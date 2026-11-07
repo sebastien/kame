@@ -81,7 +81,7 @@ Named predicates use `?`: `eq?`, `ne?`, `lt?`, `gt?`, `lte?`, `gte?`, and `in?`
 `empty?` for zero-length containers, and `success?` for a process Result's status.
 Unsuffixed comparisons and list-membership `has?` remain compatibility aliases;
 `not` and `bool` retain logical/conversion names. `apply` always spreads its list
-as positional arguments. Kash `defn` bodies are indented, not quoted source;
+as positional arguments. Kash `def` bodies are indented, not quoted source;
 `return STATUS ?` permits explicit inspection of a nonzero result. Capture stays
 lossless; `(line $(producer))` removes one producer-specified terminal LF only.
 

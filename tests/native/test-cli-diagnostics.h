@@ -73,19 +73,19 @@ static void test_cli_diagnostics(void) {
     bytes_Buffer out = bytes_NewBuffer(mem_System, (so_Slice){0});
     // TestJSONEventEncodesBinaryChunk.
     so_byte binary[] = {0xff, 0x00};
-    writeJSONEvent(native_writer(&out), (program_Event){.Kind = program_Stdout,
+    program_WriteJSONEvent(native_writer(&out), (program_Event){.Kind = program_Stdout,
         .Target = so_str("build"), .Data = {binary, 2, 2}});
     assert(native_equal(&out, "{\"schema\":1,\"type\":\"stdout\",\"target\":\"build\",\"node\":0,\"generation\":0,\"attempt\":0,\"data\":\"/wA=\",\"encoding\":\"base64\"}\n"));
 
     // TestJSONEventIncludesStructuredRuntimeContext.
     bytes_Buffer_Reset(&out);
-    writeJSONEvent(native_writer(&out), (program_Event){.Kind = program_DependencyDiscovered,
+    program_WriteJSONEvent(native_writer(&out), (program_Event){.Kind = program_DependencyDiscovered,
         .Target = so_str("build"), .Key = {.Kind = core_ResourceTask, .Name = so_str("build")},
         .DependencyID = 9, .DependencyKey = {.Kind = core_ResourceFile, .Name = so_str("./input")}});
     assert(native_contains(&out, "\"resource\":{\"kind\":\"task\",\"name\":\"build\"}"));
     assert(native_contains(&out, "\"dependency\":{\"node\":9,\"resource\":{\"kind\":\"file\",\"name\":\"./input\"}}"));
     bytes_Buffer_Reset(&out);
-    writeJSONEvent(native_writer(&out), (program_Event){.Kind = program_TargetValue,
+    program_WriteJSONEvent(native_writer(&out), (program_Event){.Kind = program_TargetValue,
         .Target = so_str("result"), .Value = {.Kind = core_String, .Text = so_str("value")}});
     assert(native_contains(&out, "\"value\":{\"kind\":\"string\",\"data\":\"value\"}"));
 
@@ -93,7 +93,7 @@ static void test_cli_diagnostics(void) {
     bytes_Buffer_Reset(&out);
     so_String notes[] = {so_str("rebuild scheduled")};
     diagnostic_Frame warning_frames[] = {{.Label = so_str("rule"), .Span = {3, 7}}};
-    writeJSONDiagnostic(native_writer(&out), (diagnostic_Diagnostic){
+    program_WriteJSONDiagnostic(native_writer(&out), (diagnostic_Diagnostic){
         .Code = so_str("CACHE_UNUSABLE"), .Severity = diagnostic_Warning,
         .Message = so_str("cache record ignored"), .Notes = {notes, 1, 1},
         .Frames = {warning_frames, 1, 1}});
@@ -109,7 +109,7 @@ static void test_cli_diagnostics(void) {
         .Source = so_str("Makefile.kmk"), .Span = {0, 7}}};
     so_String stack[] = {so_str("all"), so_str("build")};
     so_String tips[] = {so_str("check the compiler")};
-    writeJSONDiagnostic(native_writer(&out), (diagnostic_Diagnostic){
+    program_WriteJSONDiagnostic(native_writer(&out), (diagnostic_Diagnostic){
         .Code = so_str("RECIPE_FAIL"), .Severity = diagnostic_Error,
         .Message = so_str("recipe exited unsuccessfully"), .Source = so_str("Makefile.kmk"),
         .Span = {4, 7}, .Related = {related, 1, 1}, .Frames = {frames, 1, 1},

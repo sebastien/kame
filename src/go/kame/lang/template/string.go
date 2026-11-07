@@ -1,4 +1,3 @@
-// Package template parses Kame string and target templates.
 package template
 
 import (

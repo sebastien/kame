@@ -211,4 +211,5 @@ tests/T048-07-kash-input.sh	048	kash	Native/Node borrowed invocation stdin, uniq
 tests/T048-08-kash-records.sh	048	kash	Native/Node regular-file record loops, framing/limits, closed body input, cleanup and per-record state retirement
 tests/T048-09-kash-stdin-records.sh	048	kash	Native/Node supported stdin record readers, exact handoff, exclusive claims, framing, deadlines and cancellation
 tests/T048-10-kash-selected-exits.sh	048	kash	Typed selected exits, raw/effective provenance, conditions, peer and per-record collection, validation before effects
+tests/T048-11-kash-loop-reuse.sh	048	kash	Loop and callable recipe reuse and dependency invalidation across native and WASM
 tests/T049-01-kash-process-inspection.sh	049	kash	Native/Node typed byte capture, independent bounds, stream isolation, failures/cancellation, optional tool lookup and overrides

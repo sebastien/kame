@@ -66,7 +66,7 @@ func TestSessionKashEagerBindingsFollowFragmentOrderAndExecutionPolicy(t *testin
 }
 
 func TestSessionKashEagerBindingsRejectCrossFragmentCollisions(t *testing.T) {
-	pairs := []string{"let value = 1", "value = 1", "value ?= 1", "value += [1]", "defn value\n\treturn 0"}
+	pairs := []string{"let value = 1", "value = 1", "value ?= 1", "value += [1]", "def value\n\treturn 0"}
 	for i := range pairs {
 		for order := 0; order < 2; order++ {
 			a := t.Allocator()

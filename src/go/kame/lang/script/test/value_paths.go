@@ -17,7 +17,7 @@ func TestKashLeadingValuePathsKeepExpressionBoundaries(t *testing.T) {
 		"path = @(nop \"./semi;colon\")/file; (nop path)",
 		"path = (nop @{root}/semi;colon); (nop path)",
 		"for file in @{root}/*.txt\n\tprintf $file\n",
-		"defn status\n\treturn @{root}/status\n",
+		"def status\n\treturn @{root}/status\n",
 	}
 	for i := range texts {
 		s := script.ParseKash(a, "paths.kash", texts[i])

@@ -1333,6 +1333,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_watch_begin',
   'kame_wasm_watch_invalidate',
   'kame_wasm_watch_state',
+  'kame_wasm_watch_cancel_message',
   'kame_wasm_watch_cancel',
 ];
 
@@ -2764,7 +2765,7 @@ class Module {
   }
 
   async beginWatch(source, targets, name, context) {
-    for (const method of ['kame_wasm_watch_begin', 'kame_wasm_watch_state', 'kame_wasm_watch_invalidate', 'kame_wasm_watch_cancel']) {
+    for (const method of ['kame_wasm_watch_begin', 'kame_wasm_watch_state', 'kame_wasm_watch_invalidate', 'kame_wasm_watch_cancel_message', 'kame_wasm_watch_cancel']) {
       if (!this.exports[method]) throw Object.assign(new Error(`watch ABI is missing ${method}`), { code: 'FEATURE_UNSUP' });
     }
     const tools = await this.toolNames(source, name);
@@ -2817,6 +2818,11 @@ class Module {
     const bytes = this.write(JSON.stringify(resources), 'invalidations');
     const status = this.exports.kame_wasm_watch_invalidate(watch.instance, bytes.pointer, bytes.length);
     if (status !== 0) throw diagnosticError(this.instanceDiagnostic(watch.instance), 'HOST_FAIL');
+  }
+
+  watchCancellationMessage(watch, resources) {
+    const bytes = this.write(JSON.stringify(resources), 'cancellationKeys');
+    return this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_watch_cancel_message(handle, bytes.pointer, bytes.length, dst, capacity, length), watch.instance));
   }
 
   drainWatch(watch) {
@@ -5093,7 +5099,8 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
 
       if (inv.cancelOnChange && active && busy && pending.size && !cancelledForChange) {
-        const message = `cancelling active build; restart queued for changed inputs:\n${[...new Set([...pending.values()].map((item) => item.name))].map((name) => `  ${name}`).join('\n')}`;
+        const changed = [...pending.values()].filter((item) => item.kind === 'file' || item.kind === 'glob');
+        const message = module.watchCancellationMessage(watch, changed);
         const diagnostic = { code: 'INPUT_CHANGE_CANCELLED', severity: 'warning', message };
         clearDashboard();
         if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'input-warning', target: '', node: 0, generation: 0, attempt: 0, diagnostic })}\n`);

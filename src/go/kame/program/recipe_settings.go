@@ -396,9 +396,13 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	}
 	if entry.KashContext == nil {
 		entry.KashContext = p.kashContext(c, index)
+		entry.KashContext.Resume(c)
+		// A cache, timing, or output-preparation completion belongs to the producer.
+		entry.KashContext.TakeCompletion()
+	} else {
+		entry.KashContext.Resume(c)
 	}
 	context := entry.KashContext
-	context.Resume(c)
 	eval.FreeEffects(p.Alloc, context.Effects)
 	freeStrings(p.Alloc, context.WritePaths)
 	context.Effects, context.WritePaths = nil, nil

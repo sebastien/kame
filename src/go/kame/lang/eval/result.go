@@ -1,4 +1,3 @@
-// Package eval evaluates Kame language ASTs over core values.
 package eval
 
 import (
@@ -15,7 +14,7 @@ type Result struct {
 	Value        core.Value
 	Waiting      bool
 	Completed    bool
-	Returned     bool      // call-local Kash control flow, consumed by its defn invocation
+	Returned     bool      // call-local Kash control flow, consumed by its def invocation
 	LoopTransfer expr.Kind // KashBreak/KashContinue, consumed by the nearest loop.
 	Stream       *core.Source
 	Diagnostic   diagnostic.Diagnostic

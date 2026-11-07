@@ -45,14 +45,14 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env
   run('for line from ./tail :lines\n\tprintf %s $line\n\tbreak\nprintf X', 'aX');
   run('for line from ./final :lines\n\tfor inner from ./lf :lines\n\t\tprintf %s%s $line $inner\n\t\tbreak\nprintf X', 'aX');
   run('for line from ./final :lines\n\twith\n\t\tdefer printf D\n\t\tprintf %s $line\n\t\tcontinue\nprintf X', 'aDX');
-  run('defn helper\n\tcat\n\treturn 0\nfor line from ./final :lines\n\t(helper)\n\tprintf %s $line\ncat', 'aborrowed');
-  run('defn helper\n\tcat\n\treturn 0\nlazy = (helper)\nfor line from ./final :lines\n\t(let [unused lazy] :nil)\n\tprintf %s $line\ncat', 'aborrowed');
+  run('def helper\n\tcat\n\treturn 0\nfor line from ./final :lines\n\t(helper)\n\tprintf %s $line\ncat', 'aborrowed');
+  run('def helper\n\tcat\n\treturn 0\nlazy = (helper)\nfor line from ./final :lines\n\t(let [unused lazy] :nil)\n\tprintf %s $line\ncat', 'aborrowed');
   run('for line from ./final :lines\n\tcat < ./cr\n\tprintf %s $line\ncat', 'a\raborrowed');
   run('with :cwd ./sub\n\tfor line from ./items :lines\n\t\tprintf %s $line', 'scoped');
   run('for line from ./final :lines\n\twith\n\t\tdefer printf D\n\t\tsh -c "sleep 0.01; printf J" &\n\t\tbreak\nprintf X', 'JDX');
-  run('defn probe\n\tfor line from ./final :lines\n\t\twith\n\t\t\tdefer printf D\n\t\t\treturn 7 ?\n\tprintf forbidden\n(probe)\nprintf X', 'DX');
+  run('def probe\n\tfor line from ./final :lines\n\t\twith\n\t\t\tdefer printf D\n\t\t\treturn 7 ?\n\tprintf forbidden\n(probe)\nprintf X', 'DX');
   run('for line from ./final :lines\n\twith\n\t\tdefer printf D\n\t\texit 23\nprintf forbidden', 'D', 23);
-  run('defn cleanup\n\tfor line from ./final :lines\n\t\tprintf %s $line\n\t\tbreak\ndefer (cleanup)\nprintf X', 'Xa');
+  run('def cleanup\n\tfor line from ./final :lines\n\t\tprintf %s $line\n\t\tbreak\ndefer (cleanup)\nprintf X', 'Xa');
   run('for line from ./embedded :lines\n\tprintf %s $line', '', 1, 'EXPR_INVALID');
   run('for line from ./invalid :lines\n\tprintf forbidden', '', 1, 'KASH_FRAME_ENCODING');
   run('for line from ./max :lines\n\tprintf %s (count line)', '65536');
@@ -67,7 +67,7 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env
   run('for line from ./absent :lines\n\tprintf forbidden\n\tdefer printf forbidden', '', 0, undefined, ['-n']);
   run('for line from ./many :lines\n\twith\n\t\tdefer (nop :nil)\n\t\tcontinue\nprintf X', 'X');
   run('defer printf D\nfor line from ./deadline :lines\n\tcontinue', 'D', 1, 'RECIPE_TIMEOUT', ['--timeout', '50']);
-  run('defn probe\n\tfor line from ./invalid :lines\n\t\tprintf forbidden\n(probe) ?? "recovered"\nfor line from ./final :lines\n\tprintf %s $line', 'a');
+  run('def probe\n\tfor line from ./invalid :lines\n\t\tprintf forbidden\n(probe) ?? "recovered"\nfor line from ./final :lines\n\tprintf %s $line', 'a');
   writeFileSync(join(work, 'replace'), 'old1\nold2\n'); writeFileSync(join(work, 'replacement'), 'new\n');
   run('for line from ./replace :lines\n\tif (eq? line "old1")\n\t\tmv ./replacement ./replace\n\tprintf "%s;" $line', 'old1;old2;');
   const formatted = spawnSync(runner[0], [...runner.slice(1), 'do', 'fmt', '-l', 'kash', '-c', 'for line from ./final :lines\n\tprintf %s $line'], { encoding: 'utf8', timeout: 6000 });

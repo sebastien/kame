@@ -9,9 +9,9 @@ import (
 )
 
 // DocumentFormatResult carries canonical document text or the first source
-// diagnostic. Its strings are owned by Allocator.
+// diagnostic. Its strings are owned by Alloc.
 type DocumentFormatResult struct {
-	Allocator mem.Allocator
+	Alloc     mem.Allocator
 	Text      string
 	Code      string
 	Message   string
@@ -23,7 +23,7 @@ func (r *DocumentFormatResult) Free() {
 	if r == nil {
 		return
 	}
-	a := r.Allocator
+	a := r.Alloc
 	mem.FreeString(a, r.Text)
 	mem.FreeString(a, r.Code)
 	mem.FreeString(a, r.Message)
@@ -149,13 +149,13 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 	slices.Free(a, blocks)
 	sourceText.Free(a)
 	result := mem.Alloc[DocumentFormatResult](a)
-	result.Allocator, result.Text, result.OK = a, cloneDocumentFormatText(a, out.String()), true
+	result.Alloc, result.Text, result.OK = a, cloneDocumentFormatText(a, out.String()), true
 	return result
 }
 
 func documentFormatError(a mem.Allocator, code string, message string) *DocumentFormatResult {
 	result := mem.Alloc[DocumentFormatResult](a)
-	result.Allocator = a
+	result.Alloc = a
 	result.Code = cloneDocumentFormatText(a, code)
 	result.Message = cloneDocumentFormatText(a, message)
 	return result

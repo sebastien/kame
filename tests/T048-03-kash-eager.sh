@@ -22,7 +22,7 @@ unused = $(printf forbidden)
 let acquired = $(printf A)
 let ignored = (out! "B")
 printf "%s%s" $acquired $acquired
-defn probe item
+def probe item
 	let value = $(printf %s $item)
 	defer printf "%s" $value
 	printf "%s" $value
@@ -47,7 +47,7 @@ KASH
 	if cmp -s "$work/out" "$work/formatted.out"; then test-ok "$backend eager formatting roundtrip"; else test-fail "$backend eager formatting"; fi
 	"${runner[@]}" do parse --json -l kash -c 'let value = 42' >"$work/ast"
 	if grep -q '"eager":true' "$work/ast" && grep -q '"kind":"kash-let"' "$work/ast"; then test-ok "$backend AST preserves eager declaration and statement"; else test-fail "$backend eager AST"; cat "$work/ast"; fi
-	reject BINDING_UNINITIALIZED -l kash -c $'value = 42\ndefn probe\n\tproxy = value\n\tlet use = proxy ?? "fallback"\n\tlet value = 1\n(probe)'
+	reject BINDING_UNINITIALIZED -l kash -c $'value = 42\ndef probe\n\tproxy = value\n\tlet use = proxy ?? "fallback"\n\tlet value = 1\n(probe)'
 	reject BINDING_UNINITIALIZED -l kash -c $'printf %s $value\nlet value = 1'
 	reject DEF_INVALID -l kash -c 'let value = 1; (def value 2)'
 	reject DEF_INVALID --define value=override -l kash -c 'let value = 1'

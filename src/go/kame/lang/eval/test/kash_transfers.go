@@ -11,8 +11,8 @@ import (
 
 func TestKashLoopTransfersSkipStatementsAndRetainCleanupProgress(t *testing.T) {
 	texts := []string{
-		"defn probe\n\tfor item in [1 2 3]\n\t\tlet value = (tick)\n\t\tif (eq? item 2)\n\t\t\tcontinue\n\t\tif (eq? item 3)\n\t\t\tbreak\n\t\t(tick)\n\treturn 0\nresult = (probe)\n",
-		"defn probe\n\tfor item in [1 2]\n\t\twith\n\t\t\tdefer (async)\n\t\t\tlet value = (tick)\n\t\t\tcontinue\n\t\t(tick)\n\treturn 0\nresult = (probe)\n",
+		"def probe\n\tfor item in [1 2 3]\n\t\tlet value = (tick)\n\t\tif (eq? item 2)\n\t\t\tcontinue\n\t\tif (eq? item 3)\n\t\t\tbreak\n\t\t(tick)\n\treturn 0\nresult = (probe)\n",
+		"def probe\n\tfor item in [1 2]\n\t\twith\n\t\t\tdefer (async)\n\t\t\tlet value = (tick)\n\t\t\tcontinue\n\t\t(tick)\n\treturn 0\nresult = (probe)\n",
 	}
 	for i := range texts {
 		a := t.Allocator()

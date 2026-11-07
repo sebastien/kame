@@ -278,7 +278,7 @@ let config = (joinpath (source-dir) "./defaults.json")
 
 Extend literal, file-backed `(include PATH)` composition to top-level Kash.
 Included files are parsed as Kash regardless of suffix and may contain comments,
-lazy value/function definitions, `defn` definitions, and further top-level includes.
+lazy value/function definitions, `def` definitions, and further top-level includes.
 Top-level eager bindings, commands, expression statements, and control blocks are
 invalid in a library; bodies of declared functions retain ordinary Kash syntax.
 This is definition composition, not execution of another script at load time.

@@ -23,14 +23,14 @@ for backend in native wasm; do
 	}
 	cat >"$work/scripts/lib/nested/value.km" <<'KASH'
 # Suffix does not choose the included grammar.
-defn nested
+def nested
 	printf "%s" (source-dir)
 KASH
 	cat >"$work/scripts/lib/common.kash" <<'KASH'
 (include ./nested/value.km)
 unused = $(touch ./executed)
 (assets) = (source-dir)
-defn show
+def show
 	printf "%s\n" (assets)
 	(nested)
 KASH
@@ -88,7 +88,7 @@ KAME
 	reject FEATURE_UNSUP -l kash -c '(include ./library.kash)'
 	printf '(include ./library.kash)\n' | reject FEATURE_UNSUP -l kash -
 	reject EXPR_INVALID -l kash -c '(include? ./library.kash)'
-	reject EXPR_INVALID -l kash -c $'defn hidden\n\t(include ./library.kash)\n'
+	reject EXPR_INVALID -l kash -c $'def hidden\n\t(include ./library.kash)\n'
 	reject EXPR_INVALID -l kash -c '(if :false (include ./library.kash) :nil)'
 	printf 'printf forbidden\n' >"$work/scripts/lib/invalid.kash"
 	printf 'touch ./executed\n(include ./lib/invalid.kash)\n' >"$work/scripts/invalid.kash"
@@ -100,7 +100,7 @@ KAME
 	reject DEP_CYCLE ../scripts/cycle.kash
 	printf '(include ./absent.kash)\n' >"$work/scripts/missing.kash"
 	reject FS_ERR ../scripts/missing.kash
-	printf 'defn broken\n\t(first 1)\n' >"$work/scripts/lib/broken.kash"
+	printf 'def broken\n\t(first 1)\n' >"$work/scripts/lib/broken.kash"
 	printf '(include ./lib/broken.kash)\n(broken)\n' >"$work/scripts/broken.kash"
 	status=0
 	invoke --json ../scripts/broken.kash >"$work/out" 2>"$work/err" || status=$?

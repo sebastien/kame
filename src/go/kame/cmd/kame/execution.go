@@ -1,4 +1,3 @@
-// Command kame provides the native Kame command-line interface.
 package main
 
 import (
@@ -145,7 +144,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			continue
 		}
 		if json {
-			writeJSONEvent(out, event)
+			program.WriteJSONEvent(out, event)
 		} else if event.Kind == program.Stdout {
 			// Preserve event ordering before an independent terminal stream writes.
 			publishDashboard(destination, messages.Bytes())

@@ -69,7 +69,7 @@ func TestNativeKashFunctionsBindAndReturnWithoutHostProcesses(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	text := "result = (list (probe 75 1 2) (probe 0))\ndefn probe status rest...\n\tdefn nested code\n\t\treturn code ?\n\tif (= (count rest) 2)\n\t\treturn status ?\n\t(nested 3)\n\treturn (count rest)\n\t(fail! \"unreachable\")\n"
+	text := "result = (list (probe 75 1 2) (probe 0))\ndef probe status rest...\n\tdef nested code\n\t\treturn code ?\n\tif (= (count rest) 2)\n\t\treturn status ?\n\t(nested 3)\n\treturn (count rest)\n\t(fail! \"unreachable\")\n"
 	parsed := script.ParseKash(a, "functions.kash", text)
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
@@ -95,7 +95,7 @@ func TestNativeKashFunctionsHaveFreshLocalDefinitions(t *testing.T) {
 	operations.Register(registry)
 	state := operationState{}
 	registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "fresh.kash", "defn probe\n\tlocal = (tick)\n\treturn local ?\nresult = (map ([unused] (probe)) [1 2 3])\n")
+	parsed := script.ParseKash(a, "fresh.kash", "def probe\n\tlocal = (tick)\n\treturn local ?\nresult = (map ([unused] (probe)) [1 2 3])\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)

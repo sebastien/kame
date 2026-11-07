@@ -98,7 +98,7 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Span.Start = kind, start
 	if kind == expr.KashReturn && p.Functions == 0 {
-		s.error(start, wordEnd, "return requires an enclosing defn")
+		s.error(start, wordEnd, "return requires an enclosing def")
 	}
 	pos := wordEnd
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {

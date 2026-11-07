@@ -16,7 +16,7 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 	operations.Register(registry)
 	state := operationState{}
 	registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "fresh.kash", "defn probe\n\tlet unused = (tick)\n\tlet value = (tick)\n\tlet call = ([] value)\n\treturn (call) ?\nresult = (map ([item] (probe)) [1 2 3])\n")
+	parsed := script.ParseKash(a, "fresh.kash", "def probe\n\tlet unused = (tick)\n\tlet value = (tick)\n\tlet call = ([] value)\n\treturn (call) ?\nresult = (map ([item] (probe)) [1 2 3])\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
@@ -37,12 +37,12 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 }
 
 func TestKashEagerBindingRetainsInitializerAcrossSuspension(t *testing.T) {
-	checkKashEagerSuspension(t, "defn probe\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
-	checkKashEagerSuspension(t, "defn probe\n\tunused = (once)\n\t(helper) = 42\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
-	checkKashEagerSuspension(t, "defn probe callback\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe ([] 42))\n", 1)
-	checkKashEagerSuspension(t, "defn probe\n\tlet values = (list ([] 42) (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 1)
-	checkKashEagerSuspension(t, "defn probe\n\t(def unrelated 1)\n\tlet values = (list (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 1)
-	checkKashEagerSuspension(t, "defn probe\n\tfor item in [1 2]\n\t\tif (eq? item item)\n\t\t\tunused = (once)\n\t\t\t(helper) = item\n\t\t\tlet values = (list (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 2)
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
+	checkKashEagerSuspension(t, "def probe\n\tunused = (once)\n\t(helper) = 42\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
+	checkKashEagerSuspension(t, "def probe callback\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe ([] 42))\n", 1)
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (list ([] 42) (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 1)
+	checkKashEagerSuspension(t, "def probe\n\t(def unrelated 1)\n\tlet values = (list (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 1)
+	checkKashEagerSuspension(t, "def probe\n\tfor item in [1 2]\n\t\tif (eq? item item)\n\t\t\tunused = (once)\n\t\t\t(helper) = item\n\t\t\tlet values = (list (once) (async))\n\treturn 2 ?\nresult = (probe)\n", 2)
 }
 
 func checkKashEagerSuspension(t *testing.T, text string, expected int) {
@@ -100,7 +100,7 @@ func TestKashEagerUninitializedReadsAreProtectedThroughRecoveryAndLazyProxies(t 
 		operations.Register(registry)
 		state := operationState{}
 		registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-		parsed := script.ParseKash(a, "uninitialized.kash", "value = 42\ndefn probe\n"+bodies[i]+"result = (probe)\n")
+		parsed := script.ParseKash(a, "uninitialized.kash", "value = 42\ndef probe\n"+bodies[i]+"result = (probe)\n")
 		p := eval.Compile(a, engine, parsed, registry)
 		node := p.Definition("result")
 		engine.Request(node)
@@ -123,7 +123,7 @@ func TestKashEagerCancelledInitializerReleasesCallableOperands(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "cancelled.kash", "defn probe\n\tlet values = (list ([] 42) (once) (async))\nresult = (probe)\n")
+	parsed := script.ParseKash(a, "cancelled.kash", "def probe\n\tlet values = (list ([] 42) (once) (async))\nresult = (probe)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)

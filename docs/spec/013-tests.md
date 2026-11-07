@@ -28,8 +28,8 @@ and no skipped assertions.
 | Leak gate | `make test-leaks` | sanitized package tests plus the compiled CLI end-to-end suite |
 
 The So `test/` directories are separate consumer packages, not privileged access
-to package internals. For example, `operations/test` imports `kame/operations`;
-its historical `lib_test` package label does not rename the production package.
+to package internals. For example, `operations/test` imports `kame/operations`
+from package `operations_test`.
 
 Runtime assertions execute compiled Solod/native code. Go may drive subprocesses
 and inspect their output, but must not execute Solod runtime methods through Go
@@ -243,7 +243,7 @@ Native/WASM conformance covers:
   operand kinds, lazy selection, and suspension. Parse/format/clone/AST inspection
   preserves spread syntax, and resumed operands neither replay effects nor append
   duplicate elements. Record and call-argument spread remain invalid.
-- Indented `defn` functions with fixed/rest arguments, lexical capture, forward
+- Indented `def` functions with fixed/rest arguments, lexical capture, forward
   references, fresh call-local definitions, nested calls, and unused bodies.
   `return` unwinds only its own call through branches and loops; status validation,
   accepted/unaccepted nonzero results, and call-local deferred cleanup agree on

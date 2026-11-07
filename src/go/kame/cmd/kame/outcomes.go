@@ -8,12 +8,7 @@ import (
 	"solod.dev/so/mem"
 )
 
-type buildProgress struct {
-	Active    int
-	Completed int
-	Failed    int
-	Cancelled int
-}
+type buildProgress = cli.Progress
 
 var outcomes []cli.Outcome
 
@@ -24,10 +19,10 @@ func freeOutcomes() {
 }
 
 func observeOutcome(event program.Event, progress *buildProgress) {
-	state := cli.ProgressState{Outcomes: outcomes, Counts: cli.Progress{Active: progress.Active, Completed: progress.Completed, Failed: progress.Failed, Cancelled: progress.Cancelled}}
+	state := cli.ProgressState{Outcomes: outcomes, Counts: *progress}
 	state.ObserveOutcome(mem.System, event, presentationNow())
 	outcomes = state.Outcomes
-	*progress = buildProgress{Active: state.Counts.Active, Completed: state.Counts.Completed, Failed: state.Counts.Failed, Cancelled: state.Counts.Cancelled}
+	*progress = state.Counts
 }
 
 func writeTargetOutcome(out io.Writer, event program.Event) {
@@ -55,9 +50,5 @@ func writeHumanSummary(out io.Writer, command string, status int, elapsedMS int6
 	if posix.StderrIsTerminal() {
 		width = posix.StderrWidth() - 2
 	}
-	cli.WriteHumanSummary(out, command, status, elapsedMS, cli.Progress{Active: counts.Active, Completed: counts.Completed, Failed: counts.Failed, Cancelled: counts.Cancelled}, selectedOutput == "ansi", invocationHadDiagnostic, width, diagnosticColor == "always")
-}
-
-func writeDuration(out io.Writer, elapsedMS int64) {
-	cli.WriteDuration(out, elapsedMS)
+	cli.WriteHumanSummary(out, command, status, elapsedMS, counts, selectedOutput == "ansi", invocationHadDiagnostic, width, diagnosticColor == "always")
 }

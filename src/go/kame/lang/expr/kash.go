@@ -971,7 +971,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 			continue
 		}
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "defn" || part.Text == "return" || part.Text == "let" || part.Text == "exit" || part.Text == "with" || part.Text == "break" || part.Text == "continue") {
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "def" || part.Text == "return" || part.Text == "let" || part.Text == "exit" || part.Text == "with" || part.Text == "break" || part.Text == "continue") {
 			return true
 		}
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') {

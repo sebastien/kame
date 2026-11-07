@@ -17,7 +17,7 @@ func TestKashWithSetupRetainsCompletedWorkAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "with.kash", "defn probe\n\twith :cwd (let [unused (once)] \"./scope\") :env (let [unused (list (once) (async))] [MODE: \"new\"])\n\t\t(once)\n\treturn 0\nresult = (probe)\n")
+	parsed := script.ParseKash(a, "with.kash", "def probe\n\twith :cwd (let [unused (once)] \"./scope\") :env (let [unused (list (once) (async))] [MODE: \"new\"])\n\t\t(once)\n\treturn 0\nresult = (probe)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -71,7 +71,7 @@ func TestKashWithCannotRestartAnEnclosingCleanupBudget(t *testing.T) {
 	state := withBudgetState{}
 	registry.Add(eval.Operation{Name: "advance", Call: withBudgetAdvance, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "budget", Call: withBudgetInspect, Context: &state, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "budget.kash", "defn cleanup\n\twith\n\t\tdefer (budget)\n\t\t(advance)\ndefn probe\n\tdefer (cleanup)\n\treturn 0\nresult = (probe)\n")
+	parsed := script.ParseKash(a, "budget.kash", "def cleanup\n\twith\n\t\tdefer (budget)\n\t\t(advance)\ndef probe\n\tdefer (cleanup)\n\treturn 0\nresult = (probe)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.FinalizationNow, p.FinalizationHost = withBudgetNow, &state
 	node := p.Definition("result")

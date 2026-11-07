@@ -9,7 +9,7 @@ import (
 
 func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 	a := t.Allocator()
-	text := "defn probe first rest...\n  defn nested\n    return 0\n  if (nop first)\n    return 75 ?\n  (nested)\n  return (count rest)\nresult = (probe :true 1 2)\n\"defn\" literal\n\"return\" literal\n"
+	text := "def probe first rest...\n  def nested\n    return 0\n  if (nop first)\n    return 75 ?\n  (nested)\n  return (count rest)\nresult = (probe :true 1 2)\n\"def\" literal\n\"return\" literal\n"
 	s := script.ParseKash(a, "functions.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
@@ -42,14 +42,14 @@ func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 
 func TestKashFunctionsRejectMalformedDefinitionsAndReturns(t *testing.T) {
 	texts := []string{
-		"return 0", "if false\n  return 0", "defn", "defn probe\n", "defn probe {\n  return 0",
-		"defn env\n  return 0", "defn probe env\n  return 0", "defn probe a a\n  return 0",
-		"defn probe rest... other\n  return 0", "defn probe; printf no\n  return 0",
-		"defn probe\n  return", "defn probe\n  return 0 ? printf no", "defn probe\n  defer return 0",
-		"defn probe\n  return 0\nprobe = 1", "probe = 1\ndefn probe\n  return 0",
-		"defn probe\n  return :nil ?? 0", "defn probe\n  return 0 &", "defn probe\n  return 0 > ./file",
-		"printf before; defn probe\n  return 0",
-		"defn probe#comment\n  return 0", "defn probe value#comment\n  return 0",
+		"return 0", "if false\n  return 0", "def", "def probe\n", "def probe {\n  return 0", "defn probe\n  return 0",
+		"def env\n  return 0", "def probe env\n  return 0", "def probe a a\n  return 0",
+		"def probe rest... other\n  return 0", "def probe; printf no\n  return 0",
+		"def probe\n  return", "def probe\n  return 0 ? printf no", "def probe\n  defer return 0",
+		"def probe\n  return 0\nprobe = 1", "probe = 1\ndef probe\n  return 0",
+		"def probe\n  return :nil ?? 0", "def probe\n  return 0 &", "def probe\n  return 0 > ./file",
+		"printf before; def probe\n  return 0",
+		"def probe#comment\n  return 0", "def probe value#comment\n  return 0",
 	}
 	for i := range texts {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", texts[i])

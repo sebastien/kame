@@ -136,7 +136,7 @@ func writeLockHeading(out io.Writer, event *posix.LockEvent, width int) {
 	var text = bytes.NewBuffer(mem.System, nil)
 	if width > 0 {
 		fmt.Fprintf(&text, "%s lock · ", event.Kind)
-		writeDuration(&text, event.ElapsedMS)
+		cli.WriteDuration(&text, event.ElapsedMS)
 	} else {
 		io.WriteString(&text, detail)
 	}
@@ -157,7 +157,7 @@ func writeLockNotice(out io.Writer, event *posix.LockEvent) {
 	defer text.Free()
 	if event.State == "acquired" {
 		io.WriteString(&text, "  ✓ lock acquired after ")
-		writeDuration(&text, event.ElapsedMS)
+		cli.WriteDuration(&text, event.ElapsedMS)
 		io.WriteString(&text, "; continuing")
 		cli.Style(out, "status.success", text.String(), diagnosticColor == "always")
 		io.WriteString(out, "\n")
@@ -171,14 +171,14 @@ func writeLockNotice(out io.Writer, event *posix.LockEvent) {
 	text.Reset()
 	if event.State == "waiting" {
 		io.WriteString(&text, "waiting ")
-		writeDuration(&text, event.ElapsedMS)
+		cli.WriteDuration(&text, event.ElapsedMS)
 	}
 	if event.HeldMS >= 0 {
 		if text.Len() != 0 {
 			io.WriteString(&text, " · ")
 		}
 		io.WriteString(&text, "held ")
-		writeDuration(&text, event.HeldMS)
+		cli.WriteDuration(&text, event.HeldMS)
 	}
 	if text.Len() != 0 {
 		writeLockRow(out, "time:", text.String(), "text.muted", 0)

@@ -9,7 +9,7 @@ import (
 
 func TestKashExitParsesAndFormatsAsATransfer(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "exit.kash", "exit (if :true 0 7)\ndefn stop status\n\texit $status\n")
+	s := script.ParseKash(a, "exit.kash", "exit (if :true 0 7)\ndef stop status\n\texit $status\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || s.Items[0].Expression.Kind != expr.KashExit {
 		t.Fatal("exit rejected or parsed as a command")

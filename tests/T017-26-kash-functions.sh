@@ -19,10 +19,10 @@ for backend in native wasm; do
 	test-step "$backend fresh functions, lexical parameters, nested return and cleanup"
 	cat >"$work/functions.kash" <<'KASH'
 label = "fresh"
-defn nested status
+def nested status
 	defer printf "inner-cleanup\n"
 	return status ?
-defn probe status rest...
+def probe status rest...
 	defer printf "outer-cleanup=%s\n" $status
 	marker = $(printf "%s\n" $label)
 	printf "%s/%s/%s\n" (line marker) (count rest) (count args)
@@ -38,8 +38,8 @@ defn probe status rest...
 first = (probe 75 "two words" "")
 second = (probe 0)
 printf "statuses=%s,%s\n" $first.status $second.status
-defn enclosing
-	defn local value
+def enclosing
+	def local value
 		return value ?
 	(local 3)
 	return 0
@@ -58,13 +58,13 @@ KASH
 
 	test-step "$backend process statuses and invalid return operands"
 	for status_value in 1 75 255; do
-		printf 'defn fail\n\tdefer printf "cleanup\\n"\n\treturn %s\n(fail)\nprintf unreachable\n' "$status_value" >"$work/fail.kash"
+		printf 'def fail\n\tdefer printf "cleanup\\n"\n\treturn %s\n(fail)\nprintf unreachable\n' "$status_value" >"$work/fail.kash"
 		status=0
 		invoke -l kash "$work/fail.kash" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = "$status_value" ] && [ "$(cat "$work/out")" = cleanup ] && grep -q RECIPE_FAIL "$work/err"; then test-ok "$backend return preserves status $status_value"; else test-fail "$backend return failure contract"; cat "$work/out" "$work/err"; fi
 	done
 	for operand in -1 256 :nil '"text"' '[]' 1.5; do
-		printf 'defn invalid\n\treturn %s ?\n(invalid)\n' "$operand" >"$work/invalid.kash"
+		printf 'def invalid\n\treturn %s ?\n(invalid)\n' "$operand" >"$work/invalid.kash"
 		status=0
 		invoke -l kash "$work/invalid.kash" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend rejects status $operand"; else test-fail "$backend accepted invalid status"; fi
@@ -72,12 +72,12 @@ KASH
 
 	test-step "$backend return joins async work and cannot hide cleanup failures"
 	cat >"$work/join.kash" <<'KASH'
-defn background
+def background
 	printf "joined\n" > ./background &
 	return 0
 (background)
 cat ./background
-defn cleanup-fails
+def cleanup-fails
 	defer false
 	return 75 ?
 (cleanup-fails)

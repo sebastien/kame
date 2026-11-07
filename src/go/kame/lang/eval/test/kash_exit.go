@@ -42,7 +42,7 @@ func TestKashExitOperandRetainsCompletedWorkAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "exit.kash", "defn stop\n\texit (let [values (list (once) (async))] 7)\nresult = (stop)\n")
+	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit (let [values (list (once) (async))] 7)\nresult = (stop)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.ExitBoundary = true
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
@@ -70,7 +70,7 @@ func TestKashExitWaitsForProcessRetirementEvenWithoutDefers(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.ParseKash(a, "exit.kash", "defn stop\n\texit 7\nresult = (stop)\n")
+	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit 7\nresult = (stop)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.ExitBoundary = true
 	host := finalizationHost{}

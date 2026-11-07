@@ -28,7 +28,7 @@ for backend in native wasm; do
 	cat >"$work/context.kash" <<'KASH'
 exports = [KAME_WITH_MODE: "scope"]
 nested = [KAME_WITH_MODE: "nested"]
-defn show
+def show
 	pwd
 	printenv KAME_WITH_MODE
 with :cwd ./a :env $exports
@@ -46,18 +46,18 @@ KASH
 	else test-fail "$backend with context"; cat "$work/out" "$work/err"; fi
 	run_case 0 ABC $'with :cwd (let [side (out! "A")] "./a") :env (let [side (out! "B")] [KAME_WITH_MODE: "scope"])\n\tprintf C'
 	run_case 0 "$work/a"$'\n'"$work" $'with :cwd ./a :env (let [here (line $(pwd))] [BASE: here])\n\tpwd\n\tprintenv BASE'
-	run_case 0 ARB $'defn show\n\t(out! (read ./value))\nwith :cwd ./a\n\t(show)\n(show)\nwith :cwd ./b\n\t(show)'
+	run_case 0 ARB $'def show\n\t(out! (read ./value))\nwith :cwd ./a\n\t(show)\n(show)\nwith :cwd ./b\n\t(show)'
 	run_case 0 "$work"$'\n'"$work" $'cached = (line $(pwd))\nprintf "%s\\n" $cached\nwith :cwd ./a\n\tprintf "%s" $cached'
 	run_case 0 B1D1X1B2D2X2 $'for item in [1 2]\n\twith\n\t\tlet local = item\n\t\tdefer printf D%s $local\n\t\tprintf B%s $local\n\tprintf X%s $item'
 	run_case 0 B21X $'with\n\tfor item in [1 2]\n\t\tif (eq? item item)\n\t\t\tdefer printf %s $item\n\tprintf B\nprintf X'
 	run_case 0 BJDX $'with\n\tdefer printf D\n\tsh -c "sleep 0.05; printf J" &\n\tprintf B\nprintf X'
-	run_case 0 JDX $'defn probe\n\twith\n\t\tdefer printf D\n\t\tsh -c "sleep 0.02; printf J" &\n\t\treturn 7 ?\n\tprintf forbidden\n(probe)\nprintf X'
-	run_case 0 DX $'defn probe\n\twith\n\t\tdefer printf D\n\t\tsh -c "sleep 1; printf forbidden" &\n\t\treturn 7\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
-	run_case 0 X $'defn probe\n\twith\n\t\tdefer false\n\t\treturn 0\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
+	run_case 0 JDX $'def probe\n\twith\n\t\tdefer printf D\n\t\tsh -c "sleep 0.02; printf J" &\n\t\treturn 7 ?\n\tprintf forbidden\n(probe)\nprintf X'
+	run_case 0 DX $'def probe\n\twith\n\t\tdefer printf D\n\t\tsh -c "sleep 1; printf forbidden" &\n\t\treturn 7\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
+	run_case 0 X $'def probe\n\twith\n\t\tdefer false\n\t\treturn 0\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
 	run_case 23 innerouter $'defer printf outer\nwith\n\tdefer printf inner\n\tsh -c "sleep 1; printf forbidden" &\n\texit 23\nprintf forbidden'
 	run_case 23 innerouter $'defer printf outer\nwith\n\tdefer printf inner\n\tsh -c "sleep 1; printf forbidden" &\n\tsleep 0.02\n\texit 23\nprintf forbidden'
 	run_case 1 '' $'with\n\tdefer false\n\texit 0\nprintf forbidden'
-	run_case 0 R $'let outer = (run! :async :true "sh" "-c" "sleep 0.05; printf R")\ndefn probe\n\twith\n\t\tfalse\n(probe) ?? "recovered"\n(await outer)'
+	run_case 0 R $'let outer = (run! :async :true "sh" "-c" "sleep 0.05; printf R")\ndef probe\n\twith\n\t\tfalse\n(probe) ?? "recovered"\n(await outer)'
 	reject REF_MISSING $'with\n\tlet hidden = "scope"\nprintf %s $hidden'
 	reject EXPR_INVALID $'with :cwd ""\n\tprintf forbidden'
 	reject EXPR_INVALID $'with :cwd (list "a" "b")\n\tprintf forbidden'

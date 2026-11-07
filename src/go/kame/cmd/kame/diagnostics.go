@@ -1,4 +1,3 @@
-// Command kame provides the native Kame command-line interface.
 package main
 
 import (
@@ -6,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/lang/source"
+	"kame/program"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -111,7 +111,7 @@ func cliError(out io.Writer, code string, message string) {
 		return
 	}
 	if cliDiagnosticJSON && cliDiagnosticOut != nil {
-		writeJSONDiagnostic(cliDiagnosticOut, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message})
+		program.WriteJSONDiagnostic(cliDiagnosticOut, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message})
 		return
 	}
 	fmt.Fprintf(out, "error[%s]: %s\n", code, message)
@@ -135,7 +135,7 @@ func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *sour
 		return
 	}
 	if json {
-		writeJSONDiagnostic(out, d)
+		program.WriteJSONDiagnostic(out, d)
 		return
 	}
 	cliDiagnosticWithSource(out, d, src)
@@ -227,7 +227,7 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 }
 
 func writeDiagnosticMessage(out io.Writer, d diagnostic.Diagnostic, token string, styled bool) {
-	cli.Style(out, token, diagnosticSeverity(d.Severity), styled)
+	cli.Style(out, token, diagnostic.SeverityName(d.Severity), styled)
 	io.WriteString(out, "[")
 	cli.Style(out, "diagnostic.code", d.Code, styled)
 	io.WriteString(out, "]: ")
@@ -574,16 +574,6 @@ func writeMarker(out io.Writer, text string, lineStart int, start int, end int, 
 	cli.Style(out, token, string(marker), styled)
 	mem.FreeSlice(mem.System, marker)
 	io.WriteString(out, "\n")
-}
-
-func diagnosticSeverity(severity diagnostic.Severity) string {
-	if severity == diagnostic.Warning {
-		return "warning"
-	}
-	if severity == diagnostic.Fatal {
-		return "fatal"
-	}
-	return "error"
 }
 
 // annotateTargetDiagnostic appends deterministic suggestions to unknown-target

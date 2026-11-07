@@ -41,7 +41,8 @@ else
 fi
 
 test-step "the host cache record persists under the project cache root"
-record_count="$(find "$project/.kame/cache/host" -type f 2>/dev/null | wc -l)"
+# Forwarded timing records share this directory and are always 12 bytes.
+record_count="$(find "$project/.kame/cache/host" -type f ! -size 12c 2>/dev/null | wc -l)"
 if [ "$record_count" = 1 ]; then
 	test-ok "one host cache record was written"
 else
@@ -65,7 +66,7 @@ else
 fi
 
 test-step "deleting the record forces a rerun"
-find "$project/.kame/cache/host" -type f -delete
+find "$project/.kame/cache/host" -type f ! -size 12c -delete
 (cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
 if [ "$(runs "$project")" = 2 ]; then
 	test-ok "a missing cache record reruns the recipe"
@@ -74,7 +75,7 @@ else
 fi
 
 test-step "cache publication replaces record symlinks without following them"
-record="$(find "$project/.kame/cache/host" -type f -print -quit)"
+record="$(find "$project/.kame/cache/host" -type f ! -size 12c -print -quit)"
 printf marker >"$project/marker"
 rm -f "$record"
 ln -s "$project/marker" "$record"

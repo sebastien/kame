@@ -130,7 +130,7 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 		for j := 0; j < level; j++ {
 			b.WriteString(indent)
 		}
-		b.WriteString("defn ")
+		b.WriteString("def ")
 		b.WriteString(e.Text)
 		for i := range e.Parameters {
 			b.WriteByte(' ')

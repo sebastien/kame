@@ -45,7 +45,7 @@ test-step "file rules emit lifecycle events in order"
 		test-fail "process display bounds or runtime field were wrong"
 	fi
 	cli_expect_event "$CLI_OUT" 'target-completed' '.target == "./text.out"'
-	sequence="$(jq -r 'select(.target == "./text.out" and .type != "target-reason") | .type' "$CLI_OUT" | tr '\n' ' ')"
+	sequence="$(jq -r 'select(.target == "./text.out" and .type != "target-reason" and .type != "target-estimate") | .type' "$CLI_OUT" | tr '\n' ' ')"
 	case "$sequence" in
 	*"target-started process-started process-exited target-value target-completed "*)
 		test-ok "file rule lifecycle sequence"

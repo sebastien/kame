@@ -23,7 +23,7 @@ echo revision=$revision
 
 Value and expression-bodied function definitions are lazy. Their right-hand
 sides use `.km`/`.kmk` expression grammar, plus Kash `??` compositions. Native
-`defn` functions instead have directly parsed, indented Kash bodies.
+`def` functions instead have directly parsed, indented Kash bodies.
 Statements run in source order; newlines or `;` separate them. Word-start `#`
 introduces a comment; `//` is literal. Branch-local definitions do not escape.
 
@@ -59,7 +59,7 @@ cannot contain them at top level; their function bodies may use them.
 ## Native functions
 
 ```kash
-defn probe workspace
+def probe workspace
 	if test -f "${workspace}/ready"
 		return 0
 	touch "${workspace}/ready"
@@ -68,7 +68,7 @@ defn probe workspace
 result = (probe workspace)
 ```
 
-Headers use `defn NAME PARAMETER...` and may have no parameters or one final
+Headers use `def NAME PARAMETER...` and may have no parameters or one final
 `rest...` parameter. Indentation ends the body: no braces or `end`. Call through
 ordinary Kame applications, not raw command lookup. Functions capture lexical
 bindings; each call gets fresh locals, arguments, and its own async/cleanup
@@ -79,7 +79,7 @@ runs deferred cleanup before resuming the caller. Status must be an integer from
 0 through 255. Nonzero is a process-exit failure; `return 75 ?` explicitly accepts
 that status and returns an inspectable Result without launching a process.
 Acceptance never hides earlier failures, invalid statuses, or cleanup failures.
-`return` outside `defn` and deferred returns are invalid. Fallthrough keeps the
+`return` outside `def` and deferred returns are invalid. Fallthrough keeps the
 ordinary Kash final-statement behavior.
 
 Test statuses with `if (success? (probe workspace))`, not `if (probe workspace)`:
@@ -222,7 +222,7 @@ config = (joinpath (source-dir) "defaults.json")
 
 Includes are literal, required, top-level forms, resolved relative to their
 containing source. Included files use Kash grammar regardless of suffix and may
-contain comments, lazy definitions, `defn` functions, and nested includes only.
+contain comments, lazy definitions, `def` functions, and nested includes only.
 Inclusion does not demand definitions or run function bodies. All sources are
 parsed and validated before execution; definitions share the including namespace
 and forward visibility. Repeated inclusion expands again, so repeated declarations

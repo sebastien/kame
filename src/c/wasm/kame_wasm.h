@@ -247,6 +247,8 @@ uint32_t kame_wasm_watch_begin(uint64_t instance, uint32_t data, uint32_t len);
 uint32_t kame_wasm_watch_invalidate(uint64_t instance, uint32_t data, uint32_t len);
 uint32_t kame_wasm_watch_state(uint64_t instance, uint32_t dst, uint32_t dst_len,
                                uint32_t out_len);
+uint32_t kame_wasm_watch_cancel_message(uint64_t instance, uint32_t data, uint32_t len,
+                                        uint32_t dst, uint32_t dst_len, uint32_t out_len);
 uint32_t kame_wasm_watch_cancel(uint64_t instance);
 /* Compile the instance source, then query one recursive schema-2 inspection
  * plan. Read-only discovery is automatic; expand is retained but ignored.

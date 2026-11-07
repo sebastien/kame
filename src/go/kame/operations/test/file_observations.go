@@ -1,4 +1,4 @@
-package lib_test
+package operations_test
 
 import (
 	"kame/core"

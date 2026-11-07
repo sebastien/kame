@@ -168,22 +168,31 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	return PureResult{Text: text}
 }
 
-// InvalidateWatch validates the entire batch before mutating graph state.
-func (r *Runtime) InvalidateWatch(data []byte) PureResult {
-	if !r.Watching || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no active watch session")}
+func freeWatchKeys(a mem.Allocator, keys []core.ResourceKey) {
+	for i := range keys {
+		keys[i].Free(a)
 	}
+	slices.Free(a, keys)
+}
+
+type watchBatch struct {
+	Keys     []core.ResourceKey
+	Observed []bool
+	Result   PureResult
+}
+
+// parseWatchBatch owns keys and, when requested, the observed-only flags.
+func (r *Runtime) parseWatchBatch(data []byte, withObserved bool) watchBatch {
 	var batch core.Value
 	if !CompletionValueFromJSON(r.Alloc, data, &batch) {
-		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch invalidation batch")}
+		return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch invalidation batch")}}
 	}
 	defer batch.Free(r.Alloc)
 	if batch.Kind != core.List || len(batch.List) > 65536 {
-		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "watch invalidations must be a bounded resource list")}
+		return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "watch invalidations must be a bounded resource list")}}
 	}
 	var keys []core.ResourceKey
 	var observedOnly []bool
-	defer slices.Free(r.Alloc, observedOnly)
 	for i := range batch.List {
 		item := batch.List[i]
 		var kind, name core.Value
@@ -198,16 +207,18 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 				}
 				if item.Record[j].Key == "observedOnly" {
 					if item.Record[j].Value.Kind != core.Bool {
-						slices.Free(r.Alloc, keys)
-						return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "observedOnly must be a boolean")}
+						freeWatchKeys(r.Alloc, keys)
+						slices.Free(r.Alloc, observedOnly)
+						return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "observedOnly must be a boolean")}}
 					}
 					observed = item.Record[j].Value.Bool
 				}
 			}
 		}
 		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob" && kind.Text != "tool") || name.Kind != core.String || name.Text == "" || strings.IndexByte(name.Text, 0) >= 0 {
-			slices.Free(r.Alloc, keys)
-			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch resource key")}
+			freeWatchKeys(r.Alloc, keys)
+			slices.Free(r.Alloc, observedOnly)
+			return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch resource key")}}
 		}
 		resourceKind := core.ResourceFile
 		if kind.Text == "glob" {
@@ -216,18 +227,48 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 		if kind.Text == "tool" {
 			resourceKind = core.ResourceTool
 		}
-		keys = slices.Append(r.Alloc, keys, core.ResourceKey{Kind: resourceKind, Name: name.Text})
-		observedOnly = slices.Append(r.Alloc, observedOnly, observed)
-	}
-	for i := range keys {
-		if observedOnly[i] {
-			r.Program.NoteProductionInputChange(keys[i])
-		} else {
-			r.Program.InvalidateResource(keys[i])
+		keys = slices.Append(r.Alloc, keys, core.NewResourceKey(r.Alloc, resourceKind, name.Text))
+		if withObserved {
+			observedOnly = slices.Append(r.Alloc, observedOnly, observed)
 		}
 	}
-	slices.Free(r.Alloc, keys)
+	return watchBatch{Keys: keys, Observed: observedOnly}
+}
+
+// InvalidateWatch validates the entire batch before mutating graph state.
+func (r *Runtime) InvalidateWatch(data []byte) PureResult {
+	if !r.Watching || r.Program == nil {
+		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no active watch session")}
+	}
+	batch := r.parseWatchBatch(data, true)
+	if batch.Result.Code != "" {
+		return batch.Result
+	}
+	defer freeWatchKeys(r.Alloc, batch.Keys)
+	defer slices.Free(r.Alloc, batch.Observed)
+	for i := range batch.Keys {
+		if batch.Observed[i] {
+			r.Program.NoteProductionInputChange(batch.Keys[i])
+		} else {
+			r.Program.InvalidateResource(batch.Keys[i])
+		}
+	}
 	return PureResult{}
+}
+
+// WatchCancellationMessage renders the same cancellation text as the native CLI.
+func (r *Runtime) WatchCancellationMessage(data []byte) PureResult {
+	if !r.Watching || r.Program == nil {
+		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no active watch session")}
+	}
+	batch := r.parseWatchBatch(data, false)
+	if batch.Result.Code != "" {
+		return batch.Result
+	}
+	message := r.Program.ProductionCancellationMessage(batch.Keys)
+	freeWatchKeys(r.Alloc, batch.Keys)
+	defer mem.FreeString(r.Alloc, message)
+	return PureResult{Text: pureText(r.Alloc, message)}
 }
 
 func (r *Runtime) freeWatchHandles() {

@@ -989,6 +989,19 @@ uint32_t kame_wasm_watch_state(uint64_t handle, uint32_t dst, uint32_t dst_len, 
   return kame_wasm_finish_query(instance, result, dst, dst_len, out_len);
 }
 
+/* Render the cancellation warning for a watched cycle's changed keys. */
+uint32_t kame_wasm_watch_cancel_message(uint64_t handle, uint32_t data, uint32_t len,
+                                        uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u || (len != 0u && data == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  so_Slice bytes = {(so_byte *)(uintptr_t)data, (so_int)len, (so_int)len};
+  wasm_PureResult result = wasm_Runtime_WatchCancellationMessage(instance->runtime, bytes);
+  return kame_wasm_finish_query(instance, result, dst, dst_len, out_len);
+}
+
 /* Pop one queued target lifecycle event and copy its schema-1 JSON line. A
  * zero-length result means no event is pending. */
 uint32_t kame_wasm_target_event(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {

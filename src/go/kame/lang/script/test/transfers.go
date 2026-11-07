@@ -9,7 +9,7 @@ import (
 
 func TestKashLoopTransfersPreserveLexicalTargetsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "for item in [1 2]\n\twith\n\t\tif (eq? item 1)\n\t\t\tcontinue\n\t\tbreak\nwhile (eq? 1 1)\n\tbreak\ndefn cleanup\n\tfor item in [1]\n\t\tcontinue\n"
+	text := "for item in [1 2]\n\twith\n\t\tif (eq? item 1)\n\t\t\tcontinue\n\t\tbreak\nwhile (eq? 1 1)\n\tbreak\ndef cleanup\n\tfor item in [1]\n\t\tcontinue\n"
 	s := script.ParseKash(a, "transfers.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 3 {
@@ -31,9 +31,9 @@ func TestKashLoopTransfersPreserveLexicalTargetsAndFormatting(t *testing.T) {
 
 func TestKashLoopTransfersRejectNonlocalTargetsAndProcessSyntax(t *testing.T) {
 	texts := []string{
-		"break", "continue", "if (eq? 1 2)\n\tbreak", "with\n\tcontinue", "defn unused\n\tbreak",
-		"for item in [1]\n\tdefn unused\n\t\tcontinue\n\tprintf forbidden",
-		"for item in [1]\n\tdefn unused\n\t\twhile (eq? 1 2)\n\t\t\tbreak\n\t\tcontinue\n\tprintf forbidden",
+		"break", "continue", "if (eq? 1 2)\n\tbreak", "with\n\tcontinue", "def unused\n\tbreak",
+		"for item in [1]\n\tdef unused\n\t\tcontinue\n\tprintf forbidden",
+		"for item in [1]\n\tdef unused\n\t\twhile (eq? 1 2)\n\t\t\tbreak\n\t\tcontinue\n\tprintf forbidden",
 		"for item in [1]\n\tbreak 2", "for item in [1]\n\tcontinue label", "for item in [1]\n\tbreak ?",
 		"for item in [1]\n\tcontinue ?? 0", "for item in [1]\n\tbreak > ./out", "for item in [1]\n\tcontinue &",
 		"for item in [1]\n\tbreak | cat", "for item in [1]\n\tprintf forbidden | continue",

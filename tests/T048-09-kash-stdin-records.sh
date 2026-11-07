@@ -45,10 +45,10 @@ for (const runner of runners) {
     run('for line from :stdin :lines\n\twith\n\t\tdefer printf D\n\t\tprintf %s $line\n\t\tcontinue\nprintf X', 'a\nb\n', 'aDbDX');
     run('for line from :stdin :lines\n\tdefer printf %s $line\nprintf X', 'a\nb\n', 'Xba');
     run('for line from :stdin :lines\n\tfor inner from :stdin :lines\n\t\tprintf forbidden', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
-    run('defn helper\n\tfor inner from :stdin :lines\n\t\tprintf forbidden\nfor line from :stdin :lines\n\t(helper)', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
-    run('defn consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nprintf %s $(printf %s (let [unused (consume)] "C"))\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'Cab');
-    run('defn consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\ndefer (consume)\nfor line from :stdin :lines\n\tprintf %s $line\n\tbreak', 'a\nb\n', 'a');
-    run('defn consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nlet job = (run! :async :true (let [unused (consume)] "cat"))\n(await job)\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'ab');
+    run('def helper\n\tfor inner from :stdin :lines\n\t\tprintf forbidden\nfor line from :stdin :lines\n\t(helper)', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
+    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nprintf %s $(printf %s (let [unused (consume)] "C"))\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'Cab');
+    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\ndefer (consume)\nfor line from :stdin :lines\n\tprintf %s $line\n\tbreak', 'a\nb\n', 'a');
+    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nlet job = (run! :async :true (let [unused (consume)] "cat"))\n(await job)\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'ab');
     run('for line from :stdin :lines\n\tlet event = (parse-json line)\n\tif (eq? event.kind "release")\n\t\tprintf %s $event.name', '{"kind":"skip"}\n{"kind":"release","name":"sdk"}\n', 'sdk');
     run('for line from :stdin :lines\n\tprintf %s (count line)', 'x'.repeat(65536), '65536');
     run('for line from :stdin :lines\n\tprintf %s (count line)', 'x'.repeat(65535) + '\n', '65535');

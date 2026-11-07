@@ -95,7 +95,7 @@ if [ "$actual" != '"async-env"' ]; then
 	exit 1
 fi
 actual="$("${cli[@]}" --lang expr --allow-run -c '(sh! "printf async-wasm")')"
-if [ "$actual" != '[status: 0 stdout: async-wasm stderr:  signal: 0]' ]; then
+if [ "$actual" != '[status: 0 stdout: async-wasm stderr:  signal: 0 effectiveStatus: 0 effectiveSignal: 0]' ]; then
 	echo "WASM process result lost its status or streams: $actual" >&2
 	exit 1
 fi

@@ -94,7 +94,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
 			continue
 		}
-		if word == "defn" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+		if word == "def" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
 			if !leading {
 				s.error(start, wordEnd, "function header must occupy its own line")
 				break

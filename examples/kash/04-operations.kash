@@ -12,7 +12,7 @@ config = [name: "quotes: \" and newline\n" enabled: :true]
 (write! @{workspace}/config.json (json config))
 
 # Accept a chosen nonzero status without a shell fixture.
-defn attempt
+def attempt
 	return 1 ?
 result = (attempt)
 (if (and (= result.signal 0) (in? result.status [0 1])) :nil (fail! "unexpected status"))
@@ -22,7 +22,7 @@ result = (attempt)
 
 # A native function simulates a transient failure. Paths remain typed arguments,
 # never generated source. Do not retry deployments without establishing safety.
-defn probe
+def probe
 	if test -f ${workspace}/ready
 		return 0
 	touch ${workspace}/ready

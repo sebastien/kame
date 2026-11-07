@@ -14,6 +14,17 @@ const (
 	Fatal
 )
 
+// SeverityName is the stable spelling used by diagnostics and JSON output.
+func SeverityName(severity Severity) string {
+	if severity == Warning {
+		return "warning"
+	}
+	if severity == Fatal {
+		return "fatal"
+	}
+	return "error"
+}
+
 // Span is source-neutral so portable core code need not import language ASTs.
 type Span struct {
 	Start int

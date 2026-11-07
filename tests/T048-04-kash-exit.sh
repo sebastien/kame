@@ -26,22 +26,22 @@ for backend in native wasm; do
 	run_case 64 '' 'exit 64; printf forbidden'
 	run_case 255 '' 'exit 255'
 	run_case 17 '' 'exit (parse-json (line $(printf 17)))'
-	run_case 7 innerouter $'defn stop\n\tdefer printf inner\n\texit 7\n\tprintf forbidden\ndefer printf outer\n(stop)\nprintf forbidden'
+	run_case 7 innerouter $'def stop\n\tdefer printf inner\n\texit 7\n\tprintf forbidden\ndefer printf outer\n(stop)\nprintf forbidden'
 	run_case 23 '' $'runner = (kash "exit 23; printf forbidden")\n(runner) ?? "fallback"\nprintf forbidden'
-	run_case 0 '' $'defn stop\n\texit 0\nif (stop)\n\tprintf forbidden\nprintf forbidden'
-	run_case 23 '' $'defn stop\n\texit 23\n(proxy) = (stop)\n(? (proxy) "fallback")\nprintf forbidden'
+	run_case 0 '' $'def stop\n\texit 0\nif (stop)\n\tprintf forbidden\nprintf forbidden'
+	run_case 23 '' $'def stop\n\texit 23\n(proxy) = (stop)\n(? (proxy) "fallback")\nprintf forbidden'
 	run_case 25 '' $'for item in [1 2]\n\tif (eq? item 1)\n\t\texit 25\nprintf forbidden'
 	run_case 0 joinedclean $'defer printf clean\nsh -c "sleep 0.02; printf joined" &\nexit 0'
 	run_case 23 clean $'defer printf clean\nsh -c "sleep 1; printf forbidden" &\nexit 23'
 	run_case 23 '' $'sh -c "sleep 1; printf forbidden" &\nexit 23'
-	run_case 1 '' $'defn stop\n\tfalse &\n\texit 0\n(stop) ?? "fallback"\nprintf forbidden'
-	run_case 1 '' $'defn stop\n\tdefer false\n\texit 0\n(? (stop) "fallback")\nprintf forbidden'
-	run_case 19 clean $'defn stop\n\tdefer printf clean\n\tdefer false\n\texit 19\n(stop) ?? "fallback"\nprintf forbidden'
-	run_case 0 operandclean $'defn stop\n\tdefer printf clean\n\texit (let [unused (out! "operand")] 0)\n(stop)'
+	run_case 1 '' $'def stop\n\tfalse &\n\texit 0\n(stop) ?? "fallback"\nprintf forbidden'
+	run_case 1 '' $'def stop\n\tdefer false\n\texit 0\n(? (stop) "fallback")\nprintf forbidden'
+	run_case 19 clean $'def stop\n\tdefer printf clean\n\tdefer false\n\texit 19\n(stop) ?? "fallback"\nprintf forbidden'
+	run_case 0 operandclean $'def stop\n\tdefer printf clean\n\texit (let [unused (out! "operand")] 0)\n(stop)'
 	run_case 0 operandclean $'defer printf clean\nexit (let [unused (out! "operand")] 0)'
 	for text in 'exit' 'exit 0 ?' 'exit 0 ?? 1' 'exit 0 1' 'exit 0 > ./executed' 'exit 0 | cat' 'exit 0 &' 'printf x | exit 0' 'defer exit 0'; do reject PARSE_ERR "$text"; done
 	for value in '"3"' ':nil' ':true' '-1' '256' '[0]' '0.5'; do reject EXPR_INVALID "exit $value"; done
-	reject PHASE_INVALID $'defn stop\n\texit (let [unused (out! "forbidden")] 0)\ndefer (stop)'
+	reject PHASE_INVALID $'def stop\n\texit (let [unused (out! "forbidden")] 0)\ndefer (stop)'
 	invoke -n -l kash -c 'exit (let [unused (write! ./executed "forbidden")] 0); printf forbidden' >"$work/out" 2>"$work/err"
 	if [ ! -s "$work/out" ] && [ ! -e "$work/executed" ]; then test-ok "$backend dry-run does not evaluate exit operand"; else test-fail "$backend dry-run exit effects"; fi
 	status=0
@@ -66,7 +66,7 @@ KMK
 	printf 'default : ./artifact\n./artifact : ; [shell: kash]\n\tdefer printf clean\n\t(yield! "content")\n\texit 0\n\t(yield! "forbidden")\n' >"$work/artifact.kmk"
 	invoke ./artifact.kmk >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/artifact")" = content ] && [ "$(cat "$work/out")" = clean ]; then test-ok "$backend successful recipe exit publishes retained effects after cleanup"; else test-fail "$backend exited recipe publication"; cat "$work/out" "$work/err"; fi
-	"${runner[@]}" do fmt -l kash -c $'defn stop status\n\texit $status\n(stop 0)' >"$work/formatted.kash"
+	"${runner[@]}" do fmt -l kash -c $'def stop status\n\texit $status\n(stop 0)' >"$work/formatted.kash"
 	invoke ./formatted.kash >"$work/out" 2>"$work/err"
 	if [ ! -s "$work/out" ] && [ ! -s "$work/err" ]; then test-ok "$backend exit formatting roundtrip"; else test-fail "$backend exit formatting"; fi
 	"${runner[@]}" do parse --json -l kash -c 'exit 0' >"$work/ast"

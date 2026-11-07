@@ -117,6 +117,15 @@ for host in native wasm; do
 	else
 		test-fail "$host memory namespace grant: $(cat "$TMPDIR/$host.denied.err")"
 	fi
+	status=0
+	"${runner[@]}" do run --lang expr --allow-read=mem://workspace/ \
+		-c '(wildcard (resource "mem://other/**/*.txt"))' \
+		>"$TMPDIR/$host.denied-glob.out" 2>"$TMPDIR/$host.denied-glob.err" || status=$?
+	if [ "$status" -ne 0 ] && grep -Fq 'CAP_DENIED' "$TMPDIR/$host.denied-glob.err"; then
+		test-ok "$host keeps wildcard namespace grants isolated"
+	else
+		test-fail "$host wildcard namespace grant: $(cat "$TMPDIR/$host.denied-glob.err")"
+	fi
 	if [ ! -e "$TMPDIR/$host-work/file:" ] && [ ! -e "$TMPDIR/$host-work/mem:" ]; then
 		test-ok "$host URI operations create no local scheme-named directories"
 	else

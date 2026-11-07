@@ -218,7 +218,11 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		name = resolved
 	}
 	defer mem.FreeString(c.Run, resolved)
-	if !c.Allows(eval.Read, name) {
+	allowed := c.Allows(eval.Read, name)
+	if op == host.OpWildcard {
+		allowed = allowsWildcard(c, name)
+	}
+	if !allowed {
 		return failure("CAP_DENIED", "read access denied; grant the required path with --allow-read=ROOT")
 	}
 	kind := core.ResourceFile
@@ -242,6 +246,37 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		result.Diagnostic.Frames = slices.Append(c.Run, result.Diagnostic.Frames, diagnostic.Frame{Kind: kind.Text, Label: label.Text})
 	}
 	return result
+}
+
+// Check the literal search root, not the escaped glob spelling or its matches.
+func allowsWildcard(c *eval.Context, pattern string) bool {
+	b := strings.NewBuilder(c.Run)
+	defer b.Free()
+	rootEnd := -1
+	for i := 0; i < len(pattern); i++ {
+		ch := pattern[i]
+		if ch == '\\' && i+1 < len(pattern) {
+			i++
+			b.WriteByte(pattern[i])
+		} else {
+			if rootEnd < 0 && (ch == '*' || ch == '?' || ch == '[') {
+				rootEnd = len(b.String())
+			}
+			b.WriteByte(ch)
+		}
+	}
+	decoded := b.String()
+	if !c.Allows(eval.Read, decoded) {
+		return false
+	}
+	if rootEnd < 0 {
+		return true
+	}
+	root := "."
+	if slash := strings.LastIndexByte(decoded[:rootEnd], '/'); slash >= 0 {
+		root = decoded[:slash+1]
+	}
+	return c.Allows(eval.Read, root)
 }
 func opRead(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

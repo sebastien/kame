@@ -10,9 +10,9 @@ import (
 func TestSessionExitIsTypedAndStopsLaterFragments(t *testing.T) {
 	texts := []string{
 		"exit 23\n(out! \"forbidden\")",
-		"defn stop\n\texit 23\n(stop) ?? \"fallback\"\n(out! \"forbidden\")",
+		"def stop\n\texit 23\n(stop) ?? \"fallback\"\n(out! \"forbidden\")",
 		"runner = (kash \"exit 23\")\n(? (runner) \"fallback\")\n(out! \"forbidden\")",
-		"defn stop\n\texit 23\nif (stop)\n\t(out! \"forbidden\")\n",
+		"def stop\n\texit 23\nif (stop)\n\t(out! \"forbidden\")\n",
 	}
 	for i := range texts {
 		a := t.Allocator()

@@ -33,7 +33,7 @@ not shell grouping.
 ## Accept selected statuses only after explicit `?`
 
 ```kash
-defn attempt command...
+def attempt command...
 	$...command ?
 result = (attempt "tidy" "-o" "./staged.html" "./input.html")
 (if (and (= result.signal 0) (in? result.status [0 1]))
@@ -107,7 +107,7 @@ callable whose command uses `?`, then inspect every result. Use `reduce` with a
 small accumulator when retaining all callback results is unnecessary.
 
 ```kash
-defn probe command...
+def probe command...
 	$...command ?
 result = (reduce ([previous number]
   (if (= previous.status 0) previous

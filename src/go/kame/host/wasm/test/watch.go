@@ -129,6 +129,31 @@ func TestWatchInvalidationBatchRejectsPartialMutation(t *testing.T) {
 	after.Free(a)
 }
 
+func TestWatchCancellationMessageUsesProgramFormatting(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "VALUE = (text (read ./input))\n")
+	if started.Runtime == nil {
+		t.Fatal("compile watched value")
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	r.SetFile("input", []byte("before"))
+	begin := r.RequestWatch([]byte("[\"VALUE\"]"))
+	begin.Free(a)
+	for i := 0; i < 32; i++ {
+		next := r.Step()
+		if next.OK {
+			next.Request.Free(a)
+		}
+	}
+	message := r.WatchCancellationMessage([]byte("[{\"kind\":\"file\",\"name\":\"input\"}]"))
+	if message.Code != "" || !strings.Contains(message.Text, "cancelling active build") || !strings.Contains(message.Text, "./input") {
+		t.Error("watch cancellation message did not use program formatting: " + message.Text)
+	}
+	message.Free(a)
+}
+
 func TestWatchFailedReadRecoversAfterMissingFileAppears(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "VALUE = (text (read ./input))\n")

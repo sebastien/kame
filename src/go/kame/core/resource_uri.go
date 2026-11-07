@@ -10,7 +10,7 @@ import (
 // ResourceURI is a canonical protocol identity. Its strings belong to the
 // allocator that parsed it and are released by Free.
 type ResourceURI struct {
-	Allocator mem.Allocator
+	Alloc     mem.Allocator
 	Scheme    string
 	Authority string
 	Path      string
@@ -20,9 +20,9 @@ func (u *ResourceURI) Free() {
 	if u == nil {
 		return
 	}
-	mem.FreeString(u.Allocator, u.Scheme)
-	mem.FreeString(u.Allocator, u.Authority)
-	mem.FreeString(u.Allocator, u.Path)
+	mem.FreeString(u.Alloc, u.Scheme)
+	mem.FreeString(u.Alloc, u.Authority)
+	mem.FreeString(u.Alloc, u.Path)
 	*u = ResourceURI{}
 }
 
@@ -141,7 +141,7 @@ func ParseResourceURI(a mem.Allocator, text string) ResourceURIResult {
 	if !normalized.OK {
 		return resourceURIError("resource URI path escapes its root", pathStart+normalized.ErrorOffset)
 	}
-	result := ResourceURI{Allocator: a}
+	result := ResourceURI{Alloc: a}
 	result.Scheme = cloneResourceURIText(a, scheme)
 	result.Authority = cloneResourceURIText(a, authority)
 	result.Path = normalized.Text

@@ -60,6 +60,8 @@ matches = (wildcard @{root}/*.txt)
 KM
 	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read="$work/literal*?[x]\\name" path-glob.km matches
 	reject CAP_DENIED do run --allow-read="$work/literalZZxname" path-glob.km matches
+	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard "./literal*/a.txt")'
+	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard "./literalZZxname/../literal*/a.txt")'
 	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read --lang expr -c '(let [root "./literal*?[x]\\name"] (wildcard (nop @{root}/*.txt)))'
 	printf '%s\n' './@(join " " ["a" "b"])/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
 	if jq -e '.ast.kind == "path" and (.ast.parts | length) == 3 and .ast.parts[1].expression.kind == "application"' "$work/path-ast.json" >/dev/null; then test-ok "$backend path AST exposes interpolation children"; else test-fail "$backend path AST lost children"; cat "$work/path-ast.json"; fi

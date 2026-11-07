@@ -136,6 +136,7 @@ WASM_EXPORTS =
     "kame_wasm_watch_begin"
     "kame_wasm_watch_state"
     "kame_wasm_watch_invalidate"
+    "kame_wasm_watch_cancel_message"
     "kame_wasm_watch_cancel"
     "kame_wasm_prepare"
     "kame_wasm_plan"

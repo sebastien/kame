@@ -297,6 +297,9 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 		for state.Index < len(state.Inputs) {
 			item := state.Inputs[state.Index].Observation
 			op := observationOp(item.Key, item.Aspect)
+			if item.Key.Kind == core.ResourceFile && item.Aspect == core.ObservationValue && p.isToolPath(item.Key.Name) {
+				op = host.OpToolContent
+			}
 			if p.Forwarding {
 				state.Pending = true
 				p.submitFileContextRequest(c, host.RequestReadFile, host.FilePayload(p.Alloc, op, item.Key.Name))
@@ -404,7 +407,8 @@ func (p *Program) productionWarning(code string, message string) {
 	p.emit(Event{Kind: InputWarning, Diagnostic: diagnostic.Diagnostic{Code: cloneText(p.Alloc, code), Severity: diagnostic.Warning, Message: cloneText(p.Alloc, message), Owned: true}})
 }
 
-func (p *Program) ReportProductionCancellation(keys []core.ResourceKey) {
+// ProductionCancellationMessage is caller-owned and must be freed.
+func (p *Program) ProductionCancellationMessage(keys []core.ResourceKey) string {
 	message := strings.NewBuilder(p.Alloc)
 	message.WriteString("cancelling active build; restart queued for changed inputs:")
 	for i := range keys {
@@ -416,6 +420,13 @@ func (p *Program) ReportProductionCancellation(keys []core.ResourceKey) {
 			p.appendProductionPath(&message, "\n  ", keys[i].Name)
 		}
 	}
-	p.productionWarning("INPUT_CHANGE_CANCELLED", message.String())
+	text := cloneText(p.Alloc, message.String())
 	message.Free()
+	return text
+}
+
+func (p *Program) ReportProductionCancellation(keys []core.ResourceKey) {
+	message := p.ProductionCancellationMessage(keys)
+	p.productionWarning("INPUT_CHANGE_CANCELLED", message)
+	mem.FreeString(p.Alloc, message)
 }

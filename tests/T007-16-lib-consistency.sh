@@ -43,7 +43,7 @@ root = "./private"
 (base) = root
 path = @{root}/config.json; computed = @(base)/config.json
 (if (eq? path computed) :nil (fail! "path boundary"))
-defn probe status
+def probe status
 	return status ?
 if (success? (probe 75))
 	(fail! "accepted failure was truthy")
@@ -51,7 +51,7 @@ else
 	(out! "retry\n")
 if (success? (apply probe [0]))
 	(out! "success\n")
-defn collect values...
+def collect values...
 	return (count values) ?
 result = (apply collect [1 2 3])
 (out! "arity=" result.status "\n" path "\n")
@@ -64,7 +64,7 @@ KASH
 	invoke -l kash "$work/formatted.kash" >"$work/formatted-out"
 	if cmp -s "$work/formatted.kash" "$work/again.kash" && cmp -s "$work/formatted-out" "$work/expected"; then test-ok "$backend value paths round trip"; else test-fail "$backend value path formatting"; fi
 	status=0
-	invoke -l kash -c $'defn fatal\n\treturn 75\nif (success? (fatal))\n\t(out! "unreachable")\n' >"$work/out" 2>"$work/err" || status=$?
+	invoke -l kash -c $'def fatal\n\treturn 75\nif (success? (fatal))\n\t(out! "unreachable")\n' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 75 ] && [ ! -s "$work/out" ]; then test-ok "$backend success? cannot accept a failure"; else test-fail "$backend status predicate swallowed failure"; fi
 done
 test-end

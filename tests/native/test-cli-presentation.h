@@ -203,7 +203,7 @@ static void presentation_TestTargetDurationUsesLifecycleClock(void) {
 static void presentation_TestDurationAndPathTheme(void) {
     bytes_Buffer out = presentation_begin();
     io_Writer writer = native_writer(&out);
-    writeDuration(writer, 40840);
+    cli_WriteDuration(writer, 40840);
     assert(native_equal(&out, "40.8s"));
     bytes_Buffer_Reset(&out);
     cli_WriteHumanOutcome(writer, so_str("default"), so_str("completed"), true, 40840, true, 78, false);

@@ -8,16 +8,6 @@ import (
 	"solod.dev/so/mem"
 )
 
-func diagnosticSeverity(severity diagnostic.Severity) string {
-	if severity == diagnostic.Warning {
-		return "warning"
-	}
-	if severity == diagnostic.Fatal {
-		return "fatal"
-	}
-	return "error"
-}
-
 func WriteJSONEvent(out io.Writer, event Event) {
 	WriteJSONEventWithAllocator(mem.System, out, event)
 }
@@ -269,7 +259,7 @@ func encodeDiagnostic(e *json.Encoder, d diagnostic.Diagnostic) {
 	e.Str("code")
 	e.Str(d.Code)
 	e.Str("severity")
-	e.Str(diagnosticSeverity(d.Severity))
+	e.Str(diagnostic.SeverityName(d.Severity))
 	e.Str("message")
 	e.Str(d.Message)
 	if d.Source != "" {

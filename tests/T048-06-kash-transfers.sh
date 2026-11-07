@@ -37,15 +37,15 @@ for backend in native wasm; do
 	run_case 0 JX $'let job = (run! :async :true "sh" "-c" "sleep 0.02; printf J")\nfor item in [1]\n\tbreak\n(await job)\nprintf X'
 	run_case 1 X $'for item in [1]\n\tfalse &\n\tbreak\nprintf X'
 	for transfer in break continue; do
-		run_case 0 X "defn probe"$'\n\tfor item in [1 2]\n\t\twith\n\t\t\tdefer false\n\t\t\t'"$transfer"$'\n\t\tprintf forbidden\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
-		run_case 0 X "defn probe"$'\n\tfor item in [1 2]\n\t\twith\n\t\t\tfalse &\n\t\t\t'"$transfer"$'\n\t\tprintf forbidden\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
+		run_case 0 X "def probe"$'\n\tfor item in [1 2]\n\t\twith\n\t\t\tdefer false\n\t\t\t'"$transfer"$'\n\t\tprintf forbidden\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
+		run_case 0 X "def probe"$'\n\tfor item in [1 2]\n\t\twith\n\t\t\tfalse &\n\t\t\t'"$transfer"$'\n\t\tprintf forbidden\n\tprintf forbidden\n(probe) ?? "recovered"\nprintf X'
 	done
-	run_case 0 12X $'for item in [1 2]\n\tdefn helper\n\t\tfor inner in [1 2]\n\t\t\tbreak\n\t\treturn 0\n\t(helper)\n\tprintf %s $item\nprintf X'
-	run_case 0 B1D $'defn cleanup\n\tfor item in [1 2]\n\t\tprintf %s $item\n\t\tbreak\ndefn probe\n\tdefer printf D\n\tdefer (cleanup)\n\tprintf B\n\treturn 0\n(probe)'
-	run_case 0 12X $'defn cleanup\n\tfor item in [1 2]\n\t\tprintf %s $item\n\t\tcontinue\n(cleanup)\nprintf X'
+	run_case 0 12X $'for item in [1 2]\n\tdef helper\n\t\tfor inner in [1 2]\n\t\t\tbreak\n\t\treturn 0\n\t(helper)\n\tprintf %s $item\nprintf X'
+	run_case 0 B1D $'def cleanup\n\tfor item in [1 2]\n\t\tprintf %s $item\n\t\tbreak\ndef probe\n\tdefer printf D\n\tdefer (cleanup)\n\tprintf B\n\treturn 0\n(probe)'
+	run_case 0 12X $'def cleanup\n\tfor item in [1 2]\n\t\tprintf %s $item\n\t\tcontinue\n(cleanup)\nprintf X'
 	run_case 0 breakX $'for item in [1]\n\tprintf %s break\n\tbreak\nprintf X'
 	run_case 0 "$work/a"$'\n'"$work/a"$'\n'"$work" $'for item in [1 2]\n\twith :cwd ./a\n\t\tpwd\n\t\tcontinue\npwd'
-	for text in 'break' 'continue' $'if (eq? 1 2)\n\tbreak' $'defn unused\n\tcontinue' $'for item in [1]\n\tdefn unused\n\t\tbreak\n\tprintf forbidden' $'with\n\tcontinue'; do reject "$text"; done
+	for text in 'break' 'continue' $'if (eq? 1 2)\n\tbreak' $'def unused\n\tcontinue' $'for item in [1]\n\tdef unused\n\t\tbreak\n\tprintf forbidden' $'with\n\tcontinue'; do reject "$text"; done
 	for transfer in break continue; do
 		for suffix in ' 2' ' label' ' ?' ' ?? 0' ' | cat' ' > ./executed' ' &'; do reject "printf forbidden"$'\nfor item in [1]\n\t'"$transfer$suffix"; done
 		reject "for item in [1]"$'\n\tdefer '"$transfer"

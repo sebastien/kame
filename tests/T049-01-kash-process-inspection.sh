@@ -59,7 +59,7 @@ for (const runner of runners) {
     assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout, '0remaining\n'); checks++;
   } finally { require('node:fs').closeSync(fd); }
   const marker = join(work, `capture-once-${checks}`);
-  run(`defn observe\n\tsh -c ${q(`printf x >> ${marker}`)}\n\treturn 0\nlet r = (capture! [stdout: :true] "printf" (let [unused (observe)] "once"))\nprintf %s (text r.stdout)`, 'once');
+  run(`def observe\n\tsh -c ${q(`printf x >> ${marker}`)}\n\treturn 0\nlet r = (capture! [stdout: :true] "printf" (let [unused (observe)] "once"))\nprintf %s (text r.stdout)`, 'once');
   assert.equal(readFileSync(marker,'utf8'), 'x');
   run('printf "%s:%s" (nil? (tool "missing-optional-executable" | ?)) (string? (tool "sh" | ?))', 'true:true');
   run('let executable = (tool "printf" | ?)\n$executable found', 'found');

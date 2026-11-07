@@ -73,7 +73,7 @@ if [ "$status" = 0 ] && cmp -s "$project/out.txt" "$project/native.shell"; then
 else
 	test-fail "cat shell: wasm=$(cat "$project/out.txt") native=$(cat "$project/native.shell")"
 fi
-if [ "$status" = 0 ] && python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == {"status":0,"stdout":"hi","stderr":"","signal":0}' "$project/out.txt"; then
+if [ "$status" = 0 ] && python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == {"status":0,"stdout":"hi","stderr":"","signal":0,"effectiveStatus":0,"effectiveSignal":0}' "$project/out.txt"; then
 	test-ok "cat shell definition is JSON"
 else
 	test-fail "cat shell JSON: $(cat "$project/out.txt")"

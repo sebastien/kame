@@ -156,7 +156,7 @@ select the recipe interpreter. Native and WASM runners implement these invocatio
 A Kash source is a sequence of comments, blank lines, definitions, statements,
 and block control statements. `;` separates statements on a line. Value and
 expression-bodied function definitions have the same shape and lazy semantics
-as Kame definitions; `defn` adds native block-bodied functions below:
+as Kame definitions; `def` adds native block-bodied functions below:
 
 ```kash
 name = "John Smith"
@@ -198,9 +198,9 @@ and infix `??` are not added to ordinary Kame expressions: use
 expansions and expression-string interpolation retain their own rules. Expression-
 bodied functions retain Kame parameter and lazy evaluation semantics. These `=`
 definition surfaces use expressions rather than word-list or recipe-template RHS
-syntax; `defn` bodies instead use the Kash statement grammar.
+syntax; `def` bodies instead use the Kash statement grammar.
 
-Definitions, including `defn` functions, in a statement sequence are registered
+Definitions, including `def` functions, in a statement sequence are registered
 before that sequence runs, without evaluating their values or bodies. Duplicate
 names in one sequence are errors. Each selected control branch has a child lexical
 scope; its definitions may shadow outer bindings but do not
@@ -221,11 +221,11 @@ not a Kash comment.
 
 ## Indented function definitions
 
-`defn NAME PARAMETER...` defines a function whose body is a nonempty indented
+`def NAME PARAMETER...` defines a function whose body is a nonempty indented
 Kash statement sequence, using the existing block indentation and dedent rules:
 
 ```kash
-defn probe workspace
+def probe workspace
 	if test -f "${workspace}/ready"
 		return 0
 	touch "${workspace}/ready"
@@ -237,7 +237,7 @@ result = (probe workspace)
 The header occupies its own line, with no `=`, braces, `end`, or quoted source.
 Zero parameters are permitted. Names and parameters use the ordinary definition
 grammar, including one optional final `rest...` parameter; arity checks, duplicate
-parameter checks, and reserved bindings such as `env` are unchanged. `defn` is
+parameter checks, and reserved bindings such as `env` are unchanged. `def` is
 Kash statement syntax, not a Kame expression special form. `name = VALUE` and
 `(name PARAMETER...) = EXPRESSION` retain their current meanings; no separate
 `def` block syntax is introduced.
@@ -267,7 +267,7 @@ its retained state without replaying statements or effects.
 
 ### Status return
 
-`return STATUS` terminates the nearest lexically enclosing `defn` invocation,
+`return STATUS` terminates the nearest lexically enclosing `def` invocation,
 including from nested `if`, `match`, `for`, or `while` bodies. `STATUS` is one Kame
 expression or Kash reference operand (`$REFERENCE` / `${REFERENCE}`), not a raw
 command or implicitly captured word. It is evaluated once and must produce an
@@ -305,11 +305,11 @@ joining/cancellation rules. An invalid status instead unwinds as an evaluation
 failure. Cleanup failures retain the normal primary-failure and LIFO rules; a
 successful or accepted return cannot hide failed cleanup.
 
-`return` outside a lexically enclosing `defn` is `PARSE_ERR`, even in an unused
+`return` outside a lexically enclosing `def` is `PARSE_ERR`, even in an unused
 branch. A nested function or separately constructed Kash script cannot return
 from its caller. `defer return ...` is invalid: cleanup cannot install a return
 for an invocation that is already finalizing. Quote external executables named
-`defn` or `return` at statement position; ordinary `name = VALUE` definition
+`def` or `return` at statement position; ordinary `name = VALUE` definition
 detection remains unchanged.
 
 ### Explicit value construction
@@ -917,7 +917,7 @@ precede registration. Expression results are discarded, not interpreted as
 executables or implicitly printed.
 
 Cleanup belongs to the enclosing Kash invocation: a recipe, constructed callable,
-`defn` call, or the top-level ordered runner session. Branch exit does not finalize
+`def` call, or the top-level ordered runner session. Branch exit does not finalize
 it; nested Kash callables have independent stacks. Actions execute once in reverse
 registration order. Normal completion joins owned async work before cleanup;
 failure/cancellation cancels and reaps that work before cleanup starts. A deferred
@@ -966,7 +966,7 @@ Kash adds block control statements around its commands. A block is introduced by
 a keyword line and holds one or more statements indented deeper than the keyword.
 Blocks nest, and dedenting to an existing enclosing level ends the inner block.
 Block keywords include `if`, `elif`, `else`, `match`, `case`, `for`, `while`, and
-`defn`; a block statement is not `;`-separated. Function bodies use these same
+`def`; a block statement is not `;`-separated. Function bodies use these same
 rules, not a separate braced or explicitly terminated block grammar.
 
 Input indentation may use tabs or spaces, but a source must use one style;
@@ -1023,7 +1023,7 @@ bodies to Kash statements, so they carry normal Kame values, dependencies, and
 diagnostics.
 
 A `return` in a selected function-body branch propagates through control blocks
-to its owning `defn` call. It is not a branch value and cannot be swallowed by
+to its owning `def` call. It is not a branch value and cannot be swallowed by
 lowering a branch or iteration to an ordinary expression callback.
 
 Each `case` header contains exactly one pattern expression accepted by Kame's
@@ -1119,7 +1119,7 @@ Formatting must preserve the parser boundary:
 
 - `$REFERENCE`, `${REFERENCE}`, `(EXPRESSION)`, and `$(COMMAND)` retain their
   distinct forms.
-- Block keywords `if`, `elif`, `else`, `match`, `case`, `for`, `while`, and `defn`
+- Block keywords `if`, `elif`, `else`, `match`, `case`, `for`, `while`, and `def`
   remain on their own line, and each nested block is one tab deeper than its
   keyword.
 - Function headers retain parameter order and rest syntax. Return statements
@@ -1151,7 +1151,7 @@ live forwarding and explicit capture remain separate channels.
 
 ## Acceptance tests
 
-- `defn` supports zero, fixed, and rest parameters, lexical capture, forward
+- `def` supports zero, fixed, and rest parameters, lexical capture, forward
   references, shadowing, nested definitions, and ordinary typed Kame calls.
   Existing value/expression-function definitions and raw external command lookup
   remain unchanged. Registration and unused bodies have no effects or grants.
@@ -1166,7 +1166,7 @@ live forwarding and explicit capture remain separate channels.
   cleanup once in LIFO order, joins or cancels/reaps owned work as appropriate,
   and resumes only the immediate caller. Other calls and outer cleanup stacks
   are unaffected. Unselected returns do not evaluate their operands.
-- Invalid `defn` headers, empty/misindented bodies, duplicate bindings, misplaced
+- Invalid `def` headers, empty/misindented bodies, duplicate bindings, misplaced
   returns, and deferred returns produce precise authored-source diagnostics.
   Function parse/format/clone/AST inspection preserves native blocks, parameters,
   comments, returns, and acceptance markers on both hosts.
@@ -1232,7 +1232,7 @@ live forwarding and explicit capture remain separate channels.
 - Definition detection distinguishes `name = VALUE` from `echo name=value`;
   expression-bodied function RHSs use Kame expressions, including command-
   substitution atoms, not shell-style infix concatenation or Kash reference
-  wrappers. `defn` instead owns a directly parsed indented Kash body.
+  wrappers. `def` instead owns a directly parsed indented Kash body.
 - Single-expression, shorthand application, lambda, and value-pipe boundaries
   agree with their corresponding ordinary Kame expressions.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.
