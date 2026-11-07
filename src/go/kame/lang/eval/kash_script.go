@@ -29,7 +29,11 @@ func kashFunctionValue(p *Program, f *Function) core.Value {
 	if f.KashConstructor {
 		text = "kash"
 	}
-	return core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: text}
+	value := core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: text}
+	if f.KashSignature.Mode == core.SignatureContent {
+		value.CallableSignature = &f.KashSignature
+	}
+	return value
 }
 
 func (p *Program) IsKashConstructor(v core.Value) bool {
@@ -83,6 +87,15 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 	}
 	f := mem.Alloc[Function](p.Alloc)
 	f.Kind, f.Owner, f.KashScript, f.Scope = FunctionInvocation, p, parsed, c.Scope
+	// Only the global scope has no captured invocation-local bindings. Its
+	// referenced definitions and other reads remain tracked as dependencies.
+	if f.Scope == p.Scope {
+		digest := core.NewDigest()
+		digest.Text("kame-global-kash-callable-v1")
+		digest.Text(parsed.Source.Text)
+		f.KashSignature.Mode = core.SignatureContent
+		digest.Sum(f.KashSignature.Digest[:])
+	}
 	f.Scope.Retain()
 	p.KashFunctions = slices.Append(p.Alloc, p.KashFunctions, f)
 	if c.Engine != nil {

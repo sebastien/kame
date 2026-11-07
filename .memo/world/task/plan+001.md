@@ -1,3 +1,8 @@
+---
+created: 2026-09-27T22:53:25+00:00
+updated: 2026-09-27T22:53:25+00:00
+uuid: 93d8d59c-bf85-4001-b8d0-a830ee0b20fa
+---
 # Prepare migration to solod
 
 Using `../littlemake` as reference, and start to form a view of the domain, architecture

@@ -227,6 +227,21 @@ func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 	}
 }
 
+func TestToolsInspectKashRecipes(t *testing.T) {
+	source := "SHELL = kash\nroot : used\nused :\n\tkame-missing-kash-tool run python | sh -c true\n\tkame-missing-kash-tool again\nunused :\n\tkame-unused-kash-tool\nshell : ; [shell: sh]\n\tkame-shell-command\nexplicit : ; [shell: kash]\n\tkame-explicit-kash-tool\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLI(t, []string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
+	if status != 0 || strings.Count(out.String(), `"name":"kame-missing-kash-tool"`) != 1 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"name":"kame-explicit-kash-tool"`) || strings.Contains(out.String(), `"name":"python"`) || strings.Contains(out.String(), `"name":"kame-shell-command"`) {
+		t.Fatalf("listing status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	status = runNativeCLI(t, []string{"do", "tools", "check", "--json", "-c", source, "root"}, &input{}, &out, &errOut)
+	if status != 1 || !strings.Contains(out.String(), `"code":"TOOL_MISSING"`) || !strings.Contains(out.String(), `"targetStack":["root","used"]`) || strings.Contains(out.String(), "kame-unused-kash-tool") {
+		t.Fatalf("check status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}
+
 func TestBuildOptionsValidateAndReachRuntime(t *testing.T) {
 	var out, errOut bytes.Buffer
 	status := runNativeCLI(t, []string{"-n", "-l", "kmk", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)

@@ -70,6 +70,7 @@ type Function struct {
 	// KameSelector marks the shell value that publishes one expression as a file.
 	KameSelector        bool
 	KashScript          *script.Script
+	KashSignature       core.Signature
 	Kind                FunctionKind
 	Parameters          []expr.Parameter
 	Body                []*expr.Expr

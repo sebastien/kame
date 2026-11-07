@@ -231,6 +231,17 @@ func (s *ProgressState) WorkerView(a mem.Allocator, nowNS int64) []ProgressWorke
 			elapsed = (nowNS - w.Started) / 1000000
 		}
 		workers[i] = ProgressWorkerView{Target: w.Target, Program: w.Program, State: w.State, Ready: w.Ready, ElapsedMS: elapsed}
+		for j := range s.Outcomes {
+			o := s.Outcomes[j]
+			if w.Target == "" || w.Ready || o.Scope != w.Scope || o.Node != w.Node || o.Generation != w.Generation || !o.Started || o.Terminal || nowNS < o.ProgressStartedNS {
+				continue
+			}
+			left := o.EstimateMS - (nowNS-o.ProgressStartedNS)/1000000
+			if left > 0 {
+				workers[i].RemainingMS = left
+			}
+			break
+		}
 	}
 	return workers
 }

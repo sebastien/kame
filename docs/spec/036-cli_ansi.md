@@ -391,7 +391,9 @@ When a finite total is established, show units and optionally a bar:
 0  format sources    [######....]  6/10 files           0.3s
 ```
 
-- Inline recipe rows do not present historical runtime as measured completion.
+- Inline recipe rows may show a clearly labeled approximate ETA from historical
+  target timing when it fits; it is not measured completion and disappears when
+  history is missing or overrun.
 - Do not parse arbitrary child output for progress percentages.
 - Do not show a measured build percentage while discovery can change the total.
 - Show completed counts without a denominator when the total is unknown.

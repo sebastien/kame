@@ -322,6 +322,7 @@ type Program struct {
 	productionRevision   int64
 	productionValidation any
 	productionChanges    []core.ResourceKey
+	deferredTerminal     []int
 
 	RecordReaders       []recordReaderOwner
 	RecordRequests      []host.Request

@@ -133,8 +133,9 @@ func (s *Digest) Uint64(n uint64) {
 
 func (s *Digest) Text(text string) { s.Uint64(uint64(len(text))); s.Write([]byte(text)) }
 
-// ValueSignature fingerprints immutable data, not pointers or process handles.
-// Unsupported values are deliberately unavailable rather than encoded as nil.
+// ValueSignature fingerprints immutable data and explicitly identified
+// callables, not pointers or process handles. Unsupported values are deliberately
+// unavailable rather than encoded as nil.
 func ValueSignature(value Value) Signature {
 	s := NewDigest()
 	s.Text("kame-value-v1")
@@ -200,6 +201,11 @@ func (s *Digest) value(v Value, depth int) bool {
 	case Resource:
 		s.Uint64(uint64(v.Resource.Kind))
 		s.Text(v.Resource.Name)
+	case Callable:
+		if v.CallableSignature == nil || v.CallableSignature.Mode != SignatureContent {
+			return false
+		}
+		s.Write(v.CallableSignature.Digest[:])
 	case List:
 		s.Uint64(uint64(len(v.List)))
 		for i := range v.List {

@@ -174,6 +174,15 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			for valueStart < len(text) && space(text[valueStart]) {
 				valueStart++
 			}
+			if valueStart < len(text) && text[valueStart] == '\n' {
+				next := valueStart + 1
+				for next < len(text) && space(text[next]) {
+					next++
+				}
+				if next-(valueStart+1) > start-lineStart {
+					valueStart = next
+				}
+			}
 			if valueStart == len(text) || text[valueStart] == '\n' || text[valueStart] == ';' || text[valueStart] == '#' {
 				s.error(headerEnd, valueStart, "expected Kash definition value")
 				break

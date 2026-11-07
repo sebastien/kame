@@ -16,12 +16,15 @@ import (
 
 func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
 	a := t.Allocator()
-	for mode := 0; mode < 5; mode++ {
+	for mode := 0; mode < 7; mode++ {
 		memory := wasm.NewMemoryHost(a)
 		memory.SetFile("declared", []byte("A"))
 		memory.SetFile("dynamic", []byte("B"))
+		memory.SetFile("meta", []byte("metadata"))
+		memory.SetFile("globbed/a", []byte("a"))
+		memory.SetFile("globbed/b", []byte("b"))
 		memory.SetFile("order", []byte("order"))
-		parsed := script.Parse(a, "changing.kmk", "./child : ./declared | ./order ; [shell: kame]\n\t(str (count (files ./dynamic)) (text (read ./dynamic)))\n./output : ./child ; [shell: kame]\n\t(read ./child)\n")
+		parsed := script.Parse(a, "changing.kmk", "./child : ./declared | ./order ; [shell: kame]\n\t(str (count (files ./dynamic)) (text (read ./dynamic)) (get \"size\" (stat ./meta)) (count (files ./globbed/*)))\n./output : ./child ; [shell: kame]\n\t(read ./child)\n")
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -49,6 +52,10 @@ func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
 					memory.SetFile("order", []byte("changed"))
 				} else if mode == 4 {
 					p.NoteProductionInputChange(core.ResourceKey{Kind: core.ResourceFile, Name: "declared"})
+				} else if mode == 5 {
+					memory.Remove("meta")
+				} else if mode == 6 {
+					memory.SetFile("globbed/c", []byte("c"))
 				}
 			}
 			polled := started.Handle.Poll()
@@ -62,12 +69,19 @@ func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
 			t.Error("production change build did not settle")
 		}
 		started.Handle.Free()
-		warnings := 0
+		warnings, warningAt, completedAt, position := 0, -1, -1, 0
 		for {
 			next := p.NextEvent()
 			if !next.OK {
 				break
 			}
+			if next.Event.Kind == program.InputWarning {
+				warningAt = position
+			}
+			if next.Event.Kind == program.TargetCompleted {
+				completedAt = position
+			}
+			position++
 			if next.Event.Kind == program.InputWarning {
 				warnings++
 				if next.Event.Diagnostic.Code != "INPUT_UNSTABLE" || !strings.Contains(next.Event.Diagnostic.Message, "run the build again") {
@@ -76,16 +90,25 @@ func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
 				if mode == 1 && (!strings.Contains(next.Event.Diagnostic.Message, "declared") || !strings.Contains(next.Event.Diagnostic.Message, "dynamic")) {
 					t.Error("warning omitted a changed declared or discovered input")
 				}
+				if mode == 5 && (!strings.Contains(next.Event.Diagnostic.Message, "changed: ./meta") || strings.Contains(next.Event.Diagnostic.Message, "unverifiable: ./meta")) {
+					t.Error("disappearing metadata input was not reported as changed")
+				}
+				if mode == 6 && !strings.Contains(next.Event.Diagnostic.Message, "globbed") {
+					t.Error("glob membership change was not reported")
+				}
 			}
 			next.Event.Free(a)
 		}
-		unstable := mode == 1 || mode == 2 || mode == 4
+		unstable := mode == 1 || mode == 2 || mode == 4 || mode == 5 || mode == 6
 		wantWarnings := 0
 		if unstable {
 			wantWarnings = 1
 		}
 		if warnings != wantWarnings {
 			t.Errorf("mode %d: got %d warnings, want %d", mode, warnings, wantWarnings)
+		}
+		if unstable && warningAt >= 0 && completedAt >= 0 && completedAt < warningAt {
+			t.Errorf("mode %d: completion event preceded the input warning", mode)
 		}
 		if unstable && len(p.ChangedProductionInputs()) == 0 {
 			t.Errorf("mode %d: changed inputs were not reported", mode)
@@ -94,6 +117,8 @@ func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
 		// because the final input or output bytes happen to match an earlier run.
 		memory.SetFile("declared", []byte("A"))
 		memory.SetFile("dynamic", []byte("B"))
+		memory.SetFile("meta", []byte("metadata"))
+		memory.Remove("globbed/c")
 		recovery := p.Start("./output")
 		if len(p.ChangedProductionInputs()) != 0 {
 			t.Errorf("mode %d: a new root retained stale changed inputs", mode)

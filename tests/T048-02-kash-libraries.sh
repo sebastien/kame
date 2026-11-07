@@ -60,6 +60,25 @@ KASH
 	invoke ../scripts/formatted.kash >"$work/out" 2>"$work/err"
 	printf '%s\n%s\n%s' "$work/scripts/lib" "$work/scripts/lib/nested" "$work/scripts" >"$work/expected"
 	if cmp -s "$work/expected" "$work/out"; then test-ok "$backend formatting preserves includes"; else test-fail "$backend formatted library"; fi
+	cat >"$work/scripts/shared.kmk" <<'KAME'
+helper = (kash """printf %s $args.0
+printf %s $args.1
+printf %s $args.2""")
+KAME
+	"${runner[@]}" do fmt -l kmk "$work/scripts/shared.kmk" >"$work/scripts/shared-formatted.kmk"
+	if grep -qx 'helper =' "$work/scripts/shared-formatted.kmk"; then test-ok "$backend formatter emits multiline definition"; else test-fail "$backend fixture did not exercise multiline definition"; fi
+	printf '(include ./shared-formatted.kmk)\n(helper "a" "b" "c")\n' >"$work/scripts/shared-caller.kash"
+	invoke ../scripts/shared-caller.kash >"$work/out" 2>"$work/err"
+	if [ "$(cat "$work/out")" = abc ]; then test-ok "$backend kmk-formatted definition includes from Kash"; else test-fail "$backend formatted shared definition"; cat "$work/err"; fi
+	printf '(include ./shared-formatted.kmk)\nSHELL = kash\nall :\n\t(helper "a" "b" "c")\n' >"$work/scripts/shared-caller.kmk"
+	"${runner[@]}" -C "$work/scripts" -f shared-caller.kmk all >"$work/out" 2>"$work/err"
+	if [ "$(cat "$work/out")" = abc ]; then test-ok "$backend kmk-formatted definition includes from kmk"; else test-fail "$backend kmk shared definition"; cat "$work/err"; fi
+	printf 'broken =\n  (first 1)\n' >"$work/scripts/shared-broken.kmk"
+	printf '(include ./shared-broken.kmk)\nprintf %%s $broken\n' >"$work/scripts/shared-broken.kash"
+	status=0
+	invoke --json ../scripts/shared-broken.kash >"$work/out" 2>"$work/err" || status=$?
+	if [ "$status" = 1 ] && grep -q 'shared-broken.kmk' "$work/out" "$work/err"; then test-ok "$backend multiline include retains source"; else test-fail "$backend multiline include provenance"; fi
+	reject PARSE_ERR -l kash -c $'missing =\nprintf bad\n'
 	test-step "$backend source context and library boundaries"
 	reject SEL_NO_CONTEXT -l kash -c 'printf %s (source-dir)'
 	printf 'printf %%s (source-dir)\n' | reject SEL_NO_CONTEXT -l kash -

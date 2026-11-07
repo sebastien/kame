@@ -59,6 +59,7 @@ func (p *Program) setServiceState(entry *instance, state string) {
 }
 
 func (p *Program) observeInstances() {
+	p.flushDeferredTerminals()
 	for i := range p.Instances {
 		entry := &p.Instances[i]
 		if entry.Inspection {
@@ -94,13 +95,43 @@ func (p *Program) observeInstances() {
 		if kind == TargetCompleted {
 			p.timingSave(entry)
 		}
-		event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID}
-		if node.Diagnostic.Code != "" {
-			event.Diagnostic = node.Diagnostic.Clone(p.Alloc)
+		if kind == TargetCompleted && p.productionDirty {
+			p.deferredTerminal = slices.Append(p.Alloc, p.deferredTerminal, i)
+		} else {
+			p.emitTerminal(entry, kind)
 		}
-		p.emit(event)
 		entry.terminalEmitted, entry.terminalGeneration = true, node.Generation
 	}
+}
+
+func (p *Program) emitTerminal(entry *instance, kind EventKind) {
+	node := entry.Node
+	event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID}
+	if node.Diagnostic.Code != "" {
+		event.Diagnostic = node.Diagnostic.Clone(p.Alloc)
+	}
+	p.emit(event)
+}
+
+// Completion validation runs after production settles. Hold successful
+// terminal events until it finishes so input warnings precede completion.
+func (p *Program) flushDeferredTerminals() {
+	if p.productionDirty || len(p.deferredTerminal) == 0 {
+		return
+	}
+	for i := range p.deferredTerminal {
+		index := p.deferredTerminal[i]
+		if index < 0 || index >= len(p.Instances) {
+			continue
+		}
+		entry := &p.Instances[index]
+		if !entry.terminalEmitted || entry.Node.State != core.NodeComplete {
+			continue
+		}
+		p.emitTerminal(entry, TargetCompleted)
+	}
+	slices.Free(p.Alloc, p.deferredTerminal)
+	p.deferredTerminal = nil
 }
 
 func (p *Program) NextEvent() EventResult {

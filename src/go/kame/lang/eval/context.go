@@ -431,7 +431,9 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 		return 0
 	}
 	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), kind, payload)
-	if id != 0 && (c.TrackUnvalidatedReads || kind != host.RequestProcess) && kind != host.RequestReadFile && kind != host.RequestEnvironment {
+	// Internal monotonic clock requests only service deadlines and scheduling.
+	// The user-visible clock operation separately records its unvalidated read.
+	if id != 0 && (c.TrackUnvalidatedReads || kind != host.RequestProcess) && kind != host.RequestReadFile && kind != host.RequestEnvironment && kind != host.RequestMonotonicTime {
 		c.UnvalidatedRead()
 	}
 	if id != 0 {

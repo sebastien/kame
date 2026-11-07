@@ -88,6 +88,27 @@ compare_check --json computed computed
 compare_check
 compare_check --json missing
 
+test-step "Kash command tools are listed and checked on both backends"
+cat >>"$project/Makefile.kmk" <<'EOF'
+kash_root : kash_used
+kash_used : ; [shell: kash]
+	definitely-not-a-real-kash-tool run python | sh -c true
+	definitely-not-a-real-kash-tool again
+EOF
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools --json) >"$project/wasm.json"
+(cd "$project" && "$CLI_BIN" do tools --json) >"$project/native.json"
+if cmp -s "$project/wasm.json" "$project/native.json" && jq -e '[.[] | select(.name == "definitely-not-a-real-kash-tool")] | length == 1' "$project/wasm.json" >/dev/null; then
+	test-ok "Kash listing matches and deduplicates"
+else
+	test-fail "Kash listing mismatch or missing command"
+fi
+compare_check --json kash_root
+if jq -e -s 'any(.[]; .type == "diagnostic" and .diagnostic.code == "TOOL_MISSING" and .diagnostic.target == "kash_used" and .diagnostic.targetStack == ["kash_root", "kash_used"])' "$project/wasm.json" >/dev/null; then
+	test-ok "Kash check reports missing command and dependency path"
+else
+	test-fail "Kash check omitted missing command context"
+fi
+
 test-step "read-only host requests discover the real dependency plan without executing recipes"
 mkdir -p "$project/input"
 touch "$project/input/needs.txt"

@@ -26,6 +26,7 @@ type productionValidationState struct {
 	Index    int
 	Pending  bool
 	Saving   bool
+	Probing  bool
 	Revision int64
 }
 
@@ -44,7 +45,7 @@ func clearProductionValidation(a mem.Allocator, state *productionValidationState
 	slices.Free(a, state.Unknown)
 	slices.Free(a, state.Suspect)
 	state.Inputs, state.Changed, state.Unknown, state.Suspect = nil, nil, nil, nil
-	state.Index, state.Pending, state.Saving = 0, false, false
+	state.Index, state.Pending, state.Saving, state.Probing = 0, false, false, false
 }
 
 func freeProductionValidation(a mem.Allocator, value any) {
@@ -72,6 +73,8 @@ func (p *Program) ChangedProductionInputs() []core.ResourceKey {
 // A new root or invalidation starts a new cycle: previously reported changes
 // are no longer evidence for the work that is about to run.
 func (p *Program) clearChangedProductionInputs() {
+	slices.Free(p.Alloc, p.deferredTerminal)
+	p.deferredTerminal = nil
 	state := p.validationState()
 	if state == nil || state.Root != nil || p.productionDirty {
 		return
@@ -146,7 +149,14 @@ func (p *Program) advanceProductionValidation() {
 	if state == nil {
 		state = mem.Alloc[productionValidationState](p.Alloc)
 		state.Program = p
-		state.Node = p.Engine.AddOwned(core.ResourceKey{Kind: core.ResourceOperation, Name: "\x00production-input-validation"}, validateProductionInputs, state, freeProductionValidation)
+		node := p.Engine.AddOwned(core.ResourceKey{Kind: core.ResourceOperation, Name: "\x00production-input-validation"}, validateProductionInputs, state, freeProductionValidation)
+		if node == nil {
+			mem.Free(p.Alloc, state)
+			p.productionDirty = false
+			p.productionWarning("INPUT_PROOF_UNUSABLE", "could not schedule input validation")
+			return
+		}
+		state.Node = node
 		p.productionValidation = state
 	} else {
 		clearProductionValidation(p.Alloc, state)
@@ -159,7 +169,7 @@ func (p *Program) advanceProductionValidation() {
 		}
 		inputs := p.acceptedInputs(entry)
 		for n := range inputs {
-			if inputs[n].Key.Kind == core.ResourceFile {
+			if inputs[n].Key.Kind == core.ResourceFile || inputs[n].Key.Kind == core.ResourceGlob {
 				state.Inputs = slices.Append(p.Alloc, state.Inputs, productionObservation{Observation: inputs[n], Consumer: i})
 			} else {
 				inputs[n].Key.Free(p.Alloc)
@@ -171,7 +181,10 @@ func (p *Program) advanceProductionValidation() {
 	state.Root = p.Engine.RequestRoot(state.Node)
 }
 
-func productionInputOp(aspect core.ObservationAspect) string {
+func observationOp(key core.ResourceKey, aspect core.ObservationAspect) string {
+	if key.Kind == core.ResourceGlob {
+		return host.OpWildcard
+	}
 	if aspect == core.ObservationExistence {
 		return host.OpExists
 	}
@@ -187,19 +200,43 @@ func productionInputOp(aspect core.ObservationAspect) string {
 	return host.OpFileContent
 }
 
-func acceptProductionInput(state *productionValidationState, completion core.Completion) {
+func observationSignature(key core.ResourceKey, aspect core.ObservationAspect, value core.Value) core.Signature {
+	if key.Kind == core.ResourceGlob {
+		return core.ValueSignature(value)
+	}
+	if aspect == core.ObservationContent || aspect == core.ObservationValue {
+		return contentObservation(value)
+	}
+	if aspect == core.ObservationMetadata || aspect == core.ObservationLinkMetadata {
+		return core.MetadataSignature(value)
+	}
+	return core.ValueSignature(value)
+}
+
+// acceptProductionInput returns true when it submitted an asynchronous probe.
+func acceptProductionInput(c *core.EngineContext, state *productionValidationState, completion core.Completion) bool {
 	p := state.Program
 	input := state.Inputs[state.Index]
+	if state.Probing {
+		state.Probing = false
+		missing := completion.Diagnostic.Code == "" && completion.HasValue && completion.Value.Kind == core.Bool && !completion.Value.Bool
+		completion.Value.Free(p.Alloc)
+		completion.Diagnostic.Free(p.Alloc)
+		if missing {
+			state.Changed = appendProductionKey(p.Alloc, state.Changed, input.Observation.Key)
+		} else {
+			state.Unknown = appendProductionKey(p.Alloc, state.Unknown, input.Observation.Key)
+		}
+		if !slices.Contains(state.Suspect, input.Consumer) {
+			state.Suspect = slices.Append(p.Alloc, state.Suspect, input.Consumer)
+		}
+		state.Index++
+		return false
+	}
 	item := input.Observation
 	signature := core.Signature{}
 	if completion.Diagnostic.Code == "" && completion.HasValue {
-		if item.Aspect == core.ObservationContent || item.Aspect == core.ObservationValue {
-			signature = contentObservation(completion.Value)
-		} else if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
-			signature = core.MetadataSignature(completion.Value)
-		} else {
-			signature = core.ValueSignature(completion.Value)
-		}
+		signature = observationSignature(item.Key, item.Aspect, completion.Value)
 	}
 	completion.Value.Free(p.Alloc)
 	completion.Diagnostic.Free(p.Alloc)
@@ -211,15 +248,28 @@ func acceptProductionInput(state *productionValidationState, completion core.Com
 	if changed || (!unknown && !signature.Equal(item.Signature)) {
 		state.Changed = appendProductionKey(p.Alloc, state.Changed, item.Key)
 	} else if unknown {
+		// A failed metadata probe cannot distinguish disappearance from an
+		// unreadable path. Ask for existence before calling it unverifiable.
+		if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
+			state.Probing = true
+			if p.Forwarding {
+				state.Pending = true
+				p.submitFileContextRequest(c, host.RequestReadFile, host.FilePayload(p.Alloc, host.OpExists, item.Key.Name))
+				return true
+			}
+			acceptProductionInput(c, state, p.fileCompletion(host.Request{}, host.OpExists, item.Key.Name))
+			return false
+		}
 		state.Unknown = appendProductionKey(p.Alloc, state.Unknown, item.Key)
 	} else {
 		state.Index++
-		return
+		return false
 	}
 	if !slices.Contains(state.Suspect, input.Consumer) {
 		state.Suspect = slices.Append(p.Alloc, state.Suspect, input.Consumer)
 	}
 	state.Index++
+	return false
 }
 
 func validateProductionInputs(c *core.EngineContext, nodeID int64) core.ProducerResult {
@@ -239,20 +289,22 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 			completion.Value.Free(p.Alloc)
 			completion.Diagnostic.Free(p.Alloc)
 			state.Index++
-		} else {
-			acceptProductionInput(state, completion)
+		} else if acceptProductionInput(c, state, completion) {
+			return core.ProducerSubmitted
 		}
 	}
 	if !state.Saving {
 		for state.Index < len(state.Inputs) {
 			item := state.Inputs[state.Index].Observation
-			op := productionInputOp(item.Aspect)
+			op := observationOp(item.Key, item.Aspect)
 			if p.Forwarding {
 				state.Pending = true
 				p.submitFileContextRequest(c, host.RequestReadFile, host.FilePayload(p.Alloc, op, item.Key.Name))
 				return core.ProducerSubmitted
 			}
-			acceptProductionInput(state, p.fileCompletion(host.Request{}, op, item.Key.Name))
+			if acceptProductionInput(c, state, p.fileCompletion(host.Request{}, op, item.Key.Name)) {
+				return core.ProducerSubmitted
+			}
 		}
 		// Propagate taint through normal edges, including definitions and grouped
 		// artifact aliases, without treating an order-only prerequisite as data.

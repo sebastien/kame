@@ -79,10 +79,12 @@ func (p *Program) declareTemplateTools(value *template.String) {
 
 func (p *Program) declareBuildTools(parsed *script.Script) {
 	shellIsKame := false
+	shellIsKash := false
 	for i := range parsed.Items {
 		definition := parsed.Items[i].Definition
-		if definition != nil && definition.Name == "SHELL" && definition.Expression != nil && definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame" {
-			shellIsKame = true
+		if definition != nil && definition.Name == "SHELL" && definition.Expression != nil {
+			shellIsKame = definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame"
+			shellIsKash = definition.Expression.Kind == expr.Name && definition.Expression.Text == "kash"
 		}
 	}
 	for i := range parsed.Items {
@@ -107,21 +109,28 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
 				expr.Free(p.Alloc, value.Expr)
 				slices.Free(p.Alloc, value.Diagnostics)
 			}
+			if len(item.Rule.Body) != 0 && ruleSelectsShell(item.Rule, shellIsKash, "kash") {
+				p.collectKashTools(item.Rule, "", nil, nil)
+			}
 		}
 	}
 }
 
 func ruleSelectsKame(rule *rule.Rule, shellIsKame bool) bool {
+	return ruleSelectsShell(rule, shellIsKame, "kame")
+}
+
+func ruleSelectsShell(rule *rule.Rule, global bool, name string) bool {
 	if rule.Metadata != nil {
 		for i := range rule.Metadata.Fields {
 			field := rule.Metadata.Fields[i]
 			if field.Key != "shell" {
 				continue
 			}
-			return field.Value != nil && field.Value.Kind == expr.Name && field.Value.Text == "kame"
+			return field.Value != nil && field.Value.Kind == expr.Name && field.Value.Text == name
 		}
 	}
-	return shellIsKame
+	return global
 }
 
 func (p *Program) plannedTools() []Tool {

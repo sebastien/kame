@@ -45,7 +45,7 @@ func observeNativeWork(node *core.Node, target string, started bool) {
 	if started && (!dashboardCanDraw() || dashboardOutput == nil) {
 		return
 	}
-	state := cli.ProgressState{Workers: workers}
+	state := cli.ProgressState{Workers: workers, Outcomes: outcomes}
 	generation, attempt := node.Generation, node.Attempt
 	if !started {
 		// Dispatch advances the live node's attempt (and may change generation).

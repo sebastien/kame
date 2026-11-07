@@ -431,6 +431,7 @@ func (p *Program) Free() {
 	p.Eval.CancelDefers()
 	slices.Free(p.Alloc, p.RecordReaders)
 	p.clearProductionChanges()
+	slices.Free(p.Alloc, p.deferredTerminal)
 	p.RecordReaders = nil
 	for i := range p.RecordRequests {
 		p.RecordRequests[i].Free(p.Alloc)

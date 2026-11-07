@@ -19,11 +19,12 @@ type Progress struct {
 }
 
 type ProgressWorkerView struct {
-	Target    string
-	Program   string
-	State     string
-	ElapsedMS int64
-	Ready     bool
+	Target      string
+	Program     string
+	State       string
+	ElapsedMS   int64
+	RemainingMS int64
+	Ready       bool
 }
 
 // ProgressView borrows all strings and workers for one render. The caller owns
@@ -412,7 +413,19 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 		var elapsed = bytes.NewBuffer(mem.System, nil)
 		WriteDuration(&elapsed, worker.ElapsedMS)
 		remaining := width - 2 - used
-		for j := len(elapsed.String()); j < remaining; j++ {
+		if worker.RemainingMS > 0 {
+			var eta = bytes.NewBuffer(mem.System, nil)
+			io.WriteString(&eta, " · ETA ~")
+			WriteDuration(&eta, worker.RemainingMS)
+			if len(elapsed.String())+measureDisplayText(eta.String(), len(eta.String())*2).Cells <= remaining {
+				io.WriteString(&elapsed, eta.String())
+			} else if len(eta.String())-4 <= remaining {
+				elapsed.Reset()
+				io.WriteString(&elapsed, eta.String()[4:])
+			}
+			eta.Free()
+		}
+		for j := measureDisplayText(elapsed.String(), len(elapsed.String())*2).Cells; j < remaining; j++ {
 			io.WriteString(out, " ")
 		}
 		WriteProgressField(out, elapsed.String(), remaining)

@@ -1,3 +1,8 @@
+---
+created: 2026-09-29T04:44:29+00:00
+updated: 2026-09-29T04:44:29+00:00
+uuid: e33c3aa0-ef5d-4faa-a208-2efbafdf5ac3
+---
 # Kash
 
 Kash is Kame's shell language. It extends Kame's core expression language with

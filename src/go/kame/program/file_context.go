@@ -338,13 +338,7 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 		}
 		signature := core.Signature{}
 		if completion.Diagnostic.Code == "" {
-			if state.PendingAspect == core.ObservationContent {
-				signature = contentObservation(completion.Value)
-			} else if state.PendingAspect == core.ObservationMetadata || state.PendingAspect == core.ObservationLinkMetadata {
-				signature = core.MetadataSignature(completion.Value)
-			} else {
-				signature = core.ValueSignature(completion.Value)
-			}
+			signature = observationSignature(state.PendingKey, state.PendingAspect, completion.Value)
 		}
 		c.ObserveAspect(state.PendingKey, state.PendingAspect, signature)
 		completion.Value.Free(p.Alloc)
@@ -482,22 +476,7 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 					continue
 				}
 			}
-			op := host.OpFileContent
-			if item.Aspect == core.ObservationExistence {
-				op = host.OpExists
-			}
-			if item.Aspect == core.ObservationMetadata {
-				op = host.OpStat
-			}
-			if item.Aspect == core.ObservationLinkMetadata {
-				op = host.OpLstat
-			}
-			if item.Aspect == core.ObservationLinkTarget {
-				op = host.OpReadlink
-			}
-			if item.Key.Kind == core.ResourceGlob {
-				op = host.OpWildcard
-			}
+			op := observationOp(item.Key, item.Aspect)
 			if p.Forwarding {
 				state.Pending, state.PendingAspect = true, item.Aspect
 				state.PendingKey = item.Key.Clone(p.Alloc)
@@ -507,13 +486,7 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			completion := p.fileCompletion(host.Request{}, op, item.Key.Name)
 			signature := core.Signature{}
 			if completion.Diagnostic.Code == "" {
-				if item.Aspect == core.ObservationContent {
-					signature = contentObservation(completion.Value)
-				} else if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
-					signature = core.MetadataSignature(completion.Value)
-				} else {
-					signature = core.ValueSignature(completion.Value)
-				}
+				signature = observationSignature(item.Key, item.Aspect, completion.Value)
 			}
 			c.ObserveAspect(item.Key, item.Aspect, signature)
 			completion.Value.Free(p.Alloc)

@@ -78,6 +78,9 @@ type Value struct {
 	// CallableOwner marks immutable invocation-owned callables. Their owner
 	// outlives engine snapshots; ordinary lexical closures remain unpublished.
 	CallableOwner any
+	// CallableSignature is present only for callables with a stable semantic identity.
+	// Its storage is owned by CallableOwner and outlives published values.
+	CallableSignature *Signature
 	// Process is opaque and borrowed from its invocation owner, never serialized.
 	Process  any
 	Resource ResourceKey

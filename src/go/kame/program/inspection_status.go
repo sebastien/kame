@@ -323,24 +323,9 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 				s.Index++
 				continue
 			}
-			op := host.OpFileContent
+			op := observationOp(item.Key, item.Aspect)
 			if toolMetadata {
 				op = host.OpToolContent
-			}
-			if item.Aspect == core.ObservationExistence {
-				op = host.OpExists
-			}
-			if item.Aspect == core.ObservationMetadata {
-				op = host.OpStat
-			}
-			if item.Aspect == core.ObservationLinkMetadata {
-				op = host.OpLstat
-			}
-			if item.Aspect == core.ObservationLinkTarget {
-				op = host.OpReadlink
-			}
-			if item.Key.Kind == core.ResourceGlob {
-				op = host.OpWildcard
 			}
 			reply := p.inspectionStatusRead(c, index, host.RequestReadFile, op, item.Key.Name)
 			if reply.Waiting {
@@ -349,11 +334,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 			if op == host.OpFileContent || op == host.OpToolContent {
 				signature = inspectionContent(reply.Completion)
 			} else if reply.Completion.Diagnostic.Code == "" && reply.Completion.HasValue {
-				if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
-					signature = core.MetadataSignature(reply.Completion.Value)
-				} else {
-					signature = core.ValueSignature(reply.Completion.Value)
-				}
+				signature = observationSignature(item.Key, item.Aspect, reply.Completion.Value)
 			}
 			reply.Completion.Value.Free(p.Alloc)
 			reply.Completion.Diagnostic.Free(p.Alloc)

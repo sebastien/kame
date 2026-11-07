@@ -91,6 +91,14 @@ func TestValueSignaturesAreCanonicalAndTyped(t *testing.T) {
 			t.Error("opaque value proves reusable equality")
 		}
 	}
+	identity := core.ContentSignature([]byte("global Kash body"))
+	other := core.ContentSignature([]byte("different body"))
+	callable := core.Value{Kind: core.Callable, CallableSignature: &identity}
+	copy := callable.Clone(a)
+	if !core.ValueSignature(callable).Equal(core.ValueSignature(copy)) || core.ValueSignature(callable).Equal(core.ValueSignature(core.Value{Kind: core.Callable, CallableSignature: &other})) {
+		t.Error("stable callable identity was not preserved")
+	}
+	copy.Free(a)
 	duplicate := core.NewRecord(a, []core.RecordField{{Key: "a"}, {Key: "a"}})
 	if core.ValueSignature(duplicate).Mode != core.SignatureUnavailable {
 		t.Error("duplicate record keys are reusable")
