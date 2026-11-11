@@ -1,19 +1,19 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
-	"solod.dev/so/time"
+	"os"
+	"time"
 )
 
 func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	dir, err := os.MkdirTemp(buffer[:], "", "kame-newer-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-newer-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -74,8 +74,8 @@ func materializeNewerKash(t *testing.T, directory string, text string) string {
 }
 
 func TestKashNewerInputsSurviveSuspendedFunctionRead(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	dir, err := os.MkdirTemp(buffer[:], "", "kame-kash-newer-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-kash-newer-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return

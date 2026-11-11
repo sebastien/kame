@@ -2,11 +2,11 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+
+	"strconv"
+	"strings"
 )
 
 func (p *Program) stringValue(scope *Scope, expression *expr.Expr, context *Context) Result {
@@ -14,18 +14,18 @@ func (p *Program) stringValue(scope *Scope, expression *expr.Expr, context *Cont
 	var children []*expr.Expr
 	for i := range parts {
 		if parts[i].Expr != nil {
-			children = slices.Append(context.Run, children, parts[i].Expr)
+			children = append(children, parts[i].Expr)
 		}
 	}
 	operands := p.argumentValues(scope, children, context, expression.Span)
-	slices.Free(context.Run, children)
+	mem.FreeSlice(nil, children)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	defer freeValuesWithCallables(context.Run, operands.Values)
 	next := 0
-	b := strings.NewBuilder(context.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range parts {
 		if parts[i].Expr == nil {
 			b.WriteString(parts[i].Text)
@@ -57,32 +57,32 @@ func stringify(a mem.Allocator, value core.Value) (string, bool) {
 		return owned(a, "false"), true
 	}
 	if value.Kind == core.Int {
-		var buffer [strconv.MaxIntBase10Len]byte
-		return owned(a, strconv.FormatInt(buffer[:], value.Int, 10)), true
+
+		return owned(a, strconv.FormatInt(value.Int, 10)), true
 	}
 	if value.Kind == core.Float {
-		var buffer [strconv.MaxFloat64Len]byte
-		return owned(a, strconv.FormatFloat(buffer[:], value.Float, 'g', -1, 64)), true
+
+		return owned(a, strconv.FormatFloat(value.Float, 'g', -1, 64)), true
 	}
 	if value.Kind == core.Pattern {
 		return owned(a, value.Text), true
 	}
 	if value.Kind == core.List {
-		builder := strings.NewBuilder(a)
+		builder := strings.Builder{}
 		for i := range value.List {
 			if i != 0 {
 				builder.WriteByte(' ')
 			}
 			text, ok := stringify(a, value.List[i])
 			if !ok {
-				builder.Free()
+				builder.Reset()
 				return "", false
 			}
 			builder.WriteString(text)
 			mem.FreeString(a, text)
 		}
 		result := owned(a, builder.String())
-		builder.Free()
+		builder.Reset()
 		return result, true
 	}
 	return "", false
@@ -106,12 +106,14 @@ func Display(a mem.Allocator, value core.Value) string {
 	var out []byte
 	appendDisplay(a, &out, value)
 	result := owned(a, string(out))
-	slices.Free(a, out)
+	mem.FreeSlice(nil, out)
 	return result
 }
 
 func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 	switch value.Kind {
+	case core.Module:
+		*out = appendTextBytes(a, *out, "<kash-module>")
 	case core.String, core.Pattern:
 		*out = appendQuotedText(a, *out, value.Text)
 	case core.Bytes:
@@ -123,11 +125,11 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 			*out = appendTextBytes(a, *out, ":false")
 		}
 	case core.Int:
-		var buffer [strconv.MaxIntBase10Len]byte
-		*out = appendTextBytes(a, *out, strconv.FormatInt(buffer[:], value.Int, 10))
+
+		*out = appendTextBytes(a, *out, strconv.FormatInt(value.Int, 10))
 	case core.Float:
-		var buffer [strconv.MaxFloat64Len]byte
-		text := strconv.FormatFloat(buffer[:], value.Float, 'g', -1, 64)
+
+		text := strconv.FormatFloat(value.Float, 'g', -1, 64)
 		// Negative zero parses back as the integer 0, so fold it to keep the
 		// display a fixed point under evaluation.
 		if text == "-0" {
@@ -181,7 +183,7 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 
 func appendTextBytes(a mem.Allocator, out []byte, text string) []byte {
 	for i := 0; i < len(text); i++ {
-		out = slices.Append(a, out, text[i])
+		out = append(out, text[i])
 	}
 	return out
 }
@@ -190,12 +192,12 @@ func appendTextBytes(a mem.Allocator, out []byte, text string) []byte {
 // characters the language recognises. It mirrors operations.quote so nested
 // values read back as the string they hold.
 func appendQuotedText(a mem.Allocator, out []byte, text string) []byte {
-	out = slices.Append(a, out, '"')
+	out = append(out, '"')
 	for i := 0; i < len(text); i++ {
 		switch text[i] {
 		case '"', '\\':
-			out = slices.Append(a, out, '\\')
-			out = slices.Append(a, out, text[i])
+			out = append(out, '\\')
+			out = append(out, text[i])
 		case '\n':
 			out = appendTextBytes(a, out, "\\n")
 		case '\r':
@@ -203,10 +205,10 @@ func appendQuotedText(a mem.Allocator, out []byte, text string) []byte {
 		case '\t':
 			out = appendTextBytes(a, out, "\\t")
 		default:
-			out = slices.Append(a, out, text[i])
+			out = append(out, text[i])
 		}
 	}
-	return slices.Append(a, out, '"')
+	return append(out, '"')
 }
 
 func owned(a mem.Allocator, text string) string {

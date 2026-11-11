@@ -1,10 +1,10 @@
 package main
 
 import (
+	"io"
 	"kame/host/posix"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/os"
+	"os"
 )
 
 // Like presentation state, output delivery is single-owner for one Run. Custom

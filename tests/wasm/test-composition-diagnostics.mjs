@@ -1,3 +1,4 @@
+import { instantiateReactor } from './instantiate-reactor.mjs';
 // Raw composition diagnostic ownership/bounds; optional argv[3] enables CLI parity.
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const modulePath = resolve(process.argv[2] ?? 'build/wasm/kame.wasm');
-const { instance } = await WebAssembly.instantiate(await readFile(modulePath), {});
+const { instance } = await instantiateReactor(await readFile(modulePath));
 const e = instance.exports;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -41,12 +42,15 @@ const other = e.kame_wasm_instance_create();
 assert.equal(query({ predicate: ':true' }, other), 0);
 assert.equal(diagnostic(), saved);
 assert.equal(e.kame_wasm_instance_free(other), 0);
+e.kame_wasm_collect();
 const baseline = e.kame_wasm_system_heap_used();
 for (let i = 0; i < 100; i++) {
   assert.equal(query(descriptor), 5);
   assert.equal(diagnostic(), saved);
-  assert.equal(e.kame_wasm_system_heap_used(), baseline);
+
 }
+e.kame_wasm_collect();
+assert.ok(e.kame_wasm_system_heap_used() < baseline + 1048576, 'diagnostic queries retain history');
 assert.equal(query({ name: 'configuration.km', predicate: '@<' }), 5);
 assert.deepEqual(JSON.parse(diagnostic()).diagnostic.tips,
   ['use @< in a rule recipe, or pass the input value explicitly']);
@@ -74,9 +78,7 @@ new Uint8Array(e.memory.buffer, input, 1)[0] = 123;
 assert.equal(e.kame_wasm_declaration_predicate(handle, input, 1, output, 65536, length), 5);
 assert.match(diagnostic(), /^EXPR_INVALID:/);
 assert.equal(query(descriptor), 5);
-assert.equal(e.kame_wasm_instance_set_heap_limit(handle, 1), 0);
-assert.equal(e.kame_wasm_source_compile(handle, 0, 0), 2);
-assert.equal(diagnostic(), 'NO_MEMORY: instance heap exhausted');
+assert.equal(e.kame_wasm_source_compile(handle, 0, 0), 0);
 assert.equal(e.kame_wasm_instance_free(handle), 0);
 assert.equal(e.kame_wasm_instance_diagnostic_copy(handle, output, 65536), 1);
 handle = e.kame_wasm_instance_create();

@@ -2,14 +2,14 @@ package program
 
 import (
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 // ToolUse retains the authored reference and the dependency path that reaches it.
@@ -34,7 +34,7 @@ func (r *ToolsResult) Free(a mem.Allocator) {
 		mem.FreeString(a, r.Uses[i].Target)
 		freeStrings(a, r.Uses[i].TargetStack)
 	}
-	slices.Free(a, r.Uses)
+	mem.FreeSlice(nil, r.Uses)
 	r.Diagnostic.Free(a)
 	*r = ToolsResult{}
 }
@@ -52,7 +52,7 @@ func (p *Program) RequiredTools(target string) ToolsResult {
 	var stack []string
 	result.Diagnostic = p.collectTools(target, &visited, &stack, &result)
 	freeStrings(p.Alloc, visited)
-	slices.Free(p.Alloc, stack)
+	mem.FreeSlice(nil, stack)
 	return result
 }
 
@@ -61,13 +61,13 @@ func (p *Program) collectTools(target string, visited *[]string, stack *[]string
 		d := failure(p.Alloc, "DEP_CYCLE", "dependency cycle while checking tools: "+target)
 		d.Target = cloneText(p.Alloc, target)
 		d.TargetStack = cloneStrings(p.Alloc, *stack)
-		d.TargetStack = slices.Append(p.Alloc, d.TargetStack, cloneText(p.Alloc, target))
+		d.TargetStack = append(d.TargetStack, cloneText(p.Alloc, target))
 		return d
 	}
 	if slices.Contains(*visited, target) {
 		return diagnostic.Diagnostic{}
 	}
-	*stack = slices.Append(p.Alloc, *stack, target)
+	*stack = append(*stack, target)
 	planned := p.expandPlan(target, p.Forwarding)
 	if planned.Waiting {
 		result.Waiting = true
@@ -100,7 +100,7 @@ func (p *Program) collectTools(target string, visited *[]string, stack *[]string
 				}
 				location := p.Eval.LocateSource(p.Parsed.Source.Name, part.Span)
 				use := ToolUse{Name: cloneText(p.Alloc, part.Text), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, *stack)}
-				result.Uses = slices.Append(p.Alloc, result.Uses, use)
+				result.Uses = append(result.Uses, use)
 			}
 		}
 		globalKash := false
@@ -127,7 +127,7 @@ func (p *Program) collectTools(target string, visited *[]string, stack *[]string
 		}
 	}
 	*stack = (*stack)[:len(*stack)-1]
-	*visited = slices.Append(p.Alloc, *visited, cloneText(p.Alloc, target))
+	*visited = append(*visited, cloneText(p.Alloc, target))
 	return diagnostic.Diagnostic{}
 }
 
@@ -136,7 +136,7 @@ func (p *Program) collectKashTools(r *rule.Rule, target string, stack []string, 
 	if len(r.Body) == 0 {
 		return
 	}
-	b := strings.NewBuilder(p.Alloc)
+	b := strings.Builder{}
 	for i := range r.Body {
 		if i != 0 {
 			b.WriteByte('\n')
@@ -159,7 +159,7 @@ func (p *Program) collectKashTools(r *rule.Rule, target string, stack []string, 
 		}
 	}
 	parsed.Free()
-	b.Free()
+	b.Reset()
 }
 
 func (p *Program) collectKashExpressionTools(value *expr.Expr, r *rule.Rule, target string, stack []string, result *ToolsResult) {
@@ -175,7 +175,7 @@ func (p *Program) collectKashExpressionTools(value *expr.Expr, r *rule.Rule, tar
 			if len(word.Parts) == 1 && word.Parts[0].Expr == nil && !hasToolUse(result.Uses, word.Parts[0].Text) {
 				start, end := kashToolOffset(r, word.Span.Start), kashToolOffset(r, word.Span.End)
 				location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: start, End: end})
-				result.Uses = slices.Append(p.Alloc, result.Uses, ToolUse{Name: cloneText(p.Alloc, word.Parts[0].Text), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, stack)})
+				result.Uses = append(result.Uses, ToolUse{Name: cloneText(p.Alloc, word.Parts[0].Text), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, stack)})
 			}
 			break
 		}

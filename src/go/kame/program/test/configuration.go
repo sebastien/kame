@@ -1,15 +1,15 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {

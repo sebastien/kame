@@ -2,11 +2,11 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+
+	"strings"
+	"unicode/utf8"
 )
 
 func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -17,8 +17,8 @@ func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.String {
 		return invalidArgument(c, v, 0, "string")
 	}
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range v[1].List {
 		if v[1].List[i].Kind != core.String {
 			discardArgCallables(c, v)
@@ -44,10 +44,10 @@ func opSplit(c *eval.Context, s any, v []core.Value) eval.Result {
 	for {
 		cut := strings.Index(left, v[0].Text)
 		if cut < 0 {
-			out = slices.Append(c.Run, out, core.NewString(c.Run, left))
+			out = append(out, core.NewString(c.Run, left))
 			break
 		}
-		out = slices.Append(c.Run, out, core.NewString(c.Run, left[:cut]))
+		out = append(out, core.NewString(c.Run, left[:cut]))
 		left = left[cut+len(v[0].Text):]
 	}
 	result := core.NewList(c.Run, out)
@@ -77,7 +77,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 			discardArgCallables(c, v)
 			return c.InvalidOperation("expects FROM TO TEXT strings, or MATCH-PATTERN EXPANSION [TEXT]")
 		}
-		value := strings.ReplaceAll(c.Run, v[2].Text, v[0].Text, v[1].Text)
+		value := strings.ReplaceAll(v[2].Text, v[0].Text, v[1].Text)
 		return eval.Result{Value: core.Value{Kind: core.String, Text: value}}
 	}
 	var state *replaceState
@@ -133,7 +133,7 @@ func opUppercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	if !ok {
 		return invalidArgument(c, v, 0, "string")
 	}
-	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToUpper(c.Run, value)}}
+	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToUpper(value)}}
 }
 func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
@@ -141,7 +141,7 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	if !ok {
 		return invalidArgument(c, v, 0, "string")
 	}
-	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(c.Run, value)}}
+	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(value)}}
 }
 
 func opTerminalStyle(c *eval.Context, state any, v []core.Value) eval.Result {
@@ -172,8 +172,8 @@ func opTerminalStyle(c *eval.Context, state any, v []core.Value) eval.Result {
 	if v[0].Kind != core.String {
 		return invalidArgument(c, v, 0, "string")
 	}
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	b.WriteString(start)
 	b.WriteString(v[0].Text)
 	b.WriteString(end)
@@ -183,8 +183,8 @@ func opTerminalStyle(c *eval.Context, state any, v []core.Value) eval.Result {
 // opTemplateCat is the document-lowering primitive, not scalar conversion.
 func opTemplateCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range v {
 		text, ok := eval.Stringify(c.Run, v[i])
 		if !ok {

@@ -1,9 +1,5 @@
 package expr
 
-import (
-	"solod.dev/so/slices"
-)
-
 // IsCommandGroup discriminates only at process-operand position. Nested value
 // expressions, captures, strings, and collection commas belong to their grammar.
 func IsCommandGroup(text string, start int) bool {
@@ -58,7 +54,7 @@ func (p *parser) processGroup() *Expr {
 	p.pos++
 	for {
 		p.commandSpace(true)
-		group.Items = slices.Append(p.a, group.Items, p.commandPipeline(p.pos, false, true, false))
+		group.Items = append(group.Items, p.commandPipeline(p.pos, false, true, false))
 		if len(p.diags) != 0 {
 			break
 		}

@@ -3,13 +3,12 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 const (
@@ -46,9 +45,9 @@ func resolveGeneratedDefinition(value any, key core.ResourceKey, context *eval.C
 		}
 	}
 	if !found {
-		state.Dependencies = slices.Append(state.Program.Alloc, state.Dependencies, cloneText(state.Program.Alloc, key.Name))
+		state.Dependencies = append(state.Dependencies, cloneText(state.Program.Alloc, key.Name))
 	}
-	state.Stack = slices.Append(state.Program.Alloc, state.Stack, key.Name)
+	state.Stack = append(state.Stack, key.Name)
 	result := state.Program.Eval.EvaluateDefinition(key, context)
 	state.Stack = state.Stack[:len(state.Stack)-1]
 	return result
@@ -70,7 +69,7 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 				return d
 			}
 		}
-		names = slices.Append(p.Alloc, names, cloneText(p.Alloc, item.GenerateName))
+		names = append(names, cloneText(p.Alloc, item.GenerateName))
 		state := generatedEvaluation{Program: p}
 		context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Requests: p.Eval.Requests, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolverState: &state, ResolveDefinition: resolveGeneratedDefinition}
 		value := p.Eval.EvaluateWith(item.Expression, context)
@@ -125,21 +124,21 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 				freeGeneratedBatch(p.Alloc, rules, metadata, names)
 				return d
 			}
-			rules = slices.Append(p.Alloc, rules, lowered.Rule)
+			rules = append(rules, lowered.Rule)
 			dependencies := cloneStrings(p.Alloc, state.Dependencies)
-			metadata = slices.Append(p.Alloc, metadata, generatedRuleMeta{Rule: lowered.Rule, Name: cloneText(p.Alloc, item.GenerateName), Dependencies: dependencies})
+			metadata = append(metadata, generatedRuleMeta{Rule: lowered.Rule, Name: cloneText(p.Alloc, item.GenerateName), Dependencies: dependencies})
 		}
 		value.Free(p.Alloc)
 		freeStrings(p.Alloc, state.Stack)
 		freeStrings(p.Alloc, state.Dependencies)
 	}
 	for i := range rules {
-		p.GeneratedRules = slices.Append(p.Alloc, p.GeneratedRules, rules[i])
-		p.GeneratedRuleMeta = slices.Append(p.Alloc, p.GeneratedRuleMeta, metadata[i])
-		p.Rules = slices.Append(p.Alloc, p.Rules, registeredRule{Rule: rules[i]})
+		p.GeneratedRules = append(p.GeneratedRules, rules[i])
+		p.GeneratedRuleMeta = append(p.GeneratedRuleMeta, metadata[i])
+		p.Rules = append(p.Rules, registeredRule{Rule: rules[i]})
 	}
-	slices.Free(p.Alloc, rules)
-	slices.Free(p.Alloc, metadata)
+	mem.FreeSlice(nil, rules)
+	mem.FreeSlice(nil, metadata)
 	freeStrings(p.Alloc, names)
 	return diagnostic.Diagnostic{}
 }
@@ -148,12 +147,12 @@ func freeGeneratedBatch(a mem.Allocator, rules []*rule.Rule, metadata []generate
 	for i := range rules {
 		freeGeneratedRule(a, rules[i])
 	}
-	slices.Free(a, rules)
+	mem.FreeSlice(nil, rules)
 	for i := range metadata {
 		mem.FreeString(a, metadata[i].Name)
 		freeStrings(a, metadata[i].Dependencies)
 	}
-	slices.Free(a, metadata)
+	mem.FreeSlice(nil, metadata)
 	freeStrings(a, names)
 }
 
@@ -292,20 +291,20 @@ func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, t
 	if targetPath {
 		targetKind = rule.TargetPath
 	}
-	generated.Outputs = slices.Append(p.Alloc, generated.Outputs, rule.Target{Kind: targetKind, Text: cloneText(p.Alloc, target), Span: generated.Header, Path: targetPath})
+	generated.Outputs = append(generated.Outputs, rule.Target{Kind: targetKind, Text: cloneText(p.Alloc, target), Span: generated.Header, Path: targetPath})
 	for i := range inputs {
 		kind := rule.InputName
 		if isFileName(inputs[i]) {
 			kind = rule.InputPath
 		}
-		generated.Inputs = slices.Append(p.Alloc, generated.Inputs, rule.Input{Kind: kind, Text: cloneText(p.Alloc, inputs[i]), Span: generated.Header})
+		generated.Inputs = append(generated.Inputs, rule.Input{Kind: kind, Text: cloneText(p.Alloc, inputs[i]), Span: generated.Header})
 	}
 	for i := range orderOnly {
 		kind := rule.InputName
 		if isFileName(orderOnly[i]) {
 			kind = rule.InputPath
 		}
-		generated.Inputs = slices.Append(p.Alloc, generated.Inputs, rule.Input{OrderOnly: true, Kind: kind, Text: cloneText(p.Alloc, orderOnly[i]), Span: generated.Header})
+		generated.Inputs = append(generated.Inputs, rule.Input{OrderOnly: true, Kind: kind, Text: cloneText(p.Alloc, orderOnly[i]), Span: generated.Header})
 	}
 	for i := range recipes {
 		if len(recipes[i]) > generatedFieldLimit || containsNUL(recipes[i]) {
@@ -323,7 +322,7 @@ func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, t
 			freeGeneratedRule(p.Alloc, generated)
 			return generatedRuleResult{Diagnostic: generatedDiagnostic(p, item, "PARSE_ERR", "invalid generated recipe template", target)}
 		}
-		generated.Body = slices.Append(p.Alloc, generated.Body, rule.RecipeLine{Text: cloneText(p.Alloc, recipes[i]), Span: generated.Header, Template: templateValue})
+		generated.Body = append(generated.Body, rule.RecipeLine{Text: cloneText(p.Alloc, recipes[i]), Span: generated.Header, Template: templateValue})
 		p.declareTemplateTools(templateValue)
 	}
 	if *total > generatedDataLimit {
@@ -409,7 +408,7 @@ func generatedDiagnostic(p *Program, item script.ScriptItem, code string, messag
 	d := failureAt(p.Alloc, code, diagnostic.Span{Start: item.Span.Start, End: item.Span.End}, message)
 	d.Source = cloneText(p.Alloc, p.Parsed.Source.Name)
 	if target != "" {
-		d.Notes = slices.Append(p.Alloc, d.Notes, cloneText(p.Alloc, "generated target: "+target))
+		d.Notes = append(d.Notes, cloneText(p.Alloc, "generated target: "+target))
 	}
 	return d
 }

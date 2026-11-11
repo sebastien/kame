@@ -4,11 +4,11 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+
+	"strconv"
 )
 
 // Cleanup has its own finite budget, including after the caller's deadline.
@@ -47,7 +47,7 @@ type deferredAction struct {
 func (p *Program) NewDeferScope(group int64, owner int64) *DeferScope {
 	s := mem.Alloc[DeferScope](p.Alloc)
 	s.Program, s.Group, s.Owner = p, group, owner
-	p.DeferScopes = slices.Append(p.Alloc, p.DeferScopes, s)
+	p.DeferScopes = append(p.DeferScopes, s)
 	return s
 }
 
@@ -94,7 +94,7 @@ func (p *Program) appendDefer(e *expr.Expr, c *Context, prepared *captureState) 
 	if prepared != nil {
 		action.Prepared = clonePreparedProcess(p.Alloc, prepared)
 	}
-	c.Deferred.Actions = slices.Append(p.Alloc, c.Deferred.Actions, action)
+	c.Deferred.Actions = append(c.Deferred.Actions, action)
 }
 
 func (p *Program) startDefers(s *DeferScope, aborting bool) {
@@ -112,8 +112,8 @@ func (p *Program) startDefers(s *DeferScope, aborting bool) {
 		return
 	}
 	s.Index = len(s.Actions) - 1
-	var buffer [strconv.MaxIntBase10Len]byte
-	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<defer-scope:"+strconv.Itoa(buffer[:], int(s.Group))+">")
+
+	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<defer-scope:"+strconv.Itoa(int(s.Group))+">")
 	s.Node = p.Engine.Add(key, runDefers, s)
 	key.Free(p.Alloc)
 	s.Root = p.Engine.RequestRoot(s.Node)
@@ -232,8 +232,8 @@ func runDefers(engine *core.EngineContext, id int64) core.ProducerResult {
 				}
 			}
 		}
-		var buffer, indexBuffer [strconv.MaxIntBase10Len]byte
-		key := core.NewResourceKey(a, core.ResourceDefinition, "<defer-action:"+strconv.Itoa(buffer[:], int(s.Node.ID))+":"+strconv.Itoa(indexBuffer[:], s.Index)+">")
+
+		key := core.NewResourceKey(a, core.ResourceDefinition, "<defer-action:"+strconv.Itoa(int(s.Node.ID))+":"+strconv.Itoa(s.Index)+">")
 		action.Node = p.Engine.Add(key, runDeferredAction, action)
 		key.Free(a)
 		action.Root = p.Engine.RequestRoot(action.Node)
@@ -248,7 +248,7 @@ func (s *DeferScope) recordFailure(d diagnostic.Diagnostic) {
 		s.Diagnostic = d.Clone(s.Program.Alloc)
 		return
 	}
-	s.Diagnostic.Notes = slices.Append(s.Program.Alloc, s.Diagnostic.Notes, owned(s.Program.Alloc, "additional deferred action failed: "+d.Code+": "+d.Message))
+	s.Diagnostic.Notes = append(s.Diagnostic.Notes, owned(s.Program.Alloc, "additional deferred action failed: "+d.Code+": "+d.Message))
 }
 
 func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult {
@@ -289,7 +289,7 @@ func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult
 	for i := range c.WritePaths {
 		mem.FreeString(c.Run, c.WritePaths[i])
 	}
-	slices.Free(c.Run, c.WritePaths)
+	mem.FreeSlice(nil, c.WritePaths)
 	if r.Waiting {
 		r.Free(c.Run)
 		if engine.Submitted() {
@@ -355,7 +355,7 @@ func (p *Program) FinalizationDiagnostic(a mem.Allocator) diagnostic.Diagnostic 
 		if result.Code == "" {
 			result = d.Clone(a)
 		} else {
-			result.Notes = slices.Append(a, result.Notes, owned(a, "additional cleanup failure: "+d.Code+": "+d.Message))
+			result.Notes = append(result.Notes, owned(a, "additional cleanup failure: "+d.Code+": "+d.Message))
 		}
 	}
 	return result
@@ -382,7 +382,7 @@ func (p *Program) freeDefers() {
 		s := p.DeferScopes[i]
 		p.freeDeferScope(s)
 	}
-	slices.Free(p.Alloc, p.DeferScopes)
+	mem.FreeSlice(nil, p.DeferScopes)
 }
 
 func (p *Program) freeDeferScope(s *DeferScope) {
@@ -395,7 +395,7 @@ func (p *Program) freeDeferScope(s *DeferScope) {
 		expr.Free(p.Alloc, action.Expression)
 		mem.Free(p.Alloc, action)
 	}
-	slices.Free(p.Alloc, s.Actions)
+	mem.FreeSlice(nil, s.Actions)
 	s.Diagnostic.Free(p.Alloc)
 	mem.FreeString(p.Alloc, s.CallPath)
 	mem.Free(p.Alloc, s)

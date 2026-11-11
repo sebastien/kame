@@ -2,7 +2,7 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 type RequestKind int
@@ -37,6 +37,8 @@ const (
 	RequestPublishFile
 	RequestRecordRead
 	RequestRecordClose
+	// RequestLoadSource is reserved for evaluator-validated authored source paths.
+	RequestLoadSource
 )
 
 // Request owns Payload until it is popped or the queue is freed.

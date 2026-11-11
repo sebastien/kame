@@ -4,22 +4,22 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func (p *Program) prepareRemoteExecution(entry *instance) diagnostic.Diagnostic {
 	for i := range entry.ExecutionInputs {
 		entry.ExecutionInputs[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, entry.ExecutionInputs)
+	mem.FreeSlice(nil, entry.ExecutionInputs)
 	entry.ExecutionInputs = nil
 	for i := range entry.ExecutionOutputs {
 		mem.FreeString(p.Alloc, entry.ExecutionOutputs[i])
 	}
-	slices.Free(p.Alloc, entry.ExecutionOutputs)
+	mem.FreeSlice(nil, entry.ExecutionOutputs)
 	entry.ExecutionOutputs = nil
 	if entry.Executor == "" || entry.Executor == "local" {
 		return diagnostic.Diagnostic{}
@@ -51,7 +51,7 @@ func (p *Program) prepareRemoteExecution(entry *instance) diagnostic.Diagnostic 
 			for j := range entry.ExecutionInputs {
 				entry.ExecutionInputs[j].Free(p.Alloc)
 			}
-			slices.Free(p.Alloc, entry.ExecutionInputs)
+			mem.FreeSlice(nil, entry.ExecutionInputs)
 			entry.ExecutionInputs = nil
 			return failure(p.Alloc, "FS_ERR", "remote input is missing or not a regular file")
 		}
@@ -61,18 +61,18 @@ func (p *Program) prepareRemoteExecution(entry *instance) diagnostic.Diagnostic 
 			for j := range entry.ExecutionInputs {
 				entry.ExecutionInputs[j].Free(p.Alloc)
 			}
-			slices.Free(p.Alloc, entry.ExecutionInputs)
+			mem.FreeSlice(nil, entry.ExecutionInputs)
 			entry.ExecutionInputs = nil
 			return failure(p.Alloc, "FS_ERR", "cannot read remote input")
 		}
 		artifact := host.ExecutionArtifact{Name: remoteArtifactName(p, name), Data: data, Mode: stat.Info.Mode}
 		cacheHash(data, artifact.Digest[:])
-		entry.ExecutionInputs = slices.Append(p.Alloc, entry.ExecutionInputs, artifact)
+		entry.ExecutionInputs = append(entry.ExecutionInputs, artifact)
 		mem.FreeString(p.Alloc, name)
 	}
 	for i := range entry.Plan.Outputs {
 		canonical := p.canonicalTarget(entry.Plan.Outputs[i], true)
-		entry.ExecutionOutputs = slices.Append(p.Alloc, entry.ExecutionOutputs, remoteArtifactName(p, canonical))
+		entry.ExecutionOutputs = append(entry.ExecutionOutputs, remoteArtifactName(p, canonical))
 		mem.FreeString(p.Alloc, canonical)
 	}
 	key := hashSink{state: core.NewDigest()}
@@ -114,12 +114,12 @@ func (p *Program) releaseRemoteExecution(entry *instance) {
 	for i := range entry.ExecutionInputs {
 		entry.ExecutionInputs[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, entry.ExecutionInputs)
+	mem.FreeSlice(nil, entry.ExecutionInputs)
 	entry.ExecutionInputs = nil
 	for i := range entry.ExecutionOutputs {
 		mem.FreeString(p.Alloc, entry.ExecutionOutputs[i])
 	}
-	slices.Free(p.Alloc, entry.ExecutionOutputs)
+	mem.FreeSlice(nil, entry.ExecutionOutputs)
 	entry.ExecutionOutputs = nil
 }
 
@@ -127,7 +127,7 @@ func (p *Program) publishRemoteOutputs(entry *instance, outputs []host.Execution
 	if entry == nil || entry.Executor == "" || entry.Executor == "local" {
 		return diagnostic.Diagnostic{}
 	}
-	seen := slices.Make[bool](p.Alloc, len(entry.ExecutionOutputs))
+	seen := make([]bool, len(entry.ExecutionOutputs))
 	for i := range outputs {
 		matched := -1
 		for j := range entry.ExecutionOutputs {
@@ -137,18 +137,18 @@ func (p *Program) publishRemoteOutputs(entry *instance, outputs []host.Execution
 			}
 		}
 		if matched < 0 || seen[matched] {
-			slices.Free(p.Alloc, seen)
+			mem.FreeSlice(nil, seen)
 			return failure(p.Alloc, "HOST_FAIL", "remote executor returned an undeclared or duplicate output")
 		}
 		seen[matched] = true
 	}
 	for i := range seen {
 		if !seen[i] {
-			slices.Free(p.Alloc, seen)
+			mem.FreeSlice(nil, seen)
 			return failure(p.Alloc, "OUTPUT_MISSING", "remote executor omitted a declared output")
 		}
 	}
-	slices.Free(p.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 	for i := range outputs {
 		outputPath := p.canonicalTarget(entry.Plan.Outputs[0], true)
 		for j := range entry.ExecutionOutputs {

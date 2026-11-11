@@ -1,10 +1,12 @@
-package posix_test
+//go:build linux
+
+package posixcheck
 
 import (
 	"kame/host"
 	"kame/host/posix"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestAcceptedExitKeepsRawAndEffectiveFailureSeparate(t *testing.T) {
@@ -28,5 +30,5 @@ func TestAcceptedExitKeepsRawAndEffectiveFailureSeparate(t *testing.T) {
 	for i := range events {
 		events[i].Free(a)
 	}
-	slices.Free(a, events)
+	mem.FreeSlice(nil, events)
 }

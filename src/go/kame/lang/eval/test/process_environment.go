@@ -1,8 +1,8 @@
-package eval_test
+package evalcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/eval"
-	"solod.dev/so/testing"
 )
 
 func TestProcessEnvironmentSignature(t *testing.T) {

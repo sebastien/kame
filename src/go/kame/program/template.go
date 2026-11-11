@@ -1,10 +1,10 @@
 package program
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // Bindings are string literals in a lexical scope. Clone argv/descriptor text
@@ -28,8 +28,8 @@ func templateBindings(a mem.Allocator, root *expr.Expr, defines []string) *expr.
 		name.Kind, name.Text, name.TextOwned = expr.Name, cloneText(a, defines[i][:equal]), true
 		value := mem.Alloc[expr.Expr](a)
 		value.Kind, value.Text, value.TextOwned = expr.Symbol, cloneText(a, defines[i][equal+1:]), true
-		bindings.Items = slices.Append(a, bindings.Items, name, value)
+		bindings.Items = append(bindings.Items, name, value)
 	}
-	application.Items = slices.Append(a, application.Items, head, bindings, root)
+	application.Items = append(application.Items, head, bindings, root)
 	return application
 }

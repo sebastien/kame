@@ -1,6 +1,8 @@
 package core
 
-import "solod.dev/so/slices"
+import "kame/internal/mem"
+
+import "slices"
 
 // Revalidate refreshes a resource before discarding consumers' accepted state.
 // Active host work still uses cancellation-first invalidation; a settled graph
@@ -27,7 +29,7 @@ func (e *Engine) Revalidate(n *Node) {
 		}
 	}
 	if !stable {
-		slices.Free(e.Alloc, nodes)
+		mem.FreeSlice(nil, nodes)
 		e.Invalidate(n)
 		return
 	}
@@ -36,17 +38,17 @@ func (e *Engine) Revalidate(n *Node) {
 			nodes[i].ValidationPending = true
 		}
 	}
-	slices.Free(e.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	var seen []*Node
 	e.invalidate(n, &seen, false, false)
-	slices.Free(e.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 }
 
 func (e *Engine) revalidationClosure(n *Node, nodes *[]*Node) {
 	if slices.Contains(*nodes, n) {
 		return
 	}
-	*nodes = slices.Append(e.Alloc, *nodes, n)
+	*nodes = append(*nodes, n)
 	for i := range n.Dependents {
 		e.revalidationClosure(n.Dependents[i], nodes)
 	}
@@ -102,7 +104,7 @@ func (e *Engine) validatePending(n *Node) {
 	var seen []*Node
 	// Keep old dependency interest while the producer discovers its new edges.
 	e.invalidate(n, &seen, true, false)
-	slices.Free(e.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 }
 
 func consumedDependencyUnchanged(consumer *Node, dependency *Node) bool {

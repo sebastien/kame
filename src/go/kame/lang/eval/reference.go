@@ -4,8 +4,8 @@ import (
 	"kame/core"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/slices"
-	"solod.dev/so/unicode/utf8"
+
+	"unicode/utf8"
 )
 
 func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Context) Result {
@@ -37,7 +37,7 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 		freeCallables(context.Run, &result.Value)
 		result.Value.Free(context.Run)
 		result = next
-		if result.Diagnostic.Code != "" {
+		if result.Waiting || result.Diagnostic.Code != "" {
 			return result
 		}
 	}
@@ -46,6 +46,16 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 
 func (p *Program) referencePart(value core.Value, part expr.ReferencePart, context *Context) Result {
 	_ = p
+	if value.Kind == core.Module {
+		if part.Kind != expr.ReferenceName {
+			return failure(context.Run, "EXPR_INVALID", part.Span, "module supports only named field selection")
+		}
+		selected := context.ModuleField(value, part.Text, part.Span)
+		if selected.Found {
+			return selected.Result
+		}
+		return failure(context.Run, "REF_MISSING", part.Span, "module field not found")
+	}
 	if part.Kind == expr.ReferenceName {
 		if value.Kind != core.Record {
 			return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
@@ -71,7 +81,7 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 			found := false
 			for j := range value.Record {
 				if value.Record[j].Key == key {
-					fields = slices.Append(context.Run, fields, core.RecordField{Key: key, Value: borrowValue(context.Run, value.Record[j].Value)})
+					fields = append(fields, core.RecordField{Key: key, Value: borrowValue(context.Run, value.Record[j].Value)})
 					found = true
 					break
 				}
@@ -289,7 +299,7 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 			}
 		}
 		result := failure(context.Run, "SEL_NO_CONTEXT", span, kind+" selector "+text+" requires an "+kind+" context; none is available")
-		result.Diagnostic.Tips = slices.Append(context.Run, result.Diagnostic.Tips, cloneFailureText(context.Run, "use "+text+" in a rule recipe, or pass the "+kind+" value explicitly"))
+		result.Diagnostic.Tips = append(result.Diagnostic.Tips, cloneFailureText(context.Run, "use "+text+" in a rule recipe, or pass the "+kind+" value explicitly"))
 		return result
 	}
 	suffix := text[offset:]

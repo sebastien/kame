@@ -1,8 +1,8 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestListQueryGrammar(t *testing.T) {

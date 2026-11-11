@@ -1,10 +1,10 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func ownedFailure(a mem.Allocator, message string) core.Diagnostic {

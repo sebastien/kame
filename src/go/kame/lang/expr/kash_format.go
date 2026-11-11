@@ -1,24 +1,24 @@
 package expr
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"strings"
 )
 
 func FormatKashControl(a mem.Allocator, e *Expr, indent string) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	writeKashControl(&b, e, indent, 0)
 	text := sourceText(a, b.String())
-	b.Free()
+	b.Reset()
 	return text
 }
 
 // FormatKashStatement formats graph structure without changing value formatting.
 func FormatKashStatement(a mem.Allocator, e *Expr, indent string) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	writeKashStatement(&b, e, indent, 0)
 	text := sourceText(a, b.String())
-	b.Free()
+	b.Reset()
 	return text
 }
 
@@ -197,7 +197,11 @@ func writeKashBody(b *strings.Builder, body []*Expr, indent string, level int) {
 			writeKashControl(b, statement.Items[0], indent, level)
 			continue
 		}
-		for k := 0; k < level; k++ {
+		depth := level
+		if statement.Kind == KashComment {
+			depth = statement.CommentIndent
+		}
+		for k := 0; k < depth; k++ {
 			b.WriteString(indent)
 		}
 		if statement.Kind == KashComment {

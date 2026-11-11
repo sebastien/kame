@@ -1,11 +1,11 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestCompositionFormsAndFormatting(t *testing.T) {

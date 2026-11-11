@@ -1,8 +1,8 @@
 package expr
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"strings"
 )
 
 // Columns measures canonical source columns, not UTF-8 bytes.
@@ -26,10 +26,10 @@ func Fits(text string, column int) bool {
 
 // FormatAt lays out an expression at its actual starting column.
 func FormatAt(a mem.Allocator, e *Expr, column int) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	writeLayout(a, &b, e, column, column, 0)
 	text := sourceText(a, b.String())
-	b.Free()
+	b.Reset()
 	return text
 }
 

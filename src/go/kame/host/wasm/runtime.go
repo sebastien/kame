@@ -1,19 +1,19 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // Runtime is the portable, single-owner state machine used by the wasm ABI.
@@ -227,9 +227,9 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 			for j := range r.InspectionGrants[i].Names {
 				mem.FreeString(r.Alloc, r.InspectionGrants[i].Names[j])
 			}
-			slices.Free(r.Alloc, r.InspectionGrants[i].Names)
+			mem.FreeSlice(nil, r.InspectionGrants[i].Names)
 		}
-		slices.Free(r.Alloc, r.InspectionGrants)
+		mem.FreeSlice(nil, r.InspectionGrants)
 		r.InspectionGrants = nil
 		r.InspectionPolicy = true
 		if r.Eval != nil {
@@ -251,9 +251,9 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 		return false
 	}
 	if name != "" {
-		grant.Names = slices.Append(r.Alloc, grant.Names, pureText(r.Alloc, name))
+		grant.Names = append(grant.Names, pureText(r.Alloc, name))
 	}
-	r.InspectionGrants = slices.Append(r.Alloc, r.InspectionGrants, grant)
+	r.InspectionGrants = append(r.InspectionGrants, grant)
 	r.InspectionPolicy = true
 	if r.Eval != nil {
 		r.Eval.SetGrants(r.InspectionGrants)
@@ -277,7 +277,7 @@ func (r *Runtime) SetToolPath(name string, path string) bool {
 			return true
 		}
 	}
-	r.ToolPaths = slices.Append(r.Alloc, r.ToolPaths, program.Tool{Name: pureText(r.Alloc, name), Path: pureText(r.Alloc, path)})
+	r.ToolPaths = append(r.ToolPaths, program.Tool{Name: pureText(r.Alloc, name), Path: pureText(r.Alloc, path)})
 	return true
 }
 
@@ -308,7 +308,7 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 		result.Free(r.Alloc)
 		return PureResult{HostNeeded: true}
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	if result.Diagnostic.Code != "" {
 		program.WriteJSONDiagnostic(&buffer, result.Diagnostic)
 	} else {
@@ -325,7 +325,7 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 		cli.WriteToolsCheckResult(&buffer, r.Program, target, result.Uses)
 	}
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	result.Free(r.Alloc)
 	return PureResult{Text: text}
 }
@@ -338,11 +338,11 @@ func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	targets := []string{target}
 	d := r.Program.WriteInspection(&buffer, targets, -1, "plan")
 	if r.Program.InspectionWaiting {
-		buffer.Free()
+		buffer.Reset()
 		return PureResult{HostNeeded: true}
 	}
 	if d.Code != "" {
@@ -350,7 +350,7 @@ func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 		d.Free(r.Alloc)
 	}
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -360,10 +360,10 @@ func (r *Runtime) ListJSON(query string) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer = bytes.Buffer{}
 	r.Program.WriteTargetList(&buffer, query)
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -373,14 +373,14 @@ func (r *Runtime) ListReportJSON(query string) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer = bytes.Buffer{}
 	r.Program.WriteTargetReport(&buffer, query)
 	if r.Program.InspectionWaiting {
-		buffer.Free()
+		buffer.Reset()
 		return PureResult{HostNeeded: true}
 	}
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -390,21 +390,21 @@ func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	d := r.Program.WriteGraph(&buffer, target, depth, kind)
 	if r.Program.InspectionWaiting {
-		buffer.Free()
+		buffer.Reset()
 		return PureResult{HostNeeded: true}
 	}
 	if d.Code != "" {
 		program.WriteJSONDiagnostic(&buffer, d)
 		out := PureResult{Text: pureText(r.Alloc, buffer.String())}
 		d.Free(r.Alloc)
-		buffer.Free()
+		buffer.Reset()
 		return out
 	}
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -429,8 +429,8 @@ func (r *Runtime) PlanQueryJSON(encoded string, depth int, affected bool) PureRe
 		r.Program.CancelInspection()
 		return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")}
 	}
-	targets := slices.Make[string](r.Alloc, len(value.List))
-	defer slices.Free(r.Alloc, targets)
+	targets := make([]string, len(value.List))
+	defer mem.FreeSlice(nil, targets)
 	for i := range value.List {
 		if value.List[i].Kind != core.String || value.List[i].Text == "" {
 			r.Program.CancelInspection()
@@ -438,14 +438,14 @@ func (r *Runtime) PlanQueryJSON(encoded string, depth int, affected bool) PureRe
 		}
 		targets[i] = value.List[i].Text
 	}
-	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer = bytes.Buffer{}
 	kind := "plan"
 	if affected {
 		kind = "affected"
 	}
 	d := r.Program.WriteInspection(&buffer, targets, depth, kind)
 	if r.Program.InspectionWaiting {
-		buffer.Free()
+		buffer.Reset()
 		return PureResult{HostNeeded: true}
 	}
 	if d.Code != "" {
@@ -453,7 +453,7 @@ func (r *Runtime) PlanQueryJSON(encoded string, depth int, affected bool) PureRe
 		d.Free(r.Alloc)
 	}
 	out := PureResult{Text: pureText(r.Alloc, buffer.String())}
-	buffer.Free()
+	buffer.Reset()
 	return out
 }
 
@@ -464,20 +464,20 @@ func (r *Runtime) SpanJSON(target string, depth int, expand bool) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	d := r.Program.WriteSpan(&buffer, target, depth, expand)
 	if r.Program.InspectionWaiting {
-		buffer.Free()
+		buffer.Reset()
 		return PureResult{HostNeeded: true}
 	}
 	if d.Code != "" {
 		out := PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message)}
 		d.Free(r.Alloc)
-		buffer.Free()
+		buffer.Reset()
 		return out
 	}
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -488,7 +488,7 @@ func (r *Runtime) ToolNames() PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	e := json.NewEncoder(&buffer)
 	e.BeginArray()
 	for i := range r.Program.Tools {
@@ -497,7 +497,7 @@ func (r *Runtime) ToolNames() PureResult {
 	e.EndArray()
 	e.Flush()
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -541,7 +541,7 @@ func (r *Runtime) SetEnvironment(name string, value string) bool {
 	if r == nil || r.Program != nil {
 		return false
 	}
-	r.Environment = slices.Append(r.Alloc, r.Environment, pureText(r.Alloc, name+"="+value))
+	r.Environment = append(r.Environment, pureText(r.Alloc, name+"="+value))
 	return true
 }
 
@@ -622,11 +622,11 @@ func (r *Runtime) NextEventJSON() bool {
 	if !next.OK {
 		return false
 	}
-	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer bytes.Buffer
 	program.WriteJSONEventWithAllocator(r.Alloc, &buffer, next.Event)
 	next.Event.Free(r.Alloc)
-	r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
-	buffer.Free()
+	r.EventJSON = slices.Clone([]byte(buffer.String()))
+	buffer.Reset()
 	return true
 }
 
@@ -652,7 +652,7 @@ func (r *Runtime) EventJSONClear() {
 	if r == nil || len(r.EventJSON) == 0 {
 		return
 	}
-	slices.Free(r.Alloc, r.EventJSON)
+	mem.FreeSlice(nil, r.EventJSON)
 	r.EventJSON = nil
 }
 
@@ -734,9 +734,9 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerFailed
 	}
 	for i := range context.Effects {
-		r.Effects = slices.Append(r.Alloc, r.Effects, context.Effects[i])
+		r.Effects = append(r.Effects, context.Effects[i])
 	}
-	slices.Free(r.Alloc, context.Effects)
+	mem.FreeSlice(nil, context.Effects)
 	context.Effects = nil
 	c.Publish(result.Value)
 	result.Value = core.Value{}
@@ -798,7 +798,7 @@ func (r *Runtime) PrepareWorkJSON() PureResult {
 	if w.Target == "" {
 		return PureResult{}
 	}
-	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	var buffer = bytes.Buffer{}
 	e := json.NewEncoder(&buffer)
 	e.BeginObject()
 	e.Str("type")
@@ -814,7 +814,7 @@ func (r *Runtime) PrepareWorkJSON() PureResult {
 	e.EndObject()
 	e.Flush()
 	result := PureResult{Text: pureText(r.Alloc, buffer.String())}
-	buffer.Free()
+	buffer.Reset()
 	return result
 }
 
@@ -917,7 +917,7 @@ func (r *Runtime) Result() RuntimeResult {
 			if result.Diagnostic.Code == "" {
 				result.Diagnostic = d
 			} else if d.Code != "" {
-				result.Diagnostic.Notes = slices.Append(r.Alloc, result.Diagnostic.Notes, pureText(r.Alloc, "deferred cleanup failed: "+d.Code+": "+d.Message))
+				result.Diagnostic.Notes = append(result.Diagnostic.Notes, pureText(r.Alloc, "deferred cleanup failed: "+d.Code+": "+d.Message))
 				d.Free(r.Alloc)
 			}
 		}
@@ -988,7 +988,7 @@ func (r *Runtime) Free() {
 	if r == nil {
 		return
 	}
-	slices.Free(r.Alloc, r.FinalizationRequests)
+	mem.FreeSlice(nil, r.FinalizationRequests)
 	r.freeWatchHandles()
 	if r.Handle != nil {
 		r.Handle.Free()
@@ -1006,20 +1006,20 @@ func (r *Runtime) Free() {
 		r.Host = nil
 	}
 	if len(r.EventJSON) != 0 {
-		slices.Free(r.Alloc, r.EventJSON)
+		mem.FreeSlice(nil, r.EventJSON)
 		r.EventJSON = nil
 	}
 	eval.FreeEffects(r.Alloc, r.Effects)
 	for i := range r.Environment {
 		mem.FreeString(r.Alloc, r.Environment[i])
 	}
-	slices.Free(r.Alloc, r.Environment)
+	mem.FreeSlice(nil, r.Environment)
 	r.InspectionGrant("", "")
 	for i := range r.ToolPaths {
 		mem.FreeString(r.Alloc, r.ToolPaths[i].Name)
 		mem.FreeString(r.Alloc, r.ToolPaths[i].Path)
 	}
-	slices.Free(r.Alloc, r.ToolPaths)
+	mem.FreeSlice(nil, r.ToolPaths)
 	if r.ExprParsed != nil {
 		r.ExprParsed.Free()
 	}

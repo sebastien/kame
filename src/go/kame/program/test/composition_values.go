@@ -1,10 +1,10 @@
-package program_test
+package programcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestCompositionSessionRejectsValueHeadsBeforePriorWork(t *testing.T) {

@@ -1,9 +1,9 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/testing"
 )
 
 func TestContributionFragmentCannotBorrowClosingDelimiter(t *testing.T) {

@@ -1,12 +1,12 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // FinalizationTick opts an embedding driver into graceful cleanup and services
@@ -77,8 +77,8 @@ func runtimeFinalizationQuiet(value any, node int64, generation int64) bool {
 func runtimeFinalizationEffect(value any, effect eval.Effect) {
 	r := value.(*Runtime)
 	copy := effect
-	copy.Data = slices.Clone(r.Alloc, effect.Data)
-	r.Effects = slices.Append(r.Alloc, r.Effects, copy)
+	copy.Data = slices.Clone(effect.Data)
+	r.Effects = append(r.Effects, copy)
 }
 
 func runtimeDefersQuiet(value any, owner int64, group int64) bool {
@@ -97,7 +97,7 @@ func (r *Runtime) trackFinalizationRequest(next host.NextResult) {
 		return
 	}
 	request := host.Request{ID: next.Request.ID, NodeID: next.Request.NodeID, Generation: next.Request.Generation, Attempt: next.Request.Attempt, Kind: next.Request.Kind}
-	r.FinalizationRequests = slices.Append(r.Alloc, r.FinalizationRequests, request)
+	r.FinalizationRequests = append(r.FinalizationRequests, request)
 }
 
 func (r *Runtime) retireFinalizationRequest(id int64) {
@@ -158,7 +158,7 @@ func (r *Runtime) ResultDiagnosticJSON() PureResult {
 		if d.Code == "" {
 			d = cleanup
 		} else if cleanup.Code != "" {
-			d.Notes = slices.Append(r.Alloc, d.Notes, pureText(r.Alloc, "deferred cleanup failed: "+cleanup.Code+": "+cleanup.Message))
+			d.Notes = append(d.Notes, pureText(r.Alloc, "deferred cleanup failed: "+cleanup.Code+": "+cleanup.Message))
 			cleanup.Free(r.Alloc)
 		}
 	}
@@ -166,9 +166,9 @@ func (r *Runtime) ResultDiagnosticJSON() PureResult {
 	if d.Code == "" {
 		return PureResult{}
 	}
-	buffer := bytes.NewBuffer(r.Alloc, nil)
+	buffer := bytes.Buffer{}
 	program.WriteJSONDiagnostic(&buffer, d)
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }

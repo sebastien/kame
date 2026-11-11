@@ -1,17 +1,16 @@
 package eval
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func addStreamNode(c *Context, graph *expr.Expr, kind string, span source.Span) int {
 	node := mem.Alloc[expr.Expr](c.Run)
 	node.Kind, node.Text, node.Span = expr.CommandMux, kind, span
 	index := len(graph.Items)
-	graph.Items = slices.Append(c.Run, graph.Items, node)
+	graph.Items = append(graph.Items, node)
 	return index
 }
 
@@ -23,7 +22,7 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 		if graph.Items[i].Kind == expr.CommandStage && !graph.Items[i].Each {
 			kind = 0
 		}
-		graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, kind)
+		graph.StreamKinds = append(graph.StreamKinds, kind)
 	}
 	for {
 		progress, remaining := false, false
@@ -97,10 +96,10 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 		edge := graph.Edges[i]
 		if graph.StreamKinds[edge.From] == 1 && graph.Items[edge.To].Kind == expr.CommandStage && !graph.Items[edge.To].Each {
 			adapter := addStreamNode(c, graph, "encode", graph.Items[edge.To].Span)
-			graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
+			graph.StreamKinds = append(graph.StreamKinds, 0)
 			graph.Edges[i].To = adapter
 			graph.Edges[i].Argument = 0
-			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: edge.To, Argument: edge.Argument})
+			graph.Edges = append(graph.Edges, expr.CommandEdge{From: adapter, To: edge.To, Argument: edge.Argument})
 		}
 	}
 	for i := 0; i < len(graph.Items); i++ {
@@ -117,9 +116,9 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			return failure(c.Run, "KASH_MUX_ARITY", graph.Items[i].Span, "presentation port requires one input")
 		}
 		adapter := addStreamNode(c, graph, "encode", graph.Items[i].Span)
-		graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
+		graph.StreamKinds = append(graph.StreamKinds, 0)
 		graph.Edges[incoming].To = adapter
-		graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: i})
+		graph.Edges = append(graph.Edges, expr.CommandEdge{From: adapter, To: i})
 		graph.StreamKinds[i] = 0
 	}
 	nodes := len(graph.Items)
@@ -135,8 +134,8 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 		}
 		if !connected {
 			adapter := addStreamNode(c, graph, "encode", graph.Items[i].Span)
-			graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
-			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: i, To: adapter})
+			graph.StreamKinds = append(graph.StreamKinds, 0)
+			graph.Edges = append(graph.Edges, expr.CommandEdge{From: i, To: adapter})
 		}
 	}
 	return Result{}

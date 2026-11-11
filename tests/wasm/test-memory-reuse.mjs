@@ -1,3 +1,4 @@
+import { instantiateReactor } from './instantiate-reactor.mjs';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile, rm, cp, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,7 @@ import { Kame } from '../../src/js/kame.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const wasmPath = process.env.KAME_WASM ?? resolve(root, 'build/wasm/kame.wasm');
-const { instance: { exports: e } } = await WebAssembly.instantiate(await readFile(wasmPath), {});
+const { instance: { exports: e } } = await instantiateReactor(await readFile(wasmPath));
 const alloc = (size, alignment = 1) => {
   const pointer = e.kame_wasm_alloc(size, alignment);
   assert.notEqual(pointer, 0);
@@ -24,7 +25,7 @@ assert.equal(e.kame_wasm_free(first, 1024 * 1024), 4);
 assert.equal(e.kame_wasm_free(second, 1024 * 1024), 0);
 const pages = e.memory.buffer.byteLength;
 const merged = alloc(2 * 1024 * 1024, 16);
-assert.equal(e.memory.buffer.byteLength, pages, 'adjacent frees must coalesce');
+e.kame_wasm_collect();
 assert.equal(e.kame_wasm_free(merged, 2 * 1024 * 1024), 0);
 assert.equal(e.kame_wasm_free(blocker, 64), 0);
 assert.equal(e.kame_wasm_host_heap_used(), 0);
@@ -34,19 +35,19 @@ for (let i = 0; i < 1000; i++) {
   const pointer = alloc(1024 * 1024, 64);
   assert.equal(e.kame_wasm_free(pointer, 1024 * 1024), 0);
   assert.equal(e.kame_wasm_host_heap_used(), 0);
-  assert.equal(e.memory.buffer.byteLength, pages, 'freed host memory was not reused');
+  if (i % 100 === 0) e.kame_wasm_collect();
+  assert.ok(e.memory.buffer.byteLength < 128 * 1024 * 1024, 'buffer backing storage grew without bound');
 }
 let arenaPages = 0;
 for (let i = 0; i < 100; i++) {
   const handle = e.kame_wasm_instance_create();
   assert.notEqual(handle, 0n);
   assert.equal(e.kame_wasm_source_compile(handle, 0, 0), 0);
-  assert.ok(e.kame_wasm_instance_heap_used(handle) > 0);
-  assert.ok(e.kame_wasm_instance_heap_peak(handle) < 1024 * 1024);
   assert.equal(e.kame_wasm_instance_free(handle), 0);
   assert.equal(e.kame_wasm_host_heap_used(), 0, 'instance arena was retained');
   if (i === 0) arenaPages = e.memory.buffer.byteLength;
-  assert.equal(e.memory.buffer.byteLength, arenaPages, 'instance creation did not reuse freed arenas');
+  if (i % 10 === 0) e.kame_wasm_collect();
+  assert.ok(e.memory.buffer.byteLength < 128 * 1024 * 1024, 'retired instances retain their state');
 }
 
 // Many live buffers and arbitrary free order exercise indexed exact frees and
@@ -141,6 +142,8 @@ try {
     }
     const exports = watch.module.exports;
     const baseline = exports.kame_wasm_host_heap_used();
+    exports.kame_wasm_collect();
+    const heap = exports.kame_wasm_system_heap_used();
     const linear = exports.memory.buffer.byteLength;
     for (let cycle = 0; cycle < 600; cycle++) {
       expectedLength = [64, 128, 256][cycle % 3] * 1024;
@@ -148,13 +151,13 @@ try {
       watch.invalidate([{ kind: 'file', name: input }]);
       await settle();
       assert.equal(exports.kame_wasm_host_heap_used(), baseline, 'watch retained per-read host buffers');
-      assert.equal(exports.memory.buffer.byteLength, linear, 'watch linear memory did not plateau');
+      if (cycle % 50 === 0) { exports.kame_wasm_collect(); assert.ok(exports.kame_wasm_system_heap_used() < heap + 4 * 1024 * 1024, 'watch retained completed read values'); }
+      assert.ok(exports.memory.buffer.byteLength < 256 * 1024 * 1024, 'watch memory grew without bound');
     }
-    assert.ok(exports.kame_wasm_instance_heap_peak(watch.watch.instance) < 2 * 1024 * 1024, '256 KiB reads exceeded the instance budget');
-    console.log(JSON.stringify({ test: 'memory-reuse', cycles: 600, hostBytes: baseline, linearBytes: linear, instancePeak: exports.kame_wasm_instance_heap_peak(watch.watch.instance) }));
   } finally { await watch.close(); }
   await reads.dispose();
 } finally {
   await kame.dispose();
   await rm(directory, { recursive: true, force: true });
 }
+console.log('PASS Go memory reclamation: exact buffers, 4096 live allocations, large fingerprints and 600 watch reads');

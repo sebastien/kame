@@ -1,11 +1,10 @@
-package expr_test
+package exprcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"math"
 )
 
 func TestUnclosedPipeFreesDiscardedTrees(t *testing.T) {
@@ -28,7 +27,7 @@ func TestNamedPatternTrailingEscapeHasAuthoredSpan(t *testing.T) {
 	a := t.Allocator()
 	parsed := expr.ParsePatternText(a, "{name:abc\\", 7)
 	defer parsed.Pattern.Free(a)
-	defer slices.Free(a, parsed.Diagnostics)
+	defer mem.FreeSlice(nil, parsed.Diagnostics)
 	if len(parsed.Diagnostics) != 1 || parsed.Diagnostics[0].Message != "unfinished pattern escape" || !sameSpan(parsed.Diagnostics[0].Span, 16, 17) {
 		t.Error("trailing capture escape did not return a bounded diagnostic")
 	}

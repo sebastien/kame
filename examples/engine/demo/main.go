@@ -3,20 +3,19 @@ package main
 
 import (
 	"kame/examples/engine"
-	"solod.dev/so/fmt"
-	"solod.dev/so/mem"
+	"os"
 )
 
 func main() {
-	build := examples.NewBuild(mem.System)
-	buildReport := build.Run(fmt.Output)
+	build := examples.NewBuild(nil)
+	buildReport := build.Run(os.Stdout)
 	build.Free()
 	if !buildReport.OK() {
 		panic("engine build example failed")
 	}
 
-	stream := examples.NewStream(mem.System)
-	streamReport := stream.Run(fmt.Output)
+	stream := examples.NewStream(nil)
+	streamReport := stream.Run(os.Stdout)
 	stream.Free()
 	if !streamReport.OK() {
 		panic("engine stream example failed")

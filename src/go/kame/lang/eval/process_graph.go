@@ -1,9 +1,8 @@
 package eval
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type graphPorts struct {
@@ -28,7 +27,7 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 	defer expr.Free(c.Run, flat)
 	flat.Kind, flat.Span, flat.Topology, flat.Async, flat.AcceptExit = e.Kind, e.Span, true, e.Async, e.AcceptExit
 	for i := range e.Body {
-		flat.Body = slices.Append(c.Run, flat.Body, expr.Clone(c.Run, e.Body[i]))
+		flat.Body = append(flat.Body, expr.Clone(c.Run, e.Body[i]))
 	}
 	r := prepareProcessGraph(c, e, flat)
 	if r.Diagnostic.Code != "" {
@@ -70,8 +69,8 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 			flat.InputRoot = root
 		}
 	}
-	slices.Free(c.Run, ports.Inputs)
-	slices.Free(c.Run, ports.Outputs)
+	mem.FreeSlice(nil, ports.Inputs)
+	mem.FreeSlice(nil, ports.Outputs)
 	if flat.Text != "" {
 		return failure(c.Run, flat.Text, flat.Span, "process connection has incompatible endpoint cardinality or disposition")
 	}
@@ -189,15 +188,15 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		node := expr.Clone(c.Run, e)
 		if node.Kind == expr.CommandWriter && (node.Text == "out" || node.Text == "err") {
 			node.Kind = expr.CommandMux
-			flat.Items = slices.Append(c.Run, flat.Items, node)
-			ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
+			flat.Items = append(flat.Items, node)
+			ports.Inputs = append(ports.Inputs, index)
 			return ports
 		}
-		flat.Items = slices.Append(c.Run, flat.Items, node)
+		flat.Items = append(flat.Items, node)
 		if e.Kind == expr.CommandReader {
-			ports.Outputs = slices.Append(c.Run, ports.Outputs, index)
+			ports.Outputs = append(ports.Outputs, index)
 		} else {
-			ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
+			ports.Inputs = append(ports.Inputs, index)
 		}
 		return ports
 	}
@@ -210,9 +209,9 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		if e.Kind == expr.CommandInput {
 			node.Kind, node.Text = expr.CommandMux, "copy"
 		}
-		flat.Items = slices.Append(c.Run, flat.Items, node)
-		ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
-		ports.Outputs = slices.Append(c.Run, ports.Outputs, index)
+		flat.Items = append(flat.Items, node)
+		ports.Inputs = append(ports.Inputs, index)
+		ports.Outputs = append(ports.Outputs, index)
 		return ports
 	}
 	if e.Kind == expr.CommandGroup {
@@ -224,25 +223,25 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			}
 			child := lowerProcessGraph(c, member, flat)
 			for j := range child.Inputs {
-				ports.Inputs = slices.Append(c.Run, ports.Inputs, child.Inputs[j])
+				ports.Inputs = append(ports.Inputs, child.Inputs[j])
 			}
 			for j := range child.Outputs {
-				ports.Outputs = slices.Append(c.Run, ports.Outputs, child.Outputs[j])
+				ports.Outputs = append(ports.Outputs, child.Outputs[j])
 			}
-			slices.Free(c.Run, child.Inputs)
-			slices.Free(c.Run, child.Outputs)
+			mem.FreeSlice(nil, child.Inputs)
+			mem.FreeSlice(nil, child.Outputs)
 		}
 		return ports
 	}
 	ports = lowerProcessGraph(c, e.Items[0], flat)
 	var joins []graphJoin
-	defer slices.Free(c.Run, joins)
+	defer mem.FreeSlice(nil, joins)
 	for i := 1; i < len(e.Items); i++ {
 		connection := e.Items[i]
 		joined := []int{}
 		for j := range joins {
 			if joins[j].Target == i {
-				joined = slices.Append(c.Run, joined, joins[j].Source)
+				joined = append(joined, joins[j].Source)
 			}
 		}
 		if len(joined) != 0 {
@@ -251,15 +250,15 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			}
 			merge := addStreamNode(c, flat, "merge", connection.Span)
 			for j := range ports.Outputs {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge})
 			}
 			for j := range joined {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: joined[j], To: merge})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: joined[j], To: merge})
 			}
-			slices.Free(c.Run, ports.Outputs)
-			ports.Outputs = slices.Append(c.Run, []int{}, merge)
+			mem.FreeSlice(nil, ports.Outputs)
+			ports.Outputs = append([]int{}, merge)
 		}
-		slices.Free(c.Run, joined)
+		mem.FreeSlice(nil, joined)
 		if connection.Kind == expr.CommandMux && connection.Text == "each" {
 			if len(ports.Outputs) != 1 || i+1 >= len(e.Items) || e.Items[i+1].Kind != expr.CommandStage {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
@@ -278,10 +277,10 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			if len(right.Inputs) != 1 || len(right.Outputs) != 1 {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			} else {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
 			}
-			slices.Free(c.Run, ports.Outputs)
-			slices.Free(c.Run, right.Inputs)
+			mem.FreeSlice(nil, ports.Outputs)
+			mem.FreeSlice(nil, right.Inputs)
 			ports.Outputs = right.Outputs
 			continue
 		}
@@ -294,14 +293,14 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			for j := range node.Body {
 				expr.Free(c.Run, node.Body[j])
 			}
-			slices.Free(c.Run, node.Body)
+			mem.FreeSlice(nil, node.Body)
 			node.Body = nil
-			flat.Items = slices.Append(c.Run, flat.Items, node)
+			flat.Items = append(flat.Items, node)
 			for j := range ports.Outputs {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index})
 			}
-			slices.Free(c.Run, ports.Outputs)
-			ports.Outputs = slices.Append(c.Run, []int{}, index)
+			mem.FreeSlice(nil, ports.Outputs)
+			ports.Outputs = append([]int{}, index)
 			if connection.Text == "filter" {
 				branch := connection.Body[0]
 				selected := lowerProcessGraph(c, branch, flat)
@@ -309,7 +308,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 					flat.Text, flat.Span = "KASH_MUX_ARITY", branch.Span
 				}
 				for j := range selected.Inputs {
-					flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: index, To: selected.Inputs[j]})
+					flat.Edges = append(flat.Edges, expr.CommandEdge{From: index, To: selected.Inputs[j]})
 				}
 				if branch.Exit != "" {
 					target := i + 1
@@ -322,12 +321,12 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 						flat.Text, flat.Span = "KASH_REJOIN_OUT_OF_SCOPE", branch.Span
 					} else {
 						for j := range selected.Outputs {
-							joins = slices.Append(c.Run, joins, graphJoin{Target: target, Source: selected.Outputs[j]})
+							joins = append(joins, graphJoin{Target: target, Source: selected.Outputs[j]})
 						}
 					}
 				}
-				slices.Free(c.Run, selected.Inputs)
-				slices.Free(c.Run, selected.Outputs)
+				mem.FreeSlice(nil, selected.Inputs)
+				mem.FreeSlice(nil, selected.Outputs)
 			}
 			continue
 		}
@@ -337,10 +336,10 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			if len(ports.Outputs) != 1 {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			} else {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
 			}
-			slices.Free(c.Run, ports.Outputs)
-			slices.Free(c.Run, right.Inputs)
+			mem.FreeSlice(nil, ports.Outputs)
+			mem.FreeSlice(nil, right.Inputs)
 			ports.Outputs = right.Outputs
 			continue
 		}
@@ -352,12 +351,12 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			}
 			merge := len(flat.Items)
-			flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, connection))
+			flat.Items = append(flat.Items, expr.Clone(c.Run, connection))
 			for j := range ports.Outputs {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge})
 			}
-			slices.Free(c.Run, ports.Outputs)
-			ports.Outputs = slices.Append(c.Run, []int{}, merge)
+			mem.FreeSlice(nil, ports.Outputs)
+			ports.Outputs = append([]int{}, merge)
 			continue
 		}
 		if policy != "" {
@@ -372,32 +371,32 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			if len(ports.Outputs) != 1 || len(right.Inputs) != 1 {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			} else {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]})
 			}
 		} else {
 			if (policy == "merge" && (len(ports.Outputs) < 2 || len(right.Inputs) != 1)) || ((policy == "broadcast" || policy == "balance") && (len(ports.Outputs) != 1 || len(right.Inputs) < 2)) {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			}
 			index := len(flat.Items)
-			flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, connection))
+			flat.Items = append(flat.Items, expr.Clone(c.Run, connection))
 			for j := range ports.Outputs {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index})
 			}
 			for j := range right.Inputs {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: index, To: right.Inputs[j]})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: index, To: right.Inputs[j]})
 			}
 		}
-		slices.Free(c.Run, ports.Outputs)
-		slices.Free(c.Run, right.Inputs)
+		mem.FreeSlice(nil, ports.Outputs)
+		mem.FreeSlice(nil, right.Inputs)
 		ports.Outputs = right.Outputs
 	}
 	if len(e.Items) != 0 && e.Items[len(e.Items)-1].Kind == expr.CommandMux && e.Items[len(e.Items)-1].Text == "filter" {
 		sink := addStreamNode(c, flat, "copy", e.Span)
 		for i := range ports.Outputs {
-			flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[i], To: sink})
+			flat.Edges = append(flat.Edges, expr.CommandEdge{From: ports.Outputs[i], To: sink})
 		}
-		slices.Free(c.Run, ports.Outputs)
-		ports.Outputs = slices.Append(c.Run, []int{}, sink)
+		mem.FreeSlice(nil, ports.Outputs)
+		ports.Outputs = append([]int{}, sink)
 	}
 	return ports
 }

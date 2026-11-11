@@ -1,16 +1,16 @@
-package program_test
+package programcheck
 
 import (
+	"bytes"
 	"kame/core"
 	"kame/host"
 	"kame/host/wasm"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 // The tracked allocator also checks repeated-query and failure-path ownership.
@@ -27,8 +27,8 @@ func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 		registry.Free()
 		return
 	}
-	var first = bytes.NewBuffer(a, nil)
-	var second = bytes.NewBuffer(a, nil)
+	var first = bytes.Buffer{}
+	var second = bytes.Buffer{}
 	roots := []string{"default"}
 	d := compiled.Program.WriteInspection(&first, roots, -1, "plan")
 	if d.Code != "" {
@@ -48,8 +48,8 @@ func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 		t.Error("shared prerequisite delayed, or exclusive later prerequisite not gated")
 	}
 	doc.Free(a)
-	first.Free()
-	second.Free()
+	first.Reset()
+	second.Reset()
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -69,22 +69,22 @@ func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 		registry.Free()
 		return
 	}
-	var buffer = bytes.NewBuffer(a, nil)
+	var buffer = bytes.Buffer{}
 	roots := []string{"default"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "plan")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"display\":\"./one\"") || !strings.Contains(buffer.String(), "\"display\":\"./two\"") {
 		t.Error("bound input instances not preserved")
 	}
 	d.Free(a)
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	roots[0] = "cycle"
 	d = compiled.Program.WriteInspection(&buffer, roots, -1, "plan")
 	if d.Code != "DEP_CYCLE" || len(d.TargetStack) != 3 || d.TargetStack[0] != d.TargetStack[2] || len(buffer.Bytes()) != 0 {
 		t.Error("cycle path or failure atomicity lost")
 	}
 	d.Free(a)
-	buffer.Free()
+	buffer.Reset()
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -104,14 +104,14 @@ func TestInspectionCoincidentOrigins(t *testing.T) {
 		registry.Free()
 		return
 	}
-	var buffer = bytes.NewBuffer(a, nil)
+	var buffer = bytes.Buffer{}
 	roots := []string{"default"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "plan")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"resource\":3,\"origin\":\"declared\",\"orderOnly\":false,\"group\":1") || !strings.Contains(buffer.String(), "\"resource\":3,\"origin\":\"computed\",\"orderOnly\":false,\"group\":1") {
 		t.Error("coincident provenance lost")
 	}
 	d.Free(a)
-	buffer.Free()
+	buffer.Reset()
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -131,8 +131,8 @@ func TestInspectionArtifactWithoutHostStaysUnknownAndRepeatStable(t *testing.T) 
 		registry.Free()
 		return
 	}
-	var first = bytes.NewBuffer(a, nil)
-	var second = bytes.NewBuffer(a, nil)
+	var first = bytes.Buffer{}
+	var second = bytes.Buffer{}
 	roots := []string{"./result"}
 	d := compiled.Program.WriteInspection(&first, roots, -1, "plan")
 	if d.Code != "" || !strings.Contains(first.String(), "\"status\":\"unknown\"") {
@@ -144,8 +144,8 @@ func TestInspectionArtifactWithoutHostStaysUnknownAndRepeatStable(t *testing.T) 
 		t.Error("artifact status was not repeat-stable")
 	}
 	d.Free(a)
-	first.Free()
-	second.Free()
+	first.Reset()
+	second.Reset()
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -175,10 +175,10 @@ func TestInspectionDownstreamPatternsDepthAndRepeatedQueries(t *testing.T) {
 		t.Error("CLI path was not normalized")
 		return
 	}
-	var first = bytes.NewBuffer(a, nil)
-	var second = bytes.NewBuffer(a, nil)
-	defer first.Free()
-	defer second.Free()
+	var first = bytes.Buffer{}
+	var second = bytes.Buffer{}
+	defer first.Reset()
+	defer second.Reset()
 	d := compiled.Program.WriteInspection(&first, operands, -1, "outputs")
 	if d.Code != "" {
 		t.Error(d.Code)
@@ -193,15 +193,15 @@ func TestInspectionDownstreamPatternsDepthAndRepeatedQueries(t *testing.T) {
 		t.Error("consumer query not repeat-stable")
 	}
 	d.Free(a)
-	second.Free()
-	second = bytes.NewBuffer(a, nil)
+	second.Reset()
+	second = bytes.Buffer{}
 	d = compiled.Program.WriteInspection(&second, operands, 1, "outputs")
 	if d.Code != "" || !strings.Contains(second.String(), "\"truncated\":true") || strings.Contains(second.String(), "\"target\":\"./app\"") {
 		t.Error("depth did not count consumer hops")
 	}
 	d.Free(a)
-	second.Free()
-	second = bytes.NewBuffer(a, nil)
+	second.Reset()
+	second = bytes.Buffer{}
 	d = compiled.Program.WriteInspection(&second, operands, -1, "plan")
 	if d.Code != "" || !strings.Contains(second.String(), "\"producers\":[]") {
 		t.Error("source root requires a producer")
@@ -238,8 +238,8 @@ func TestCLIFileOperandsPreserveLogicalNamesAndArguments(t *testing.T) {
 			t.Error("incorrect operand normalization")
 		}
 	}
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	d := compiled.Program.WriteInspection(&buffer, operands[:1], -1, "plan")
 	if d.Code != "" || strings.Contains(buffer.String(), "\"kind\":\"file\"") {
 		t.Error("exact logical name became a file")
@@ -261,8 +261,8 @@ func TestInspectionReversePositionalReferencesAndLogicalPatterns(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	roots := []string{"./src/one", "./pair-src/two-one", "seed-one"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "outputs")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"target\":\"./out/one\"") || !strings.Contains(buffer.String(), "\"target\":\"./pair/one-two\"") || !strings.Contains(buffer.String(), "\"target\":\"build-one\"") || strings.Contains(buffer.String(), "pattern-captures-unbound") {
@@ -291,24 +291,24 @@ func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing
 		return
 	}
 	defer compiled.Program.Free()
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	roots := []string{"./seed"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "outputs")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"target\":\"./out\"") || strings.Contains(buffer.String(), "\"target\":\"./bad\"") {
 		t.Error("unrelated planning error aborted discovery")
 	}
 	d.Free(a)
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	roots[0] = "./elsewhere"
 	d = compiled.Program.WriteInspection(&buffer, roots, -1, "affected")
 	if d.Code != "EXPR_INVALID" || d.Target != "./bad" || len(buffer.Bytes()) != 0 {
 		t.Error("affected planning error was hidden or output was not atomic")
 	}
 	d.Free(a)
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	d = compiled.Program.WriteInspection(&buffer, roots, 0, "affected")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"producers\":[]") {
 		t.Error("depth zero resolved an excluded producer")
@@ -317,8 +317,8 @@ func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing
 	seeds := []string{"./computed-seed", "./late-computed-seed"}
 	producers := []string{"./computed-bad", "./late-computed-bad"}
 	for i := range seeds {
-		buffer.Free()
-		buffer = bytes.NewBuffer(a, nil)
+		buffer.Reset()
+		buffer = bytes.Buffer{}
 		roots[0] = seeds[i]
 		d = compiled.Program.WriteInspection(&buffer, roots, -1, "outputs")
 		if d.Code != "EXPR_INVALID" || d.Target != producers[i] || len(buffer.Bytes()) != 0 {
@@ -342,8 +342,8 @@ func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	roots := []string{"./seed"}
 	for depth := 0; depth <= 1; depth++ {
 		d := compiled.Program.WriteInspection(&buffer, roots, depth, "outputs")
@@ -366,8 +366,8 @@ func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 		if depth == 0 && compiled.Program.InspectionWaiting {
 			t.Error("depth zero yielded to the host")
 		}
-		buffer.Free()
-		buffer = bytes.NewBuffer(a, nil)
+		buffer.Reset()
+		buffer = bytes.Buffer{}
 	}
 }
 
@@ -385,16 +385,16 @@ func TestInspectionConsumerReadErrorsRemainAuthorizedAndScoped(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	roots := []string{"./seed"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "outputs")
 	if d.Code != "" || !strings.Contains(buffer.String(), "\"target\":\"./out\"") {
 		t.Error("unrelated input read failure aborted discovery")
 	}
 	d.Free(a)
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	roots[0] = "./elsewhere"
 	d = compiled.Program.WriteInspection(&buffer, roots, -1, "outputs")
 	if d.Code != "FS_ERR" || d.Target != "./bad" || len(buffer.Bytes()) != 0 {
@@ -417,8 +417,8 @@ func TestInspectionAffectedConsumerReadStillRequiresGrant(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	roots := []string{"./seed"}
 	d := compiled.Program.WriteInspection(&buffer, roots, -1, "affected")
 	if d.Code != "CAP_DENIED" || d.Target != "./out" || len(buffer.Bytes()) != 0 || compiled.Program.InspectionWaiting {

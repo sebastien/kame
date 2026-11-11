@@ -1,12 +1,12 @@
-package plugins_test
+package pluginscheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/plugins"
-	"solod.dev/so/testing"
 )
 
 func TestRegisterAddsVersionedOperations(t *testing.T) {

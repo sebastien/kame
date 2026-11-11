@@ -1,18 +1,18 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"path"
+	"strconv"
+	"strings"
 )
 
 func inputSnapshotAllocations(t *testing.T, count int) uint64 {
@@ -21,12 +21,12 @@ func inputSnapshotAllocations(t *testing.T, count int) uint64 {
 	memory := wasm.NewMemoryHost(a)
 	memory.Mkdir("inputs", 0o755)
 	memory.SetFile("extra", []byte("A"))
-	source := strings.NewBuilder(a)
-	defer source.Free()
+	source := strings.Builder{}
+	defer source.Reset()
 	source.WriteString("INPUTS = [")
 	for i := 0; i < count; i++ {
-		var digits [32]byte
-		name := core.NewString(a, "inputs/"+strconv.Itoa(digits[:], i))
+
+		name := core.NewString(a, "inputs/"+strconv.Itoa(i))
 		memory.SetFile(name.Text, []byte("source"))
 		source.WriteString(" ./" + name.Text)
 		name.Free(a)
@@ -83,7 +83,7 @@ func inputSnapshotAllocations(t *testing.T, count int) uint64 {
 				}
 				for i := range entries {
 					if !entries[i].IsDir {
-						name := path.Join(a, dir, entries[i].Name)
+						name := path.Join(dir, entries[i].Name)
 						data, fileErr := memory.ReadFile(a, name)
 						if fileErr != nil {
 							t.Error("snapshot file missing")

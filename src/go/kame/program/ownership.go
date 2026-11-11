@@ -3,12 +3,12 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 func (p *Program) beginOwnership(entry *instance, commands string, effects []eval.Effect, writes []string) diagnostic.Diagnostic {
@@ -19,7 +19,7 @@ func (p *Program) beginOwnership(entry *instance, commands string, effects []eva
 		for i := range entry.Plan.Outputs {
 			name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 			if !slices.Contains(entry.OwnershipPaths, name) {
-				entry.OwnershipPaths = slices.Append(p.Alloc, entry.OwnershipPaths, name)
+				entry.OwnershipPaths = append(entry.OwnershipPaths, name)
 			} else {
 				mem.FreeString(p.Alloc, name)
 			}
@@ -28,7 +28,7 @@ func (p *Program) beginOwnership(entry *instance, commands string, effects []eva
 	for i := range writes {
 		name := p.canonicalTarget(writes[i], true)
 		if !slices.Contains(entry.OwnershipPaths, name) {
-			entry.OwnershipPaths = slices.Append(p.Alloc, entry.OwnershipPaths, name)
+			entry.OwnershipPaths = append(entry.OwnershipPaths, name)
 		} else {
 			mem.FreeString(p.Alloc, name)
 		}
@@ -52,29 +52,29 @@ func (p *Program) holdResources(entry *instance) diagnostic.Diagnostic {
 	}
 	var fresh []LockedResource
 	if entry.Rule.Kind != rule.FileRule && !heldResource(entry.Resources, entry.Plan.Target, "task") {
-		fresh = slices.Append(p.Alloc, fresh, LockedResource{Name: cloneText(p.Alloc, entry.Plan.Target), Kind: cloneText(p.Alloc, "task")})
+		fresh = append(fresh, LockedResource{Name: cloneText(p.Alloc, entry.Plan.Target), Kind: cloneText(p.Alloc, "task")})
 	}
 	for i := range entry.OwnershipPaths {
 		if heldResource(entry.Resources, entry.OwnershipPaths[i], "output") {
 			continue
 		}
-		fresh = slices.Append(p.Alloc, fresh, LockedResource{Name: cloneText(p.Alloc, entry.OwnershipPaths[i]), Kind: cloneText(p.Alloc, "output")})
+		fresh = append(fresh, LockedResource{Name: cloneText(p.Alloc, entry.OwnershipPaths[i]), Kind: cloneText(p.Alloc, "output")})
 	}
 	if len(fresh) == 0 {
-		slices.Free(p.Alloc, fresh)
+		mem.FreeSlice(nil, fresh)
 		return diagnostic.Diagnostic{}
 	}
 	sortResourceBatch(fresh)
 	d := p.Options.LockResources(p.Options.ResourcesState, fresh)
 	if d.Code != "" {
 		freeResources(p.Alloc, fresh)
-		slices.Free(p.Alloc, fresh)
+		mem.FreeSlice(nil, fresh)
 		return d
 	}
 	for i := range fresh {
-		entry.Resources = slices.Append(p.Alloc, entry.Resources, fresh[i])
+		entry.Resources = append(entry.Resources, fresh[i])
 	}
-	slices.Free(p.Alloc, fresh)
+	mem.FreeSlice(nil, fresh)
 	return diagnostic.Diagnostic{}
 }
 
@@ -116,7 +116,7 @@ func (p *Program) releaseResources(entry *instance) {
 		p.Options.UnlockResources(p.Options.ResourcesState, entry.Resources)
 	}
 	freeResources(p.Alloc, entry.Resources)
-	slices.Free(p.Alloc, entry.Resources)
+	mem.FreeSlice(nil, entry.Resources)
 	entry.Resources = nil
 }
 
@@ -146,8 +146,8 @@ func (p *Program) EnableAutomaticClean(callback func(any, *Program) diagnostic.D
 	}
 	r := mem.Alloc[rule.Rule](p.Alloc)
 	r.Kind = rule.TaskRule
-	r.Outputs = slices.Append(p.Alloc, r.Outputs, rule.Target{Kind: rule.TargetName, Text: "clean"})
-	p.Rules = slices.Append(p.Alloc, p.Rules, registeredRule{Rule: r})
+	r.Outputs = append(r.Outputs, rule.Target{Kind: rule.TargetName, Text: "clean"})
+	p.Rules = append(p.Rules, registeredRule{Rule: r})
 	p.automaticCleanRule, p.AutomaticClean, p.AutomaticCleanState = r, callback, state
 }
 
@@ -270,7 +270,7 @@ func (p *Program) CleanupExternalInputs() []string {
 			}
 			name := p.canonicalTarget(text, true)
 			if !slices.Contains(paths, name) {
-				paths = slices.Append(p.Alloc, paths, name)
+				paths = append(paths, name)
 			} else {
 				mem.FreeString(p.Alloc, name)
 			}

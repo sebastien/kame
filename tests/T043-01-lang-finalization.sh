@@ -8,7 +8,7 @@ cli_build
 cd "$CLI_ROOT"
 if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 test-step "native/WASM results, effects, deadlines, cancellation and reaping"
-node --input-type=module - "$CLI_ROOT" "$CLI_BIN" "$TMPDIR" <<'JS'
+if node --input-type=module - "$CLI_ROOT" "$CLI_BIN" "$TMPDIR" <<'JS'
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -182,5 +182,5 @@ await assert.rejects(program.evaluate('(finally! ([] (fail! "body-primary")) ([]
 await kame.dispose();
 console.log('WASM API: cancellation, quiescence, disposal and secondary diagnostic ownership passed');
 JS
-test-ok "native and WASM finalization conformance"
+then test-ok "native and WASM finalization conformance"; else test-fail "finalization parity checks failed"; fi
 test-end

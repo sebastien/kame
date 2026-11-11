@@ -3,7 +3,7 @@ package operations
 import (
 	"kame/core"
 	"kame/lang/eval"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 func opTool(c *eval.Context, state any, values []core.Value) eval.Result {

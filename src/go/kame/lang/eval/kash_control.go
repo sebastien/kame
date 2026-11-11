@@ -3,9 +3,9 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 type localDefinition struct {
@@ -54,12 +54,12 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 		}
 		local.Done, local.Value, local.Diagnostic = true, r.Value.Clone(local.Scope.Alloc), r.Diagnostic.Clone(local.Scope.Alloc)
 		for i := beforePaths; i < len(c.WritePaths); i++ {
-			local.WritePaths = slices.Append(local.Scope.Alloc, local.WritePaths, owned(local.Scope.Alloc, c.WritePaths[i]))
+			local.WritePaths = append(local.WritePaths, owned(local.Scope.Alloc, c.WritePaths[i]))
 		}
 		for i := before; i < len(c.Effects); i++ {
 			effect := c.Effects[i]
 			if p.DefinitionEffectSink == nil || r.Diagnostic.Code != "" || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
-				local.Effects = slices.Append(local.Scope.Alloc, local.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(local.Scope.Alloc, effect.Data)})
+				local.Effects = append(local.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 			}
 		}
 		if p.DefinitionEffectSink != nil && r.Diagnostic.Code == "" {
@@ -77,10 +77,10 @@ func replayLocalEffects(local *localDefinition, c *Context) {
 	}
 	for i := range local.Effects {
 		effect := local.Effects[i]
-		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
+		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 	}
 	for i := range local.WritePaths {
-		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, local.WritePaths[i]))
+		c.WritePaths = append(c.WritePaths, owned(c.Run, local.WritePaths[i]))
 	}
 	local.EffectAttempt = c.Engine.Attempt()
 }
@@ -106,18 +106,18 @@ func freeKashControlState(a mem.Allocator, value any) {
 	for i := range state.WritePaths {
 		mem.FreeString(a, state.WritePaths[i])
 	}
-	slices.Free(a, state.WritePaths)
+	mem.FreeSlice(nil, state.WritePaths)
 	mem.Free(a, state)
 }
 
 func (p *Program) retainControlEffects(state *kashControlState, c *Context, scope *Scope, before int, beforePaths int) {
 	for i := beforePaths; i < len(c.WritePaths); i++ {
-		state.WritePaths = slices.Append(p.Alloc, state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
+		state.WritePaths = append(state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
 	}
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
 		if p.DefinitionEffectSink == nil || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
-			state.Effects = slices.Append(p.Alloc, state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(p.Alloc, effect.Data)})
+			state.Effects = append(state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 		}
 	}
 	if p.DefinitionEffectSink != nil {
@@ -151,10 +151,10 @@ func (p *Program) streamControlOutput(c *Context, before int) {
 func replayControlEffects(state *kashControlState, c *Context) {
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
+		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 	}
 	for i := range state.WritePaths {
-		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
+		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
 }
 
@@ -222,8 +222,8 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 				for i := range matched.Captures {
 					mem.FreeString(c.Run, matched.Captures[i])
 				}
-				slices.Free(c.Run, matched.Names)
-				slices.Free(c.Run, matched.Captures)
+				mem.FreeSlice(nil, matched.Names)
+				mem.FreeSlice(nil, matched.Captures)
 				if matched.Diag.Code != "" {
 					r.Free(c.Run)
 					return Result{Diagnostic: matched.Diag}

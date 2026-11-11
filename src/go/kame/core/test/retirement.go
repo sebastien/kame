@@ -1,9 +1,9 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func retirementSource(c *core.EngineContext, id int64) core.ProducerResult {
@@ -44,6 +44,6 @@ func TestRetirementRequiresReleasedRootsAndConsumerEdges(t *testing.T) {
 	if len(nodes) != 0 || e.Lookup(core.ResourceKey{Kind: core.ResourceDefinition, Name: "source"}) != nil {
 		t.Error("retired node remains indexed")
 	}
-	slices.Free(a, nodes)
+	mem.FreeSlice(nil, nodes)
 	e.Free()
 }

@@ -1,8 +1,8 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"slices"
 )
 
 // DependencyCheckpoint isolates speculative reuse validation from execution.
@@ -16,19 +16,19 @@ type DependencyCheckpoint struct {
 
 func (c *EngineContext) CheckpointDependencies() DependencyCheckpoint {
 	checkpoint := DependencyCheckpoint{Dynamic: len(c.node.Dynamic)}
-	checkpoint.OrderOnly = slices.Clone(c.engine.Alloc, c.node.OrderOnly)
-	checkpoint.Observed = slices.Clone(c.engine.Alloc, c.node.Observed)
+	checkpoint.OrderOnly = slices.Clone(c.node.OrderOnly)
+	checkpoint.Observed = slices.Clone(c.node.Observed)
 	for i := range c.node.Observations {
 		item := c.node.Observations[i]
 		item.Key = item.Key.Clone(c.engine.Alloc)
-		checkpoint.Observations = slices.Append(c.engine.Alloc, checkpoint.Observations, item)
+		checkpoint.Observations = append(checkpoint.Observations, item)
 	}
 	return checkpoint
 }
 
 func (checkpoint *DependencyCheckpoint) Free(a mem.Allocator) {
-	slices.Free(a, checkpoint.OrderOnly)
-	slices.Free(a, checkpoint.Observed)
+	mem.FreeSlice(nil, checkpoint.OrderOnly)
+	mem.FreeSlice(nil, checkpoint.Observed)
 	FreeObservations(a, checkpoint.Observations)
 	*checkpoint = DependencyCheckpoint{}
 }
@@ -43,8 +43,8 @@ func (c *EngineContext) RestoreDependencies(checkpoint *DependencyCheckpoint) {
 		}
 	}
 	n.Dynamic = n.Dynamic[:checkpoint.Dynamic]
-	slices.Free(c.engine.Alloc, n.OrderOnly)
-	slices.Free(c.engine.Alloc, n.Observed)
+	mem.FreeSlice(nil, n.OrderOnly)
+	mem.FreeSlice(nil, n.Observed)
 	FreeObservations(c.engine.Alloc, n.Observations)
 	n.OrderOnly, n.Observed, n.Observations = checkpoint.OrderOnly, checkpoint.Observed, checkpoint.Observations
 	*checkpoint = DependencyCheckpoint{}

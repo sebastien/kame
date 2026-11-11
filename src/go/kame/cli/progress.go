@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"kame/core"
+
 	"kame/lang/source"
-	"solod.dev/so/bytes"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/unicode/utf8"
+	"unicode/utf8"
 )
 
 // Progress is an established snapshot, not an estimate based on process counts.
@@ -66,7 +66,7 @@ func progressLine(frame string, index int) string {
 // WriteFrameUpdate changes only owned rows. Both hosts keep the previous frame
 // and publish this update in their terminal transaction.
 func WriteFrameUpdate(out io.Writer, frame string, previous string, previousRows int, rows int) {
-	var update = bytes.NewBuffer(mem.System, nil)
+	var update = bytes.Buffer{}
 	if previousRows == rows {
 		for i := 0; i < rows; i++ {
 			line := progressLine(frame, i)
@@ -95,7 +95,7 @@ func WriteFrameUpdate(out io.Writer, frame string, previous string, previousRows
 		io.WriteString(&update, frame)
 	}
 	out.Write(update.Bytes())
-	update.Free()
+	update.Reset()
 }
 
 func measureDisplayText(text string, width int) displayMeasure {
@@ -151,13 +151,13 @@ func WriteProgressField(out io.Writer, text string, width int) {
 }
 
 func WriteProgressPadded(out io.Writer, text string, width int, token string, color bool) {
-	var field = bytes.NewBuffer(mem.System, nil)
+	var field = bytes.Buffer{}
 	WriteProgressField(&field, text, width)
 	Style(out, token, field.String(), color)
 	for i := measureDisplayText(field.String(), len(field.String())*2).Cells; i < width; i++ {
 		io.WriteString(out, " ")
 	}
-	field.Free()
+	field.Reset()
 }
 
 func targetIsPath(target string) bool {
@@ -231,7 +231,7 @@ func writeProgressStatus(out io.Writer, field string, token string, color bool) 
 
 func writeOutcomeRow(out io.Writer, target string, status string, token string, width int, color bool) {
 	statusWidth := measureDisplayText(status, len(status)*2).Cells
-	var subject = bytes.NewBuffer(mem.System, nil)
+	var subject = bytes.Buffer{}
 	io.WriteString(&subject, "[")
 	if width >= 20 {
 		writeProgressTarget(&subject, target, width-statusWidth-4)
@@ -249,7 +249,7 @@ func writeOutcomeRow(out io.Writer, target string, status string, token string, 
 	}
 	writeProgressStatus(out, status, token, color)
 	io.WriteString(out, "\n")
-	subject.Free()
+	subject.Reset()
 }
 
 func WriteHumanOutcome(out io.Writer, target string, outcome string, ansi bool, elapsedMS int64, hasTiming bool, width int, color bool) {
@@ -261,14 +261,14 @@ func WriteHumanOutcome(out io.Writer, target string, outcome string, ansi bool, 
 		label, status, token = "cancelled", "cancelled", "status.cancelled"
 	}
 	if ansi {
-		var timing = bytes.NewBuffer(mem.System, nil)
+		var timing = bytes.Buffer{}
 		if hasTiming {
 			WriteDuration(&timing, elapsedMS)
 			io.WriteString(&timing, " - ")
 		}
 		io.WriteString(&timing, status)
 		writeOutcomeRow(out, target, timing.String(), token, width, color)
-		timing.Free()
+		timing.Reset()
 		return
 	}
 	Style(out, token, label+" ["+target+"] "+outcome, color)
@@ -301,7 +301,7 @@ func WriteHumanSummary(out io.Writer, command string, status int, elapsedMS int6
 }
 
 func writeProgressTally(out io.Writer, counts Progress, running int, elapsedMS int64, status string, token string, width int, color bool) {
-	var tally = bytes.NewBuffer(mem.System, nil)
+	var tally = bytes.Buffer{}
 	if width != 0 && width < 60 {
 		fmt.Fprintf(&tally, "%d ok · %d failed", counts.Completed, counts.Failed)
 	} else {
@@ -313,7 +313,7 @@ func writeProgressTally(out io.Writer, counts Progress, running int, elapsedMS i
 			fmt.Fprintf(&tally, " · %d cancelled", counts.Cancelled)
 		}
 	}
-	var elapsed = bytes.NewBuffer(mem.System, nil)
+	var elapsed = bytes.Buffer{}
 	WriteDuration(&elapsed, elapsedMS)
 	io.WriteString(&elapsed, " - "+status)
 	rightWidth := measureDisplayText(elapsed.String(), len(elapsed.String())*2).Cells
@@ -325,8 +325,8 @@ func writeProgressTally(out io.Writer, counts Progress, running int, elapsedMS i
 	io.WriteString(out, "  ")
 	writeProgressStatus(out, elapsed.String(), token, color)
 	io.WriteString(out, "\n")
-	elapsed.Free()
-	tally.Free()
+	elapsed.Reset()
+	tally.Reset()
 }
 
 // WriteDashboard writes a complete frame without terminal controls. Publication
@@ -347,7 +347,7 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 			running++
 		}
 	}
-	var heading = bytes.NewBuffer(mem.System, nil)
+	var heading = bytes.Buffer{}
 	io.WriteString(&heading, view.Command)
 	if view.DryRun {
 		io.WriteString(&heading, " dry-run")
@@ -356,13 +356,13 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 		fmt.Fprintf(&heading, " · cycle %d", view.Cycle)
 	}
 	fmt.Fprintf(&heading, " · workers: %d", running)
-	var bounded = bytes.NewBuffer(mem.System, nil)
+	var bounded = bytes.Buffer{}
 	WriteProgressField(&bounded, heading.String(), width-5)
 	io.WriteString(out, "── ")
 	Style(out, "text.muted", bounded.String(), view.Color)
 	io.WriteString(out, "\n")
-	bounded.Free()
-	heading.Free()
+	bounded.Reset()
+	heading.Reset()
 	rows := 1
 	capacity := height - 3
 	if view.Subject != "" {
@@ -382,10 +382,10 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 			continue
 		}
 		visible++
-		var slot = bytes.NewBuffer(mem.System, nil)
+		var slot = bytes.Buffer{}
 		fmt.Fprintf(&slot, "  %d  ", i+1)
 		Style(out, "text.muted", slot.String(), view.Color)
-		var target = bytes.NewBuffer(mem.System, nil)
+		var target = bytes.Buffer{}
 		io.WriteString(&target, "[")
 		writeProgressTarget(&target, worker.Target, width/2-10)
 		io.WriteString(&target, "]")
@@ -393,7 +393,7 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 		for j := measureDisplayText(target.String(), len(target.String())*2).Cells; j < width/2-8; j++ {
 			io.WriteString(out, " ")
 		}
-		target.Free()
+		target.Reset()
 		state := worker.State
 		if state == "" {
 			state = "running"
@@ -410,11 +410,11 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 			WriteProgressPadded(out, tool, width/4-8, "worker.tool", view.Color)
 			used += 2 + (width/4 - 8)
 		}
-		var elapsed = bytes.NewBuffer(mem.System, nil)
+		var elapsed = bytes.Buffer{}
 		WriteDuration(&elapsed, worker.ElapsedMS)
 		remaining := width - 2 - used
 		if worker.RemainingMS > 0 {
-			var eta = bytes.NewBuffer(mem.System, nil)
+			var eta = bytes.Buffer{}
 			io.WriteString(&eta, " · ETA ~")
 			WriteDuration(&eta, worker.RemainingMS)
 			if len(elapsed.String())+measureDisplayText(eta.String(), len(eta.String())*2).Cells <= remaining {
@@ -423,35 +423,35 @@ func WriteDashboard(out io.Writer, view ProgressView) int {
 				elapsed.Reset()
 				io.WriteString(&elapsed, eta.String()[4:])
 			}
-			eta.Free()
+			eta.Reset()
 		}
 		for j := measureDisplayText(elapsed.String(), len(elapsed.String())*2).Cells; j < remaining; j++ {
 			io.WriteString(out, " ")
 		}
 		WriteProgressField(out, elapsed.String(), remaining)
-		elapsed.Free()
-		slot.Free()
+		elapsed.Reset()
+		slot.Reset()
 		io.WriteString(out, "\n")
 		rows++
 	}
 	if hidden != 0 || ready != 0 {
-		var extra = bytes.NewBuffer(mem.System, nil)
+		var extra = bytes.Buffer{}
 		fmt.Fprintf(&extra, "%d hidden active · %d ready services", hidden, ready)
 		WriteProgressField(out, extra.String(), width-2)
 		io.WriteString(out, "\n")
 		rows++
-		extra.Free()
+		extra.Reset()
 	}
 	if view.Subject != "" {
 		Style(out, "text.muted", "target ", view.Color)
-		var subject = bytes.NewBuffer(mem.System, nil)
+		var subject = bytes.Buffer{}
 		io.WriteString(&subject, "[")
 		writeProgressTarget(&subject, view.Subject, width-11)
 		io.WriteString(&subject, "]")
 		writeProgressSubject(out, subject.String(), view.Color)
 		io.WriteString(out, "\n")
 		rows++
-		subject.Free()
+		subject.Reset()
 	}
 	status := "building"
 	if view.Command != "build" {

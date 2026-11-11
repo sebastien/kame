@@ -1,13 +1,27 @@
 package wasm
 
 import (
+	"encoding/hex"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"path"
 )
+
+func descriptorSourceSignature(value core.Value) core.Signature {
+	return decodeDescriptorSignature(host.PayloadText(value, "sourceSignature"))
+}
+
+func decodeDescriptorSignature(text string) core.Signature {
+	var signature core.Signature
+	if len(text) == 64 {
+		if count, err := hex.Decode(signature.Digest[:], []byte(text)); err == nil && count == 32 {
+			signature.Mode = core.SignatureContent
+		}
+	}
+	return signature
+}
 
 // Validate known option fields before Payload helpers apply omitted defaults.
 // Unknown fields remain compatible with newer embedding hosts.
@@ -88,8 +102,12 @@ func validDescriptorSource(value core.Value) bool {
 	for i := range value.Record {
 		field := value.Record[i]
 		switch field.Key {
-		case "name", "text":
+		case "name", "text", "lang":
 			if field.Value.Kind != core.String {
+				return false
+			}
+		case "sourceSignature":
+			if field.Value.Kind != core.String || decodeDescriptorSignature(field.Value.Text).Mode != core.SignatureContent {
 				return false
 			}
 		case "sourceDirectory":
@@ -181,7 +199,7 @@ func descriptorIncludes(a mem.Allocator, value core.Value) []diagnostic.Frame {
 	var frames []diagnostic.Frame
 	items := host.PayloadList(value, "includes")
 	for i := range items {
-		frames = slices.Append(a, frames, diagnostic.Frame{Kind: "include", Label: pureText(a, host.PayloadText(items[i], "label")), Source: pureText(a, host.PayloadText(items[i], "source")), Span: diagnostic.Span{Start: int(host.PayloadInt(items[i], "start")), End: int(host.PayloadInt(items[i], "end"))}})
+		frames = append(frames, diagnostic.Frame{Kind: "include", Label: pureText(a, host.PayloadText(items[i], "label")), Source: pureText(a, host.PayloadText(items[i], "source")), Span: diagnostic.Span{Start: int(host.PayloadInt(items[i], "start")), End: int(host.PayloadInt(items[i], "end"))}})
 	}
 	return frames
 }
@@ -191,5 +209,5 @@ func freeDescriptorIncludes(a mem.Allocator, frames []diagnostic.Frame) {
 		mem.FreeString(a, frames[i].Label)
 		mem.FreeString(a, frames[i].Source)
 	}
-	slices.Free(a, frames)
+	mem.FreeSlice(nil, frames)
 }

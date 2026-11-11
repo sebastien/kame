@@ -1,17 +1,17 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+
+	"strings"
 )
 
 func TestProductionInputChangesWarnAndInvalidateDerivedRecords(t *testing.T) {
@@ -282,7 +282,7 @@ func TestProductionInputChangeDiscardsCachedTaskRecord(t *testing.T) {
 		}
 		mem.FreeString(a, entries[i].Name)
 	}
-	slices.Free(a, entries)
+	mem.FreeSlice(nil, entries)
 	if records != 0 {
 		t.Error("suspect cached task record was not removed")
 	}

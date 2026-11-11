@@ -1,15 +1,14 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/format"
 	"kame/lang/source"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
+	"os"
 )
 
 type formatArguments struct {
@@ -28,8 +27,8 @@ func (options *formatArguments) Free() {
 	for i := range options.Files {
 		mem.FreeString(mem.System, options.Files[i])
 	}
-	slices.Free(mem.System, options.Files)
-	slices.Free(mem.System, options.Inputs)
+	mem.FreeSlice(nil, options.Files)
+	mem.FreeSlice(nil, options.Inputs)
 	*options = formatArguments{}
 }
 
@@ -46,7 +45,7 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 		text, name := parsed.Inputs[0].Value, "<command:1>"
 		if parsed.Inputs[0].Kind == "stdin" {
 			name = "<stdin>"
-			readData, readErr := io.ReadAll(mem.System, in)
+			readData, readErr := io.ReadAll(in)
 			if readErr != nil {
 				invocationCounts.Failed++
 				cliError(errOut, "FS_ERR", "cannot read stdin")
@@ -74,7 +73,7 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 	}
 	different := false
 	for i := range parsed.Files {
-		data, readErr := os.ReadFile(mem.System, parsed.Files[i])
+		data, readErr := os.ReadFile(parsed.Files[i])
 		if readErr != nil {
 			invocationCounts.Failed++
 			cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i])

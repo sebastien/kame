@@ -1,6 +1,6 @@
 package operations
 
-import "solod.dev/so/math/bits"
+import "math/bits"
 
 // Portable SHA-1 for compatibility identifiers, not collision-resistant security.
 func sha1Sum(data []byte, out []byte) {

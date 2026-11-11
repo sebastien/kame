@@ -3,9 +3,8 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type FinalizerState struct {
@@ -138,7 +137,7 @@ func (c *Context) Finally(values []core.Value) Result {
 	s.Span, s.Source, s.Path = c.Span, owned(p.Alloc, c.Source), owned(p.Alloc, c.CallPath)
 	s.TimeoutMS, s.Context = timeout, retainFinalizerContext(p.Alloc, c)
 	s.Body, s.Cleanup = borrowValue(p.Alloc, values[first]), borrowValue(p.Alloc, values[first+1])
-	p.finalizers = slices.Append(p.Alloc, p.finalizers, s)
+	p.finalizers = append(p.finalizers, s)
 	c.Engine.SetTeardown(beginFinalizerTeardown, advanceFinalizerTeardown, p)
 	return p.advanceFinalizer(s, c)
 }
@@ -371,7 +370,7 @@ func (p *Program) finishFinalizerEffects(c *Context, success bool) {
 	for i := range c.WritePaths {
 		mem.FreeString(c.Run, c.WritePaths[i])
 	}
-	slices.Free(c.Run, c.WritePaths)
+	mem.FreeSlice(nil, c.WritePaths)
 	c.WritePaths = nil
 }
 

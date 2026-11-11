@@ -2,10 +2,10 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 type Capability int
@@ -64,8 +64,8 @@ func (r *Registry) TaskKey(a mem.Allocator, task string, operation string) TaskK
 	if o == nil {
 		return TaskKeyResult{}
 	}
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	b.WriteString(task)
 	b.WriteByte('\x00')
 	b.WriteString(o.Name)
@@ -89,9 +89,9 @@ func (r *Registry) Add(operation Operation) bool {
 	}
 	operation.Name = owned(r.Alloc, operation.Name)
 	operation.Version = owned(r.Alloc, operation.Version)
-	operation.Capabilities = slices.Clone(r.Alloc, operation.Capabilities)
-	operation.ConditionalCapabilities = slices.Clone(r.Alloc, operation.ConditionalCapabilities)
-	r.Items = slices.Append(r.Alloc, r.Items, operation)
+	operation.Capabilities = slices.Clone(operation.Capabilities)
+	operation.ConditionalCapabilities = slices.Clone(operation.ConditionalCapabilities)
+	r.Items = append(r.Items, operation)
 	return true
 }
 
@@ -121,9 +121,9 @@ func (r *Registry) Free() {
 		}
 		mem.FreeString(r.Alloc, o.Name)
 		mem.FreeString(r.Alloc, o.Version)
-		slices.Free(r.Alloc, o.Capabilities)
-		slices.Free(r.Alloc, o.ConditionalCapabilities)
+		mem.FreeSlice(nil, o.Capabilities)
+		mem.FreeSlice(nil, o.ConditionalCapabilities)
 	}
-	slices.Free(r.Alloc, r.Items)
+	mem.FreeSlice(nil, r.Items)
 	mem.Free(r.Alloc, r)
 }

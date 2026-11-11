@@ -1,10 +1,10 @@
-package host_test
+package hostcheck
 
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
+	"strings"
 )
 
 func TestQueueOwnsPayloadAndCorrelation(t *testing.T) {

@@ -115,22 +115,17 @@ enum kame_wasm_process_outcome {
   KAME_WASM_PROCESS_FAILED = 3
 };
 
-/* Module ABI discovery and linear-memory ownership. Allocation grows exported
- * memory only as needed, never beyond the linker-provided maximum. Returned
- * ranges belong to the caller for the module lifetime, independently of engine
- * instances, until freed with the exact pointer and requested size. Freed
- * blocks coalesce and are reused; invalid/double frees return STATE_INVALID.
- * Linear memory does not shrink, but warm workloads must plateau. */
+/* Go WASI reactor ABI. Caller buffers stay live until an exact explicit free.
+ * Go reclaims backing storage; linear memory can grow and cannot shrink. */
 uint32_t kame_wasm_abi_version(void);
-/* Diagnostic accounting for the separate fixed system heap, not host buffers. */
+/* Process-wide live Go heap bytes, separate from explicit buffer ownership. */
 uint32_t kame_wasm_system_heap_used(void);
 uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment);
 uint32_t kame_wasm_free(uint32_t pointer, uint32_t size);
-/* Physical live bytes (including block overhead) and high-water marks. */
+void kame_wasm_collect(void);
+/* Explicit caller buffer bytes and their high-water mark. */
 uint32_t kame_wasm_host_heap_used(void);
 uint32_t kame_wasm_host_heap_peak(void);
-uint32_t kame_wasm_instance_heap_used(uint64_t instance);
-uint32_t kame_wasm_instance_heap_peak(uint64_t instance);
 
 /* Encode the 48-byte event envelope at dst. Every 64-bit argument maps to a
  * JavaScript BigInt. The function returns a kame_wasm_status value. */
@@ -198,10 +193,6 @@ uint32_t kame_wasm_instance_diagnostic_span(uint64_t instance, uint32_t out_star
  * return. */
 uint64_t kame_wasm_instance_create(void);
 uint32_t kame_wasm_instance_free(uint64_t instance);
-/* Set the logical allocator budget before compilation: 1..16 MiB. The backing
- * arena remains 16 MiB. Exhausted instances allow diagnostics and destruction;
- * create a fresh instance to resume evaluation. */
-uint32_t kame_wasm_instance_set_heap_limit(uint64_t instance, uint32_t limit);
 /* Pure source-composition predicate query: JSON descriptor in, true/false out.
  * Uses the same length-query convention and emergency diagnostics as parse. */
 uint32_t kame_wasm_declaration_predicate(uint64_t instance, uint32_t data,

@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/expr"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) kashExit(scope *Scope, e *expr.Expr, c *Context) Result {
@@ -67,7 +66,7 @@ func (p *Program) FinishExit(primary *diagnostic.Diagnostic, deferred *DeferScop
 	}
 	out := primary.Clone(c.Run)
 	if r.Diagnostic.Code != "" {
-		out.Notes = slices.Append(c.Run, out.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
+		out.Notes = append(out.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
 	}
 	r.Free(c.Run)
 	return Result{Diagnostic: out}

@@ -1,11 +1,11 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestForwardedBuildWritesWaitForHostAndPreserveBytes(t *testing.T) {

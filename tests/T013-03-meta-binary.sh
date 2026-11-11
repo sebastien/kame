@@ -25,9 +25,9 @@ fi
 cli_run -- --version
 cli_expect_status 0
 # Spec 009: `kame VERSION (BUILD_ID; BUILD_TIME; BUILD_MODE; RUNTIME)`.
-version_pattern="^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*; C\)$"
+version_pattern="^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*; Go\)$"
 if grep -Eq "$version_pattern" "$CLI_OUT"; then
-	test-ok "version matches kame VERSION, build metadata, and C runtime"
+	test-ok "version matches kame VERSION, build metadata, and Go runtime"
 else
 	test-fail "version output: $(cat -A "$CLI_OUT")"
 fi

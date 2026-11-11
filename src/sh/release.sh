@@ -114,11 +114,12 @@ ensure_npm() {
 	fi
 	local -a browser_args=()
 	[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || browser_args=(--browser=false)
-	# Kame captures recipe streams; npm needs a terminal to offer web approval.
+	# Keep npm interactive while forwarding its output through Kame's dashboard.
 	if ! (
 		cd "$npm_dir"
 		if [ -r /dev/tty ] && [ -w /dev/tty ] && ( : </dev/tty ) 2>/dev/null; then
-			npm publish --access public --registry "$registry" ${browser_args[@]+"${browser_args[@]}"} </dev/tty >/dev/tty 2>&1
+			python3 -c 'import os, pty, sys; sys.exit(os.waitstatus_to_exitcode(pty.spawn(sys.argv[1:])))' \
+				npm publish --access public --registry "$registry" ${browser_args[@]+"${browser_args[@]}"} </dev/tty
 		else
 			npm publish --access public --registry "$registry" ${browser_args[@]+"${browser_args[@]}"}
 		fi
@@ -238,14 +239,14 @@ fi
 
 printf 'release: staging %s (revision %s)\n' "$tag" "$revision"
 
-# dist-release stages only the APE, WASM pair and verification metadata.
+# dist-release stages the Go binaries, Windows bundle, WASM and verification metadata.
 # The Kame `release` target already holds the shared project lease while it
 # builds the prerequisites; re-entering Kame through `make dist-release` would
 # duplicate that production and can wait on the same output locks.
 if [ -n "${KAME_RELEASE_PREBUILT:-}" ]; then
 	rm -rf "$release_dir"
 	mkdir -p "$release_dir"
-	for name in kame.com kame.wasm kame.js; do
+	for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
 		[ -f "$root/dist/$name" ] || {
 			printf 'release: missing prebuilt artifact dist/%s\n' "$name" >&2
 			exit 1
@@ -283,9 +284,11 @@ notes=$(
 	cat <<EOF
 ## Downloads and usage
 
-- **kame.com** — standalone Cosmopolitan/APE native CLI. On supported Unix hosts:
-  \`chmod +x kame.com\`, then \`./kame.com --help\`. On Windows, rename it to
-  \`kame.exe\` and run \`.\\kame.exe --help\`; Node.js is not required.
+- **kame-linux-{x86_64,arm64}** and **kame-darwin-{x86_64,arm64}** — standalone Go CLI.
+  Download the binary for your OS and architecture, rename it to \`kame\`,
+  then \`chmod +x kame\` and \`./kame --help\`.
+- **kame-windows-x64.zip** — Windows launcher and WASM runtime. Extract all
+  files into one directory and run \`kame.exe --help\` with Node.js 18+ installed.
 - **kame.js + kame.wasm** — JavaScript CLI and its WebAssembly runtime.
   Download **both into the same directory**. For Node.js 18+, rename
   \`kame.js\` to \`kame.mjs\`, then run \`node ./kame.mjs --help\`.
@@ -305,12 +308,11 @@ npm fetches both the JavaScript wrapper and WASM runtime. Replace \`--help\`
 with your Kame arguments. For a permanent install:
 \`npm install --global $package_name@$version\`, then \`kame --help\`.
 
-The APE works on supported Linux, macOS, Windows and BSD hosts, not every
-OS/version. In particular, Cosmopolitan 4.0.2 is incompatible with OpenBSD
-7.5+; use the Node/WASM pair there.
+Native Go binaries are available for Linux and macOS on x86_64 and arm64.
+The Windows archive includes a launcher and the JavaScript/WASM runtime and
+requires Node.js. Other hosts can use the Node/WASM pair.
 Homebrew and Scoop definitions live in [etc/](https://github.com/$repo_slug/tree/$tag/etc),
-not in release attachments. There are no separate per-platform downloads or
-shell installer assets in this release.
+not in release attachments.
 EOF
 )
 # ${arr[@]+...} keeps empty-array expansion safe under `set -u` on bash < 4.4.

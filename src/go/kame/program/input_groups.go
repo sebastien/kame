@@ -2,8 +2,8 @@ package program
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
 )
 
 // Both completed input resolution and intermediate comma barriers request

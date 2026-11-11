@@ -1,14 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/source"
-	"solod.dev/so/bytes"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
+	"os"
 )
 
 func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
@@ -24,7 +24,7 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 	if parsed.Inputs[0].Kind == "command" {
 		name, text = "<command:1>", parsed.Inputs[0].Value
 	} else if file == "" {
-		readData, readErr := io.ReadAll(mem.System, in)
+		readData, readErr := io.ReadAll(in)
 		if readErr != nil {
 			cliError(errOut, "FS_ERR", "cannot read stdin")
 			return 1
@@ -33,14 +33,14 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 	} else {
 		file = languageSourcePath(parsed.Directory, file)
 		defer mem.FreeString(mem.System, file)
-		readData, readErr := os.ReadFile(mem.System, file)
+		readData, readErr := os.ReadFile(file)
 		if readErr != nil {
 			cliError(errOut, "FS_ERR", "cannot read source: "+file)
 			return 1
 		}
 		name, data, text = file, readData, string(readData)
 	}
-	var buffer = bytes.NewBuffer(mem.System, nil)
+	var buffer = bytes.Buffer{}
 	status := writeAST(&buffer, lang, name, text)
 	if status == 0 && parsed.Check {
 		// Parse-only validation intentionally emits no AST.
@@ -66,7 +66,7 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 			document.Free(mem.System)
 		}
 	}
-	buffer.Free()
+	buffer.Reset()
 	mem.FreeSlice(mem.System, data)
 	return status
 }

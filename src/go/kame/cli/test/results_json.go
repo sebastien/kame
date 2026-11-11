@@ -1,14 +1,14 @@
-package cli_test
+package clicheck
 
 import (
+	"bytes"
 	"kame/cli"
-	"solod.dev/so/bytes"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestResultJSONPreservesCommandEnvelopes(t *testing.T) {
-	a := t.Allocator()
-	buffer := bytes.NewBuffer(a, nil)
+	_ = t.Allocator()
+	buffer := bytes.Buffer{}
 	cli.WriteInvocation(&buffer, "build", true)
 	cli.WriteSummary(&buffer, "fmt", 1, true, 12, -1, 0, 0)
 	cli.WriteWatchTransition(&buffer, "watch-cycle-finished", 2, "success", 24, 3, 0, 0)
@@ -18,15 +18,15 @@ func TestResultJSONPreservesCommandEnvelopes(t *testing.T) {
 	if buffer.String() != expected {
 		t.Error("command result JSON changed")
 	}
-	buffer.Free()
+	buffer.Reset()
 }
 
 func TestDataResultJSONPreservesEmptyAndBinaryBytes(t *testing.T) {
-	a := t.Allocator()
+	_ = t.Allocator()
 	data := []string{"", "hello", "\xff", "\xff\x00", "\xff\x00\x01"}
 	encoded := []string{"", "hello", "/w==", "/wA=", "/wAB"}
 	for i := range data {
-		buffer := bytes.NewBuffer(a, nil)
+		buffer := bytes.Buffer{}
 		cli.WriteDataResult(&buffer, "artifact", "", "chosen", "", false, []byte(data[i]), true)
 		encoding := "utf-8"
 		if i > 1 {
@@ -36,6 +36,6 @@ func TestDataResultJSONPreservesEmptyAndBinaryBytes(t *testing.T) {
 		if buffer.String() != expected {
 			t.Error("artifact result lost byte encoding")
 		}
-		buffer.Free()
+		buffer.Reset()
 	}
 }

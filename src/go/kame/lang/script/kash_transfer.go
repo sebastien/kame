@@ -1,8 +1,8 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
 )
 
 func (p *kashParser) loopTransferStatement(start int, wordEnd int, kind expr.Kind) *expr.Expr {

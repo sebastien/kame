@@ -3,7 +3,6 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/slices"
 )
 
 type recordReaderOwner struct {
@@ -21,7 +20,7 @@ func (p *Program) noteRecordReader(request host.Request) {
 		}
 	}
 	node := p.Engine.LookupID(request.NodeID)
-	p.RecordReaders = slices.Append(p.Alloc, p.RecordReaders, recordReaderOwner{ID: id, Node: request.NodeID, Generation: request.Generation, Teardown: node != nil && node.IsTearingDown()})
+	p.RecordReaders = append(p.RecordReaders, recordReaderOwner{ID: id, Node: request.NodeID, Generation: request.Generation, Teardown: node != nil && node.IsTearingDown()})
 }
 
 func (p *Program) closeAbandonedRecordReaders() {
@@ -113,7 +112,7 @@ func (p *Program) CloseRecordReader(id int64) {
 	}
 	if p.Forwarding {
 		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestRecordClose, Payload: host.RecordPayload(p.Alloc, id, "", 0, false)})
+		p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestRecordClose, Payload: host.RecordPayload(p.Alloc, id, "", 0, false)})
 	} else if p.Host != nil {
 		p.Host.CloseRecord(id)
 	}

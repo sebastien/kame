@@ -14,8 +14,10 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-const input = ('x'.repeat(1023) + '\n').repeat(512);
-for (const backend of ['native', 'wasm']) for (const overflow of ['', ' :overflow drop-old :items 2 :buffer 4096']) {
+// Keep even the retained lossy records larger than a pipe's spare capacity.
+// Small records may all drain into kernel buffers before a snapshot is sampled.
+const input = ('x'.repeat(65535) + '\n').repeat(32);
+for (const backend of ['native', 'wasm']) for (const overflow of ['', ' :overflow drop-old :items 2 :buffer 65536']) {
   const directory = join(process.argv[3], backend + (overflow ? '-lossy' : '-block'));
   mkdirSync(directory);
   writeFileSync(join(directory, 'input'), input);

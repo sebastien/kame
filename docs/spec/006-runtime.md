@@ -173,7 +173,9 @@ that set with the outputs:
 - `(read PATH)`, `(render PATH)`, and a template include record that file.
 - `(wildcard PATTERN)` and any glob evaluated while rendering record the pattern
   and the sorted member paths.
-- An environment read records the name and the value read.
+- An environment read records the name and the value read. A read satisfied by
+  an overlay assignment or removal in the same attempt follows
+  `051-kash-session-authority.md` and does not persist that attempt's own value.
 - A tool lookup records the tool name and the content digest of the resolved
   executable.
 - Handing the recipe to an interpreter records that interpreter's identity:

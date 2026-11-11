@@ -1,3 +1,4 @@
+import { instantiateReactor } from './instantiate-reactor.mjs';
 // Raw ABI regressions; run after linking: node tests/wasm/test-abi.mjs [module]
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -45,7 +46,7 @@ for (const test of ['instance identity', 'failure input lifetime', 'malformed JS
   try {
     // Fresh module makes the first instance occupy slot zero: child value zero
     // used to resolve to that instance despite a different table handle.
-    const { instance } = await WebAssembly.instantiate(bytes, {});
+    const { instance } = await instantiateReactor(bytes);
     const e = instance.exports;
     const alloc = (length, alignment = 1) => {
       const pointer = e.kame_wasm_alloc(length || 1, alignment);

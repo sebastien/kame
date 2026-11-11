@@ -1,10 +1,10 @@
 package core
 
 import (
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strings"
+	"unicode/utf8"
 )
 
 // WriteJSONData writes lossless data and encoding fields into an open object.
@@ -26,8 +26,8 @@ func WriteJSONData(a mem.Allocator, e *json.Encoder, data []byte) {
 
 func base64Text(a mem.Allocator, data []byte) string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := 0; i < len(data); i += 3 {
 		value := int(data[i]) << 16
 		if i+1 < len(data) {
@@ -49,5 +49,5 @@ func base64Text(a mem.Allocator, data []byte) string {
 			b.WriteByte('=')
 		}
 	}
-	return strings.Clone(a, b.String())
+	return strings.Clone(b.String())
 }

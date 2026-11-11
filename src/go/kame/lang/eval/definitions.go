@@ -4,12 +4,12 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // RecordReaderCloser releases evaluator-owned record readers when a loop ends,
@@ -24,6 +24,7 @@ type Program struct {
 	StreamStates       []*captureState
 	OperationFunctions []*Function
 	KashFunctions      []*Function
+	Modules            []*kashModule
 	kameSelector       *Function
 	NextScriptGroup    int64
 	DeferScopes        []*DeferScope
@@ -99,7 +100,7 @@ func (r *CompileResult) Free(a mem.Allocator) {
 	for i := range r.Diagnostics {
 		r.Diagnostics[i].Free(a)
 	}
-	slices.Free(a, r.Diagnostics)
+	mem.FreeSlice(nil, r.Diagnostics)
 	*r = CompileResult{}
 }
 
@@ -113,13 +114,13 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		if parsed.Diagnostics[i].Severity != source.Error {
 			continue
 		}
-		result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: parsed.Diagnostics[i].Code, Severity: diagnostic.Error, Message: parsed.Diagnostics[i].Message, Span: diagnostic.Span{Start: parsed.Diagnostics[i].Span.Start, End: parsed.Diagnostics[i].Span.End}})
+		result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: parsed.Diagnostics[i].Code, Severity: diagnostic.Error, Message: parsed.Diagnostics[i].Message, Span: diagnostic.Span{Start: parsed.Diagnostics[i].Span.Start, End: parsed.Diagnostics[i].Span.End}})
 	}
 	var names []*definition.Definition
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
-			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 			continue
 		}
 		if item.Kind != script.Definition || item.Definition == nil {
@@ -139,12 +140,12 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			if item.Definition.Contribution && !previous.Function && !previous.Eager {
 				continue
 			}
-			result.Diagnostics = slices.Append(a, result.Diagnostics, duplicateDefinition(a, parsed, previous, item.Definition))
+			result.Diagnostics = append(result.Diagnostics, duplicateDefinition(a, parsed, previous, item.Definition))
 		} else {
-			names = slices.Append(a, names, item.Definition)
+			names = append(names, item.Definition)
 		}
 	}
-	slices.Free(a, names)
+	mem.FreeSlice(nil, names)
 	if len(result.Diagnostics) != 0 {
 		return result
 	}
@@ -172,13 +173,13 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			continue
 		}
 		p.Valid = false
-		p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: d.Code, Severity: diagnostic.Error, Message: d.Message, Span: diagnostic.Span{Start: d.Span.Start, End: d.Span.End}})
+		p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: d.Code, Severity: diagnostic.Error, Message: d.Message, Span: diagnostic.Span{Start: d.Span.Start, End: d.Span.End}})
 	}
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			p.Valid = false
-			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
 	}
 	if !p.Valid {
@@ -202,7 +203,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			for j := 0; j < i; j++ {
 				previous := parsed.Items[j].Definition
 				if previous != nil && previous.Name == d.Name {
-					p.Diagnostics = slices.Append(a, p.Diagnostics, duplicateDefinition(a, parsed, previous, d))
+					p.Diagnostics = append(p.Diagnostics, duplicateDefinition(a, parsed, previous, d))
 					break
 				}
 			}
@@ -219,12 +220,12 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			continue
 		}
 		p.Scope.setDefinition(d.Name)
-		p.Definitions = slices.Append(a, p.Definitions, d)
+		p.Definitions = append(p.Definitions, d)
 		context := mem.Alloc[definitionState](a)
 		context.Program, context.Definition = p, d
 		node := engine.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: d.Name}, evaluateDefinition, context, freeDefinitionState)
 		node.Restartable = true
-		p.Nodes = slices.Append(a, p.Nodes, definitionNode{Name: owned(a, d.Name), Node: node})
+		p.Nodes = append(p.Nodes, definitionNode{Name: owned(a, d.Name), Node: node})
 	}
 	return p
 }
@@ -251,17 +252,17 @@ func (p *Program) Free() {
 	for i := range p.finalizers {
 		freeFinalizer(p.Alloc, p.finalizers[i])
 	}
-	slices.Free(p.Alloc, p.finalizers)
+	mem.FreeSlice(nil, p.finalizers)
 	for i := range p.explicitDefinitionOverrides {
 		mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i])
 	}
-	slices.Free(p.Alloc, p.explicitDefinitionOverrides)
+	mem.FreeSlice(nil, p.explicitDefinitionOverrides)
 	p.freeSourceParts()
 	p.freeDefers()
 	for i := range p.Processes {
 		freeProcessTask(p.Alloc, p.Processes[i])
 	}
-	slices.Free(p.Alloc, p.Processes)
+	mem.FreeSlice(nil, p.Processes)
 	p.Processes = nil
 	p.Scope.Free()
 	p.Requests.Free()
@@ -274,37 +275,41 @@ func (p *Program) Free() {
 			p.OperationStates[i].Free(p.Alloc, p.OperationStates[i].Value)
 		}
 	}
-	slices.Free(p.Alloc, p.Nodes)
-	slices.Free(p.Alloc, p.OperationStates)
-	slices.Free(p.Alloc, p.StreamStates)
+	mem.FreeSlice(nil, p.Nodes)
+	mem.FreeSlice(nil, p.OperationStates)
+	mem.FreeSlice(nil, p.StreamStates)
 	for i := range p.OperationMemos {
 		p.freeOperationMemo(p.OperationMemos[i])
 	}
-	slices.Free(p.Alloc, p.OperationMemos)
+	mem.FreeSlice(nil, p.OperationMemos)
 	p.freeKashFunctions()
+	for i := range p.Modules {
+		p.Modules[i].Free()
+	}
+	mem.FreeSlice(nil, p.Modules)
 	mem.Free(p.Alloc, p.kameSelector)
 	for i := range p.OperationFunctions {
 		mem.Free(p.Alloc, p.OperationFunctions[i])
 	}
-	slices.Free(p.Alloc, p.OperationFunctions)
+	mem.FreeSlice(nil, p.OperationFunctions)
 	for i := range p.Aggregates {
 		definition.Free(p.Alloc, p.Aggregates[i])
 	}
-	slices.Free(p.Alloc, p.Aggregates)
-	slices.Free(p.Alloc, p.Definitions)
+	mem.FreeSlice(nil, p.Aggregates)
+	mem.FreeSlice(nil, p.Definitions)
 	for i := range p.Diagnostics {
 		p.Diagnostics[i].Free(p.Alloc)
 	}
 	for i := range p.Grants {
-		slices.Free(p.Alloc, p.Grants[i].Names)
+		mem.FreeSlice(nil, p.Grants[i].Names)
 	}
 	for i := range p.DefinitionArgs {
 		p.DefinitionArgs[i].Free(p.Alloc)
 	}
 	mem.FreeString(p.Alloc, p.DefinitionCwd)
-	slices.Free(p.Alloc, p.Diagnostics)
-	slices.Free(p.Alloc, p.Grants)
-	slices.Free(p.Alloc, p.DefinitionArgs)
+	mem.FreeSlice(nil, p.Diagnostics)
+	mem.FreeSlice(nil, p.Grants)
+	mem.FreeSlice(nil, p.DefinitionArgs)
 	mem.Free(p.Alloc, p)
 }
 
@@ -315,13 +320,13 @@ func (p *Program) SetGrants(grants []Grant) {
 		return
 	}
 	for i := range p.Grants {
-		slices.Free(p.Alloc, p.Grants[i].Names)
+		mem.FreeSlice(nil, p.Grants[i].Names)
 	}
-	slices.Free(p.Alloc, p.Grants)
+	mem.FreeSlice(nil, p.Grants)
 	p.Grants = nil
 	for i := range grants {
-		grant := Grant{Capability: grants[i].Capability, Names: slices.Clone(p.Alloc, grants[i].Names)}
-		p.Grants = slices.Append(p.Alloc, p.Grants, grant)
+		grant := Grant{Capability: grants[i].Capability, Names: slices.Clone(grants[i].Names)}
+		p.Grants = append(p.Grants, grant)
 	}
 }
 
@@ -351,10 +356,10 @@ func (p *Program) SetDefinitionArgs(values []core.Value) {
 	for i := range p.DefinitionArgs {
 		p.DefinitionArgs[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, p.DefinitionArgs)
+	mem.FreeSlice(nil, p.DefinitionArgs)
 	p.DefinitionArgs = nil
 	for i := range values {
-		p.DefinitionArgs = slices.Append(p.Alloc, p.DefinitionArgs, values[i].Clone(p.Alloc))
+		p.DefinitionArgs = append(p.DefinitionArgs, values[i].Clone(p.Alloc))
 	}
 	p.DefinitionArgsSet = true
 }
@@ -416,13 +421,13 @@ func freeDefinitionState(a mem.Allocator, value any) {
 	for i := range state.Environment {
 		mem.FreeString(a, state.Environment[i])
 	}
-	slices.Free(a, state.Environment)
+	mem.FreeSlice(nil, state.Environment)
 	for i := range state.RuleFrames {
 		freeValues(a, state.RuleFrames[i].Inputs)
 		freeValues(a, state.RuleFrames[i].Outputs)
 		freeValues(a, state.RuleFrames[i].NewerInputs)
 	}
-	slices.Free(a, state.RuleFrames)
+	mem.FreeSlice(nil, state.RuleFrames)
 	mem.Free(a, state)
 }
 
@@ -564,7 +569,7 @@ func (p *Program) definitionValue(engine *core.EngineContext, d *definition.Defi
 }
 
 func convertParameters(a mem.Allocator, values []definition.Parameter) []expr.Parameter {
-	result := slices.Make[expr.Parameter](a, len(values))
+	result := make([]expr.Parameter, len(values))
 	for i := range values {
 		result[i] = expr.Parameter{Name: values[i].Name, Span: values[i].Span, Rest: values[i].Rest}
 	}

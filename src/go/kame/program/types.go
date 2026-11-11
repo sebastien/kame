@@ -5,13 +5,12 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type Freshness int
@@ -104,14 +103,14 @@ func (p *Plan) Free(a mem.Allocator) {
 	for i := range p.Outputs {
 		mem.FreeString(a, p.Outputs[i])
 	}
-	slices.Free(a, p.Captures)
-	slices.Free(a, p.Inputs)
-	slices.Free(a, p.StaticInputs)
-	slices.Free(a, p.DynamicInputs)
-	slices.Free(a, p.ResourceInputs)
-	slices.Free(a, p.ResolvedInputs)
-	slices.Free(a, p.ResolvedResourceInputs)
-	slices.Free(a, p.Outputs)
+	mem.FreeSlice(nil, p.Captures)
+	mem.FreeSlice(nil, p.Inputs)
+	mem.FreeSlice(nil, p.StaticInputs)
+	mem.FreeSlice(nil, p.DynamicInputs)
+	mem.FreeSlice(nil, p.ResourceInputs)
+	mem.FreeSlice(nil, p.ResolvedInputs)
+	mem.FreeSlice(nil, p.ResolvedResourceInputs)
+	mem.FreeSlice(nil, p.Outputs)
 	freeTools(a, p.Tools)
 	freeStrings(a, p.Configuration)
 	*p = Plan{}
@@ -213,7 +212,7 @@ func (e *Event) Free(a mem.Allocator) {
 	}
 	mem.FreeString(a, e.Program)
 	freeStrings(a, e.Argv)
-	slices.Free(a, e.Data)
+	mem.FreeSlice(nil, e.Data)
 	e.Value.Free(a)
 	e.Diagnostic.Free(a)
 	*e = Event{}
@@ -534,6 +533,9 @@ type CompileResult struct {
 type CompileSource struct {
 	Name string
 	Text string
+	Lang string
+	// Signature identifies original file bytes, not this split fragment.
+	Signature core.Signature
 	// SourceDirectory is an absolute lexical loading base, never a display label.
 	SourceDirectory string
 	// Offset is the byte position of Text in its original source file.
@@ -548,6 +550,6 @@ func (r *CompileResult) Free(a mem.Allocator) {
 	for i := range r.Diagnostics {
 		r.Diagnostics[i].Free(a)
 	}
-	slices.Free(a, r.Diagnostics)
+	mem.FreeSlice(nil, r.Diagnostics)
 	*r = CompileResult{}
 }

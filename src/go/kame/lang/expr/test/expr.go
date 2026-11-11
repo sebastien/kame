@@ -1,12 +1,12 @@
-package expr_test
+package exprcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+
+	"strings"
 )
 
 func parse(t *testing.T, text string) *expr.Result {
@@ -27,7 +27,7 @@ func TestQuotedTemplatePrefixKeepsOnlyNestedPatternClassification(t *testing.T) 
 	defer s.Free(a)
 	parsed := expr.ParseQuotedTemplatePrefix(a, s, 0)
 	defer expr.Free(a, parsed.Expr)
-	defer slices.Free(a, parsed.Diagnostics)
+	defer mem.FreeSlice(nil, parsed.Diagnostics)
 	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Parts) != 2 {
 		t.Fatal("quoted template did not parse")
 		return
@@ -154,7 +154,7 @@ func TestCommandCaptureBoundaries(t *testing.T) {
 }
 
 func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
-	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo ||)", "$(echo >)", "$(echo &&)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'literal')", "$(echo \"\\q\")"}
+	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo ||)", "$(echo >)", "$(echo &&)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'unterminated)", "$(echo \"\\q\")"}
 	for i := range inputs {
 		r := expr.Parse(t.Allocator(), "bad.km", inputs[i])
 		if len(r.Diagnostics) == 0 {
@@ -328,9 +328,12 @@ func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
 }
 
 func TestCommandSetupParserAndFormatter(t *testing.T) {
-	r := parse(t, "$(:cwd ${directory} :timeout (nop 0.1) :MODE production cat | :MODE test cat :ordinary)")
+	r := parse(t, "$(:cwd ${directory} :timeout (nop 0.1) :MODE production :env [TOKEN: \"two words\"] cat | :MODE test cat :ordinary)")
 	if r.Expr.Items[0].Items[0].Kind != expr.CommandSetup || r.Expr.Items[0].Items[0].Text != "cwd" || r.Expr.Items[1].Items[2].Kind != expr.CommandWord {
 		t.Error("stage setup lost its syntax boundary")
+	}
+	if r.Expr.Items[0].Items[3].Items[0].Parts[0].Expr.Kind != expr.Record {
+		t.Error("inline environment record became a scalar word")
 	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
@@ -342,7 +345,7 @@ func TestCommandSetupParserAndFormatter(t *testing.T) {
 	mem.FreeString(t.Allocator(), again)
 	copy.Free()
 	r.Free()
-	invalid := []string{"$(:cwd)", "$(:cwd x)", "$(:cwd x :cwd y cat)", "$(:X a :X b cat)", "$(:async true cat)", "$(:9BAD x cat)", "$(:bad-key x cat)", "$(:timeout | cat)"}
+	invalid := []string{"$(:cwd)", "$(:cwd x)", "$(:cwd x :cwd y cat)", "$(:X a :X b cat)", "$(:async true cat)", "$(:9BAD x cat)", "$(:bad-key x cat)", "$(:timeout | cat)", "$(:env [TOKEN: )", "$(:env [TOKEN: \"value\"] :env [OTHER: \"value\"] cat)"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
 		if len(r.Diagnostics) == 0 {
@@ -666,17 +669,17 @@ func TestPortableRegexPatternsAndBudget(t *testing.T) {
 	if !matched.Matched || len(matched.Captures) != 2 || matched.Captures[0] != "demo" || matched.Captures[1] != "abcd" {
 		t.Error("regex pattern did not return positional captures")
 	}
-	slices.Free(a, matched.Captures)
+	mem.FreeSlice(nil, matched.Captures)
 	mem.FreeString(a, formatted)
 	parsed.Pattern.Free(a)
-	slices.Free(a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 
 	invalid := expr.ParsePatternText(a, "x{name:~(a|)}", 5)
 	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 15, 16) {
 		t.Errorf("invalid regex diagnostic span = %v", invalid.Diagnostics)
 	}
 	invalid.Pattern.Free(a)
-	slices.Free(a, invalid.Diagnostics)
+	mem.FreeSlice(nil, invalid.Diagnostics)
 	invalidForms := []string{"{~a{2}}", "{~\\p{L}}", "{~[z-a]}"}
 	for i := range invalidForms {
 		invalid = expr.ParsePatternText(a, invalidForms[i], 0)
@@ -684,7 +687,7 @@ func TestPortableRegexPatternsAndBudget(t *testing.T) {
 			t.Error("unsupported or malformed regex syntax was accepted")
 		}
 		invalid.Pattern.Free(a)
-		slices.Free(a, invalid.Diagnostics)
+		mem.FreeSlice(nil, invalid.Diagnostics)
 	}
 
 	bounded := expr.ParsePatternText(a, "{~a*}z", 0)
@@ -693,7 +696,7 @@ func TestPortableRegexPatternsAndBudget(t *testing.T) {
 		return
 	}
 	var subject strings.Builder
-	subject = strings.NewBuilder(a)
+	subject = strings.Builder{}
 	for i := 0; i < 1600; i++ {
 		subject.WriteByte('a')
 	}
@@ -701,10 +704,10 @@ func TestPortableRegexPatternsAndBudget(t *testing.T) {
 	if !result.Limited || result.Matched {
 		t.Error("regex state budget did not fail closed")
 	}
-	slices.Free(a, result.Captures)
-	subject.Free()
+	mem.FreeSlice(nil, result.Captures)
+	subject.Reset()
 	bounded.Pattern.Free(a)
-	slices.Free(a, bounded.Diagnostics)
+	mem.FreeSlice(nil, bounded.Diagnostics)
 }
 
 func TestMixedPatternGroupsAreRejected(t *testing.T) {

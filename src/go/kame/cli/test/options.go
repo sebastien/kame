@@ -1,9 +1,37 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
+
+func TestTypedInspectionOptionsCannotBecomeBuildTargets(t *testing.T) {
+	invalid := [][]string{
+		{"--set", "NAME=1", "do", "plan"},
+		{"-C", "/project", "--set=NAME=1", "do", "plan"},
+		{"--set", "NAME=1", "--set=NAME=2", "do", "plan"},
+		{"--set=NAME=1", "do", "-j", "2", "plan"},
+		{"-C", "/project", "do", "plan", "--set=NAME=1"},
+		{"--set=NAME=1", "do", "plan", "--"},
+	}
+	for i := range invalid {
+		inv := cli.Parse("", invalid[i])
+		if inv.OK || inv.Error.Code != "OPT_CONFLICT" {
+			t.Error("misplaced typed inspection options selected build targets")
+		}
+		inv.Free()
+	}
+	inv := cli.Parse("", []string{"--set=NAME=1", "--", "do", "plan"})
+	if !inv.OK || len(inv.Targets) != 2 {
+		t.Error("explicit literal targets were rejected")
+	}
+	inv.Free()
+	inv = cli.Parse("plan", []string{"--set=NAME=1", "do", "plan"})
+	if !inv.OK || len(inv.Targets) != 2 {
+		t.Error("correctly placed inspection options were rejected")
+	}
+	inv.Free()
+}
 
 func TestEmptyOptionValuesHaveConsistentDiagnostics(t *testing.T) {
 	commands := []string{"parse", "fmt", "run"}

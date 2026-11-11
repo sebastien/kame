@@ -1,10 +1,10 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
-	"solod.dev/so/testing"
 )
 
 func TestUncomposedConditionalIncludesCannotRegisterDefinitions(t *testing.T) {

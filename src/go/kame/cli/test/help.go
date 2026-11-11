@@ -1,12 +1,12 @@
-package cli_test
+package clicheck
 
 import (
+	"bytes"
 	"kame/cli"
 	"kame/core"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"strings"
 )
 
 func TestHelpDistinguishesInspectionFromMaterialization(t *testing.T) {
@@ -32,7 +32,7 @@ func TestHelpResultHasExplicitOwnership(t *testing.T) {
 	if !inv.OK || inv.Command != "" || inv.HelpResult == "" {
 		t.Error("help response was stored as command source")
 	}
-	buffer := bytes.NewBuffer(mem.System, nil)
+	buffer := bytes.Buffer{}
 	cli.WriteJSON(&buffer, &inv)
 	var value core.Value
 	if !core.ParseJSON(mem.System, buffer.Bytes(), &value) {
@@ -49,7 +49,7 @@ func TestHelpResultHasExplicitOwnership(t *testing.T) {
 		}
 		value.Free(mem.System)
 	}
-	buffer.Free()
+	buffer.Reset()
 	// Cleanup must not depend on a mutable command discriminator.
 	inv.Name = "help"
 	inv.Free()

@@ -2,7 +2,7 @@
 # kame -- Kame build file
 # =============================================================================
 #
-# Kame discovers Makefile.kmk before Makefile. Make forwards goals here.
+# Kame discovers Makefile.kmk. GNU Make can also build directly with Go.
 # File artifacts use content freshness instead of Make's timestamps;
 # repeated native or wasm builds are skipped when declared inputs are unchanged.
 # `kame --force TARGET` rebuilds anyway.
@@ -11,8 +11,7 @@
 # are Kame configuration: a build does not grant environment reads, so a raw
 # `CFLAGS=` export is not consulted. Assignment wins, then the KAME_ prefix,
 # then the default:
-#   kame wasm WASM_SDK=/path/to/wasi-sdk
-#   KAME_WASM_SDK=/path/to/wasi-sdk kame wasm
+#   kame wasm
 #   kame dist-release KAME_RELEASE_PUBLIC_KEY=... KAME_RELEASE_SIGNING_KEY=...
 #   KAME_RELEASE_PUBLIC_KEY=... kame dist-release
 #   KAME_RELEASE_PUBLIC_KEY=... kame release [repo=OWNER/REPO] [notes=FILE]
@@ -30,27 +29,7 @@ SHELL = kash
 KAME_DIR = ./src/go/kame
 EXAMPLES_DIR = ./examples
 
-# --- Overridable toolchain --------------------------------------------------
-#
-# Empty means "not set". WASM_CC / WASM_LD follow the resolved SDK unless set
-# on their own; they do not replace the SDK directory, which still supplies
-# compiler-rt. PLATFORM and RELEASE_* are the KAME_ environment aliases of the
-# matching KAME_* assignment names.
-
-CC ?= ""
-CFLAGS ?= ""
-
-WASM_SDK ?= ""
-WASM_CC ?= ""
-WASM_LD ?= ""
-WASM_INITIAL_MEMORY ?= ""
-WASM_MAX_MEMORY ?= ""
-# Optimized evaluator frames must reach the 32-level depth guard before the
-# linear-memory stack is exhausted; nested async dispatch also needs headroom.
-WASM_STACK_SIZE ?= ""
-WASM_INITIAL_MEMORY_DEFAULT = 16777216
-WASM_MAX_MEMORY_DEFAULT = 67108864
-WASM_STACK_SIZE_DEFAULT = 524288
+# --- Release configuration --------------------------------------------------
 
 KAME_PLATFORM ?= ""
 PLATFORM ?= ""
@@ -71,7 +50,7 @@ RELEASE_REVISION ?= ""
 # rule is what refreshes it from VERSION.
 
 KAME_SOURCES =
-  (files ./src/go/kame/**/*.go ./src/go/kame/**/*.c ./src/go/kame/**/*.h)
+  (files ./src/go/kame/**/*.go)
 
 KAME_INPUTS =
   (concat
@@ -82,104 +61,9 @@ KAME_INPUTS =
       ./Makefile.kmk]
     (filter-out ./src/go/kame/cmd/kame/version_generated.go KAME_SOURCES))
 
-# Portable link set: the Go packages that translate to freestanding C, plus the
-# hand-written C ABI shim in src/c/wasm. cmd/ is excluded so a version bump does
-# not relink the module. ownership/ is not part of that link set.
-WASM_SOURCE_DIRS =
-  [
-    ./src/go/kame/cli
-    ./src/go/kame/core
-    ./src/go/kame/diagnostic
-    ./src/go/kame/host
-    ./src/go/kame/lang
-    ./src/go/kame/operations
-    ./src/go/kame/plugins
-    ./src/go/kame/program
-    ./src/c/wasm]
-
-WASM_SOURCES =
-  (flatmap
-    ([root]
-      (files (str root "/**/*.go") (str root "/**/*.c") (str root "/**/*.h")))
-    WASM_SOURCE_DIRS)
-
+# The WASI reactor and its runtime are built by the standard Go toolchain.
+WASM_SOURCES = (files ./src/go/kame/**/*.go)
 LAUNCHER_SOURCES = (files ./src/go/kame/cmd/kame-launcher/*.go)
-
-# Keep this list aligned with Makefile's -Wl,--export set.
-WASM_EXPORTS =
-  [
-    "kame_wasm_abi_version"
-    "kame_wasm_alloc"
-    "kame_wasm_free"
-    "kame_wasm_event_header"
-    "kame_wasm_copy"
-    "kame_wasm_cli"
-    "kame_wasm_present"
-    "kame_wasm_present_observe"
-    "kame_wasm_work_prepare"
-    "kame_wasm_eval_pure"
-    "kame_wasm_parse"
-    "kame_wasm_format"
-    "kame_wasm_eval_source_pure"
-    "kame_wasm_declaration_predicate"
-    "kame_wasm_instance_create"
-    "kame_wasm_instance_free"
-    "kame_wasm_source_compile"
-    "kame_wasm_register_plugins"
-    "kame_wasm_set_source_name"
-    "kame_wasm_expression_request"
-    "kame_wasm_set_forwarding"
-    "kame_wasm_set_directory"
-    "kame_wasm_host_set_file"
-    "kame_wasm_host_set_env"
-    "kame_wasm_target_begin"
-    "kame_wasm_watch_begin"
-    "kame_wasm_watch_state"
-    "kame_wasm_watch_invalidate"
-    "kame_wasm_watch_cancel_message"
-    "kame_wasm_watch_cancel"
-    "kame_wasm_prepare"
-    "kame_wasm_plan"
-    "kame_wasm_graph"
-    "kame_wasm_tools"
-    "kame_wasm_set_tool_path"
-    "kame_wasm_tools_check"
-    "kame_wasm_inspection_grant"
-    "kame_wasm_target_event"
-    "kame_wasm_process_started"
-    "kame_wasm_process_stream"
-    "kame_wasm_process_terminal"
-    "kame_wasm_expression_begin"
-    "kame_wasm_expression_cancel"
-    "kame_wasm_expression_effect_kind"
-    "kame_wasm_expression_effect_length"
-    "kame_wasm_expression_effect_copy"
-    "kame_wasm_step"
-    "kame_wasm_next_event_header"
-    "kame_wasm_next_request_kind"
-    "kame_wasm_next_request_data_length"
-    "kame_wasm_next_request_key_length"
-    "kame_wasm_request_key_copy"
-    "kame_wasm_next_request_record_length"
-    "kame_wasm_request_record_copy"
-    "kame_wasm_request_data_copy"
-    "kame_wasm_event_payload_copy"
-    "kame_wasm_event_discard"
-    "kame_wasm_complete_bytes"
-    "kame_wasm_complete_text"
-    "kame_wasm_complete_nil"
-    "kame_wasm_complete_json"
-    "kame_wasm_complete_capture"
-    "kame_wasm_complete_failure"
-    "kame_wasm_result_copy"
-    "kame_wasm_result_kind"
-    "kame_wasm_diagnostic_length"
-    "kame_wasm_diagnostic_copy"
-    "kame_wasm_instance_diagnostic_length"
-    "kame_wasm_instance_diagnostic_copy"
-    "kame_wasm_instance_diagnostic_span"]
-
-WASM_EXPORT_FLAGS = (map ([name] (str "-Wl,--export=" name)) WASM_EXPORTS)
 
 # Cross-backend gate. Explicit, not a glob: test-wasm is a curated list.
 TEST_WASM =
@@ -329,52 +213,19 @@ dist : ./build/kame.debug ./dist/kame
 
 version-source : ./src/go/kame/cmd/kame/version_generated.go
 
-# --- Toolchain --------------------------------------------------------------
-#
-# Rebuild the pinned translator after a Go upgrade, before parallel consumers
-# resolve it. Order-only edges keep this always-run check out of artifact inputs.
-toolchain : ./src/go/kame/go.mod
-	compiler = (tool "so")
-	current = (strip $(go env GOVERSION))
-	installed = (parse-json $(go version -m -json $compiler))
-	version = (strip $(:cwd $KAME_DIR go list -m -f "{{.Version}}" solod.dev))
-	if (or (ne installed.GoVersion current) (ne installed.Main.Version version))
-		echo "Rebuilding Solod ${version} with ${current}"
-		:GOBIN (dirname compiler) :GOTOOLCHAIN local go install "solod.dev/cmd/so@${version}"
-
 # --- Native binaries --------------------------------------------------------
-#
-# Each artifact embeds its own mode. Shared version metadata stays
-# target-independent, so switching modes does not rewrite it.
 
-./build/kame.debug : @{KAME_INPUTS} | toolchain
+./build/kame.debug : @{KAME_INPUTS}
 	mkdir -p ./build
-	cflags = (if (blank? CFLAGS) "-O2" CFLAGS)
-	:cwd $KAME_DIR :env (if (blank? CC) (merge) [CC: CC]) :CFLAGS (str cflags " -DKAME_BUILD_MODE_DEBUG") so build -check=warn -o (abspath ./build/kame.debug) ./cmd/kame
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -ldflags "-X main.artifactMode=debug" -o (abspath ./build/kame.debug) ./cmd/kame
 
-./build/kame.sanitize : @{KAME_INPUTS} | toolchain
+./build/kame.sanitize : @{KAME_INPUTS}
 	mkdir -p ./build
-	cflags = (if (blank? CFLAGS) "-O2" CFLAGS)
-	:cwd $KAME_DIR :CC clang :CFLAGS (str cflags " -DKAME_BUILD_MODE_SANITIZE") so build -check=sanitize -panic=abort -o (abspath ./build/kame.sanitize) ./cmd/kame
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -gcflags "all=-d=checkptr=2" -ldflags "-X main.artifactMode=sanitize" -o (abspath ./build/kame.sanitize) ./cmd/kame
 
-./dist/kame : @{KAME_INPUTS} | toolchain
+./dist/kame : @{KAME_INPUTS}
 	mkdir -p ./dist
-	:cwd $KAME_DIR :env (if (blank? CC) (merge) [CC: CC]) :CFLAGS "-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o (abspath ./dist/kame) ./cmd/kame
-
-# --- Cosmopolitan / APE -----------------------------------------------------
-
-./build/tools/cosmocc-4.0.2/bin/cosmocc : ./src/sh/provision-cosmocc.sh
-	./src/sh/provision-cosmocc.sh ./build/tools/cosmocc-4.0.2
-
-./dist/kame.com : ./build/tools/cosmocc-4.0.2/bin/cosmocc @{KAME_INPUTS} | toolchain
-	mkdir -p ./dist
-	:cwd $KAME_DIR :CC (abspath ./build/tools/cosmocc-4.0.2/bin/cosmocc) :CFLAGS "-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" so build -assert=off -panic=exit -o (abspath ./dist/kame.com) ./cmd/kame
-
-./dist/ape-smoke.com : ./tests/platform/ape-smoke.c ./build/tools/cosmocc-4.0.2/bin/cosmocc
-	mkdir -p (dirname (first outputs))
-	./build/tools/cosmocc-4.0.2/bin/cosmocc -O2 -o (first outputs) (first inputs)
-
-dist-ape : ./dist/kame.com ./dist/ape-smoke.com
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath ./dist/kame) ./cmd/kame
 
 # Preserve a host-native CLI under a stable release platform identifier.
 # The pattern rule is incremental; `dist-native` picks the host platform.
@@ -391,51 +242,16 @@ dist-native : ./dist/kame ./src/sh/platform_id.py
 	(stat dest)
 
 # --- WebAssembly ------------------------------------------------------------
-#
-# Kept out of the default dist so a host without the wasi-sdk toolchain can
-# still build the native CLI. Link only compiler-rt's math helpers, not
-# WASI/libc. Query the SDK clang because the freestanding target has no
-# runtime archive of its own.
 
-wasm-translate : | toolchain
-	mkdir -p ./build/wasm/c
-	:cwd $KAME_DIR so translate -o ../../../build/wasm/c ./host/wasm
-
-./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./src/go/kame/go.sum ./Makefile.kmk | toolchain
-	sdk = (if (blank? WASM_SDK) (str (strip $(mise where asdf:mise-plugins/mise-wasi-sdk)) "/wasi-sdk") WASM_SDK)
-	cc = (if (blank? WASM_CC) (str sdk "/bin/clang") WASM_CC)
-	ld = (if (blank? WASM_LD) (str sdk "/bin/wasm-ld") WASM_LD)
-	stack = (str (if (blank? WASM_STACK_SIZE) WASM_STACK_SIZE_DEFAULT WASM_STACK_SIZE))
-	initial = (str (if (blank? WASM_INITIAL_MEMORY) WASM_INITIAL_MEMORY_DEFAULT WASM_INITIAL_MEMORY))
-	maxmem = (str (if (blank? WASM_MAX_MEMORY) WASM_MAX_MEMORY_DEFAULT WASM_MAX_MEMORY))
-	mkdir -p ./build/wasm/c
-	:cwd $KAME_DIR so translate -o ../../../build/wasm/c ./host/wasm
-	sdk_cc = (str sdk "/bin/clang")
-	builtins = (strip $($sdk_cc -print-libgcc-file-name))
-	test -f $builtins
-	sources = (files ./build/wasm/c/**/*.c)
-	$cc --target=wasm32-unknown-unknown -Oz -fwrapv -ffreestanding -nostdlib \
-		-mexception-handling -mllvm -wasm-enable-sjlj \
-		-include ./src/c/wasm/kame_wasm_panic.h -DSO_HEAP_SIZE=8388608 \
-		(str "-fuse-ld=" ld) -I ./build/wasm/c \
-		-Wl,--no-entry -Wl,--export-memory (str "-Wl,-z,stack-size=" stack) \
-		(str "-Wl,--initial-memory=" initial) (str "-Wl,--max-memory=" maxmem) \
-		$WASM_EXPORT_FLAGS \
-		$sources \
-		./src/c/wasm/kame_wasm_abi.c ./src/c/wasm/kame_wasm_jump.c \
-		$builtins -o (first outputs)
+./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./Makefile.kmk ./src/sh/build-wasm.sh
+	bash ./src/sh/build-wasm.sh
 
 wasm : ./build/wasm/kame.wasm
 
 dist-wasm : ./dist/kame.wasm ./dist/kame.js
 
-./dist/kame.wasm : ./build/wasm/kame.wasm
-	mkdir -p ./dist
-	cp (first inputs) (first outputs)
-
-./dist/kame.js : ./src/js/kame.js
-	mkdir -p ./dist
-	cp (first inputs) (first outputs)
+./dist/kame.wasm ./dist/kame.js : ./build/wasm/kame.wasm ./src/js/kame.js ./src/sh/stage-wasm.py
+	python3 ./src/sh/stage-wasm.py
 
 # --- Release staging --------------------------------------------------------
 #
@@ -443,7 +259,10 @@ dist-wasm : ./dist/kame.wasm ./dist/kame.js
 # Provenance includes a timestamp, so this stays a task rather than a file rule.
 # It does not collect native platform artifacts or rewrite package definitions.
 
-dist-release : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VERSION ./src/sh/release_manifest.py
+release-assets : dist-wasm ./src/go/kame/cmd/kame/version_generated.go ./src/sh/build-release-assets.py
+	python3 ./src/sh/build-release-assets.py
+
+dist-release : release-assets ./VERSION ./src/sh/release_manifest.py
 	public_key = (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)
 	signing_key = (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)
 	git_revision = $(git rev-parse HEAD) ?? "unknown"
@@ -453,21 +272,14 @@ dist-release : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VERSION ./src/s
 		(fail! "set KAME_RELEASE_PUBLIC_KEY to the release verification key")
 	if (blank? signing_key)
 		(fail! "set KAME_RELEASE_SIGNING_KEY to the release signing key")
-	test -f $public_key
-	test -f $signing_key
-	rm -rf ./dist/release
-	mkdir -p ./dist/release
-	cp ./dist/kame.com ./dist/release/kame.com
-	cp ./dist/kame.wasm ./dist/release/kame.wasm
-	cp ./dist/kame.js ./dist/release/kame.js
-	cp ./VERSION ./dist/release/VERSION
-	python3 ./src/sh/release_manifest.py --directory ./dist/release --version $version --revision $revision --public-key $public_key --signing-key $signing_key
+	cp ./VERSION ./dist/VERSION
+	python3 ./src/sh/release_manifest.py --directory ./dist/release --source-directory ./dist --version $version --revision $revision --public-key $public_key --signing-key $signing_key
 
 # Explicitly refresh checked-in package definitions before committing a release.
 # Not a file rule: the outputs are tracked source, and release staging must not
 # claim them.
 
-package-manifests : ./dist/kame.com ./VERSION ./src/sh/release_package_manifests.py
+package-manifests : release-assets ./VERSION ./src/sh/release_package_manifests.py
 	version = (strip (text (read ./VERSION)))
 	python3 ./src/sh/release_package_manifests.py --directory ./dist --output-directory ./etc --version $version
 
@@ -481,7 +293,7 @@ package-manifests : ./dist/kame.com ./VERSION ./src/sh/release_package_manifests
 # project lock, so the script is told the assets are prebuilt and stages them
 # without re-entering Kame.
 
-release {repo=} {notes=} : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VERSION ./src/sh/release.sh ./src/sh/release_manifest.py
+release {repo=} {notes=} : release-assets ./VERSION ./src/sh/release.sh ./src/sh/release_manifest.py
 	flags = (concat
 		(if (blank? repo) [] ["--repo" repo])
 		(if (blank? notes) [] ["--notes-file" notes]))
@@ -491,45 +303,42 @@ release {repo=} {notes=} : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VER
 #
 # The Go launcher and the copied WASM pair are one group. Make names only the
 # .exe; declaring the siblings keeps a deleted kame.js or kame.wasm from looking
-# fresh. The .exe zip and the APE copy are the two Windows release artifacts.
+# fresh. The Windows release bundles the launcher with the WASM pair.
 
-./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm : @{LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./src/go/kame/go.mod ./src/go/kame/go.sum
+./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json : @{LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./src/go/kame/go.mod ./src/go/kame/go.sum
 	mkdir -p ./dist/windows
 	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS windows :GOARCH amd64 go build -trimpath -o (abspath ./dist/windows/kame.exe) ./cmd/kame-launcher
 	cp ./dist/kame.js ./dist/windows/kame.js
 	cp ./dist/kame.wasm ./dist/windows/kame.wasm
+	printf '{"type":"module"}\n' > ./dist/windows/package.json
 
-./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm
+./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json
 	rm -f (first outputs)
-	:cwd ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm
+	:cwd ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm package.json
 
-./dist/kame-windows-x64.exe : ./dist/kame.com
-	mkdir -p (dirname (first outputs))
-	cp (first inputs) (first outputs)
-
-dist-windows : ./dist/kame-windows-x64.zip ./dist/kame-windows-x64.exe
+dist-windows : ./dist/kame-windows-x64.zip
 
 # --- Tests ------------------------------------------------------------------
 #
 # Bare tasks always run. Do not cache them: a green record is not a reason to
 # skip a test, and an input list would not cover the compiler or the host.
 
-test : test-toolchain test-so test-examples test-go test-cli
+test : test-toolchain test-unit test-examples test-go test-cli
 
 test-toolchain : ./build/kame.debug ./tests/native/test-toolchain.sh
 	:KAME_TOOLCHAIN_TEST_BINARY (abspath ./build/kame.debug) bash ./tests/native/test-toolchain.sh
 
-test-so : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host | toolchain
-	:cwd $KAME_DIR so test ./...
+test-unit : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test ./...
 
-test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh | toolchain
-	:CC clang bash ./tests/native/test-cli-lifecycle.sh
+test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh
+	bash ./tests/native/test-cli-lifecycle.sh
 
-test-native-host : ./tests/native/test-host.sh | toolchain
-	:CC clang bash ./tests/native/test-host.sh
+test-native-host : ./tests/native/test-host.sh
+	bash ./tests/native/test-host.sh
 
-test-examples : | toolchain
-	:cwd $EXAMPLES_DIR so test ./...
+test-examples :
+	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test ./...
 
 test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
 	:cwd $KAME_DIR :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.debug) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.debug) go test ./cmd/kame
@@ -552,32 +361,28 @@ test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspect
 test-reuse-reasons : ./build/kame.debug dist-wasm ./tests/T036-02-cli-reuse-reasons.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
 
-# Published-channel compatibility check: network access and the Solod
-# toolchain are required, so this stays opt-in and outside the hermetic suite.
+# Published-channel compatibility check: network access and the
+# Go toolchain are required, so this stays opt-in and outside the hermetic suite.
 test-release-build :
 	./tests/platform/test-release-build.sh
 
 test-all : test test-leaks
 
-test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host | toolchain
-	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...
-	:cwd $EXAMPLES_DIR :CC clang so test -check=sanitize -panic=abort ./...
+test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
 
-test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host | toolchain
+test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host
 	leak_scripts = (filter-out ./tests/T013-03-meta-binary.sh (files ./tests/T*.sh))
-	:cwd $KAME_DIR :CC clang :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.sanitize) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.sanitize) go test -asan ./cmd/kame
-	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...
-	:cwd $EXAMPLES_DIR :CC clang so test -check=sanitize -panic=abort ./...
-	:KAME_TEST_PREBUILT (abspath ".") :ASAN_OPTIONS "detect_leaks=1:halt_on_error=1" :UBSAN_OPTIONS "halt_on_error=1" :CLI_BIN (abspath ./build/kame.sanitize) ./tests/harness.sh $leak_scripts
+	:cwd $KAME_DIR :CGO_ENABLED "0" :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.sanitize) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.sanitize) go test -gcflags "all=-d=checkptr=2" ./cmd/kame
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	:KAME_TEST_PREBUILT (abspath ".") :CLI_BIN (abspath ./build/kame.sanitize) ./tests/harness.sh $leak_scripts
 
-wasm-portable : ./src/sh/check-portable.sh | toolchain
-	./src/sh/check-portable.sh
+wasm-portable : wasm
 
-wasm-check : wasm wasm-portable ./tests/wasm/test-wasm-header.c ./tests/wasm/check-imports.mjs ./tests/wasm/test-abi.mjs
-	cc = (if (blank? CC) "cc" CC)
-	$cc -std=c11 -Wall -Wextra -Werror -fsyntax-only ./tests/wasm/test-wasm-header.c
-	node ./tests/wasm/check-imports.mjs ./build/wasm/kame.wasm
-	node ./tests/wasm/test-abi.mjs ./build/wasm/kame.wasm
+wasm-check : wasm ./tests/wasm/go-reactor.mjs
+	node ./tests/wasm/go-reactor.mjs ./build/wasm/kame.wasm
 
 # map/run! streams each script and fails the recipe on the first nonzero status.
 test-wasm : wasm-check ./build/kame.debug dist-wasm @{TEST_WASM}
@@ -593,5 +398,5 @@ fmt : ./build/kame.debug
 clean :
 	rm -rf ./build ./dist
 
-demo : | toolchain
-	:cwd ./examples/engine so run ./demo
+demo :
+	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go run ./demo

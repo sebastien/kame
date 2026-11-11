@@ -1,9 +1,9 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestBinaryCaptureCompletionOwnsBytesAndRejectsAmbiguousMetadata(t *testing.T) {

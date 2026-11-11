@@ -4,94 +4,12 @@ package ownership
 import (
 	"kame/core"
 	"kame/host/posix"
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"kame/internal/c"
+	"kame/internal/mem"
+	"path"
 )
 
-//so:embed native.h
-var native_h string
-
-//so:embed native.c
-var native_c string
-
-//so:extern km_own_store
-type nativeStore struct{}
-
-//so:extern km_own_file
-type nativeFile struct{}
-
-//so:extern
-func km_own_supported() bool { return false }
-
 func Supported() bool { return km_own_supported() }
-
-//so:extern nodecay
-func km_own_open(root string, create bool, status *c.Int) *nativeStore {
-	_, _, _ = root, create, status
-	return nil
-}
-
-//so:extern
-func km_own_lock_fd(s *nativeStore) c.Int { _ = s; return -1 }
-
-//so:extern nodecay
-func km_own_resource_fd(s *nativeStore, name string, status *c.Int) c.Int {
-	_, _, _ = s, name, status
-	return -1
-}
-
-//so:extern
-func km_own_fd_close(fd c.Int) { _ = fd }
-
-//so:extern
-func km_own_close(s *nativeStore) { _ = s }
-
-//so:extern nodecay
-func km_own_root(s *nativeStore, data []byte) c.Int { _, _ = s, data; return -1 }
-
-//so:extern nodecay
-func km_own_read(s *nativeStore, name string, artifact bool, links bool, status *c.Int) *nativeFile {
-	_, _, _, _, _ = s, name, artifact, links, status
-	return nil
-}
-
-//so:extern
-func km_own_size(f *nativeFile) int64 { _ = f; return 0 }
-
-//so:extern nodecay
-func km_own_stamp(f *nativeFile, data []byte) c.Int { _, _ = f, data; return -1 }
-
-//so:extern nodecay
-func km_own_bytes(f *nativeFile, data []byte) c.Int { _, _ = f, data; return -1 }
-
-//so:extern
-func km_own_stable(f *nativeFile) bool { _ = f; return false }
-
-//so:extern
-func km_own_file_close(f *nativeFile) { _ = f }
-
-//so:extern nodecay
-func km_own_write(s *nativeStore, name string, data []byte) c.Int { _, _, _ = s, name, data; return -1 }
-
-//so:extern nodecay
-func km_own_remove(s *nativeStore, name string) c.Int { _, _ = s, name; return -1 }
-
-//so:extern nodecay
-func km_own_list(s *nativeStore, data []byte) c.Int { _, _ = s, data; return -1 }
-
-//so:extern nodecay
-func km_own_capture(s *nativeStore, name string, token string, expected []byte) c.Int {
-	_, _, _, _ = s, name, token, expected
-	return -1
-}
-
-//so:extern nodecay
-func km_own_restore(s *nativeStore, name string, token string) c.Int {
-	_, _, _ = s, name, token
-	return -1
-}
 
 const (
 	leaseNone = iota
@@ -133,7 +51,7 @@ func (s *Store) cancelled() bool {
 
 func New(a mem.Allocator, root string) *Store {
 	s := mem.Alloc[Store](a)
-	s.Alloc, s.Root = a, path.Clean(a, root)
+	s.Alloc, s.Root = a, path.Clean(root)
 	return s
 }
 
@@ -169,7 +87,7 @@ func (s *Store) openNative(create bool) bool {
 }
 
 func (s *Store) leasePath() string {
-	return path.Join(s.Alloc, s.Root, ".kame/outputs/lock")
+	return path.Join(s.Root, ".kame/outputs/lock")
 }
 
 func (s *Store) lockLease(create bool, wait bool, shared bool) bool {
@@ -275,7 +193,7 @@ func (s *Store) LockResource(name string, kind string) bool {
 		mem.FreeString(s.Alloc, lockKey)
 		return false
 	}
-	s.locks = slices.Append(s.Alloc, s.locks, heldLock{Key: lockKey, FD: fd, Refs: 1})
+	s.locks = append(s.locks, heldLock{Key: lockKey, FD: fd, Refs: 1})
 	return true
 }
 
@@ -312,7 +230,7 @@ func (s *Store) Free() {
 		km_own_fd_close(c.Int(s.locks[i].FD))
 		mem.FreeString(s.Alloc, s.locks[i].Key)
 	}
-	slices.Free(s.Alloc, s.locks)
+	mem.FreeSlice(nil, s.locks)
 	if s.native != nil {
 		if s.lease != leaseNone {
 			posix.UnlockFile(int(km_own_lock_fd(s.native)), s.lease == leaseExclusive)
@@ -324,7 +242,7 @@ func (s *Store) Free() {
 }
 
 func clone(a mem.Allocator, text string) string {
-	b := slices.Make[byte](a, len(text))
+	b := make([]byte, len(text))
 	copy(b, text)
 	return string(b)
 }
@@ -339,7 +257,7 @@ func hash(data []byte) core.Signature {
 
 func key(a mem.Allocator, text string) string {
 	d := hash([]byte(text))
-	b := slices.Make[byte](a, 64)
+	b := make([]byte, 64)
 	const hex = "0123456789abcdef"
 	for i := range d.Digest {
 		b[i*2], b[i*2+1] = hex[d.Digest[i]>>4], hex[d.Digest[i]&15]
@@ -361,7 +279,7 @@ func (s *Store) observe(name string, artifact bool) observation {
 		return result
 	}
 	km_own_stamp(f, result.Stamp[:])
-	buffer := slices.Make[byte](s.Alloc, 32768)
+	buffer := make([]byte, 32768)
 	d := core.NewDigest()
 	for {
 		if s.cancelled() {
@@ -382,7 +300,7 @@ func (s *Store) observe(name string, artifact bool) observation {
 		result.Status = 2
 	}
 	d.Sum(result.Digest[:])
-	slices.Free(s.Alloc, buffer)
+	mem.FreeSlice(nil, buffer)
 	km_own_file_close(f)
 	return result
 }
@@ -400,7 +318,7 @@ func (s *Store) read(name string) []byte {
 		s.Status = -3
 		return nil
 	}
-	data := slices.Make[byte](s.Alloc, int(size))
+	data := make([]byte, int(size))
 	used := 0
 	for used < len(data) {
 		n := int(km_own_bytes(f, data[used:]))
@@ -412,7 +330,7 @@ func (s *Store) read(name string) []byte {
 	valid := used == len(data) && km_own_stable(f)
 	km_own_file_close(f)
 	if !valid {
-		slices.Free(s.Alloc, data)
+		mem.FreeSlice(nil, data)
 		s.Status = -1
 		return nil
 	}

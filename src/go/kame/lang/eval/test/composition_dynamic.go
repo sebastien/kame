@@ -1,13 +1,13 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func TestCompositionDynamicTextRejectsHeadsBeforeEffects(t *testing.T) {

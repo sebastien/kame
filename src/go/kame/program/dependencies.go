@@ -2,7 +2,7 @@ package program
 
 import (
 	"kame/core"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node, ordered bool) bool {

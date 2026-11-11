@@ -2,9 +2,8 @@ package plugins
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type jsonField struct {
@@ -24,7 +23,7 @@ func RegisterJSON(a mem.Allocator, registry *eval.Registry, data []byte) bool {
 	if raw.Kind != core.List {
 		return false
 	}
-	declarations := slices.Make[Plugin](a, len(raw.List))
+	declarations := make([]Plugin, len(raw.List))
 	defer freePluginDeclarations(a, declarations)
 	for i := range raw.List {
 		value := raw.List[i]
@@ -47,7 +46,7 @@ func RegisterJSON(a mem.Allocator, registry *eval.Registry, data []byte) bool {
 		if operations.Duplicate || !operations.Found || operations.Value.Kind != core.List {
 			return false
 		}
-		declarations[i].Operations = slices.Make[Operation](a, len(operations.Value.List))
+		declarations[i].Operations = make([]Operation, len(operations.Value.List))
 		for j := range operations.Value.List {
 			op := operations.Value.List[j]
 			if op.Kind != core.Record {
@@ -87,13 +86,13 @@ func RegisterJSON(a mem.Allocator, registry *eval.Registry, data []byte) bool {
 					}
 					switch capability.Text {
 					case "read":
-						declaration.Capabilities = slices.Append(a, declaration.Capabilities, eval.Read)
+						declaration.Capabilities = append(declaration.Capabilities, eval.Read)
 					case "write":
-						declaration.Capabilities = slices.Append(a, declaration.Capabilities, eval.Write)
+						declaration.Capabilities = append(declaration.Capabilities, eval.Write)
 					case "run":
-						declaration.Capabilities = slices.Append(a, declaration.Capabilities, eval.Run)
+						declaration.Capabilities = append(declaration.Capabilities, eval.Run)
 					case "env":
-						declaration.Capabilities = slices.Append(a, declaration.Capabilities, eval.Env)
+						declaration.Capabilities = append(declaration.Capabilities, eval.Env)
 					default:
 						return false
 					}
@@ -108,11 +107,11 @@ func RegisterJSON(a mem.Allocator, registry *eval.Registry, data []byte) bool {
 func freePluginDeclarations(a mem.Allocator, declarations []Plugin) {
 	for i := range declarations {
 		for j := range declarations[i].Operations {
-			slices.Free(a, declarations[i].Operations[j].Capabilities)
+			mem.FreeSlice(nil, declarations[i].Operations[j].Capabilities)
 		}
-		slices.Free(a, declarations[i].Operations)
+		mem.FreeSlice(nil, declarations[i].Operations)
 	}
-	slices.Free(a, declarations)
+	mem.FreeSlice(nil, declarations)
 }
 
 func jsonFieldValue(value core.Value, key string) jsonField {

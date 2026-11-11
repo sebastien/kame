@@ -4,10 +4,10 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // produce advances one rule instance through dependency resolution, rendering,
@@ -26,8 +26,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		freeStrings(p.Alloc, entry.OwnershipPaths)
 		entry.OwnershipPaths = nil
 		p.clearReasonIdentities(entry)
-		slices.Free(p.Alloc, entry.CacheStdout)
-		slices.Free(p.Alloc, entry.CacheStderr)
+		mem.FreeSlice(nil, entry.CacheStdout)
+		mem.FreeSlice(nil, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
 		entry.KashRunning = false
@@ -200,7 +200,7 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		return p.beginFileContext(c, index, rendered, false)
 	}
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
-	slices.Free(p.Alloc, entry.LineSpans)
+	mem.FreeSlice(nil, entry.LineSpans)
 	entry.LineSpans = rendered.LineSpans
 	defer eval.FreeEffects(p.Alloc, effects)
 	defer freeStrings(p.Alloc, writePaths)
@@ -297,7 +297,7 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		pending.WritePaths = cloneStrings(p.Alloc, writePaths)
 		pending.HasYield = hasYield(effects)
 		for i := range effects {
-			pending.Effects = slices.Append(p.Alloc, pending.Effects, eval.Effect{Kind: effects[i].Kind, Span: effects[i].Span, Data: slices.Clone(p.Alloc, effects[i].Data)})
+			pending.Effects = append(pending.Effects, eval.Effect{Kind: effects[i].Kind, Span: effects[i].Span, Data: slices.Clone(effects[i].Data)})
 		}
 		entry.ForwardEffects = pending
 		return p.continueForwardEffects(c, index)
@@ -390,8 +390,8 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		// completion resumes this producer.
 		payload := host.RecipeExecutionPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment, entry.Shell)
 		display := processDisplayFromPayload(p.Alloc, payload, entry.Shell)
-		p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
+		p.Pending = append(p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
+		p.Outbound = append(p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
 		c.Submit(request.ID)
 		return core.ProducerSubmitted
 	}
@@ -406,7 +406,7 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		return core.ProducerFailed
 	}
 	display := processDisplayFromHost(p.Alloc, request)
-	p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
+	p.Pending = append(p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 	c.Submit(request.ID)
 	return core.ProducerSubmitted
 }

@@ -88,7 +88,14 @@ def terminalWait(command: list[str], root: Path, *, color: bool = True, environm
 			fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 20, 0, 0))
 			process.send_signal(signal.SIGWINCH)
 			waitFor(lambda: refreshed() and len(log) > beforeResize, process)
-			assert b"\x1b[1A" not in log[beforeResize:], "resize erased reflowed scrollback"
+			# The PTY can still contain a frame queued before SIGWINCH was
+			# serviced. Drain that delivery before checking subsequent paints.
+			time.sleep(0.15)
+			refreshed()
+			settledResize = len(log)
+			time.sleep(0.25)
+			refreshed()
+			assert b"\x1b[1A" not in log[settledResize:], "resize erased reflowed scrollback"
 		stop(process)
 		assert process.returncode != 0
 		assert not (root / "terminal.out").read_text()

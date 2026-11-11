@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"kame/cli"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"os"
+	"path"
+
+	"strconv"
 )
 
 type cacheListEntry struct {
@@ -39,9 +39,9 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 	if parsed.Args[0] == "list" {
 		var records []cacheListEntry
 		for i := range buckets {
-			name := path.Join(mem.System, parsed.Directory, ".kame/cache/"+buckets[i].Directory)
-			entries, err := os.ReadDir(mem.System, name)
-			if err == os.ErrNotExist {
+			name := path.Join(parsed.Directory, ".kame/cache/"+buckets[i].Directory)
+			entries, err := os.ReadDir(name)
+			if os.IsNotExist(err) {
 				mem.FreeString(mem.System, name)
 				continue
 			}
@@ -52,13 +52,13 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 				return 1
 			}
 			for j := range entries {
-				file := path.Join(mem.System, name, entries[j].Name)
+				file := path.Join(name, entries[j].Name())
 				info, statErr := os.Lstat(file)
 				if statErr == nil && info.Mode().IsRegular() {
-					records = slices.Append(mem.System, records, cacheListEntry{Backend: buckets[i].Name, Key: cloneCommandText(entries[j].Name), Bytes: info.Size()})
-				} else if statErr != nil && statErr != os.ErrNotExist {
+					records = append(records, cacheListEntry{Backend: buckets[i].Name, Key: cloneCommandText(entries[j].Name()), Bytes: info.Size()})
+				} else if statErr != nil && !os.IsNotExist(statErr) {
 					mem.FreeString(mem.System, file)
-					os.FreeDirEntry(mem.System, entries)
+
 					mem.FreeString(mem.System, name)
 					freeCacheList(records)
 					cliError(errOut, "FS_ERR", "cannot inspect cache record")
@@ -66,10 +66,10 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 				}
 				mem.FreeString(mem.System, file)
 			}
-			os.FreeDirEntry(mem.System, entries)
+
 			mem.FreeString(mem.System, name)
 		}
-		var buffer = bytes.NewBuffer(mem.System, nil)
+		var buffer = bytes.Buffer{}
 		e := json.NewEncoder(&buffer)
 		e.BeginArray()
 		for i := range records {
@@ -90,16 +90,16 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		} else {
 			cli.WriteReport(out, "cache list", buffer.String(), stdoutColor)
 		}
-		buffer.Free()
+		buffer.Reset()
 		freeCacheList(records)
 		return 0
 	}
 	removed := 0
 	wouldRemove := 0
 	for i := range buckets {
-		name := path.Join(mem.System, parsed.Directory, ".kame/cache/"+buckets[i].Directory)
-		entries, err := os.ReadDir(mem.System, name)
-		if err == os.ErrNotExist {
+		name := path.Join(parsed.Directory, ".kame/cache/"+buckets[i].Directory)
+		entries, err := os.ReadDir(name)
+		if os.IsNotExist(err) {
 			mem.FreeString(mem.System, name)
 			continue
 		}
@@ -109,7 +109,7 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 			return 1
 		}
 		for j := range entries {
-			file := path.Join(mem.System, name, entries[j].Name)
+			file := path.Join(name, entries[j].Name())
 			info, statErr := os.Lstat(file)
 			if statErr == nil && info.Mode().IsRegular() {
 				if parsed.DryRun {
@@ -120,26 +120,26 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 				removeErr := os.Remove(file)
 				if removeErr == nil {
 					removed++
-				} else if removeErr != os.ErrNotExist {
+				} else if !os.IsNotExist(removeErr) {
 					mem.FreeString(mem.System, file)
-					os.FreeDirEntry(mem.System, entries)
+
 					mem.FreeString(mem.System, name)
 					cliError(errOut, "FS_ERR", "cannot remove cache record")
 					return 1
 				}
-			} else if statErr != nil && statErr != os.ErrNotExist {
+			} else if statErr != nil && !os.IsNotExist(statErr) {
 				mem.FreeString(mem.System, file)
-				os.FreeDirEntry(mem.System, entries)
+
 				mem.FreeString(mem.System, name)
 				cliError(errOut, "FS_ERR", "cannot inspect cache record")
 				return 1
 			}
 			mem.FreeString(mem.System, file)
 		}
-		os.FreeDirEntry(mem.System, entries)
+
 		mem.FreeString(mem.System, name)
 	}
-	buffer := make([]byte, 24)
+
 	if cliDiagnosticJSON {
 		e := json.NewEncoder(out)
 		e.BeginObject()
@@ -160,11 +160,11 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		io.WriteString(out, "\n")
 	} else {
 		if parsed.DryRun {
-			io.WriteString(errOut, "cache clean · would remove "+strconv.Itoa(buffer, wouldRemove)+" cache records\n")
+			io.WriteString(errOut, "cache clean · would remove "+strconv.Itoa(wouldRemove)+" cache records\n")
 			return 0
 		}
 		cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
-		io.WriteString(errOut, "cache clean · removed "+strconv.Itoa(buffer, removed)+" cache records\n")
+		io.WriteString(errOut, "cache clean · removed "+strconv.Itoa(removed)+" cache records\n")
 	}
 	return 0
 }
@@ -173,5 +173,5 @@ func freeCacheList(records []cacheListEntry) {
 	for i := range records {
 		mem.FreeString(mem.System, records[i].Key)
 	}
-	slices.Free(mem.System, records)
+	mem.FreeSlice(nil, records)
 }

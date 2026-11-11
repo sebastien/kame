@@ -3,11 +3,11 @@ package eval
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // Lower syntax, not values: pipe must validate its complete shape before any
@@ -22,7 +22,7 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 			// The policy is part of the capture invocation, not a stage setup.
 			graph.CapturePolicy = processExpressionWord(c.Run, e.Items[1])
 		}
-		graph.Items = slices.Append(c.Run, graph.Items, mem.Alloc[expr.Expr](c.Run))
+		graph.Items = append(graph.Items, mem.Alloc[expr.Expr](c.Run))
 		r := lowerProcessStage(c, graph.Items[0], e, false)
 		if r.Diagnostic.Code != "" {
 			return r
@@ -33,7 +33,7 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 		}
 		for i := 1; i < len(e.Items); i++ {
 			stage := mem.Alloc[expr.Expr](c.Run)
-			graph.Items = slices.Append(c.Run, graph.Items, stage)
+			graph.Items = append(graph.Items, stage)
 			r := lowerProcessStage(c, stage, e.Items[i], true)
 			if r.Diagnostic.Code != "" {
 				return r
@@ -72,15 +72,15 @@ func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool
 		}
 		setup := mem.Alloc[expr.Expr](c.Run)
 		setup.Kind, setup.Text, setup.Span = expr.CommandSetup, key.Text, key.Span
-		setup.Items = slices.Append(c.Run, setup.Items, processExpressionWord(c.Run, e.Items[i+1]))
-		stage.Items = slices.Append(c.Run, stage.Items, setup)
+		setup.Items = append(setup.Items, processExpressionWord(c.Run, e.Items[i+1]))
+		stage.Items = append(stage.Items, setup)
 		i += 2
 	}
 	if i == len(e.Items) {
 		return failure(c.Run, "EXPR_INVALID", e.Span, "run! requires an executable")
 	}
 	for ; i < len(e.Items); i++ {
-		stage.Items = slices.Append(c.Run, stage.Items, processExpressionWord(c.Run, e.Items[i]))
+		stage.Items = append(stage.Items, processExpressionWord(c.Run, e.Items[i]))
 	}
 	return Result{}
 }
@@ -88,7 +88,7 @@ func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool
 func processExpressionWord(a mem.Allocator, e *expr.Expr) *expr.Expr {
 	word := mem.Alloc[expr.Expr](a)
 	word.Kind, word.Bool, word.Span = expr.CommandWord, true, e.Span
-	word.Parts = slices.Append(a, word.Parts, expr.StringPart{Expr: expr.Clone(a, e), Span: e.Span})
+	word.Parts = append(word.Parts, expr.StringPart{Expr: expr.Clone(a, e), Span: e.Span})
 	return word
 }
 
@@ -124,9 +124,9 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 			{Key: "signal", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "signal")}},
 			{Key: "outcome", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "outcome")}},
 		}
-		stages = slices.Append(a, stages, core.NewRecord(a, parts))
+		stages = append(stages, core.NewRecord(a, parts))
 		v := &stages[len(stages)-1]
-		v.Record = slices.Append(a, v.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(stage)}})
+		v.Record = append(v.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(stage)}})
 	}
 	fields := []core.RecordField{
 		{Key: "status", Value: core.Value{Kind: core.Int, Int: status}},
@@ -136,12 +136,12 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 		{Key: "stderrCaptured", Value: core.Value{Kind: core.Bool}},
 	}
 	value := core.NewRecord(a, fields)
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(completion)}})
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: owned(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: host.EffectiveSignal(completion)}})
+	value.Record = append(value.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(completion)}})
+	value.Record = append(value.Record, core.RecordField{Key: owned(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: host.EffectiveSignal(completion)}})
 	fields[2].Value.Free(a)
 	for i := range stages {
 		stages[i].Free(a)
 	}
-	slices.Free(a, stages)
+	mem.FreeSlice(nil, stages)
 	return Result{Value: value}
 }

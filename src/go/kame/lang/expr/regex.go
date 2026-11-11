@@ -1,8 +1,7 @@
 package expr
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type regexNodeKind int
@@ -73,7 +72,7 @@ func (p *regexProgram) Free(a mem.Allocator) {
 	if p == nil {
 		return
 	}
-	slices.Free(a, p.Instructions)
+	mem.FreeSlice(nil, p.Instructions)
 	mem.Free(a, p)
 }
 
@@ -88,16 +87,16 @@ func compileRegex(a mem.Allocator, text string) regexCompileResult {
 		if at < 0 {
 			at = parser.pos
 		}
-		slices.Free(a, parser.nodes)
+		mem.FreeSlice(nil, parser.nodes)
 		return regexCompileResult{ErrorOffset: at}
 	}
-	accept := slices.Append(a, []regexInstruction(nil), regexInstruction{Op: regexAccept, Out1: -1, Out2: -1})
+	accept := append([]regexInstruction(nil), regexInstruction{Op: regexAccept, Out1: -1, Out2: -1})
 	program := mem.Alloc[regexProgram](a)
 	program.Alloc = a
 	program.Text = text
 	program.Instructions = accept
 	program.Start = compileRegexNode(a, parser.nodes, root, 0, &program.Instructions)
-	slices.Free(a, parser.nodes)
+	mem.FreeSlice(nil, parser.nodes)
 	return regexCompileResult{Program: program, ErrorOffset: -1, Valid: true}
 }
 
@@ -109,7 +108,7 @@ func (p *regexParser) fail(at int) {
 }
 
 func (p *regexParser) add(node regexNode) int {
-	p.nodes = slices.Append(p.a, p.nodes, node)
+	p.nodes = append(p.nodes, node)
 	return len(p.nodes) - 1
 }
 
@@ -321,18 +320,18 @@ func compileRegexNode(a mem.Allocator, nodes []regexNode, index int, next int, i
 }
 
 func appendRegexInstruction(a mem.Allocator, instructions *[]regexInstruction, inst regexInstruction) int {
-	*instructions = slices.Append(a, *instructions, inst)
+	*instructions = append(*instructions, inst)
 	return len(*instructions) - 1
 }
 
 func regexFullMatch(a mem.Allocator, program *regexProgram, text string, budget *int) (bool, bool) {
-	currentBuffer := slices.Make[int](a, len(program.Instructions))
-	nextBuffer := slices.Make[int](a, len(program.Instructions))
+	currentBuffer := make([]int, len(program.Instructions))
+	nextBuffer := make([]int, len(program.Instructions))
 	current, next := currentBuffer, nextBuffer
-	seen := slices.Make[bool](a, len(program.Instructions))
-	defer slices.Free(a, currentBuffer)
-	defer slices.Free(a, nextBuffer)
-	defer slices.Free(a, seen)
+	seen := make([]bool, len(program.Instructions))
+	defer mem.FreeSlice(nil, currentBuffer)
+	defer mem.FreeSlice(nil, nextBuffer)
+	defer mem.FreeSlice(nil, seen)
 	currentCount, nextCount := 0, 0
 	if !regexAddState(program, program.Start, current, &currentCount, seen, budget) {
 		return false, true

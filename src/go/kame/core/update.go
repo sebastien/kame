@@ -1,8 +1,7 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type UpdateKind int
@@ -55,7 +54,7 @@ func (s *Subscription) pushValue(event Event) {
 		}
 		s.values = s.values[:1]
 	}
-	s.values = slices.Append(s.Alloc, s.values, event)
+	s.values = append(s.values, event)
 }
 
 // Next returns the next retained update in publication order, or the zero
@@ -105,8 +104,8 @@ func (s *Subscription) free() {
 	for i := range s.values {
 		s.values[i].Value.Free(s.Alloc)
 	}
-	slices.Free(s.Alloc, s.values)
-	slices.Free(s.Alloc, s.updates)
+	mem.FreeSlice(nil, s.values)
+	mem.FreeSlice(nil, s.updates)
 	s.unsubbed = true
 	mem.Free(s.Alloc, s)
 }

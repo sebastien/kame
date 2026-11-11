@@ -1,11 +1,11 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
-	"solod.dev/so/testing"
 )
 
 func TestSelectorMissingContextDiagnostics(t *testing.T) {

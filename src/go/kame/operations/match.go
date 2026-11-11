@@ -2,10 +2,9 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func opMatch(c *eval.Context, state any, values []core.Value) eval.Result {
@@ -15,7 +14,7 @@ func opMatch(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
 	invalid := len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers == 0 || parsed.Pattern.References != 0
-	slices.Free(c.Run, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	if invalid {
 		parsed.Pattern.Free(c.Run)
 		discardArgCallables(c, values)
@@ -50,7 +49,7 @@ func matchCall(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	pattern := state.(*expr.Pattern)
 	matched := pattern.MatchText(c.Run, values[0].Text)
-	slices.Free(c.Run, matched.Captures)
+	mem.FreeSlice(nil, matched.Captures)
 	if matched.Limited {
 		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")
 	}

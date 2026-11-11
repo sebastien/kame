@@ -3,11 +3,13 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+	"path"
+
+	"strconv"
+	"strings"
 )
 
 func (p *Program) application(scope *Scope, expression *expr.Expr, context *Context) Result {
@@ -91,12 +93,29 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		result := failure(context.Run, "EXPR_INVALID", head.Span, "application head is "+core.KindName(kind)+", not callable")
 		if expression.Expansion == "@(" && len(expression.Items) == 1 && (head.Kind == expr.Name || head.Kind == expr.Reference) {
 			name := expr.Compact(context.Run, head)
-			result.Diagnostic.Tips = slices.Append(context.Run, result.Diagnostic.Tips, owned(context.Run, "Use @{"+name+"} for lookup, rather than calling it."))
+			result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(context.Run, "Use @{"+name+"} for lookup, rather than calling it."))
 			mem.FreeString(context.Run, name)
 		}
 		return result
 	}
 	function := callee.Value.Callable.(*Function)
+	if function.KashConstructor && len(expression.Items) == 2 && expression.Items[1].Kind == expr.Path {
+		operand := expression.Items[1]
+		freeCallables(context.Run, &callee.Value)
+		callee.Value.Free(context.Run)
+		if operand.Pattern != nil || len(operand.Parts) != 0 || strings.ContainsAny(operand.Text, "\x00*?[]{}\\") || (!strings.HasPrefix(operand.Text, "./") && !strings.HasPrefix(operand.Text, "../") && !strings.HasPrefix(operand.Text, "/")) || (!strings.HasSuffix(operand.Text, ".kash") && !strings.HasSuffix(operand.Text, ".ksh")) {
+			return failure(context.Run, "EXPR_INVALID", operand.Span, "Kash module requires a literal .kash or .ksh path without patterns or interpolation")
+		}
+		base := context.SourceDirectory()
+		if base.Diagnostic.Code != "" {
+			return base
+		}
+		resolved := path.Join(base.Value.Text, operand.Text)
+		base.Free(context.Run)
+		result := p.loadKashModule(resolved, context, expression.Span)
+		mem.FreeString(context.Run, resolved)
+		return result
+	}
 	context.Scope = scope
 	result := p.call(function, expression.Items[1:], context, expression.Span)
 	freeCallables(context.Run, &callee.Value)
@@ -165,14 +184,36 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	}
 	context.Scope = scope
 	completedEffects, completedPaths := len(context.Effects), len(context.WritePaths)
+	// Operations consume callable wrappers; suspended operands retain independent owners.
+	var retained []core.Value
+	if context.sequencedOperand {
+		for i := range operands.Values {
+			if operands.Values[i].HasCallable() {
+				retained = operands.Values
+				operands.Values = make([]core.Value, len(retained))
+				for j := range retained {
+					operands.Values[j] = borrowValue(context.Run, retained[j])
+				}
+				break
+			}
+		}
+	}
 	result := p.invokeOperation(operation, operands.Values, arguments, context, span)
+	if retained != nil {
+		freeValues(context.Run, operands.Values)
+		operands.Values = retained
+	}
 	// A suspended operation owns its progress, but its completed operands also
 	// need to survive: rebuilding a large glob list on every lstat is quadratic.
 	if result.Waiting && p.retainArguments(scope, context, span, operation.Name, operands.Values, len(arguments), operands.Facts, effects, completedEffects, paths, completedPaths) {
 		return result
 	}
 	// Operations release consumed callable wrappers; release only value storage.
-	freeValues(context.Run, operands.Values)
+	if retained != nil {
+		freeValuesWithCallables(context.Run, operands.Values)
+	} else {
+		freeValues(context.Run, operands.Values)
+	}
 	return result
 }
 
@@ -298,6 +339,7 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 		attachNamedFrame(&result, context, span, "operation", function.OperationName)
 		return result
 	}
+	context.observeDefinitionSource(function.Definition)
 	scope := context.Scope
 	operands := p.argumentValues(scope, arguments, context, span)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
@@ -315,6 +357,7 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
+	context.observeDefinitionSource(function.Definition)
 	if context.PurePredicate && function.Kind == FunctionInvocation {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts")
 	}
@@ -386,7 +429,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		// The section scope owns clones of the arguments so a closure that
 		// escapes the call keeps its arguments alive. The caller frees the
 		// original values.
-		owned := slices.Make[core.Value](context.Run, len(values))
+		owned := make([]core.Value, len(values))
 		for i := range values {
 			owned[i] = values[i].Clone(context.Run)
 		}
@@ -446,6 +489,10 @@ func attachNamedFrame(result *Result, context *Context, span source.Span, kind s
 		a = mem.System
 	}
 	location := context.Program.LocateSource(context.Source, span)
+	if context.Program != nil && context.Program.Script != nil && context.Source == context.Program.Script.Source.Name && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
+		part := context.Program.SourceParts[context.SourceOrigin-1]
+		location = Location{Source: part.Name, Span: source.Span{Start: span.Start - part.Start + part.Offset, End: span.End - part.Start + part.Offset}}
+	}
 	if context.Source != "" && location.Source == "" {
 		return
 	}
@@ -469,17 +516,17 @@ func attachNamedFrame(result *Result, context *Context, span source.Span, kind s
 			return
 		}
 	}
-	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
 }
 
 func arityFailure(a mem.Allocator, span source.Span, name string, count int, min int, max int) Result {
-	var countBuffer, minBuffer, maxBuffer [strconv.MaxIntBase10Len]byte
-	got := strconv.FormatInt(countBuffer[:], int64(count), 10)
-	expected := strconv.FormatInt(minBuffer[:], int64(min), 10)
+
+	got := strconv.FormatInt(int64(count), 10)
+	expected := strconv.FormatInt(int64(min), 10)
 	if max < 0 {
 		expected = "at least " + expected
 	} else if max != min {
-		expected += " to " + strconv.FormatInt(maxBuffer[:], int64(max), 10)
+		expected += " to " + strconv.FormatInt(int64(max), 10)
 	}
 	unit := "arguments"
 	if min == 1 && (max == 1 || max < 0) {

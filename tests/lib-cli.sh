@@ -46,7 +46,7 @@ CLI_STATUS=""
 function cli_require_tools {
 	local missing=()
 	local tool
-	for tool in so jq timeout flock sha256sum ps touch mktemp diff realpath readlink; do
+	for tool in go jq timeout flock sha256sum ps touch mktemp diff realpath readlink; do
 		if ! command -v "$tool" >/dev/null 2>&1; then
 			missing+=("$tool")
 		fi
@@ -88,8 +88,8 @@ function cli_build {
 		[ -x "$CLI_BIN" ] || { test-fail "CLI binary missing: $CLI_BIN"; exit 1; }
 		return 0
 	fi
-	if ! command -v so >/dev/null 2>&1; then
-		test-fail "the 'so' toolchain is not available"
+	if ! command -v go >/dev/null 2>&1; then
+		test-fail "the 'go' toolchain is not available"
 		exit 1
 	fi
 	"$CLI_ROOT/src/sh/generate-version.sh"
@@ -116,9 +116,9 @@ function cli_build {
 		else
 			cd "$CLI_ROOT/src/go/kame" || exit 1
 			if [[ "$CLI_BIN" == *.sanitize ]]; then
-				CC=clang CFLAGS="${CFLAGS:--O2} -DKAME_BUILD_MODE_SANITIZE" so build -check=sanitize -panic=abort -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
+				CGO_ENABLED=0 go build -gcflags=all=-d=checkptr=2 -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
 			else
-				so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
+				CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
 			fi
 		fi
 	) 9>"$lock" 2>"$build_log"; then

@@ -2,11 +2,11 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope, context *Context) Result {
@@ -19,18 +19,18 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 	var children []*expr.Expr
 	for i := range value.Parts {
 		if value.Parts[i].Expr != nil {
-			children = slices.Append(run, children, value.Parts[i].Expr)
+			children = append(children, value.Parts[i].Expr)
 		}
 	}
 	operands := p.argumentValues(scope, children, context, value.Span)
-	slices.Free(run, children)
+	mem.FreeSlice(nil, children)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	defer freeValuesWithCallables(run, operands.Values)
 	next := 0
-	b := strings.NewBuilder(run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range value.Parts {
 		part := value.Parts[i]
 		if part.Kind == template.Literal {

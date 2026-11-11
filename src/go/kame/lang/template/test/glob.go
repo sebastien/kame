@@ -1,11 +1,11 @@
-package template_test
+package templatecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 func TestCaptureGlobValidationRetainsDiagnostics(t *testing.T) {
@@ -29,7 +29,7 @@ func TestCaptureGlobValidationRetainsDiagnostics(t *testing.T) {
 			}
 		}
 		parsed.Pattern.Free(a)
-		slices.Free(a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		target.Free()
 	}
 }

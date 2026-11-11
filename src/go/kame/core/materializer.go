@@ -1,8 +1,7 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type Materializer struct {
@@ -32,7 +31,7 @@ type AtomResult struct {
 func NewMaterializer(a mem.Allocator, source *Source) *Materializer {
 	m := mem.Alloc[Materializer](a)
 	m.Alloc = a
-	m.frames = slices.Append(a, m.frames, sourceFrame{source: source})
+	m.frames = append(m.frames, sourceFrame{source: source})
 	return m
 }
 
@@ -72,10 +71,10 @@ func (m *Materializer) Next(c *EngineContext) AtomResult {
 		return AtomResult{Value: atom.Value, Published: true, Waiting: atom.Wait}
 	case AtomChunk:
 		if len(frame.collections) == 0 {
-			frame.chunks = slices.Append(m.Alloc, frame.chunks, atom.Value)
+			frame.chunks = append(frame.chunks, atom.Value)
 		} else {
 			last := len(frame.collections) - 1
-			frame.collections[last] = slices.Append(m.Alloc, frame.collections[last], atom.Value)
+			frame.collections[last] = append(frame.collections[last], atom.Value)
 		}
 	case AtomEndBatch:
 		if len(frame.collections) != 0 {
@@ -83,7 +82,7 @@ func (m *Materializer) Next(c *EngineContext) AtomResult {
 		}
 		return AtomResult{Value: commit(frame), Published: true}
 	case AtomStartCollection:
-		frame.collections = slices.Append(m.Alloc, frame.collections, nil)
+		frame.collections = append(frame.collections, nil)
 	case AtomEndCollection:
 		if len(frame.collections) == 0 {
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
@@ -92,16 +91,16 @@ func (m *Materializer) Next(c *EngineContext) AtomResult {
 		list := Value{Kind: List, List: frame.collections[last]}
 		frame.collections = frame.collections[:last]
 		if len(frame.collections) == 0 {
-			frame.chunks = slices.Append(m.Alloc, frame.chunks, list)
+			frame.chunks = append(frame.chunks, list)
 		} else {
 			last = len(frame.collections) - 1
-			frame.collections[last] = slices.Append(m.Alloc, frame.collections[last], list)
+			frame.collections[last] = append(frame.collections[last], list)
 		}
 	case AtomNested:
 		if atom.Nested == nil {
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
 		}
-		m.frames = slices.Append(m.Alloc, m.frames, sourceFrame{source: atom.Nested})
+		m.frames = append(m.frames, sourceFrame{source: atom.Nested})
 	case AtomEndStream:
 		if len(frame.collections) != 0 {
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
@@ -111,9 +110,10 @@ func (m *Materializer) Next(c *EngineContext) AtomResult {
 		if published {
 			value = commit(frame)
 		}
-		// The frame leaves the stack here; committed chunks moved into value,
-		// so release the collection builder storage the frame still owns.
-		slices.Free(m.Alloc, frame.collections)
+		mem.
+			// The frame leaves the stack here; committed chunks moved into value,
+			// so release the collection builder storage the frame still owns.
+			FreeSlice(nil, frame.collections)
 		frame.collections = nil
 		m.frames = m.frames[:len(m.frames)-1]
 		s.release(m.Alloc)
@@ -171,14 +171,14 @@ func (m *Materializer) freeFrame(frame *sourceFrame) {
 	for i := range frame.chunks {
 		frame.chunks[i].Free(m.Alloc)
 	}
-	slices.Free(m.Alloc, frame.chunks)
+	mem.FreeSlice(nil, frame.chunks)
 	for i := range frame.collections {
 		for j := range frame.collections[i] {
 			frame.collections[i][j].Free(m.Alloc)
 		}
-		slices.Free(m.Alloc, frame.collections[i])
+		mem.FreeSlice(nil, frame.collections[i])
 	}
-	slices.Free(m.Alloc, frame.collections)
+	mem.FreeSlice(nil, frame.collections)
 	frame.source.release(m.Alloc)
 }
 
@@ -187,7 +187,7 @@ func (m *Materializer) discard() {
 	for i := len(m.frames); i > 0; i-- {
 		m.freeFrame(&m.frames[i-1])
 	}
-	slices.Free(m.Alloc, m.frames)
+	mem.FreeSlice(nil, m.frames)
 	m.frames = nil
 }
 

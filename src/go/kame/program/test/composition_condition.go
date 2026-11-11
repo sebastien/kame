@@ -1,12 +1,12 @@
-package program_test
+package programcheck
 
 import (
 	"kame/diagnostic"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T) {
@@ -47,8 +47,8 @@ func TestCompositionConditionUsesEvaluationDirectory(t *testing.T) {
 
 func TestCompositionConditionSourcesLargePrefix(t *testing.T) {
 	a := t.Allocator()
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	b.WriteByte('#')
 	for i := 0; i < 70000; i++ {
 		b.WriteByte('x')

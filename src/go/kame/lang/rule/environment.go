@@ -1,9 +1,10 @@
 package rule
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func (p *parser) ruleMetadata(r *Rule, start int, end int) {
@@ -14,7 +15,7 @@ func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 	}
 	parsed := expr.ParsePrefix(p.a, p.s, start)
 	p.takeDiagnostics(parsed.Diagnostics)
-	slices.Free(p.a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	r.Metadata = parsed.Expr
 	if parsed.End != end || r.Metadata == nil || r.Metadata.Kind != expr.Record {
 		p.error(start, end, "rule metadata must be a record")
@@ -34,7 +35,7 @@ func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 // Literal assignments keep registration free of evaluation and host effects.
 func (p *parser) ruleEnvironment(r *Rule, start int, end int) {
 	items := ranges(p.a, p.s.Text, start, end)
-	defer slices.Free(p.a, items)
+	defer mem.FreeSlice(nil, items)
 	if len(items) < 2 || p.s.Text[items[0].Start:items[0].End] != "env" {
 		p.error(start, end, "expected env followed by quoted NAME=value assignments")
 		return
@@ -43,9 +44,9 @@ func (p *parser) ruleEnvironment(r *Rule, start int, end int) {
 		span := items[i]
 		parsed := expr.ParsePrefix(p.a, p.s, span.Start)
 		p.takeDiagnostics(parsed.Diagnostics)
-		slices.Free(p.a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		literal := parsed.Expr != nil && parsed.Expr.Kind == expr.String && parsed.End == span.End
-		b := strings.NewBuilder(p.a)
+		b := strings.Builder{}
 		if literal {
 			for j := range parsed.Expr.Parts {
 				if parsed.Expr.Parts[j].Expr != nil {
@@ -60,9 +61,9 @@ func (p *parser) ruleEnvironment(r *Rule, start int, end int) {
 		if !literal || equal < 1 || !environmentName(value[:equal]) || strings.IndexByte(value, 0) >= 0 {
 			p.error(span.Start, span.End, "environment assignment must be a literal quoted NAME=value with a valid name and no NUL")
 		} else {
-			r.Environment = slices.Append(p.a, r.Environment, EnvironmentAssignment{Text: p.s.Text[span.Start:span.End], Value: owned(p.a, value), Span: span})
+			r.Environment = append(r.Environment, EnvironmentAssignment{Text: p.s.Text[span.Start:span.End], Value: owned(p.a, value), Span: span})
 		}
-		b.Free()
+		b.Reset()
 		expr.Free(p.a, parsed.Expr)
 	}
 }

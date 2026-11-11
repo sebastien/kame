@@ -2,7 +2,7 @@ package program
 
 import (
 	"kame/core"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 func (p *Program) sourceSignature() core.Signature {

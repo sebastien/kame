@@ -1,10 +1,9 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func (p *kashParser) withBlock(level int, start int, wordEnd int) *expr.Expr {
@@ -44,12 +43,12 @@ func (p *kashParser) withBlock(level int, start int, wordEnd int) *expr.Expr {
 			s.error(keyStart, pos, "with setup requires a value")
 			break
 		}
-		part := expr.ParseCommandSetupValuePrefix(s.Alloc, s.Source, pos)
+		part := expr.ParseCommandSetupValuePrefix(s.Alloc, s.Source, pos, key[1:])
 		s.takeDiagnostics(part.Diagnostics)
 		setup := mem.Alloc[expr.Expr](s.Alloc)
 		setup.Kind, setup.Text, setup.Span = expr.CommandSetup, key[1:], source.Span{Start: keyStart, End: part.End}
-		setup.Items = slices.Append(s.Alloc, setup.Items, part.Expr)
-		e.Items = slices.Append(s.Alloc, e.Items, setup)
+		setup.Items = append(setup.Items, part.Expr)
+		e.Items = append(e.Items, setup)
 		if part.End == pos {
 			s.error(pos, pos, "with setup requires a value")
 			break

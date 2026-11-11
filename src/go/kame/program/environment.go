@@ -2,9 +2,10 @@ package program
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // claimEnvironment binds a recipe and its prerequisite closure to one effective
@@ -48,17 +49,17 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	if entry.EnvironmentClaimed {
 		// Suspended Kash contexts borrow this snapshot; an equal claim must keep it alive.
 		if sameEnvironment(entry.Environment, environment) {
-			slices.Free(p.Alloc, environment)
+			mem.FreeSlice(nil, environment)
 			return true
 		}
 		if entry.Node.Interest > 0 {
-			slices.Free(p.Alloc, environment)
+			mem.FreeSlice(nil, environment)
 			return false
 		}
 		p.Engine.Invalidate(entry.Node)
 	}
 	resolved := cloneStrings(p.Alloc, environment)
-	slices.Free(p.Alloc, environment)
+	mem.FreeSlice(nil, environment)
 	freeStrings(p.Alloc, entry.Environment)
 	entry.Environment = resolved
 	entry.EnvironmentClaimed = true
@@ -68,7 +69,7 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 func (p *Program) setEnvironment(environment []string, assignment string) []string {
 	equal := strings.IndexByte(assignment, '=')
 	if equal < 0 {
-		return slices.Append(p.Alloc, environment, assignment)
+		return append(environment, assignment)
 	}
 	name := assignment[:equal]
 	for i := range environment {
@@ -78,7 +79,7 @@ func (p *Program) setEnvironment(environment []string, assignment string) []stri
 			return environment
 		}
 	}
-	return slices.Append(p.Alloc, environment, assignment)
+	return append(environment, assignment)
 }
 
 func sameEnvironment(left []string, right []string) bool {

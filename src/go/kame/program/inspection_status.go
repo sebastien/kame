@@ -3,11 +3,11 @@ package program
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type inspectionStatusState struct {
@@ -37,8 +37,8 @@ type inspectionStatusReply struct {
 
 func (s *inspectionStatusState) free(a mem.Allocator) {
 	s.Stored.Free(a)
-	slices.Free(a, s.Outputs)
-	slices.Free(a, s.Statuses)
+	mem.FreeSlice(nil, s.Outputs)
+	mem.FreeSlice(nil, s.Statuses)
 	mem.Free(a, s)
 }
 
@@ -61,7 +61,7 @@ func (p *Program) inspectTargetStatus(plan Plan) inspectionStatusResult {
 			mem.Free(p.Alloc, state)
 			return inspectionStatusResult{}
 		}
-		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: plan.Rule, Node: node, Plan: clonePlan(p.Alloc, plan), Captures: cloneCaptures(p.Alloc, plan.Captures), Inspection: true, InspectionStatus: mem.Alloc[inspectionStatusState](p.Alloc)})
+		p.Instances = append(p.Instances, instance{Rule: plan.Rule, Node: node, Plan: clonePlan(p.Alloc, plan), Captures: cloneCaptures(p.Alloc, plan.Captures), Inspection: true, InspectionStatus: mem.Alloc[inspectionStatusState](p.Alloc)})
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
 	node := p.Instances[index].Node
@@ -86,7 +86,7 @@ func (p *Program) inspectTargetStatus(plan Plan) inspectionStatusResult {
 	}
 	s := p.Instances[index].InspectionStatus
 	for len(s.Statuses) < len(plan.Outputs) {
-		s.Statuses = slices.Append(p.Alloc, s.Statuses, "unknown")
+		s.Statuses = append(s.Statuses, "unknown")
 	}
 	return inspectionStatusResult{State: p.Instances[index].InspectionStatus}
 }
@@ -157,13 +157,13 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 	context := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
 	task := entry.Rule.Kind == rule.CachedTaskRule
 	if task && p.Options.CacheDisabled {
-		s.Statuses = slices.Append(p.Alloc, s.Statuses, "outdated")
+		s.Statuses = append(s.Statuses, "outdated")
 		return core.ProducerCompleted
 	}
 	for s.Phase == 0 && !task && s.Index < len(entry.Plan.Outputs) {
 		name := p.canonicalTarget(entry.Plan.Outputs[s.Index], true)
 		if (!p.Forwarding && p.Host == nil) || !context.Allows(eval.Read, name) {
-			s.Outputs = slices.Append(p.Alloc, s.Outputs, core.Signature{})
+			s.Outputs = append(s.Outputs, core.Signature{})
 			s.Unknown = true
 			mem.FreeString(p.Alloc, name)
 			s.Index++
@@ -175,7 +175,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 			return core.ProducerSubmitted
 		}
 		signature := inspectionContent(reply.Completion)
-		s.Outputs = slices.Append(p.Alloc, s.Outputs, signature)
+		s.Outputs = append(s.Outputs, signature)
 		if signature.Mode == core.SignatureMissing {
 			s.Changed = true
 		}
@@ -205,7 +205,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		if task {
 			key := p.cacheKey(entry)
 			copy(entry.FileContextKey[:], key)
-			slices.Free(p.Alloc, key)
+			mem.FreeSlice(nil, key)
 			if !p.Forwarding && p.Host == nil {
 				s.Unknown = true
 				s.Phase = 3
@@ -318,7 +318,8 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 					}
 				}
 			}
-			if !toolMetadata && !context.Allows(eval.Read, item.Key.Name) {
+			sourceContent := item.Key.Kind == core.ResourceFile && item.Aspect == core.ObservationContent && p.isSourcePath(item.Key.Name)
+			if !toolMetadata && !sourceContent && !context.Allows(eval.Read, item.Key.Name) {
 				s.Unknown = true
 				s.Index++
 				continue
@@ -360,7 +361,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		if s.Missing {
 			status = "missing"
 		}
-		s.Statuses = slices.Append(p.Alloc, s.Statuses, status)
+		s.Statuses = append(s.Statuses, status)
 	}
 	for i := range s.Outputs {
 		current := status
@@ -370,7 +371,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		if s.Outputs[i].Mode == core.SignatureUnavailable {
 			current = "unknown"
 		}
-		s.Statuses = slices.Append(p.Alloc, s.Statuses, current)
+		s.Statuses = append(s.Statuses, current)
 	}
 	return core.ProducerCompleted
 }

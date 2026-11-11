@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/015-distribution.md — manual release and APE bootstrap helpers
+# Spec: docs/spec/015-distribution.md — manual release and Go release helpers
 # Spec: docs/spec/013-tests.md — T015-06-dist-release-scripts
 set -euo pipefail
 
@@ -8,11 +8,10 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-release.sh"
 
-test-start "T015-06 release preflight, publication and APE helper arguments"
+test-start "T015-06 release preflight, publication and Go asset staging"
 cd "$CLI_ROOT"
 
 release="$CLI_ROOT/src/sh/release.sh"
-build_ape="$CLI_ROOT/src/sh/build-ape.sh"
 
 test-step "the curated WASM gate retains topology and Kame recipe coverage"
 wasm_tests=$(sed -n '/^TEST_WASM =/,/^$/p' Makefile.kmk)
@@ -77,7 +76,7 @@ for option in --repo --notes-file; do
 done
 
 test-step "kame release delegates to the publication wrapper"
-if grep -Eq '^release \{repo=\} \{notes=\} : ./dist/kame.com' Makefile.kmk &&
+if grep -Eq '^release \{repo=\} \{notes=\} : release-assets' Makefile.kmk &&
 	grep -Fq ':KAME_RELEASE_PREBUILT "1" ./src/sh/release.sh $flags' Makefile.kmk; then
 	test-ok "release target prebuilds assets and forwards repo and notes"
 else
@@ -205,10 +204,10 @@ set -eu
 printf 'make %s\n' "$*" >>"$MOCK_LOG"
 mkdir -p "$MOCK_ROOT/dist/release"
 cd "$MOCK_ROOT/dist/release"
-for name in kame.com kame.js kame.wasm VERSION PROVENANCE.json; do
+for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.js kame.wasm VERSION PROVENANCE.json; do
 	printf 'fixture\n' >"$name"
 done
-sha256sum kame.com kame.js kame.wasm VERSION PROVENANCE.json >SHA256SUMS
+sha256sum kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.js kame.wasm VERSION PROVENANCE.json >SHA256SUMS
 printf 'signature fixture\n' >SHA256SUMS.sig
 SH
 cat >"$mock_bin/npm" <<'SH'
@@ -430,11 +429,14 @@ test-step "headless interactive publication reaches npm's terminal"
 : >"$MOCK_LOG"
 rm -f "$MOCK_NPM_MARKER"
 status=0
-env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$REAL_MAKE" -C "$fixture" release KAME=/bin/true repo=owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
+env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$TMPDIR/captured-out" "$REAL_MAKE" -C "$fixture" release KAME=/bin/true repo=owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
 import errno, os, pty, sys
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(sys.argv[1], sys.argv[1:])
+    out = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.dup2(out, 1)
+    os.dup2(out, 2)
+    os.execv(sys.argv[2], sys.argv[2:])
 try:
     while data := os.read(fd, 4096):
         sys.stdout.buffer.write(data)
@@ -444,7 +446,7 @@ except OSError as e:
 sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
 PY
 if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG" &&
-	grep -q 'https://example.invalid/approve' "$TMPDIR/tty-out" &&
+	grep -q 'https://example.invalid/approve' "$TMPDIR/captured-out" &&
 	grep -q '^gh repo view owner/repo ' "$MOCK_LOG" && ! grep -q '^make ' "$MOCK_LOG"; then
 	test-ok "make release retries npm without building or obscuring terminal approval"
 else
@@ -515,7 +517,7 @@ cp VERSION package.json "$fixture/"
 git -C "$fixture" tag -d "v$MOCK_VERSION" >/dev/null 2>&1 || true
 mkdir -p "$fixture/dist" "$fixture/src/sh"
 cp src/sh/release_manifest.py "$fixture/src/sh/"
-for name in kame.com kame.wasm kame.js; do
+for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
 	printf 'prebuilt %s\n' "$name" >"$fixture/dist/$name"
 done
 release_test_keys "$TMPDIR/prebuilt-keys"
@@ -530,18 +532,6 @@ if [ "$status" = 0 ] && ! grep -q '^make ' "$MOCK_LOG" &&
 	test-ok "prebuilt assets are staged and signed without a nested Kame"
 else
 	test-fail "prebuilt staging: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
-fi
-
-test-step "build-ape reports a missing compiler driver"
-tools="$TMPDIR/no-tools"
-mkdir -p "$tools"
-bash_path="$(command -v bash)"
-status=0
-PATH="$tools" "$bash_path" "$build_ape" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
-if [ "$status" = 1 ] && grep -q 'the so compiler driver is required' "$TMPDIR/err"; then
-	test-ok "build-ape fails clearly without the so driver"
-else
-	test-fail "build-ape missing driver: status=$status err=$(cat "$TMPDIR/err")"
 fi
 
 test-end

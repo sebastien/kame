@@ -1,9 +1,9 @@
 package wasm
 
 import (
+	"bytes"
+	"kame/internal/mem"
 	"kame/lang/ast"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
 )
 
 // ParseLanguage parses text as lang ("expr", "template", "rule", or "script")
@@ -11,10 +11,10 @@ import (
 // JSON, so the caller derives failure from the document exactly as the CLI
 // does. The returned text is owned by a.
 func ParseLanguage(a mem.Allocator, lang string, name string, text string) PureResult {
-	var buffer bytes.Buffer = bytes.NewBuffer(a, nil)
+	var buffer bytes.Buffer
 	ast.WriteAST(&buffer, lang, name, text)
 	out := buffer.String()
 	result := PureResult{Text: pureText(a, out)}
-	buffer.Free()
+	buffer.Reset()
 	return result
 }

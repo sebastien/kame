@@ -15,7 +15,7 @@ test-step "definition targets materialize against an in-memory host"
 if node --input-type=module - <<'NODE'
 const { readFile } = await import('node:fs/promises');
 const bytes = await readFile('./build/wasm/kame.wasm');
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports } = instance;
 const alloc = (size, alignment = 1) => {
   const pointer = exports.kame_wasm_alloc(size, alignment);

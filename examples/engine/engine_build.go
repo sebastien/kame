@@ -5,12 +5,11 @@
 package examples
 
 import (
+	"fmt"
+	"io"
 	"kame/core"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+	"kame/internal/mem"
+	"strconv"
 )
 
 type deriveKind int
@@ -52,7 +51,7 @@ func freeDerive(a mem.Allocator, context any) {
 
 // stringList owns a fresh immutable list of strings.
 func stringList(a mem.Allocator, texts []string) core.Value {
-	items := slices.Make[core.Value](a, len(texts))
+	items := make([]core.Value, len(texts))
 	for i := range texts {
 		items[i] = core.NewString(a, texts[i])
 	}
@@ -60,7 +59,7 @@ func stringList(a mem.Allocator, texts []string) core.Value {
 	for i := range items {
 		items[i].Free(a)
 	}
-	slices.Free(a, items)
+	mem.FreeSlice(a, items)
 	return value
 }
 
@@ -102,8 +101,7 @@ func deriveProducer(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if !files.OK {
 			return core.ProducerWaiting
 		}
-		var scratch [20]byte
-		text := "Bundle of " + strconv.Itoa(scratch[:], len(files.Value.List)) + " files"
+		text := "Bundle of " + strconv.Itoa(len(files.Value.List)) + " files"
 		c.Publish(core.NewString(s.Alloc, text))
 	case deriveDefault:
 		bundle := c.Value(definition("bundle"))

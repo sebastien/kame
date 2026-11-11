@@ -2,8 +2,7 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type Queue struct {
@@ -23,7 +22,7 @@ func (q *Queue) Submit(nodeID int64, generation int64, attempt int64, kind Reque
 		return 0
 	}
 	q.next++
-	q.items = slices.Append(q.Alloc, q.items, Request{ID: q.next, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: kind, Payload: payload.Clone(q.Alloc)})
+	q.items = append(q.items, Request{ID: q.next, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: kind, Payload: payload.Clone(q.Alloc)})
 	return q.next
 }
 
@@ -53,6 +52,6 @@ func (q *Queue) Free() {
 	for i := range q.items {
 		q.items[i].Free(q.Alloc)
 	}
-	slices.Free(q.Alloc, q.items)
+	mem.FreeSlice(nil, q.items)
 	mem.Free(q.Alloc, q)
 }

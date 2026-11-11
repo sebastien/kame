@@ -1,9 +1,9 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
+	"strings"
 )
 
 func TestPresentationEveryCommand(t *testing.T) {
@@ -36,14 +36,14 @@ func TestReportPreservesNestedEnvelopeNames(t *testing.T) {
 		if !cli.WriteReport(&out, "report", documents[i], false) || out.String() != expected[i] {
 			t.Error("report suppressed nested or list-entry schema/type keys")
 		}
-		out.Free()
+		out.Reset()
 	}
 }
 
 func TestTargetReportGroupsKindsAndKeepsStatusReadableWithoutColor(t *testing.T) {
 	document := `{"schema":1,"type":"list","entries":[{"name":"./out","group":"artifacts","status":"missing"},{"name":"test","group":"tasks","status":"built"},{"name":"build","group":"rules","status":"","summary":"Build project"},{"name":"daemon","group":"services","status":"","summary":"Run daemon"},{"name":"package","group":"tasks","status":"outdated"},{"name":"./bad\u001b[31m","group":"artifacts","status":"unknown"},{"name":"./{name}.o","group":"artifacts","status":""}]}`
 	var out strings.Builder
-	defer out.Free()
+	defer out.Reset()
 	if !cli.WriteReport(&out, "list", document, false) || out.String() != "list\n  Rules\n    build  Build project\n  Services\n    daemon  Run daemon\n  Tasks\n    test  ok\n    package  out of date\n  Artifacts\n    ./{name}.o\n    ./out  missing\n    \"./bad\\u001b[31m\"  unknown\n" {
 		t.Error("target groups, match ordering, status labels or terminal escaping changed: " + out.String())
 	}
@@ -55,7 +55,7 @@ func TestInspectionBoundariesGroupDistinctAttributesByPath(t *testing.T) {
 	if !cli.WriteReport(&out, "outputs", document, false) || !strings.Contains(out.String(), "  discovery boundaries\n    ./result · runtime-discovery · opaque-process-io\n") {
 		t.Error("boundary attributes were not grouped and deduplicated by path")
 	}
-	out.Free()
+	out.Reset()
 }
 
 func TestDownstreamReportKeepsLogicalImpactRelationships(t *testing.T) {
@@ -64,14 +64,14 @@ func TestDownstreamReportKeepsLogicalImpactRelationships(t *testing.T) {
 	if !cli.WriteReport(&out, "outputs", document, false) || !strings.Contains(out.String(), "./seed → middle") || !strings.Contains(out.String(), "middle → ./out") || strings.Contains(out.String(), "./context → ./out") {
 		t.Error("logical impact chain was omitted or unaffected context was included")
 	}
-	out.Free()
+	out.Reset()
 }
 
 func TestPlanReportHidesEmptyAndUnknownDetailsUnlessVerbose(t *testing.T) {
 	document := `{"schema":2,"type":"plan","depth":-1,"resources":[],"producers":[{"id":1,"resource":1,"target":"./out","kind":"file","outputs":[],"freshness":"unknown","captures":[],"source":"Makefile.kmk","span":{"start":0,"end":710},"rule":{"start":0,"end":710,"text":"install :"},"text":"producer source","tools":{},"reusePolicy":"content-signatures"},{"id":2,"resource":2,"target":"install","kind":"task","source":"Makefile.kmk","reusePolicy":"fingerprint"}],"dependencies":[],"stages":[{"number":1,"producers":[1,2]}],"deferred":[]}`
 	var concise, verbose strings.Builder
-	defer concise.Free()
-	defer verbose.Free()
+	defer concise.Reset()
+	defer verbose.Reset()
 	if !cli.WriteGraphReport(&concise, "plan", document, false, false) {
 		t.Error("concise plan report failed to render")
 		return

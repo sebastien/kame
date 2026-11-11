@@ -1,12 +1,12 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/math"
-	"solod.dev/so/testing"
+	"math"
 )
 
 func TestStructuralEqualityAndFilterShorthand(t *testing.T) {

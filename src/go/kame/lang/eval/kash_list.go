@@ -3,9 +3,8 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type commandListState struct {
@@ -23,7 +22,7 @@ func freeCommandListState(a mem.Allocator, value any) {
 	state := value.(*commandListState)
 	state.Value.Free(a)
 	state.Failure.Free(a)
-	slices.Free(a, state.Output)
+	mem.FreeSlice(nil, state.Output)
 	freeKashControlState(a, state.Control)
 	mem.Free(a, state)
 }

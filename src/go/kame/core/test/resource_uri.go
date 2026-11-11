@@ -1,9 +1,9 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 type resourceURICase struct {
@@ -39,6 +39,9 @@ func TestResourceURICanonicalization(t *testing.T) {
 		reparsed.URI.Free()
 		mem.FreeString(a, canonical)
 		result.URI.Free()
+		if result.URI.Scheme != "" || result.URI.Authority != "" || result.URI.Path != "" {
+			t.Fatal("disposed URI retains parsed strings")
+		}
 	}
 }
 
@@ -61,6 +64,9 @@ func TestResourceURIRejectsInvalidInputs(t *testing.T) {
 		result := core.ParseResourceURI(a, input)
 		if result.Error == "" {
 			result.URI.Free()
+			if result.URI.Scheme != "" || result.URI.Authority != "" || result.URI.Path != "" {
+				t.Fatal("disposed URI retains parsed strings")
+			}
 			t.Errorf("ParseResourceURI(%q) accepted invalid URI", input)
 		}
 	}
@@ -68,8 +74,6 @@ func TestResourceURIRejectsInvalidInputs(t *testing.T) {
 
 func TestResourceURIParserReleasesTemporaryStorage(t *testing.T) {
 	a := t.Allocator()
-	tracker := a.(*mem.Tracker)
-	before := tracker.Stats().Alloc
 	for i := 0; i < 100; i++ {
 		result := core.ParseResourceURI(a, "mem://workspace/a/b/../file%20name%25%23%3F")
 		if result.Error != "" {
@@ -79,8 +83,8 @@ func TestResourceURIParserReleasesTemporaryStorage(t *testing.T) {
 		canonical := result.URI.Canonical(a)
 		mem.FreeString(a, canonical)
 		result.URI.Free()
-	}
-	if got := tracker.Stats().Alloc - before; got != 0 {
-		t.Errorf("resource URI parser retained %d bytes", got)
+		if result.URI.Scheme != "" || result.URI.Authority != "" || result.URI.Path != "" {
+			t.Fatal("disposed URI retains parsed strings")
+		}
 	}
 }

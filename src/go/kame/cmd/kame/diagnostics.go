@@ -1,18 +1,18 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/source"
 	"kame/program"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/unicode/utf8"
+	"os"
+
+	"strconv"
+	"unicode/utf8"
 )
 
 // Presentation state is initialized once per Run. It affects rendering only;
@@ -34,14 +34,14 @@ func rememberDiagnosticSource(name string, text string) {
 			return
 		}
 	}
-	diagnosticSources = slices.Append(mem.System, diagnosticSources, source.New(mem.System, name, text))
+	diagnosticSources = append(diagnosticSources, source.New(mem.System, name, text))
 }
 
 func restoreDiagnosticSources(previous []*source.Source) {
 	for i := range diagnosticSources {
 		diagnosticSources[i].Free(mem.System)
 	}
-	slices.Free(mem.System, diagnosticSources)
+	mem.FreeSlice(nil, diagnosticSources)
 	diagnosticSources = previous
 }
 
@@ -249,7 +249,7 @@ func diagnosticSource(name string, primary *source.Source) (*source.Source, bool
 	if name == "" || (primary != nil && primary.Name == name && !primary.Expanded) {
 		return primary, false
 	}
-	data, readErr := os.ReadFile(mem.System, name)
+	data, readErr := os.ReadFile(name)
 	if readErr != nil {
 		return nil, false
 	}
@@ -292,9 +292,9 @@ func writeDiagnosticSourceBlock(out io.Writer, name string, span diagnostic.Span
 }
 
 func writeStyledDiagnosticLocation(out io.Writer, name string, line int, column int, styled bool) {
-	var lineBuffer, columnBuffer [strconv.MaxIntBase10Len]byte
-	lineText := strconv.FormatInt(lineBuffer[:], int64(line), 10)
-	columnText := strconv.FormatInt(columnBuffer[:], int64(column), 10)
+
+	lineText := strconv.FormatInt(int64(line), 10)
+	columnText := strconv.FormatInt(int64(column), 10)
 	cli.Style(out, "location", name+":"+lineText+":"+columnText, styled)
 }
 
@@ -308,8 +308,8 @@ func writeDiagnosticFrame(out io.Writer, d diagnostic.Diagnostic, index int, pri
 		}
 	}
 	cli.Style(out, "structure", branch, styled)
-	var buffer [strconv.MaxIntBase10Len]byte
-	cli.Style(out, "text.muted", "#"+strconv.FormatInt(buffer[:], int64(index), 10)+"  ", styled)
+
+	cli.Style(out, "text.muted", "#"+strconv.FormatInt(int64(index), 10)+"  ", styled)
 	if f.Kind != "" {
 		cli.Style(out, "text.muted", f.Kind+" ", styled)
 	}
@@ -379,8 +379,8 @@ func diagnosticLineSeen(d diagnostic.Diagnostic, index int, src *source.Source, 
 // Keep one visual line around the focus, rather than wrapping a tiny suffix onto
 // another row. Positions remain authored; ellipses describe presentation only.
 func writeDiagnosticExcerpt(out io.Writer, text string, lineStart int, lineEnd int, start int, end int, width int, line int, token string) {
-	var buffer [strconv.MaxIntBase10Len]byte
-	number := strconv.FormatInt(buffer[:], int64(line), 10)
+
+	number := strconv.FormatInt(int64(line), 10)
 	if line == 0 {
 		number = ""
 	}
@@ -587,14 +587,14 @@ func annotateTargetDiagnostic(d *diagnostic.Diagnostic, target string) {
 		d.Target = cloneCommandText(target)
 	}
 	if len(d.TargetStack) == 0 {
-		d.TargetStack = slices.Append(mem.System, d.TargetStack, cloneCommandText(target))
+		d.TargetStack = append(d.TargetStack, cloneCommandText(target))
 	} else if d.TargetStack[0] != target {
-		stack := slices.Make[string](mem.System, len(d.TargetStack)+1)
+		stack := make([]string, len(d.TargetStack)+1)
 		stack[0] = cloneCommandText(target)
 		for i := range d.TargetStack {
 			stack[i+1] = d.TargetStack[i]
 		}
-		slices.Free(mem.System, d.TargetStack)
+		mem.FreeSlice(nil, d.TargetStack)
 		d.TargetStack = stack
 	}
 	if d.Code != "TGT_NO_RULE" {
@@ -622,5 +622,5 @@ func annotateTargetDiagnostic(d *diagnostic.Diagnostic, target string) {
 			return
 		}
 	}
-	d.Notes = slices.Append(mem.System, d.Notes, cloneCommandText(note))
+	d.Notes = append(d.Notes, cloneCommandText(note))
 }

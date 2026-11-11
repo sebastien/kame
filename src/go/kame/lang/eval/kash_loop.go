@@ -2,8 +2,8 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
 )
 
 type kashLoopState struct {

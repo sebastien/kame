@@ -3,9 +3,9 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"slices"
+	"strings"
 )
 
 // FilesystemResources returns caller-owned external file and glob keys reachable
@@ -16,19 +16,63 @@ func (p *Program) FilesystemResources() []core.ResourceKey {
 	for i := range nodes {
 		n := nodes[i]
 		if n.Interest != 0 && (n.Key.Kind == core.ResourceFile || n.Key.Kind == core.ResourceGlob) && p.instanceIndex(n) < 0 {
-			keys = slices.Append(p.Alloc, keys, n.Key.Clone(p.Alloc))
+			keys = append(keys, n.Key.Clone(p.Alloc))
+		}
+		if n.Interest == 0 {
+			continue
+		}
+		for j := range n.Observations {
+			item := n.Observations[j]
+			if item.Key.Kind != core.ResourceFile || item.Aspect != core.ObservationContent {
+				continue
+			}
+			// Interested resource nodes are listed separately, even later in nodes.
+			if resource := p.Engine.Lookup(item.Key); resource != nil && (resource.Interest != 0 || p.instanceIndex(resource) >= 0) {
+				continue
+			}
+			present := false
+			for k := range keys {
+				if keys[k].Kind == item.Key.Kind && keys[k].Name == item.Key.Name {
+					present = true
+					break
+				}
+			}
+			if !present {
+				keys = append(keys, item.Key.Clone(p.Alloc))
+			}
 		}
 	}
-	slices.Free(p.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	return keys
 }
 
 // InvalidateResource clears a changed resource and all transitive consumers.
 func (p *Program) InvalidateResource(key core.ResourceKey) {
 	p.clearChangedProductionInputs()
+	if key.Kind == core.ResourceFile && p.Eval != nil {
+		p.Eval.RevalidateModuleSource(key.Name)
+	}
 	node := p.Engine.Lookup(key)
 	if node != nil {
 		p.Engine.Revalidate(node)
+	}
+	if key.Kind == core.ResourceFile {
+		// Context-local reads can be observations without graph edges.
+		nodes := p.Engine.TrackedNodes()
+		for i := range nodes {
+			// Graph-backed consumers already participate in resource revalidation.
+			if nodes[i] == node || (node != nil && (slices.Contains(nodes[i].Static, node) || slices.Contains(nodes[i].Dynamic, node))) {
+				continue
+			}
+			for j := range nodes[i].Observations {
+				item := nodes[i].Observations[j]
+				if item.Key.Kind == key.Kind && item.Key.Name == key.Name && item.Aspect == core.ObservationContent {
+					p.Engine.Revalidate(nodes[i])
+					break
+				}
+			}
+		}
+		mem.FreeSlice(nil, nodes)
 	}
 	p.drainCancellations()
 }
@@ -43,13 +87,13 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 			return cloneText(p.Alloc, "unavailable")
 		}
 		value := result.Value
-		b := strings.NewBuilder(p.Alloc)
+		b := strings.Builder{}
 		for i := range value.List {
 			b.WriteString(value.List[i].Text)
 			b.WriteByte(0)
 		}
 		stamp := cloneText(p.Alloc, b.String())
-		b.Free()
+		b.Reset()
 		value.Free(p.Alloc)
 		return stamp
 	}
@@ -101,6 +145,35 @@ func (p *Program) ResourceAcceptedFingerprint(key core.ResourceKey) string {
 	if p.ResourceMetadataObserved(key) {
 		return cloneText(p.Alloc, "unobserved")
 	}
+	nodes := p.Engine.TrackedNodes()
+	var accepted core.Signature
+	found := false
+	for i := range nodes {
+		if nodes[i].Interest == 0 {
+			continue
+		}
+		for j := range nodes[i].Observations {
+			item := nodes[i].Observations[j]
+			if item.Key.Kind != key.Kind || item.Key.Name != key.Name || item.Aspect != core.ObservationContent {
+				continue
+			}
+			if found && !accepted.Equal(item.Signature) {
+				mem.FreeSlice(nil, nodes)
+				return cloneText(p.Alloc, "unobserved")
+			}
+			accepted, found = item.Signature, true
+		}
+	}
+	mem.FreeSlice(nil, nodes)
+	if found {
+		if accepted.Mode == core.SignatureMissing {
+			return cloneText(p.Alloc, "missing")
+		}
+		if accepted.Mode == core.SignatureContent {
+			return cacheHex(p.Alloc, accepted.Digest[:])
+		}
+		return cloneText(p.Alloc, "unobserved")
+	}
 	node := p.Engine.Lookup(key)
 	if node != nil && node.Current {
 		if node.Signature.Mode == core.SignatureMissing {
@@ -110,7 +183,11 @@ func (p *Program) ResourceAcceptedFingerprint(key core.ResourceKey) string {
 			return cacheHex(p.Alloc, node.Signature.Digest[:])
 		}
 	}
-	return p.ResourceFingerprint(key)
+	if node != nil {
+		// Pending file nodes have not consumed bytes yet; avoid a spurious change.
+		return p.ResourceFingerprint(key)
+	}
+	return cloneText(p.Alloc, "unobserved")
 }
 
 // Intentional stat reads subscribe to metadata as well as resource content.
@@ -132,6 +209,6 @@ func (p *Program) ResourceMetadataObserved(key core.ResourceKey) bool {
 			break
 		}
 	}
-	slices.Free(p.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	return observed
 }

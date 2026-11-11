@@ -32,7 +32,7 @@ for backend in native wasm; do
 	grants=("--allow-read=$work" "--allow-write=$work")
 
 	test-step "$backend: file streams, truncate, append and empty capture"
-	check "\$(cat < '$work/input')" 1 '' PARSE_ERR "${grants[@]}"
+	check "\$(cat < '$work/input')" 0 '"input"' '' "${grants[@]}"
 	check "\$(cat < \"$work/input\")" 0 '"input"' '' "${grants[@]}"
 	check "\$(printf first > \"$output\")" 0 '""' '' "${grants[@]}"
 	if [ "$(cat "$output")" = first ]; then test-ok "$backend truncates output"; else test-fail "$backend output bytes differ"; fi

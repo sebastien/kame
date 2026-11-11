@@ -1,8 +1,8 @@
-package host_test
+package hostcheck
 
 import (
 	"kame/host"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestRecordPayloadPreservesPortableWireFields(t *testing.T) {

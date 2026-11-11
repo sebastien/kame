@@ -4,11 +4,11 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/unicode/utf8"
+
+	"unicode/utf8"
 )
 
 func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -185,7 +185,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		}
 		// Context copies borrow their caller's stack. Own only this frame's
 		// storage and final string; never reallocate a borrowed backing slice.
-		c.RenderStack = slices.Make[string](c.Run, len(previousStack)+1)
+		c.RenderStack = make([]string, len(previousStack)+1)
 		copy(c.RenderStack, previousStack)
 		c.RenderStack[len(previousStack)] = owned
 		pushed = true
@@ -278,7 +278,7 @@ func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Resul
 	} else {
 		return invalidArgument(c, values, 0, "list or record")
 	}
-	items := slices.Make[core.Value](c.Run, count)
+	items := make([]core.Value, count)
 	for i := 0; i < count; i++ {
 		index := core.Value{Kind: core.Int, Int: int64(i)}
 		key := core.Value{Kind: core.Nil}
@@ -290,13 +290,13 @@ func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Resul
 			value = input.Record[i].Value.Clone(c.Run)
 		}
 		var fields []core.RecordField
-		fields = slices.Append(c.Run, fields, core.RecordField{Key: "index", Value: index})
-		fields = slices.Append(c.Run, fields, core.RecordField{Key: "key", Value: key})
-		fields = slices.Append(c.Run, fields, core.RecordField{Key: "value", Value: value})
+		fields = append(fields, core.RecordField{Key: "index", Value: index})
+		fields = append(fields, core.RecordField{Key: "key", Value: key})
+		fields = append(fields, core.RecordField{Key: "value", Value: value})
 		items[i] = core.NewRecord(c.Run, fields)
 		key.Free(c.Run)
 		value.Free(c.Run)
-		slices.Free(c.Run, fields)
+		mem.FreeSlice(nil, fields)
 	}
 	return eval.Result{Value: core.Value{Kind: core.List, List: items}}
 }
@@ -354,7 +354,7 @@ func popRenderStack(c *eval.Context, previous []string) {
 	}
 	last := len(c.RenderStack) - 1
 	mem.FreeString(c.Run, c.RenderStack[last])
-	slices.Free(c.Run, c.RenderStack)
+	mem.FreeSlice(nil, c.RenderStack)
 	c.RenderStack = previous
 }
 

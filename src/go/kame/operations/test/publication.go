@@ -1,14 +1,14 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 type publicationTestState struct {

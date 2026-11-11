@@ -1,8 +1,8 @@
 package wasm
 
 import (
+	"kame/internal/mem"
 	"kame/lang/format"
-	"solod.dev/so/mem"
 )
 
 // FormatLanguage formats one language source and returns the canonical text, or

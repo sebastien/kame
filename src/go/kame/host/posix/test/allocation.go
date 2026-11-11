@@ -1,24 +1,24 @@
-package posix_test
+//go:build linux
+
+package posixcheck
 
 import (
 	"kame/host"
 	"kame/host/posix"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
-func TestNativeEventAllocationFailure(t *testing.T) {
+func TestNativeMandatoryEvents(t *testing.T) {
 	a := t.Allocator()
-	// Sweep node, chunk, retention, terminal-copy and diagnostic allocations.
+	// Repeated completion must preserve exactly one start and terminal event.
 	for after := 0; after < 12; after++ {
 		h := posix.New(a)
 		r := request(a, 901, "printf output; printf error >&2")
-		posix.ForceEventAllocationFailureForTest(after)
 		if !h.Start(r) {
 			t.Error("event probe unexpectedly failed process setup")
 		}
 		var terminal posix.Event
 		events := drain(t, h, &terminal)
-		posix.ForceEventAllocationFailureForTest(-1)
 		started, terminals := 0, 0
 		for i := range events {
 			if events[i].Kind == posix.Started {
@@ -29,16 +29,16 @@ func TestNativeEventAllocationFailure(t *testing.T) {
 			}
 		}
 		if started != 1 || terminals != 1 || h.Active() != 0 {
-			t.Error("allocation failure lost or duplicated a mandatory event")
+			t.Error("event delivery lost or duplicated a mandatory event")
 		}
 		if terminal.Outcome == posix.Exited && (string(terminal.Stdout) != "output" || string(terminal.Stderr) != "error") {
 			t.Error("successful terminal claimed missing capture")
 		}
 		if terminal.Outcome == posix.Failed && terminal.Diagnostic.Code != posix.DiagnosticHostFailure {
-			t.Error("allocation failure lost HOST_FAIL diagnostic")
+			t.Error("event delivery lost HOST_FAIL diagnostic")
 		}
 		if !nativeChildReaped(terminal.PID) {
-			t.Error("allocation failure leaked child ownership")
+			t.Error("event delivery leaked child ownership")
 		}
 		freeEvents(a, events)
 		freeRequest(a, &r)
@@ -46,19 +46,17 @@ func TestNativeEventAllocationFailure(t *testing.T) {
 	}
 }
 
-func TestNativeGraphEventAllocationFailure(t *testing.T) {
+func TestNativeGraphMandatoryEvents(t *testing.T) {
 	a := t.Allocator()
 	for after := 0; after < 16; after++ {
 		h := posix.New(a)
 		stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", "printf output"}}, {Argv: []string{"/bin/cat"}}}
 		r := host.ProcessRequest{ID: 902, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 1024}
-		posix.ForceEventAllocationFailureForTest(after)
 		if !h.Start(r) {
 			t.Error("event probe unexpectedly failed graph setup")
 		}
 		var terminal posix.Event
 		events := drain(t, h, &terminal)
-		posix.ForceEventAllocationFailureForTest(-1)
 		started, terminals := 0, 0
 		for i := range events {
 			if events[i].Kind == posix.Started {
@@ -69,33 +67,31 @@ func TestNativeGraphEventAllocationFailure(t *testing.T) {
 			}
 		}
 		if started != 1 || terminals != 1 || h.Active() != 0 {
-			t.Error("graph allocation failure lost mandatory event")
+			t.Error("graph event delivery lost mandatory event")
 		}
 		if terminal.Outcome == posix.Exited && (string(terminal.Stdout) != "output" || len(terminal.Stages) != 2) {
 			t.Error("successful graph terminal lost capture or stage results")
 		}
 		if terminal.Outcome == posix.Failed && terminal.Diagnostic.Code != posix.DiagnosticHostFailure {
-			t.Error("graph allocation failure lost diagnostic")
+			t.Error("graph event delivery lost diagnostic")
 		}
 		if !nativeChildReaped(terminal.PID) {
-			t.Error("graph allocation failure leaked leader ownership")
+			t.Error("graph event delivery leaked leader ownership")
 		}
 		freeEvents(a, events)
 		h.Free()
 	}
 }
 
-func TestNativeRejectedAllocationFailure(t *testing.T) {
+func TestNativeRejectedMandatoryEvent(t *testing.T) {
 	h := posix.New(t.Allocator())
 	defer h.Free()
-	posix.ForceEventAllocationFailureForTest(0)
-	defer posix.ForceEventAllocationFailureForTest(-1)
 	if h.Start(posix.Request{}) {
 		t.Error("invalid request accepted")
 	}
 	r := h.Next()
 	if !r.OK || r.Event.Kind != posix.Terminal || r.Event.Outcome != posix.Failed || r.Event.Diagnostic.Code != posix.DiagnosticHostFailure {
-		t.Error("rejected request lost allocation-free terminal")
+		t.Error("rejected request lost terminal")
 	}
 	if r.OK {
 		r.Event.Free(t.Allocator())

@@ -1,13 +1,13 @@
 package program
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func (p *Program) declareExpressionTools(value *expr.Expr) {
@@ -38,7 +38,7 @@ func (p *Program) declareExpressionTools(value *expr.Expr) {
 			if len(argument.Parts) == 0 {
 				p.declareTool(argument.Text)
 			} else {
-				builder := strings.NewBuilder(p.Alloc)
+				builder := strings.Builder{}
 				literal := true
 				for i := range argument.Parts {
 					if argument.Parts[i].Expr != nil {
@@ -50,7 +50,7 @@ func (p *Program) declareExpressionTools(value *expr.Expr) {
 				if literal {
 					p.declareTool(builder.String())
 				}
-				builder.Free()
+				builder.Reset()
 			}
 		}
 	}
@@ -107,7 +107,7 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
 					p.declareExpressionTools(value.Expr)
 				}
 				expr.Free(p.Alloc, value.Expr)
-				slices.Free(p.Alloc, value.Diagnostics)
+				mem.FreeSlice(nil, value.Diagnostics)
 			}
 			if len(item.Rule.Body) != 0 && ruleSelectsShell(item.Rule, shellIsKash, "kash") {
 				p.collectKashTools(item.Rule, "", nil, nil)
@@ -140,7 +140,7 @@ func (p *Program) plannedTools() []Tool {
 			continue
 		}
 		p.toolPath(p.Tools[i].Name)
-		tools = slices.Append(p.Alloc, tools, Tool{Name: cloneText(p.Alloc, p.Tools[i].Name), Path: cloneText(p.Alloc, p.Tools[i].Path)})
+		tools = append(tools, Tool{Name: cloneText(p.Alloc, p.Tools[i].Name), Path: cloneText(p.Alloc, p.Tools[i].Path)})
 	}
 	return tools
 }
@@ -150,13 +150,13 @@ func freeTools(a mem.Allocator, tools []Tool) {
 		mem.FreeString(a, tools[i].Name)
 		mem.FreeString(a, tools[i].Path)
 	}
-	slices.Free(a, tools)
+	mem.FreeSlice(nil, tools)
 }
 
 func cloneTools(a mem.Allocator, tools []Tool) []Tool {
 	var cloned []Tool
 	for i := range tools {
-		cloned = slices.Append(a, cloned, Tool{Name: cloneText(a, tools[i].Name), Path: cloneText(a, tools[i].Path)})
+		cloned = append(cloned, Tool{Name: cloneText(a, tools[i].Name), Path: cloneText(a, tools[i].Path)})
 	}
 	return cloned
 }

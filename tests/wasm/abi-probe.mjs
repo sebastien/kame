@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { instantiateReactor } from './instantiate-reactor.mjs';
 // Raw ABI probe only. Evaluation and host services belong to src/js/kame.js.
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -134,7 +135,7 @@ function evaluatePure(exports, text) {
 
 async function load() {
   const bytes = await readFile(wasmPath);
-  return WebAssembly.instantiate(bytes, {});
+  return instantiateReactor(bytes);
 }
 
 async function main() {

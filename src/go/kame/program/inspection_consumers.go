@@ -3,12 +3,12 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"path"
+
+	"strings"
 )
 
 // Catalogue failures are reported only when their producer is affected. The
@@ -23,7 +23,7 @@ func (g *inspectionGraph) freeConsumerFailures() {
 	for i := range g.ConsumerFailures {
 		g.ConsumerFailures[i].Diagnostic.Free(g.Program.Alloc)
 	}
-	slices.Free(g.Program.Alloc, g.ConsumerFailures)
+	mem.FreeSlice(nil, g.ConsumerFailures)
 	g.ConsumerFailures = nil
 }
 
@@ -100,7 +100,7 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 				if producer := g.Resources[cursor].Producer; producer != 0 {
 					g.observed(producer, 1)
 				}
-				g.ConsumerFailures = slices.Append(p.Alloc, g.ConsumerFailures, inspectionConsumerFailure{Resource: cursor + 1, Diagnostic: d})
+				g.ConsumerFailures = append(g.ConsumerFailures, inspectionConsumerFailure{Resource: cursor + 1, Diagnostic: d})
 			}
 			if g.Waiting {
 				// visit publishes a producer only after resolving its inputs.
@@ -129,7 +129,7 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 				}
 				if match.Limited {
 					match.Free(p.Alloc)
-					g.ConsumerFailures = slices.Append(p.Alloc, g.ConsumerFailures, inspectionConsumerFailure{Resource: cursor + 1, Input: true, Diagnostic: failure(p.Alloc, "PAT_LIMIT", "consumer pattern match exceeded its step budget")})
+					g.ConsumerFailures = append(g.ConsumerFailures, inspectionConsumerFailure{Resource: cursor + 1, Input: true, Diagnostic: failure(p.Alloc, "PAT_LIMIT", "consumer pattern match exceeded its step budget")})
 					continue
 				}
 				for k := range candidate.Outputs {
@@ -155,9 +155,9 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 						key := p.inspectionKey(core.ResourceTarget, name)
 						id := g.resource(key, name, 0)
 						key.Free(p.Alloc)
-						g.ConsumerFailures = slices.Append(p.Alloc, g.ConsumerFailures, inspectionConsumerFailure{Resource: id, Diagnostic: selected.Diagnostic})
+						g.ConsumerFailures = append(g.ConsumerFailures, inspectionConsumerFailure{Resource: id, Diagnostic: selected.Diagnostic})
 						g.consumerRuleDeclaration(id, candidate, captures)
-						slices.Free(p.Alloc, captures)
+						mem.FreeSlice(nil, captures)
 						mem.FreeString(p.Alloc, name)
 						continue
 					}
@@ -171,11 +171,11 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 						key := p.inspectionKey(core.ResourceTarget, name)
 						id := g.resource(key, name, 0)
 						key.Free(p.Alloc)
-						g.ConsumerFailures = slices.Append(p.Alloc, g.ConsumerFailures, inspectionConsumerFailure{Resource: id, Diagnostic: failure(p.Alloc, "TGT_AMBIG", "multiple rules match inferred consumer")})
+						g.ConsumerFailures = append(g.ConsumerFailures, inspectionConsumerFailure{Resource: id, Diagnostic: failure(p.Alloc, "TGT_AMBIG", "multiple rules match inferred consumer")})
 						// Retain the inferred declared edge even when selection is
 						// ambiguous, so an affected ambiguity remains an error.
 						g.consumerRuleDeclaration(id, candidate, captures)
-						slices.Free(p.Alloc, captures)
+						mem.FreeSlice(nil, captures)
 						mem.FreeString(p.Alloc, name)
 						continue
 					}
@@ -185,7 +185,7 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 						key.Free(p.Alloc)
 					}
 					mem.FreeString(p.Alloc, name)
-					slices.Free(p.Alloc, captures)
+					mem.FreeSlice(nil, captures)
 				}
 				match.Free(p.Alloc)
 			}
@@ -226,7 +226,7 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 		}
 	}
 	depths := g.consumerDepths()
-	defer slices.Free(p.Alloc, depths)
+	defer mem.FreeSlice(nil, depths)
 	for i := range g.ConsumerFailures {
 		entry := g.ConsumerFailures[i]
 		producer := g.Resources[entry.Resource-1].Producer
@@ -315,11 +315,11 @@ func inspectionReverseCaptures(a mem.Allocator, output *template.Target, inputs 
 	var captures []template.CaptureValue
 	for i := range output.Parts {
 		if output.Parts[i].Kind == template.Capture {
-			captures = slices.Append(a, captures, template.CaptureValue{Name: output.Parts[i].Name})
+			captures = append(captures, template.CaptureValue{Name: output.Parts[i].Name})
 		}
 	}
-	bound := slices.Make[bool](a, len(captures))
-	defer slices.Free(a, bound)
+	bound := make([]bool, len(captures))
+	defer mem.FreeSlice(nil, bound)
 	for i := range inputs {
 		index := -1
 		if inputs[i].Name == "" {
@@ -345,7 +345,7 @@ func inspectionReverseCaptures(a mem.Allocator, output *template.Target, inputs 
 				continue
 			}
 			if bound[j] && captures[j].Text != inputs[i].Text {
-				slices.Free(a, captures)
+				mem.FreeSlice(nil, captures)
 				return nil
 			}
 			captures[j].Text, bound[j] = inputs[i].Text, true
@@ -353,7 +353,7 @@ func inspectionReverseCaptures(a mem.Allocator, output *template.Target, inputs 
 	}
 	for i := range bound {
 		if !bound[i] {
-			slices.Free(a, captures)
+			mem.FreeSlice(nil, captures)
 			return nil
 		}
 	}
@@ -369,13 +369,13 @@ func inspectionInvertible(r *rule.Rule, output *template.Target) bool {
 		var captures []template.CaptureValue
 		for j := range input.Parts {
 			if input.Parts[j].Kind == template.Capture {
-				captures = slices.Append(input.Alloc, captures, template.CaptureValue{Name: input.Parts[j].Name})
+				captures = append(captures, template.CaptureValue{Name: input.Parts[j].Name})
 			}
 		}
 		reversed := inspectionReverseCaptures(input.Alloc, output, captures)
 		bound := reversed != nil
-		slices.Free(input.Alloc, reversed)
-		slices.Free(input.Alloc, captures)
+		mem.FreeSlice(nil, reversed)
+		mem.FreeSlice(nil, captures)
 		if bound {
 			return true
 		}
@@ -407,9 +407,9 @@ func (g *inspectionGraph) consumerRuleDeclaration(resource int, r *rule.Rule, ca
 	if producer == 0 {
 		plan := Plan{Rule: r, Target: cloneText(p.Alloc, g.Resources[resource-1].Request), Key: g.Resources[resource-1].Key.Clone(p.Alloc), Captures: cloneCaptures(p.Alloc, captures)}
 		for i := range r.Outputs {
-			plan.Outputs = slices.Append(p.Alloc, plan.Outputs, renderTarget(p.Alloc, r.Outputs[i], captures))
+			plan.Outputs = append(plan.Outputs, renderTarget(p.Alloc, r.Outputs[i], captures))
 		}
-		g.Producers = slices.Append(p.Alloc, g.Producers, inspectionProducer{Plan: plan, Resource: resource})
+		g.Producers = append(g.Producers, inspectionProducer{Plan: plan, Resource: resource})
 		producer = len(g.Producers)
 		g.Resources[resource-1].Producer = producer
 		if r.Kind == rule.FileRule {
@@ -418,7 +418,7 @@ func (g *inspectionGraph) consumerRuleDeclaration(resource int, r *rule.Rule, ca
 				id := g.resource(key, plan.Outputs[i], 0)
 				key.Free(p.Alloc)
 				g.Resources[id-1].Producer, g.Resources[id-1].Artifact = producer, true
-				g.Producers[producer-1].Outputs = slices.Append(p.Alloc, g.Producers[producer-1].Outputs, id)
+				g.Producers[producer-1].Outputs = append(g.Producers[producer-1].Outputs, id)
 			}
 		}
 	}
@@ -477,8 +477,8 @@ func (g *inspectionGraph) consumerPlanningInputs(resource int) {
 				mem.FreeString(p.Alloc, name)
 				name = renderInput(p.Alloc, input, plan.Captures)
 			}
-			plan.Inputs = slices.Append(p.Alloc, plan.Inputs, name)
-			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, name), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, name)})
+			plan.Inputs = append(plan.Inputs, name)
+			plan.ResourceInputs = append(plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, name), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, name)})
 		}
 		for j := before; j < len(plan.ResourceInputs); j++ {
 			entry := plan.ResourceInputs[j]
@@ -498,10 +498,10 @@ func (g *inspectionGraph) consumerPlanningInputs(resource int) {
 }
 
 func (g *inspectionGraph) consumerDepths() []int {
-	a := g.Program.Alloc
-	distances := slices.Make[int](a, len(g.Resources))
-	defer slices.Free(a, distances)
-	depths := slices.Make[int](a, len(g.Producers))
+	_ = g.Program.Alloc
+	distances := make([]int, len(g.Resources))
+	defer mem.FreeSlice(nil, distances)
+	depths := make([]int, len(g.Producers))
 	for i := range distances {
 		distances[i] = -1
 		if g.Resources[i].Root {
@@ -573,10 +573,10 @@ func inspectionGlobMatch(pattern, name string) bool {
 // not become affected work. Distances count consumer hops, not prerequisites.
 func (g *inspectionGraph) selectConsumers(limit int) {
 	p := g.Program
-	distances := slices.Make[int](p.Alloc, len(g.Resources))
-	producerDepths := slices.Make[int](p.Alloc, len(g.Producers))
-	defer slices.Free(p.Alloc, distances)
-	defer slices.Free(p.Alloc, producerDepths)
+	distances := make([]int, len(g.Resources))
+	producerDepths := make([]int, len(g.Producers))
+	defer mem.FreeSlice(nil, distances)
+	defer mem.FreeSlice(nil, producerDepths)
 	for i := range distances {
 		distances[i] = -1
 		if g.Resources[i].Root {
@@ -631,10 +631,10 @@ func (g *inspectionGraph) selectConsumers(limit int) {
 	filtered := inspectionGraph{Program: p, Downstream: true, Truncated: g.Truncated}
 	filtered.QueryTargets, filtered.QueryKind, filtered.QueryDepth = g.QueryTargets, g.QueryKind, g.QueryDepth
 	g.QueryTargets, g.QueryKind = nil, ""
-	resources := slices.Make[int](p.Alloc, len(g.Resources))
-	producers := slices.Make[int](p.Alloc, len(g.Producers))
-	defer slices.Free(p.Alloc, resources)
-	defer slices.Free(p.Alloc, producers)
+	resources := make([]int, len(g.Resources))
+	producers := make([]int, len(g.Producers))
+	defer mem.FreeSlice(nil, resources)
+	defer mem.FreeSlice(nil, producers)
 	for i := range g.Resources {
 		keep := distances[i] >= 0
 		for j := range g.Dependencies {
@@ -667,9 +667,9 @@ func (g *inspectionGraph) selectConsumers(limit int) {
 		entry := g.Producers[i]
 		producer := inspectionProducer{Plan: clonePlan(p.Alloc, entry.Plan), Resource: resources[entry.Resource-1], Depth: producerDepths[i]}
 		for j := range entry.Outputs {
-			producer.Outputs = slices.Append(p.Alloc, producer.Outputs, resources[entry.Outputs[j]-1])
+			producer.Outputs = append(producer.Outputs, resources[entry.Outputs[j]-1])
 		}
-		filtered.Producers = slices.Append(p.Alloc, filtered.Producers, producer)
+		filtered.Producers = append(filtered.Producers, producer)
 		id := len(filtered.Producers)
 		producers[i] = id
 		filtered.Resources[producer.Resource-1].Producer = id

@@ -1,8 +1,8 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/script"
-	"solod.dev/so/testing"
 )
 
 func TestMalformedNestedKashValueRetainsDiagnostics(t *testing.T) {

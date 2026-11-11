@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+
+	"strconv"
+	"strings"
 )
 
 // PickAction is what Enter does with one picker row.
@@ -175,12 +175,12 @@ func ParsePickLine(line string) PickRow {
 
 func parsePick(inv *Invocation, args []string) {
 	var remaining []string
-	defer slices.Free(mem.System, remaining)
+	defer mem.FreeSlice(nil, remaining)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
 			for ; i < len(args); i++ {
-				remaining = slices.Append(mem.System, remaining, args[i])
+				remaining = append(remaining, args[i])
 			}
 			break
 		}
@@ -205,7 +205,7 @@ func parsePick(inv *Invocation, args []string) {
 			inv.Picker = arg[9:]
 			continue
 		}
-		remaining = slices.Append(mem.System, remaining, arg)
+		remaining = append(remaining, arg)
 	}
 	parseBuild(inv, remaining)
 	if !inv.OK {
@@ -231,13 +231,13 @@ func pickParameter(inv *Invocation, arg string) bool {
 }
 
 func appendOwned(args []string, text string) []string {
-	return slices.Append(mem.System, args, cloneText(text))
+	return append(args, cloneText(text))
 }
 
 func appendNumber(args []string, flag string, number int64) []string {
-	var digits [strconv.MaxIntBase10Len]byte
+
 	args = appendOwned(args, flag)
-	return appendOwned(args, strconv.FormatInt(digits[:], number, 10))
+	return appendOwned(args, strconv.FormatInt(number, 10))
 }
 
 func appendGrantArgs(args []string, grant eval.Grant) []string {
@@ -328,8 +328,8 @@ func PickArgs(inv *Invocation, kind string, target string) []string {
 			args = appendNumber(args, "--capture-limit", int64(inv.CaptureLimit))
 		}
 		if inv.Watch && kind == "build" {
-			var debounce [strconv.MaxIntBase10Len]byte
-			args = appendOwned(args, "--watch="+strconv.FormatInt(debounce[:], int64(inv.WatchDebounceMS), 10))
+
+			args = appendOwned(args, "--watch="+strconv.FormatInt(int64(inv.WatchDebounceMS), 10))
 			if inv.CancelOnChange {
 				args = appendOwned(args, "--cancel")
 			}
@@ -352,5 +352,5 @@ func FreeArgs(args []string) {
 	for i := range args {
 		mem.FreeString(mem.System, args[i])
 	}
-	slices.Free(mem.System, args)
+	mem.FreeSlice(nil, args)
 }

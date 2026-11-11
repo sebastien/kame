@@ -3,15 +3,15 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type PredicateResult struct {
@@ -86,8 +86,8 @@ func CompositionCondition(a mem.Allocator, name string, prefix string, predicate
 // predicate. Text and inclusion paths stay borrowed until the query returns.
 // Directory is the caller's evaluation cwd, not a source-relative include base.
 func CompositionConditionSources(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string) PredicateResult {
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range sources {
 		b.WriteString(sources[i].Text)
 		b.WriteByte('\n')
@@ -121,7 +121,19 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	if request.Located {
 		parseName = "<configuration>"
 	}
-	parsed := script.Parse(a, parseName, request.Prefix)
+	var parsed *script.Script
+	if request.Located {
+		offsets := make([]int, len(request.Origins))
+		at := 0
+		for i := range request.Origins {
+			offsets[i] = at
+			at += len(request.Origins[i].Text) + 1
+		}
+		parsed = parseSourceFragments(a, parseName, request.Prefix, request.Origins, offsets)
+		mem.FreeSlice(nil, offsets)
+	} else {
+		parsed = script.Parse(a, parseName, request.Prefix)
+	}
 	defer parsed.Free()
 	var known []string
 	for i := range request.Defines {
@@ -132,12 +144,12 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		for j := range parsed.Items {
 			d := parsed.Items[j].Definition
 			if d != nil && !d.Function && d.Name == override.Name {
-				known = slices.Append(a, known, request.Defines[i])
+				known = append(known, request.Defines[i])
 				break
 			}
 		}
 	}
-	defer slices.Free(a, known)
+	defer mem.FreeSlice(nil, known)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	defer registry.Free()
@@ -147,14 +159,14 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		if len(compiled.Diagnostics) != 0 {
 			d := configurationDiagnostic(a, compiled.Diagnostics[0], request.Located)
 			if request.Located {
-				offsets := slices.Make[int](a, len(request.Origins))
+				offsets := make([]int, len(request.Origins))
 				at := 0
 				for i := range request.Origins {
 					offsets[i] = at
 					at += len(request.Origins[i].Text) + 1
 				}
 				qualifyCompileDiagnostic(a, &d, parseName, request.Origins, offsets)
-				slices.Free(a, offsets)
+				mem.FreeSlice(nil, offsets)
 			}
 			return PredicateResult{Diagnostic: d}
 		}
@@ -171,12 +183,12 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		}
 		// Parse the predicate in a disjoint range, so helper-body offsets cannot
 		// accidentally resolve against the predicate's source map.
-		combined := strings.NewBuilder(a)
+		combined := strings.Builder{}
 		combined.WriteString(request.Prefix)
 		combined.WriteByte('\n')
 		combined.WriteString(request.Predicate)
 		src := source.New(a, parseName, combined.String())
-		combined.Free()
+		combined.Reset()
 		part := expr.ParseRange(a, src, len(request.Prefix)+1, len(src.Text), "")
 		expression = mem.Alloc[expr.Result](a)
 		expression.Alloc, expression.Source, expression.Expr, expression.Diagnostics = a, src, part.Expr, part.Diagnostics
@@ -192,7 +204,7 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, portable, request.Located)}
 	}
 	state := planResolverState{Program: p}
-	defer slices.Free(a, state.Resolving)
+	defer mem.FreeSlice(nil, state.Resolving)
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: a, Cwd: request.Directory, Source: parseName, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state}
 	result := p.Eval.EvaluateWith(expression.Expr, context)
 	defer result.Free(a)

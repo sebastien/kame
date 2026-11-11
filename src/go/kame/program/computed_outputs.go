@@ -3,13 +3,13 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type outputResolution struct {
@@ -23,7 +23,7 @@ func freeResolvedRule(a mem.Allocator, r *rule.Rule) {
 		mem.FreeString(a, r.Outputs[i].Text)
 		r.Outputs[i].TargetForm.Free()
 	}
-	slices.Free(a, r.Outputs)
+	mem.FreeSlice(nil, r.Outputs)
 	mem.Free(a, r)
 }
 
@@ -48,7 +48,7 @@ func (p *Program) appendOutput(value core.Value, span source.Span, outputs *[]ru
 	if (value.Kind != core.String && value.Kind != core.Pattern) || value.Text == "" {
 		return p.outputDiagnostic(span, "EXPR_INVALID", "rule outputs require nonempty strings or patterns")
 	}
-	*outputs = slices.Append(p.Alloc, *outputs, rule.Target{Text: cloneText(p.Alloc, value.Text), Span: span, Decoded: value.Kind == core.String})
+	*outputs = append(*outputs, rule.Target{Text: cloneText(p.Alloc, value.Text), Span: span, Decoded: value.Kind == core.String})
 	return diagnostic.Diagnostic{}
 }
 
@@ -71,7 +71,7 @@ func appendOutputText(a mem.Allocator, b *strings.Builder, value core.Value, pat
 		return false
 	}
 	if value.Kind == core.Pattern {
-		*patterns = slices.Append(a, *patterns, source.Span{Start: b.Len(), End: b.Len() + len(text)})
+		*patterns = append(*patterns, source.Span{Start: b.Len(), End: b.Len() + len(text)})
 	}
 	b.WriteString(text)
 	mem.FreeString(a, text)
@@ -79,8 +79,8 @@ func appendOutputText(a mem.Allocator, b *strings.Builder, value core.Value, pat
 }
 
 func (p *Program) renderOutput(output rule.Target, context *eval.Context, patterns *[]source.Span) eval.Result {
-	b := strings.NewBuilder(p.Alloc)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range output.Expansion.Parts {
 		part := &output.Expansion.Parts[i]
 		if part.Kind == template.Literal {
@@ -125,7 +125,7 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 	for i := range authored.Outputs {
 		output := authored.Outputs[i]
 		if output.Expansion == nil {
-			outputs = slices.Append(p.Alloc, outputs, rule.Target{Text: cloneText(p.Alloc, output.Text), Span: output.Span})
+			outputs = append(outputs, rule.Target{Text: cloneText(p.Alloc, output.Text), Span: output.Span})
 			continue
 		}
 		var result eval.Result
@@ -146,7 +146,7 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 				last.TargetForm = template.ParseMixedTarget(p.Alloc, p.Parsed.Source.Name, last.Text, patterns)
 			}
 		}
-		slices.Free(p.Alloc, patterns)
+		mem.FreeSlice(nil, patterns)
 		result.Free(p.Alloc)
 		if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" {
 			p.registrationTip(&d)
@@ -166,18 +166,18 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 			mem.FreeString(p.Alloc, outputs[i].Text)
 			outputs[i].TargetForm.Free()
 		}
-		slices.Free(p.Alloc, outputs)
+		mem.FreeSlice(nil, outputs)
 		return outputResolution{Diagnostic: d}
 	}
 	part := rule.ResolveOutputs(p.Alloc, p.Parsed.Source, authored, outputs)
 	resolved := part.Rule
-	slices.Free(p.Alloc, outputs)
-	p.ResolvedRules = slices.Append(p.Alloc, p.ResolvedRules, resolved)
+	mem.FreeSlice(nil, outputs)
+	p.ResolvedRules = append(p.ResolvedRules, resolved)
 	if len(part.Diagnostics) != 0 {
 		first := part.Diagnostics[0]
 		d = p.outputDiagnostic(first.Span, "PARSE_ERR", first.Message)
 	}
-	slices.Free(p.Alloc, part.Diagnostics)
+	mem.FreeSlice(nil, part.Diagnostics)
 	if d.Code != "" {
 		return outputResolution{Diagnostic: d}
 	}

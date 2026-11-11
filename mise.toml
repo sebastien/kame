@@ -1,2 +1,2 @@
 [tools]
-"asdf:mise-plugins/mise-wasi-sdk" = "34"
+go = "1.26"

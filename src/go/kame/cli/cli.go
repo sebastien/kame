@@ -5,15 +5,15 @@
 package cli
 
 import (
+	"bytes"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/template"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 // Diagnostic is a usage error: the stable code and human message the CLI prints.
@@ -81,29 +81,29 @@ type Invocation struct {
 func (inv *Invocation) Free() {
 	mem.FreeString(mem.System, inv.HelpResult)
 	for i := range inv.Inputs {
-		slices.Free(mem.System, inv.Inputs[i].Entries)
+		mem.FreeSlice(nil, inv.Inputs[i].Entries)
 	}
-	slices.Free(mem.System, inv.Inputs)
+	mem.FreeSlice(nil, inv.Inputs)
 	for i := range inv.Grants {
 		for j := range inv.Grants[i].Names {
 			mem.FreeString(mem.System, inv.Grants[i].Names[j])
 		}
-		slices.Free(mem.System, inv.Grants[i].Names)
+		mem.FreeSlice(nil, inv.Grants[i].Names)
 	}
-	slices.Free(mem.System, inv.Grants)
-	slices.Free(mem.System, inv.Shell)
-	slices.Free(mem.System, inv.Environment)
-	slices.Free(mem.System, inv.Targets)
-	slices.Free(mem.System, inv.Files)
-	slices.Free(mem.System, inv.Args)
+	mem.FreeSlice(nil, inv.Grants)
+	mem.FreeSlice(nil, inv.Shell)
+	mem.FreeSlice(nil, inv.Environment)
+	mem.FreeSlice(nil, inv.Targets)
+	mem.FreeSlice(nil, inv.Files)
+	mem.FreeSlice(nil, inv.Args)
 	for i := range inv.Defines {
 		if definition.ParseOverride(inv.Defines[i]).Typed {
 			mem.FreeString(mem.System, inv.Defines[i])
 		}
 	}
-	slices.Free(mem.System, inv.Defines)
-	slices.Free(mem.System, inv.Parameters)
-	slices.Free(mem.System, inv.ToolOverrides)
+	mem.FreeSlice(nil, inv.Defines)
+	mem.FreeSlice(nil, inv.Parameters)
+	mem.FreeSlice(nil, inv.ToolOverrides)
 	mem.FreeString(mem.System, inv.Error.Message)
 	*inv = Invocation{}
 }
@@ -131,10 +131,10 @@ func Parse(command string, args []string) Invocation {
 		if len(options.Args) != 0 {
 			topic = options.Args[0]
 		}
-		var buffer = bytes.NewBuffer(mem.System, nil)
+		var buffer = bytes.Buffer{}
 		WriteHelp(&buffer, topic, options.JSON, false)
 		options.Name, options.HelpResult = "@help", cloneText(buffer.String())
-		buffer.Free()
+		buffer.Reset()
 		return options
 	}
 	inv := parseCommand(command, options.Args)
@@ -154,11 +154,11 @@ func parseCommand(command string, args []string) Invocation {
 		return parseRun(args, false)
 	}
 	if command == "kash" {
-		prefixed := slices.Make[string](mem.System, len(args)+2)
+		prefixed := make([]string, len(args)+2)
 		prefixed[0], prefixed[1] = "--lang", "kash"
 		copy(prefixed[2:], args)
 		invocation := parseRun(prefixed, false)
-		slices.Free(mem.System, prefixed)
+		mem.FreeSlice(nil, prefixed)
 		return invocation
 	}
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, WatchDebounceMS: 100, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
@@ -182,7 +182,7 @@ func parseCommand(command string, args []string) Invocation {
 				return inv
 			}
 		}
-		inv.Args = slices.Clone(mem.System, args)
+		inv.Args = slices.Clone(args)
 		inv.OK = true
 		return inv
 	}
@@ -246,7 +246,7 @@ func parseCommand(command string, args []string) Invocation {
 	}
 	if inv.OK && command == "tools" {
 		if len(inv.Targets) != 0 && inv.Targets[0] == "check" {
-			inv.Args = slices.Append(mem.System, inv.Args, "check")
+			inv.Args = append(inv.Args, "check")
 			copy(inv.Targets, inv.Targets[1:])
 			inv.Targets = inv.Targets[:len(inv.Targets)-1]
 			if len(inv.Targets) == 0 {
@@ -274,14 +274,16 @@ func RemovedCommandMessage(command string) string {
 // parseBuild mirrors the primary and do-plan/cat/tools grammar.
 func parseBuild(inv *Invocation, args []string) {
 	afterOptions := false
+	literalInspectionTargets := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if afterOptions {
-			inv.Targets = slices.Append(mem.System, inv.Targets, arg)
+			inv.Targets = append(inv.Targets, arg)
 			continue
 		}
 		if arg == "--" {
 			afterOptions = true
+			literalInspectionTargets = len(inv.Targets) < 2
 			continue
 		}
 		option := arg
@@ -357,7 +359,15 @@ func parseBuild(inv *Invocation, args []string) {
 				continue
 			}
 		}
-		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
+		inv.Targets = append(inv.Targets, arg)
+	}
+	if (inv.Name == "" || inv.Name == "build") && !literalInspectionTargets && len(inv.Targets) >= 2 && inv.Targets[0] == "do" && inv.Targets[1] == "plan" {
+		for j := range inv.Defines {
+			if definition.ParseOverride(inv.Defines[j]).Typed {
+				inv.fail("OPT_CONFLICT", "inspection options must follow the subcommand; use 'kame do plan --set NAME=VALUE TARGET'")
+				return
+			}
+		}
 	}
 	if inv.CancelOnChange && !inv.Watch {
 		inv.fail("OPT_CONFLICT", "--cancel requires --watch")
@@ -404,7 +414,7 @@ func assignmentOperand(inv *Invocation, arg string) bool {
 			return true
 		}
 		if i > 0 && definition.ValidName(arg[:i]) {
-			inv.Parameters = slices.Append(mem.System, inv.Parameters, arg)
+			inv.Parameters = append(inv.Parameters, arg)
 			return true
 		}
 		return false
@@ -449,7 +459,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			inv.fail("OPT_VALUE_INVALID", "tool must be NAME=PATH with a nonempty path")
 			return false
 		}
-		inv.ToolOverrides = slices.Append(mem.System, inv.ToolOverrides, value)
+		inv.ToolOverrides = append(inv.ToolOverrides, value)
 		return true
 	}
 	if option == "--define" || option == "--set" {
@@ -478,7 +488,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			}
 			value = cloneText(value[:equal] + ":=" + value[equal+1:])
 		}
-		inv.Defines = slices.Append(mem.System, inv.Defines, value)
+		inv.Defines = append(inv.Defines, value)
 		return true
 	}
 	if value == "" {
@@ -506,7 +516,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		return true
 	}
 	if option == "--shell" {
-		inv.Shell = slices.Append(mem.System, inv.Shell, value)
+		inv.Shell = append(inv.Shell, value)
 		return true
 	}
 	if option == "--env" {
@@ -521,7 +531,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			inv.fail("OPT_VALUE_INVALID", "environment entry must be NAME=VALUE")
 			return false
 		}
-		inv.Environment = slices.Append(mem.System, inv.Environment, value)
+		inv.Environment = append(inv.Environment, value)
 		return true
 	}
 	number, convertErr := strconv.Atoi(value)
@@ -573,12 +583,12 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 // values or the literal tail, then applies the shared build grammar.
 func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 	var remaining []string
-	defer slices.Free(mem.System, remaining)
+	defer mem.FreeSlice(nil, remaining)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
 			for ; i < len(args); i++ {
-				remaining = slices.Append(mem.System, remaining, args[i])
+				remaining = append(remaining, args[i])
 			}
 			break
 		}
@@ -626,10 +636,10 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 			inv.Depth = depth
 			continue
 		}
-		remaining = slices.Append(mem.System, remaining, arg)
+		remaining = append(remaining, arg)
 		if OptionTakesValue(arg) && i+1 < len(args) {
 			i++
-			remaining = slices.Append(mem.System, remaining, args[i])
+			remaining = append(remaining, args[i])
 		}
 	}
 	parseBuild(inv, remaining)
@@ -788,7 +798,7 @@ func parseFormat(inv *Invocation, args []string) {
 	}
 	for i := range inv.Inputs {
 		if inv.Inputs[i].Kind == "file" {
-			inv.Files = slices.Append(mem.System, inv.Files, inv.Inputs[i].Value)
+			inv.Files = append(inv.Files, inv.Inputs[i].Value)
 		}
 	}
 	inv.OK = true
@@ -899,16 +909,16 @@ func appendGrant(grants []eval.Grant, option string, name string) []eval.Grant {
 	}
 	grant := eval.Grant{Capability: capability}
 	if name != "" {
-		grant.Names = slices.Append(mem.System, grant.Names, cloneText(name))
+		grant.Names = append(grant.Names, cloneText(name))
 	}
-	return slices.Append(mem.System, grants, grant)
+	return append(grants, grant)
 }
 
 func cloneText(text string) string {
 	if text == "" {
 		return ""
 	}
-	buffer := slices.Make[byte](mem.System, len(text))
+	buffer := make([]byte, len(text))
 	copy(buffer, text)
 	return string(buffer)
 }

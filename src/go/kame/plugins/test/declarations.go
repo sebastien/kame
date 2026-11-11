@@ -1,9 +1,9 @@
-package plugins_test
+package pluginscheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/plugins"
-	"solod.dev/so/testing"
 )
 
 func TestPluginVersionPairsCannotCollide(t *testing.T) {

@@ -1,10 +1,10 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/unicode/utf8"
+	"kame/internal/mem"
+
+	"strconv"
+	"unicode/utf8"
 )
 
 // ParseJSON parses one canonical JSON document into an owned
@@ -185,19 +185,19 @@ func (p *jsonParser) string() (string, bool) {
 			}
 			out = appendBytes(p.alloc, out, p.data, start, p.pos-1)
 			text := NewString(p.alloc, string(out)).Text
-			slices.Free(p.alloc, out)
+			mem.FreeSlice(nil, out)
 			return text, true
 		case c == '\\':
 			out = appendBytes(p.alloc, out, p.data, start, p.pos)
 			p.pos++
 			if !p.escape(&out) {
-				slices.Free(p.alloc, out)
+				mem.FreeSlice(nil, out)
 				return "", false
 			}
 			start = p.pos
 		case c < 0x20:
 			if out != nil {
-				slices.Free(p.alloc, out)
+				mem.FreeSlice(nil, out)
 			}
 			return "", false
 		default:
@@ -205,7 +205,7 @@ func (p *jsonParser) string() (string, bool) {
 		}
 	}
 	if out != nil {
-		slices.Free(p.alloc, out)
+		mem.FreeSlice(nil, out)
 	}
 	return "", false
 }
@@ -218,17 +218,17 @@ func (p *jsonParser) escape(out *[]byte) bool {
 	p.pos++
 	switch c {
 	case '"', '\\', '/':
-		*out = slices.Append(p.alloc, *out, c)
+		*out = append(*out, c)
 	case 'b':
-		*out = slices.Append(p.alloc, *out, '\b')
+		*out = append(*out, '\b')
 	case 'f':
-		*out = slices.Append(p.alloc, *out, '\f')
+		*out = append(*out, '\f')
 	case 'n':
-		*out = slices.Append(p.alloc, *out, '\n')
+		*out = append(*out, '\n')
 	case 'r':
-		*out = slices.Append(p.alloc, *out, '\r')
+		*out = append(*out, '\r')
 	case 't':
-		*out = slices.Append(p.alloc, *out, '\t')
+		*out = append(*out, '\t')
 	case 'u':
 		r, ok := p.hex4()
 		if !ok {
@@ -279,7 +279,7 @@ func (p *jsonParser) hex4() (int, bool) {
 
 func appendBytes(a mem.Allocator, out []byte, data []byte, start int, end int) []byte {
 	for i := start; i < end; i++ {
-		out = slices.Append(a, out, data[i])
+		out = append(out, data[i])
 	}
 	return out
 }
@@ -287,13 +287,13 @@ func appendBytes(a mem.Allocator, out []byte, data []byte, start int, end int) [
 func appendRune(a mem.Allocator, out []byte, r int) []byte {
 	switch {
 	case r < 0x80:
-		return slices.Append(a, out, byte(r))
+		return append(out, byte(r))
 	case r < 0x800:
-		return slices.Append(a, out, byte(0xC0|(r>>6)), byte(0x80|(r&0x3F)))
+		return append(out, byte(0xC0|(r>>6)), byte(0x80|(r&0x3F)))
 	case r < 0x10000:
-		return slices.Append(a, out, byte(0xE0|(r>>12)), byte(0x80|((r>>6)&0x3F)), byte(0x80|(r&0x3F)))
+		return append(out, byte(0xE0|(r>>12)), byte(0x80|((r>>6)&0x3F)), byte(0x80|(r&0x3F)))
 	default:
-		return slices.Append(a, out, byte(0xF0|(r>>18)), byte(0x80|((r>>12)&0x3F)), byte(0x80|((r>>6)&0x3F)), byte(0x80|(r&0x3F)))
+		return append(out, byte(0xF0|(r>>18)), byte(0x80|((r>>12)&0x3F)), byte(0x80|((r>>6)&0x3F)), byte(0x80|(r&0x3F)))
 	}
 }
 
@@ -311,7 +311,7 @@ func (p *jsonParser) array(out *Value) bool {
 		if !p.value(&child) {
 			break
 		}
-		values = slices.Append(p.alloc, values, child)
+		values = append(values, child)
 		p.whitespace()
 		if p.pos >= len(p.data) {
 			break
@@ -324,13 +324,13 @@ func (p *jsonParser) array(out *Value) bool {
 			p.pos++
 			*out = NewList(p.alloc, values)
 			freeValues(p.alloc, values)
-			slices.Free(p.alloc, values)
+			mem.FreeSlice(nil, values)
 			return true
 		}
 		break
 	}
 	freeValues(p.alloc, values)
-	slices.Free(p.alloc, values)
+	mem.FreeSlice(nil, values)
 	return false
 }
 
@@ -363,7 +363,7 @@ func (p *jsonParser) object(out *Value) bool {
 			mem.FreeString(p.alloc, key)
 			break
 		}
-		fields = slices.Append(p.alloc, fields, RecordField{Key: key, Value: value})
+		fields = append(fields, RecordField{Key: key, Value: value})
 		p.whitespace()
 		if p.pos < len(p.data) && p.data[p.pos] == ',' {
 			p.pos++
@@ -373,13 +373,13 @@ func (p *jsonParser) object(out *Value) bool {
 			p.pos++
 			*out = NewRecord(p.alloc, fields)
 			freeFields(p.alloc, fields)
-			slices.Free(p.alloc, fields)
+			mem.FreeSlice(nil, fields)
 			return true
 		}
 		break
 	}
 	freeFields(p.alloc, fields)
-	slices.Free(p.alloc, fields)
+	mem.FreeSlice(nil, fields)
 	return false
 }
 

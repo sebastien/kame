@@ -1,8 +1,8 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestJSONNativeValues(t *testing.T) {

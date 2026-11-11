@@ -2,10 +2,9 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func opRegexMatch(c *eval.Context, state any, values []core.Value) eval.Result {
@@ -18,17 +17,17 @@ func opRegexMatch(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
 	defer parsed.Pattern.Free(c.Run)
-	defer slices.Free(c.Run, parsed.Diagnostics)
+	defer mem.FreeSlice(nil, parsed.Diagnostics)
 	if len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers == 0 || parsed.Pattern.References != 0 || !hasRegexMatcher(parsed.Pattern) {
 		return ownedFailure(c.Run, "PAT_INVALID", "regex-match needs a regex match pattern")
 	}
 	matched := parsed.Pattern.MatchText(c.Run, values[1].Text)
 	if matched.Limited {
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")
 	}
 	if !matched.Matched {
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	return regexMatchRecord(c, parsed.Pattern, values[1].Text, matched.Captures)
@@ -44,7 +43,7 @@ func hasRegexMatcher(pattern *expr.Pattern) bool {
 }
 
 func regexMatchRecord(c *eval.Context, pattern *expr.Pattern, subject string, captures []string) eval.Result {
-	values := slices.Make[core.Value](c.Run, len(captures))
+	values := make([]core.Value, len(captures))
 	for i := range captures {
 		values[i] = core.NewString(c.Run, captures[i])
 	}
@@ -65,14 +64,14 @@ func regexMatchRecord(c *eval.Context, pattern *expr.Pattern, subject string, ca
 			}
 		}
 		if !duplicate {
-			namedFields = slices.Append(c.Run, namedFields, core.RecordField{Key: name, Value: core.NewString(c.Run, captures[i])})
+			namedFields = append(namedFields, core.RecordField{Key: name, Value: core.NewString(c.Run, captures[i])})
 		}
 	}
 	named := core.NewRecord(c.Run, namedFields)
 	for i := range namedFields {
 		namedFields[i].Value.Free(c.Run)
 	}
-	slices.Free(c.Run, namedFields)
+	mem.FreeSlice(nil, namedFields)
 
 	fields := []core.RecordField{
 		{Key: "text", Value: core.NewString(c.Run, subject)},
@@ -83,7 +82,7 @@ func regexMatchRecord(c *eval.Context, pattern *expr.Pattern, subject string, ca
 	for i := range fields {
 		fields[i].Value.Free(c.Run)
 	}
-	slices.Free(c.Run, captures)
+	mem.FreeSlice(nil, captures)
 	return eval.Result{Value: result}
 }
 

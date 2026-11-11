@@ -1,10 +1,10 @@
-package rule_test
+package rulecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/rule"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func sameSpan(span source.Span, start int, end int) bool {

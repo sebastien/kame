@@ -1,8 +1,9 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"slices"
+	"strings"
 )
 
 type Kind int
@@ -28,6 +29,8 @@ func KindName(kind Kind) string {
 		return "record"
 	case Callable:
 		return "callable"
+	case Module:
+		return "kash-module"
 	case Resource:
 		return "resource"
 	case Pattern:
@@ -51,6 +54,7 @@ const (
 	Resource
 	Pattern
 	Process
+	Module
 )
 
 type RecordField struct {
@@ -81,26 +85,28 @@ type Value struct {
 	// Its storage is owned by CallableOwner and outlives published values.
 	CallableSignature *Signature
 	// Process is opaque and borrowed from its invocation owner, never serialized.
-	Process  any
-	Resource ResourceKey
+	Process any
+	// Module is an opaque invocation-owned library; its owner outlives snapshots.
+	Module          any
+	ModuleOwner     any
+	ModuleSignature *Signature
+	Resource        ResourceKey
 }
 
 func NewString(a mem.Allocator, text string) Value {
 	if len(text) == 0 {
 		return Value{Kind: String}
 	}
-	b := mem.AllocSlice[byte](a, len(text), len(text))
-	copy(b, []byte(text))
-	return Value{Kind: String, Text: string(b)}
+	return Value{Kind: String, Text: strings.Clone(text)}
 }
 
 func NewBytes(a mem.Allocator, data []byte) Value {
-	b := slices.Clone(a, data)
+	b := slices.Clone(data)
 	return Value{Kind: Bytes, Bytes: b}
 }
 
 func NewList(a mem.Allocator, values []Value) Value {
-	list := slices.Make[Value](a, len(values))
+	list := make([]Value, len(values))
 	for i := range values {
 		list[i] = values[i].Clone(a)
 	}
@@ -108,7 +114,7 @@ func NewList(a mem.Allocator, values []Value) Value {
 }
 
 func NewRecord(a mem.Allocator, fields []RecordField) Value {
-	record := slices.Make[RecordField](a, len(fields))
+	record := make([]RecordField, len(fields))
 	for i := range fields {
 		record[i].Key = NewString(a, fields[i].Key).Text
 		record[i].Value = fields[i].Value.Clone(a)
@@ -196,18 +202,18 @@ func (v *Value) Free(a mem.Allocator) {
 		mem.FreeString(a, v.ToolName)
 		mem.FreeString(a, v.GlobPattern)
 	case Bytes:
-		slices.Free(a, v.Bytes)
+		mem.FreeSlice(nil, v.Bytes)
 	case List:
 		for i := range v.List {
 			v.List[i].Free(a)
 		}
-		slices.Free(a, v.List)
+		mem.FreeSlice(nil, v.List)
 	case Record:
 		for i := range v.Record {
 			mem.FreeString(a, v.Record[i].Key)
 			v.Record[i].Value.Free(a)
 		}
-		slices.Free(a, v.Record)
+		mem.FreeSlice(nil, v.Record)
 	case Resource:
 		v.Resource.Free(a)
 	case Pattern:

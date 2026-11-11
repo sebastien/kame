@@ -2,9 +2,9 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strings"
 )
 
 func (r *PublishResult) Value(a mem.Allocator) core.Value {
@@ -16,7 +16,7 @@ func (r *PublishResult) Value(a mem.Allocator) core.Value {
 }
 
 func PublishPayload(a mem.Allocator, staged string, destination string) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("staged")
@@ -30,6 +30,6 @@ func PublishPayload(a mem.Allocator, staged string, destination string) core.Val
 		{Key: "destination", Value: core.Value{Kind: core.String, Text: destination}},
 		{Key: FieldData, Value: core.Value{Kind: core.String, Text: b.String()}},
 	})
-	b.Free()
+	b.Reset()
 	return value
 }

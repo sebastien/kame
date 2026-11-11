@@ -1,22 +1,22 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/source"
 	"kame/operations"
 	"kame/ownership"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/time"
+	"os"
+	"path"
+
+	"strconv"
+	"time"
 )
 
 func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
@@ -70,7 +70,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		name, text := input.Value, input.Value
 		if input.Kind == "file" || input.Kind == "discover" {
 			file := loadRunSourceInput(inv, input, fragments, diagnosticWriter(out, errOut, inv.JSON))
-			loaded = slices.Append(mem.System, loaded, file)
+			loaded = append(loaded, file)
 			if file.Status != 0 {
 				freeRunInputs(fragments, storage, names)
 				return 1
@@ -80,26 +80,26 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				if j+1 != len(file.Parts) {
 					entries = nil
 				}
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, SourceDirectory: file.Parts[j].SourceDirectory, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+				fragments = append(fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, SourceDirectory: file.Parts[j].SourceDirectory, Signature: file.Parts[j].Signature, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: file.Parts[j].Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		} else if input.Kind == "stdin" {
-			data, err := io.ReadAll(mem.System, in)
+			data, err := io.ReadAll(in)
 			if err != nil {
 				freeRunInputs(fragments, storage, names)
 				sourceError(diagnosticWriter(out, errOut, inv.JSON), "FS_ERR", "cannot read stdin", inv.JSON)
 				return 1
 			}
-			storage = slices.Append(mem.System, storage, data)
+			storage = append(storage, data)
 			text, name = string(data), "<stdin>"
 		} else {
-			var buffer [strconv.MaxIntBase10Len]byte
-			name = cloneCommandText("<command:" + strconv.Itoa(buffer[:], i+1) + ">")
-			names = slices.Append(mem.System, names, name)
+
+			name = cloneCommandText("<command:" + strconv.Itoa(i+1) + ">")
+			names = append(names, name)
 		}
 		if input.Lang == "km" || input.Lang == "kmk" || input.Lang == "kash" {
 			file := inlineRunSourceInput(inv, name, text, input.Lang, fragments, diagnosticWriter(out, errOut, inv.JSON))
-			loaded = slices.Append(mem.System, loaded, file)
+			loaded = append(loaded, file)
 			if file.Status != 0 {
 				freeRunInputs(fragments, storage, names)
 				return 1
@@ -109,19 +109,19 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				if j+1 != len(file.Parts) {
 					entries = nil
 				}
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: true, SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+				fragments = append(fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: file.Parts[j].Lang, Entries: entries, Inline: true, SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		}
-		fragments = slices.Append(mem.System, fragments, program.Fragment{Name: name, Text: text, Lang: input.Lang, Entries: input.Entries, Inline: input.Kind != "file", Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+		fragments = append(fragments, program.Fragment{Name: name, Text: text, Lang: input.Lang, Entries: input.Entries, Inline: input.Kind != "file", Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 	}
 	defer freeRunInputs(fragments, storage, names)
 	directory := inv.Directory
 	if !path.IsAbs(directory) {
-		buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
-		cwd, err := os.Getwd(buffer)
+		buffer := mem.AllocSlice[byte](mem.System, 4096, 4096)
+		cwd, err := os.Getwd()
 		if err == nil && cwd != "" {
-			directory = path.Join(mem.System, cwd, directory)
+			directory = path.Join(cwd, directory)
 		} else {
 			directory = cloneCommandText(directory)
 		}
@@ -185,7 +185,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	session := compiled.Session
 	p := session.Program
 	defer session.Free()
-	values := slices.Make[core.Value](mem.System, len(inv.Args))
+	values := make([]core.Value, len(inv.Args))
 	for i := range inv.Args {
 		values[i] = core.NewString(mem.System, inv.Args[i])
 	}
@@ -193,7 +193,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	for i := range values {
 		values[i].Free(mem.System)
 	}
-	slices.Free(mem.System, values)
+	mem.FreeSlice(nil, values)
 	// A single rule source keeps the established build presentation, parallel
 	// target handling, JSON events, freshness and cache path unchanged.
 	output := exprEffectOutput{Program: p, Out: out, Err: errOut}
@@ -243,10 +243,10 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" && inv.TimeoutMS == 0 {
 		var targets []string
 		for i := range session.Work {
-			targets = slices.Append(mem.System, targets, session.Work[i].Target)
+			targets = append(targets, session.Work[i].Target)
 		}
 		status := materializeTargets(p, targets, out, errOut, inv.JSON)
-		slices.Free(mem.System, targets)
+		mem.FreeSlice(nil, targets)
 		if status != 0 {
 			return status
 		}
@@ -420,16 +420,16 @@ func freeRunInputs(fragments []program.Fragment, data [][]byte, names []string) 
 	for i := range names {
 		mem.FreeString(mem.System, names[i])
 	}
-	slices.Free(mem.System, data)
-	slices.Free(mem.System, names)
-	slices.Free(mem.System, fragments)
+	mem.FreeSlice(nil, data)
+	mem.FreeSlice(nil, names)
+	mem.FreeSlice(nil, fragments)
 }
 
 func freeRunSources(sources *[]buildSource) {
 	for i := range *sources {
 		freeBuildSource(&(*sources)[i])
 	}
-	slices.Free(mem.System, *sources)
+	mem.FreeSlice(nil, *sources)
 }
 
 func emitRunDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, fragments []program.Fragment, loaded []buildSource) {

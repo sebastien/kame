@@ -3,11 +3,10 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type planResolverState struct {
@@ -56,7 +55,7 @@ func (p *Program) Plan(target string) PlanResult {
 	}
 	for i := range selected.Rule.Outputs {
 		output := renderTarget(p.Alloc, selected.Rule.Outputs[i], selected.Captures)
-		plan.Outputs = slices.Append(p.Alloc, plan.Outputs, output)
+		plan.Outputs = append(plan.Outputs, output)
 	}
 	for i := range plan.Outputs {
 		for j := 0; j < i; j++ {
@@ -111,25 +110,25 @@ func (p *Program) Plan(target string) PlanResult {
 				plan.ResourceInputs[len(plan.ResourceInputs)-1].SequenceEnd = true
 			}
 			for j := before; j < len(plan.Inputs); j++ {
-				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
+				plan.DynamicInputs = append(plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
 			}
 			continue
 		}
 		if input.Kind == rule.InputTemplate {
 			text := renderInput(p.Alloc, input, selected.Captures)
-			plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
-			plan.StaticInputs = slices.Append(p.Alloc, plan.StaticInputs, cloneText(p.Alloc, text))
-			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
+			plan.Inputs = append(plan.Inputs, text)
+			plan.StaticInputs = append(plan.StaticInputs, cloneText(p.Alloc, text))
+			plan.ResourceInputs = append(plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
 			continue
 		}
 		text := cloneText(p.Alloc, input.Text)
-		plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
-		plan.StaticInputs = slices.Append(p.Alloc, plan.StaticInputs, cloneText(p.Alloc, text))
+		plan.Inputs = append(plan.Inputs, text)
+		plan.StaticInputs = append(plan.StaticInputs, cloneText(p.Alloc, text))
 		kind := core.ResourceTarget
 		if input.Kind == rule.InputPath {
 			kind = core.ResourceFile
 		}
-		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+		plan.ResourceInputs = append(plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 	}
 	// Planning does not validate accepted records or resource bytes.
 	plan.Freshness = Unknown
@@ -174,7 +173,7 @@ func (p *Program) expandReadOnlyPlan(target string, yield bool, definitions bool
 			result.Plan.Free(p.Alloc)
 			return PlanResult{Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot create input resolver")}
 		}
-		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
+		p.Instances = append(p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
 	}
 	if node.State == core.NodeCancelled || node.State == core.NodeFailed {
 		p.restartInspectionNode(node)
@@ -309,7 +308,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	result := p.evaluateInput(input, context)
 	scope.Free()
 	if state.Resolving != nil {
-		slices.Free(p.Alloc, state.Resolving)
+		mem.FreeSlice(nil, state.Resolving)
 	}
 	if context.PhaseInvalid() || len(context.Effects) != 0 {
 		eval.FreeEffects(p.Alloc, context.Effects)
@@ -346,13 +345,13 @@ func resolvePlanDefinition(value any, key core.ResourceKey, context *eval.Contex
 		if state.Resolving[i] == key.Name {
 			d := failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")
 			for j := i; j < len(state.Resolving); j++ {
-				d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, state.Resolving[j]))
+				d.TargetStack = append(d.TargetStack, cloneText(state.Program.Alloc, state.Resolving[j]))
 			}
-			d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, key.Name))
+			d.TargetStack = append(d.TargetStack, cloneText(state.Program.Alloc, key.Name))
 			return eval.Result{Diagnostic: d}
 		}
 	}
-	state.Resolving = slices.Append(state.Program.Alloc, state.Resolving, key.Name)
+	state.Resolving = append(state.Resolving, key.Name)
 	result := state.Program.Eval.EvaluateDefinition(key, context)
 	state.Resolving = state.Resolving[:len(state.Resolving)-1]
 	return result

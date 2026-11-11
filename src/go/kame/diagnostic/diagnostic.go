@@ -2,8 +2,7 @@
 package diagnostic
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type Severity int
@@ -104,28 +103,28 @@ func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 	copy.Code = clone(a, d.Code)
 	copy.Message = clone(a, d.Message)
 	copy.Target = clone(a, d.Target)
-	copy.Notes = slices.Make[string](a, len(d.Notes))
+	copy.Notes = make([]string, len(d.Notes))
 	for i := range d.Notes {
 		copy.Notes[i] = clone(a, d.Notes[i])
 	}
-	copy.Related = slices.Make[Related](a, len(d.Related))
+	copy.Related = make([]Related, len(d.Related))
 	for i := range d.Related {
 		copy.Related[i] = d.Related[i]
 		copy.Related[i].Message = clone(a, d.Related[i].Message)
 		copy.Related[i].Source = clone(a, d.Related[i].Source)
 	}
-	copy.Frames = slices.Make[Frame](a, len(d.Frames))
+	copy.Frames = make([]Frame, len(d.Frames))
 	for i := range d.Frames {
 		copy.Frames[i] = d.Frames[i]
 		copy.Frames[i].Kind = clone(a, d.Frames[i].Kind)
 		copy.Frames[i].Label = clone(a, d.Frames[i].Label)
 		copy.Frames[i].Source = clone(a, d.Frames[i].Source)
 	}
-	copy.TargetStack = slices.Make[string](a, len(d.TargetStack))
+	copy.TargetStack = make([]string, len(d.TargetStack))
 	for i := range d.TargetStack {
 		copy.TargetStack[i] = clone(a, d.TargetStack[i])
 	}
-	copy.Tips = slices.Make[string](a, len(d.Tips))
+	copy.Tips = make([]string, len(d.Tips))
 	for i := range d.Tips {
 		copy.Tips[i] = clone(a, d.Tips[i])
 	}
@@ -165,11 +164,11 @@ func (d *Diagnostic) Free(a mem.Allocator) {
 		mem.FreeString(a, d.Cause.Message)
 		mem.FreeString(a, d.Cause.Program)
 	}
-	slices.Free(a, d.Frames)
-	slices.Free(a, d.Notes)
-	slices.Free(a, d.Related)
-	slices.Free(a, d.TargetStack)
-	slices.Free(a, d.Tips)
+	mem.FreeSlice(nil, d.Frames)
+	mem.FreeSlice(nil, d.Notes)
+	mem.FreeSlice(nil, d.Related)
+	mem.FreeSlice(nil, d.TargetStack)
+	mem.FreeSlice(nil, d.Tips)
 	*d = Diagnostic{}
 }
 

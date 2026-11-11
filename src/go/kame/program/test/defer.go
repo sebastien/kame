@@ -1,13 +1,13 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestDeferredExpressionsFinalizeAndReleaseRetainedScopes(t *testing.T) {

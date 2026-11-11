@@ -1,7 +1,5 @@
 package expr
 
-import "solod.dev/so/slices"
-
 // Policies are closed syntax, never evaluated configuration. In particular,
 // inspection and invalid graphs must not execute arbitrary option expressions.
 func (p *parser) streamPolicy(mux *Expr) {
@@ -10,7 +8,7 @@ func (p *parser) streamPolicy(mux *Expr) {
 		start := p.pos
 		key := p.expression()
 		if key != nil {
-			mux.Items = slices.Append(p.a, mux.Items, key)
+			mux.Items = append(mux.Items, key)
 		}
 		p.commandSpace(true)
 		if key == nil || key.Kind != Symbol || (key.Text != "buffer" && key.Text != "strategy" && key.Text != "overflow" && key.Text != "items" && key.Text != "order" && key.Text != "failure") || p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' {
@@ -19,7 +17,7 @@ func (p *parser) streamPolicy(mux *Expr) {
 		}
 		value := p.expression()
 		if value != nil {
-			mux.Items = slices.Append(p.a, mux.Items, value)
+			mux.Items = append(mux.Items, value)
 		}
 		if key.Text == "buffer" {
 			if buffer || value == nil || value.Kind != Integer || value.Int < 1 || value.Int > 65536 {

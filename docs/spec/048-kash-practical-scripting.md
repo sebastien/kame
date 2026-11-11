@@ -23,7 +23,9 @@ finalization machinery, not capture followed by splitting a whole string.
 This is not Bash source compatibility. Interactive facilities, implicit word
 splitting/globbing, mutable global cwd/environment, arbitrary descriptors,
 detached jobs, package discovery, implicit retries, and transactional external
-effects are outside the contract. Separate structured stdout/stderr capture,
+effects are outside this contract. Authorized child-environment overlay and
+foreground terminal handoff are `051-kash-session-authority.md`; they do not
+mutate the host environment. Separate structured stdout/stderr capture,
 byte-valued argv, live graph producers in loop headers, and accepted early-consumer
 SIGPIPE policies require separate contracts.
 
@@ -295,7 +297,8 @@ Lazy library definitions may perform effects when demanded under runtime rules;
 inclusion neither demands them nor certifies them as pure. Includes are not
 permitted inside Kash bodies, inline/stdin sources, or generated text without a
 file-backed loading base. Computed paths, search paths, optional/conditional
-Kash inclusion, namespaces, exports, and package discovery are not introduced.
+Kash inclusion or package discovery are not introduced here. Kash library module
+fields and their limited exports are specified in `050-kash-libraries.md`.
 
 `(source-dir)` takes no arguments and returns the absolute lexical directory of
 the file-backed source containing that authored call. It uses source metadata,
@@ -321,7 +324,8 @@ Its header occupies its own line. Accepted pairs are `:cwd VALUE` and `:env VALU
 each at most once, in either order. Reuse scalar cwd composition and typed
 environment-record grammar from stage setup; no second value parser is added.
 Unknown or duplicate setup keys are errors. Block `:timeout`, ambient exports,
-and shorthand arbitrary environment keys are not introduced.
+and shorthand arbitrary environment keys are not introduced here. Scope
+`export` and `unset` are `051-kash-session-authority.md`.
 
 Evaluate setup operands left to right once in the enclosing context, retaining
 completed work across suspension. Validate all values/grants before entering the
@@ -335,7 +339,8 @@ effective cwd, not the boundary's original directory. With boundary cwd `/repo`,
 `/repo/project/build`.
 
 Kame's explicit environment-read namespace and startup-PATH/tool resolution are
-unchanged. Context does not refresh a memoized definition, rebase an already
+unchanged by `with`. An authorized scope overlay is
+`051-kash-session-authority.md`. Context does not refresh a memoized definition, rebase an already
 materialized resource, change a dependency's established evaluation context, or
 alter authored source identity. Newly executed work must retain the effective
 context in its execution identity rather than reuse work from another cwd/env.

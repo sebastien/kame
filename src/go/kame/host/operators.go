@@ -32,16 +32,16 @@ const (
 // host itself and must not carry argv.
 type OperatorKind struct {
 	Kind        string
-	Code        int    // wire code shared with the native and JavaScript hosts
-	Argv        bool   // launches a command, so argv is mandatory
-	MinIn       int    // argument and stdin edges
-	MaxIn       int    // -1 is unbounded
-	MinOut      int    // outgoing edges
-	MaxOut      int    // -1 is unbounded
-	Ordered     bool   // accepts :order
-	Queue       bool   // accepts :buffer
-	Lossy       bool   // accepts :overflow
-	OutputFile  bool   // may own a side output file beside its presentation edge
+	Code        int          // wire code shared with the native and JavaScript hosts
+	Argv        bool         // launches a command, so argv is mandatory
+	MinIn       int          // argument and stdin edges
+	MaxIn       int          // -1 is unbounded
+	MinOut      int          // outgoing edges
+	MaxOut      int          // -1 is unbounded
+	Ordered     bool         // accepts :order
+	Queue       bool         // accepts :buffer
+	Lossy       bool         // accepts :overflow
+	OutputFile  bool         // may own a side output file beside its presentation edge
 	Frames      Framing      // framing emitted to the next connection
 	InputFrames InputFraming // framing required from the preceding connection
 }

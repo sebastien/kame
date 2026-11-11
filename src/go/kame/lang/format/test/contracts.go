@@ -1,12 +1,12 @@
-package format_test
+package formatcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/format"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestKashGraphFormattingCanonicalizesOperatorStages(t *testing.T) {

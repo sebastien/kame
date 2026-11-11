@@ -1,14 +1,14 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/template"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func waitEach(context *eval.Context, state any, values []core.Value) eval.Result {

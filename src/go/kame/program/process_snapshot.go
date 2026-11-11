@@ -3,8 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 func snapshotTopology(a mem.Allocator, payload core.Value) core.Value {
@@ -18,7 +17,7 @@ func snapshotTopology(a mem.Allocator, payload core.Value) core.Value {
 		if len(stages[i].List) != 0 {
 			name = stages[i].List[0].Text
 		}
-		programs = slices.Append(a, programs, core.NewString(a, name))
+		programs = append(programs, core.NewString(a, name))
 	}
 	fields := []core.RecordField{
 		{Key: "kinds", Value: core.NewList(a, host.PayloadList(payload, "kinds"))},
@@ -34,7 +33,7 @@ func snapshotTopology(a mem.Allocator, payload core.Value) core.Value {
 	for i := range programs {
 		programs[i].Free(a)
 	}
-	slices.Free(a, programs)
+	mem.FreeSlice(nil, programs)
 	return value
 }
 
@@ -115,7 +114,7 @@ func (p *Program) processGraphSnapshot(request host.Request, value core.Value) b
 			kind = "process"
 		}
 		fields := []core.RecordField{{Key: "id", Value: core.Value{Kind: core.Int, Int: int64(i)}}, {Key: "state", Value: core.NewString(p.Alloc, names[int(states[i].Int)])}, {Key: "kind", Value: core.NewString(p.Alloc, kind)}, {Key: "program", Value: programs[i]}}
-		nodes = slices.Append(p.Alloc, nodes, core.NewRecord(p.Alloc, fields))
+		nodes = append(nodes, core.NewRecord(p.Alloc, fields))
 		fields[1].Value.Free(p.Alloc)
 		fields[2].Value.Free(p.Alloc)
 	}
@@ -144,20 +143,20 @@ func (p *Program) processGraphSnapshot(request host.Request, value core.Value) b
 		keys := []string{"bytes", "items", "droppedItems", "queueHighWaterBytes", "queueHighWaterItems"}
 		var parts []core.RecordField
 		for j := range fields {
-			parts = slices.Append(p.Alloc, parts, fields[j])
+			parts = append(parts, fields[j])
 		}
 		for j := range keys {
 			counter := core.Value{Kind: core.Nil}
 			if row[0].Int != 0 && row[j+1].Int >= 0 && (j < 3 || row[0].Int == 3) {
 				counter = row[j+1]
 			}
-			parts = slices.Append(p.Alloc, parts, core.RecordField{Key: keys[j], Value: counter})
+			parts = append(parts, core.RecordField{Key: keys[j], Value: counter})
 		}
-		parts = slices.Append(p.Alloc, parts, core.RecordField{Key: "saturated", Value: core.Value{Kind: core.Bool, Bool: row[6].Int != 0}})
-		measured = slices.Append(p.Alloc, measured, core.NewRecord(p.Alloc, parts))
+		parts = append(parts, core.RecordField{Key: "saturated", Value: core.Value{Kind: core.Bool, Bool: row[6].Int != 0}})
+		measured = append(measured, core.NewRecord(p.Alloc, parts))
 		fields[1].Value.Free(p.Alloc)
 		fields[5].Value.Free(p.Alloc)
-		slices.Free(p.Alloc, parts)
+		mem.FreeSlice(nil, parts)
 	}
 	policy := "fail-fast"
 	if host.PayloadInt(pending.Graph, "failurePolicy") == 1 {
@@ -171,11 +170,11 @@ func (p *Program) processGraphSnapshot(request host.Request, value core.Value) b
 	for i := range nodes {
 		nodes[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	for i := range measured {
 		measured[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, measured)
+	mem.FreeSlice(nil, measured)
 	for i := range p.Events {
 		if p.Events[i].Kind == ProcessSnapshot && p.Events[i].RequestID == request.ID {
 			p.Events[i].Value.Free(p.Alloc)

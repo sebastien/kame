@@ -1,4 +1,4 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
@@ -6,14 +6,14 @@ import (
 	"kame/host"
 	"kame/host/posix"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"os"
+	"slices"
 )
 
 type countingReadDirHost struct {
@@ -89,7 +89,7 @@ func (h *fakeRemoteHost) Start(request host.ProcessRequest) bool {
 	copy(data, "remote-data")
 	var outputs []host.ExecutionArtifact
 	if !h.OmitOutputs {
-		outputs = slices.Make[host.ExecutionArtifact](h.allocator, 1)
+		outputs = make([]host.ExecutionArtifact, 1)
 		outputs[0] = host.ExecutionArtifact{Name: string(nameBytes), Data: data, Mode: 0o644}
 	} else {
 		mem.FreeSlice(h.allocator, nameBytes)
@@ -298,8 +298,8 @@ func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
 
 func TestMaterializeWritesOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -317,7 +317,7 @@ func TestMaterializeWritesOutput(t *testing.T) {
 		t.Errorf("materialize failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/out/result")
+	data, readErr := os.ReadFile(dir + "/out/result")
 	if readErr != nil || string(data) != "result" {
 		t.Error("recipe did not write declared output")
 	}
@@ -330,8 +330,8 @@ func TestMaterializeWritesOutput(t *testing.T) {
 
 func TestRemoteFileRuleStagesInputsAndPublishesDeclaredOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -367,7 +367,7 @@ func TestRemoteFileRuleStagesInputsAndPublishesDeclaredOutput(t *testing.T) {
 	if !remote.SawOutputName {
 		t.Error("remote output key mismatch")
 	}
-	data, readErr := os.ReadFile(a, dir+"/out")
+	data, readErr := os.ReadFile(dir + "/out")
 	if readErr != nil || string(data) != "remote-data" {
 		t.Error("remote output was not published")
 	}
@@ -380,8 +380,8 @@ func TestRemoteFileRuleStagesInputsAndPublishesDeclaredOutput(t *testing.T) {
 
 func TestRemoteFileRuleRejectsMissingDeclaredOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-missing-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-missing-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -418,8 +418,8 @@ func TestRemoteFileRuleRejectsMissingDeclaredOutput(t *testing.T) {
 
 func TestRemoteFileRuleRejectsUndeclaredOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-undeclared-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-undeclared-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -453,8 +453,8 @@ func TestRemoteFileRuleRejectsUndeclaredOutput(t *testing.T) {
 
 func TestRemoteFileRuleRequiresRegisteredExecutor(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-unregistered-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-unregistered-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -490,8 +490,8 @@ func TestRemoteCancellationDoesNotPublishOutputsAndKeepsTruncation(t *testing.T)
 }
 
 func runRemoteTerminalFailure(t *testing.T, a mem.Allocator, label string, outcome host.ProcessOutcome, expectedCode string, truncated bool) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-"+label+"-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-"+label+"-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -528,8 +528,8 @@ func runRemoteTerminalFailure(t *testing.T, a mem.Allocator, label string, outco
 
 func TestRemoteRetryReusesIdempotencyKeyAndPublishesOnlySuccess(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-retry-")
+
+	dir, err := os.MkdirTemp("", "kame-remote-retry-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -555,7 +555,7 @@ func TestRemoteRetryReusesIdempotencyKeyAndPublishesOnlySuccess(t *testing.T) {
 	if remote.StartCount != 2 || !remote.RetryKeysMatch {
 		t.Error("remote retry did not reuse its idempotency key")
 	}
-	data, readErr := os.ReadFile(a, dir+"/out")
+	data, readErr := os.ReadFile(dir + "/out")
 	if readErr != nil || string(data) != "remote-data" {
 		t.Error("remote retry did not publish its successful output")
 	}
@@ -568,8 +568,8 @@ func TestRemoteRetryReusesIdempotencyKeyAndPublishesOnlySuccess(t *testing.T) {
 
 func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-target-arguments-")
+
+	dir, err := os.MkdirTemp("", "kame-target-arguments-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -609,12 +609,12 @@ func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	data, readErr := os.ReadFile(a, dir+"/deploy-log")
+	data, readErr := os.ReadFile(dir + "/deploy-log")
 	if readErr != nil || string(data) != "westeast" {
 		t.Error("recipe scope did not receive default and supplied values")
 	}
 	mem.FreeSlice(a, data)
-	dependencies, dependencyErr := os.ReadFile(a, dir+"/dependency-log")
+	dependencies, dependencyErr := os.ReadFile(dir + "/dependency-log")
 	if dependencyErr != nil || string(dependencies) != "westeast" {
 		t.Error("argument values did not flow into dependency target selection")
 	}
@@ -650,8 +650,8 @@ func TestNamedTargetArgumentCannotShadowDefinition(t *testing.T) {
 
 func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-redirection-")
+
+	dir, err := os.MkdirTemp("", "kame-redirection-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -674,7 +674,7 @@ func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 		t.Errorf("redirection failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "source" {
 		t.Error("write effect overwrote process output")
 	}
@@ -714,8 +714,8 @@ func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 
 func TestMissingDeclaredOutputFails(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -741,8 +741,8 @@ func TestMissingDeclaredOutputFails(t *testing.T) {
 
 func TestSiblingOutputsShareOneExecution(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -766,7 +766,7 @@ func TestSiblingOutputsShareOneExecution(t *testing.T) {
 	}
 	left.Free(a)
 	right.Free(a)
-	file, fileErr := os.ReadFile(a, dir+"/file-log")
+	file, fileErr := os.ReadFile(dir + "/file-log")
 	if fileErr != nil || string(file) != "x" {
 		t.Error("sibling outputs did not share execution")
 	}
@@ -779,8 +779,8 @@ func TestSiblingOutputsShareOneExecution(t *testing.T) {
 
 func TestBareTaskRuns(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -800,7 +800,7 @@ func TestBareTaskRuns(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Error("bare task did not rerun")
 	}
@@ -813,8 +813,8 @@ func TestBareTaskRuns(t *testing.T) {
 
 func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-leak-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-leak-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -840,7 +840,7 @@ func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || len(data) != 64 {
 		t.Errorf("repeated task did not complete: %d bytes", len(data))
 	}
@@ -849,8 +849,8 @@ func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 
 func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -870,17 +870,17 @@ func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "lrlr" {
 		t.Errorf("bare dependency did not rerun: %s", string(data))
 	}
 	mem.FreeSlice(a, data)
-	entries, cacheErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, cacheErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if cacheErr == nil {
 		if len(entries) != 0 {
 			t.Error("bare dependency committed a cache record")
 		}
-		os.FreeDirEntry(a, entries)
+
 	}
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -890,8 +890,8 @@ func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
 
 func TestBareTaskRerunsForEachRoot(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -911,7 +911,7 @@ func TestBareTaskRerunsForEachRoot(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "ll" {
 		t.Errorf("bare task did not run once per root: %s", string(data))
 	}
@@ -924,8 +924,8 @@ func TestBareTaskRerunsForEachRoot(t *testing.T) {
 
 func TestTransitiveBareTaskReruns(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -945,7 +945,7 @@ func TestTransitiveBareTaskReruns(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "lmrlmr" {
 		t.Errorf("transitive bare task did not rerun: %s", string(data))
 	}
@@ -958,8 +958,8 @@ func TestTransitiveBareTaskReruns(t *testing.T) {
 
 func TestConcurrentRootsShareBareTask(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1005,7 +1005,7 @@ func TestConcurrentRootsShareBareTask(t *testing.T) {
 	if !leftDone || !rightDone {
 		t.Error("concurrent roots did not finish")
 	}
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "x" {
 		t.Errorf("concurrent roots did not share bare task: %s", string(data))
 	}
@@ -1020,8 +1020,8 @@ func TestConcurrentRootsShareBareTask(t *testing.T) {
 
 func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1040,13 +1040,13 @@ func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 		return
 	}
 	kept.Free(a)
-	entries, readErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not written")
 		return
 	}
-	before, beforeErr := os.ReadFile(a, dir+"/.kame/cache/tasks/"+entries[0].Name)
-	os.FreeDirEntry(a, entries)
+	before, beforeErr := os.ReadFile(dir + "/.kame/cache/tasks/" + entries[0].Name())
+
 	if beforeErr != nil {
 		t.Fatal("cache record unreadable")
 		return
@@ -1085,14 +1085,14 @@ func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 		t.Error("cancelled bare rerun did not stop")
 	}
 	rerun.Handle.Free()
-	later, laterErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	later, laterErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if laterErr != nil || len(later) != 1 {
 		mem.FreeSlice(a, before)
 		t.Error("cancellation changed cache records")
 		return
 	}
-	after, afterErr := os.ReadFile(a, dir+"/.kame/cache/tasks/"+later[0].Name)
-	os.FreeDirEntry(a, later)
+	after, afterErr := os.ReadFile(dir + "/.kame/cache/tasks/" + later[0].Name())
+
 	if afterErr != nil || string(before) != string(after) {
 		t.Error("cancellation replaced cached-task record")
 	}
@@ -1105,7 +1105,7 @@ func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 		t.Error("cached task failed after cancellation")
 	}
 	again.Free(a)
-	data, dataErr := os.ReadFile(a, dir+"/task-log")
+	data, dataErr := os.ReadFile(dir + "/task-log")
 	if dataErr != nil || string(data) != "kr" {
 		t.Errorf("cancellation replaced cached work: %s", string(data))
 	}
@@ -1118,8 +1118,8 @@ func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 
 func TestDiscoveredBareTaskRerunsForNewRoot(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1147,7 +1147,7 @@ func TestDiscoveredBareTaskRerunsForNewRoot(t *testing.T) {
 		t.Errorf("discovered dependency failed: %s", reached.Diagnostic.Code)
 	}
 	reached.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "llr" {
 		t.Errorf("discovered bare task was reused: %s", string(data))
 	}
@@ -1160,8 +1160,8 @@ func TestDiscoveredBareTaskRerunsForNewRoot(t *testing.T) {
 
 func TestFailedBareTaskRerunsForNewRoot(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1185,7 +1185,7 @@ func TestFailedBareTaskRerunsForNewRoot(t *testing.T) {
 		t.Errorf("failed bare task was not rerun: %s", second.Diagnostic.Code)
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "ll" {
 		t.Errorf("failed bare task was reused: %s", string(data))
 	}
@@ -1198,8 +1198,8 @@ func TestFailedBareTaskRerunsForNewRoot(t *testing.T) {
 
 func TestCancelledBareTaskRerunsForNewRoot(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1239,7 +1239,7 @@ func TestCancelledBareTaskRerunsForNewRoot(t *testing.T) {
 		t.Errorf("cancelled bare task was not rerun: %s", second.Diagnostic.Code)
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "lr" {
 		t.Errorf("cancelled bare task was reused: %s", string(data))
 	}
@@ -1270,8 +1270,8 @@ func materializeWithin(p *program.Program, target string, ticks int) program.Res
 
 func TestDiamondDependencySharesPrerequisite(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1289,7 +1289,7 @@ func TestDiamondDependencySharesPrerequisite(t *testing.T) {
 		t.Errorf("diamond dependency failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "x" {
 		t.Error("shared prerequisite did not execute once")
 	}
@@ -1299,7 +1299,7 @@ func TestDiamondDependencySharesPrerequisite(t *testing.T) {
 		t.Errorf("second diamond root failed: %s", second.Diagnostic.Code)
 	}
 	second.Free(a)
-	again, againErr := os.ReadFile(a, dir+"/task-log")
+	again, againErr := os.ReadFile(dir + "/task-log")
 	if againErr != nil || string(again) != "xx" {
 		t.Error("shared prerequisite did not rerun once for the second root")
 	}
@@ -1312,8 +1312,8 @@ func TestDiamondDependencySharesPrerequisite(t *testing.T) {
 
 func TestFreshFileSkipsRecipe(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1342,7 +1342,7 @@ func TestFreshFileSkipsRecipe(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/recipe-log")
+	data, readErr := os.ReadFile(dir + "/recipe-log")
 	if readErr != nil || string(data) != "x" {
 		t.Error("fresh file reran recipe")
 	}
@@ -1355,8 +1355,8 @@ func TestFreshFileSkipsRecipe(t *testing.T) {
 
 func TestNewerInputRebuildsFile(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1386,7 +1386,7 @@ func TestNewerInputRebuildsFile(t *testing.T) {
 	first.Free(a)
 	wait.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/recipe-log")
+	data, readErr := os.ReadFile(dir + "/recipe-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Error("newer input did not rerun recipe")
 	}
@@ -1423,8 +1423,8 @@ func TestDefinitionHostReadFailureReleasesDiagnosticOnce(t *testing.T) {
 
 func TestYieldWritesFileOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1446,7 +1446,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 		t.Errorf("yield failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "yielded" {
 		t.Error("yield did not write output")
 	}
@@ -1487,8 +1487,8 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 
 func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-")
+
+	dir, err := os.MkdirTemp("", "kame-service-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1644,8 +1644,8 @@ func TestForwardedServiceUsesConfiguredLogRetention(t *testing.T) {
 
 func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-restart-")
+
+	dir, err := os.MkdirTemp("", "kame-service-restart-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1682,7 +1682,7 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 	if ready && len(compiled.Program.Pending) != 1 {
 		t.Error("service restart retained a completed process display")
 	}
-	starts, readErr := os.ReadFile(a, dir+"/first")
+	starts, readErr := os.ReadFile(dir + "/first")
 	if readErr != nil {
 		t.Error("first startup marker was not created")
 	}
@@ -1703,8 +1703,8 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 
 func TestServiceHealthFailureRestartsAndResumesConsumer(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-health-")
+
+	dir, err := os.MkdirTemp("", "kame-service-health-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1723,7 +1723,7 @@ func TestServiceHealthFailureRestartsAndResumesConsumer(t *testing.T) {
 		t.Error("consumer failed across health restart: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
-	consumers, readErr := os.ReadFile(a, dir+"/consumers")
+	consumers, readErr := os.ReadFile(dir + "/consumers")
 	if readErr != nil || string(consumers) != "cc" {
 		t.Error("consumer did not resume after service readiness was restored")
 	}
@@ -1739,8 +1739,8 @@ func TestServiceHealthFailureRestartsAndResumesConsumer(t *testing.T) {
 
 func TestServiceReadinessProbeGatesDependents(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-ready-")
+
+	dir, err := os.MkdirTemp("", "kame-service-ready-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1773,8 +1773,8 @@ func TestServiceReadinessProbeGatesDependents(t *testing.T) {
 
 func TestServiceReadinessTimeoutCancelsService(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-timeout-")
+
+	dir, err := os.MkdirTemp("", "kame-service-timeout-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1836,8 +1836,8 @@ func TestInvalidServiceConfigFailsBeforeExecution(t *testing.T) {
 
 func TestFileDependencyRunsProducerBeforeDependent(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1873,7 +1873,7 @@ func TestFileDependencyRunsProducerBeforeDependent(t *testing.T) {
 	if !seenDependency {
 		t.Error("dependency discovery event was not emitted")
 	}
-	data, readErr := os.ReadFile(a, dir+"/out")
+	data, readErr := os.ReadFile(dir + "/out")
 	if readErr != nil || string(data) != "source" {
 		t.Error("file producer was not scheduled before dependent")
 	}
@@ -1906,8 +1906,8 @@ func TestEmptyFileRecipeMissingOutputFails(t *testing.T) {
 
 func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1933,7 +1933,7 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 		t.Errorf("materialize failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "ab" {
 		t.Error("computed inputs were not flattened for execution")
 	}
@@ -1982,8 +1982,8 @@ func TestSharedHandlesCancelOnlyAfterLastRelease(t *testing.T) {
 
 func TestDynamicExternalFileDependencyIsCurrent(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2132,8 +2132,8 @@ func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {
 
 func TestWriteOperationDefersUntilExecution(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2152,7 +2152,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 		t.Errorf("write failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "written" {
 		t.Error("write did not commit")
 	}
@@ -2171,8 +2171,8 @@ func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 		"\t@if(:true)\r\n\t@(write! \"./output\" \"written\")\r\n\t@(out! \"rendered\")\r\n\tprintf command >> @>\r\n\t@end(if)\r\n",
 	}
 	for i := range bodies {
-		dirBuffer := make([]byte, os.MaxPathLen)
-		dir, err := os.MkdirTemp(dirBuffer, "", "kame-render-ownership-")
+
+		dir, err := os.MkdirTemp("", "kame-render-ownership-")
 		if err != nil {
 			t.Fatal("temporary directory failed")
 			return
@@ -2200,7 +2200,7 @@ func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 			t.Error("recipe rendering accepted an effect: " + result.Diagnostic.Code)
 		}
 		result.Free(a)
-		data, readErr := os.ReadFile(a, dir+"/output")
+		data, readErr := os.ReadFile(dir + "/output")
 		if readErr == nil {
 			t.Error("rejected template wrote an output")
 		}
@@ -2229,8 +2229,8 @@ func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 
 func TestWriteOperationCoercesValue(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2249,7 +2249,7 @@ func TestWriteOperationCoercesValue(t *testing.T) {
 		t.Errorf("write failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "42" {
 		t.Error("write did not coerce its value")
 	}
@@ -2262,8 +2262,8 @@ func TestWriteOperationCoercesValue(t *testing.T) {
 
 func TestReadOperationResumesDuringRendering(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2286,7 +2286,7 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 		t.Errorf("read failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "3" {
 		t.Error("read result did not resume into yield")
 	}
@@ -2299,8 +2299,8 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 
 func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2323,7 +2323,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 		t.Errorf("wildcard failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "[\"./input\"]" {
 		t.Errorf("wildcard result = %s", string(data))
 	}
@@ -2336,8 +2336,8 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 
 func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2391,8 +2391,8 @@ func TestDefinitionMaterializationReturnsCurrentValue(t *testing.T) {
 
 func TestAlwaysFileRerunsOncePerRootEpochAndRemainsAnArtifact(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-always-")
+
+	dir, err := os.MkdirTemp("", "kame-always-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -2416,7 +2416,7 @@ func TestAlwaysFileRerunsOncePerRootEpochAndRemainsAnArtifact(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	data, readErr := os.ReadFile(a, dir+"/recipe-log")
+	data, readErr := os.ReadFile(dir + "/recipe-log")
 	if readErr != nil || string(data) != "xxx" {
 		t.Error("always file did not rerun exactly once per diamond root")
 	}
@@ -2426,7 +2426,7 @@ func TestAlwaysFileRerunsOncePerRootEpochAndRemainsAnArtifact(t *testing.T) {
 		t.Error("always target lost artifact semantics or reported fresh")
 	}
 	result.Free(a)
-	data, readErr = os.ReadFile(a, dir+"/recipe-log")
+	data, readErr = os.ReadFile(dir + "/recipe-log")
 	if readErr != nil || string(data) != "xxxx" {
 		t.Error("direct always request did not rerun")
 	}

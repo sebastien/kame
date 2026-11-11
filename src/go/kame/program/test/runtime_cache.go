@@ -1,18 +1,18 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host/posix"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
-	"solod.dev/so/time"
+	"math"
+	"os"
+	"time"
 )
 
 func cacheVersionOperation(context *eval.Context, state any, values []core.Value) eval.Result {
@@ -125,12 +125,12 @@ func TestFingerprintValueTagVectors(t *testing.T) {
 }
 
 func cleanupFingerprintSubdir(a mem.Allocator, subdir string) {
-	entries, err := os.ReadDir(a, subdir)
+	entries, err := os.ReadDir(subdir)
 	if err == nil {
 		for i := range entries {
-			_ = os.Remove(subdir + "/" + entries[i].Name)
+			_ = os.Remove(subdir + "/" + entries[i].Name())
 		}
-		os.FreeDirEntry(a, entries)
+
 	}
 	_ = os.Remove(subdir)
 }
@@ -172,14 +172,14 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 		return
 	}
 	result.Free(a)
-	entries, err := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, err := os.ReadDir(dir + "/.kame/cache/tasks")
 	if err != nil || len(entries) != 1 {
-		os.FreeDirEntry(a, entries)
+
 		t.Fatal("expected exactly one task record")
 		return
 	}
-	data, err := os.ReadFile(a, dir+"/.kame/cache/tasks/"+entries[0].Name)
-	os.FreeDirEntry(a, entries)
+	data, err := os.ReadFile(dir + "/.kame/cache/tasks/" + entries[0].Name())
+
 	if err != nil || len(data) < 46 {
 		mem.FreeSlice(a, data)
 		t.Fatal("task record could not be read")
@@ -196,8 +196,8 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 		return
 	}
 	fingerprint := program.FingerprintHex(data[fingerprintAt : fingerprintAt+32])
-	// The manifest includes the v2 read-only source/context proof for task status.
-	if fingerprint != "d906023d4d6f26db47f19ee95f246ff0eadffb34839ed3875342e028930680b4" {
+	// The manifest includes the v3 file implementation proof for task status.
+	if fingerprint != "b5871d2574be038e6a8d812378d9e06536c450c970b13073dcb481bb73d9e00d" {
 		t.Errorf("complete task fingerprint = %s", fingerprint)
 	}
 	mem.FreeString(mem.System, fingerprint)
@@ -206,8 +206,8 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 
 func TestCachedTaskHits(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -227,7 +227,7 @@ func TestCachedTaskHits(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "x" {
 		t.Error("cached task did not hit")
 	}
@@ -293,8 +293,8 @@ func TestCachedTaskUsesPortableMemoryBackend(t *testing.T) {
 
 func TestCachedTaskInvalidatesForDeclaredFile(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -324,7 +324,7 @@ func TestCachedTaskInvalidatesForDeclaredFile(t *testing.T) {
 	first.Free(a)
 	second.Free(a)
 	third.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "onetwo" {
 		t.Error("declared file did not invalidate cached task")
 	}
@@ -340,8 +340,8 @@ func TestCachedTaskInvalidatesForDeclaredFile(t *testing.T) {
 // a cache result, even when their names are unchanged.
 func TestCachedTaskInvalidatesWhenDependencyKindChanges(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-kind-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-kind-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -390,7 +390,7 @@ func TestCachedTaskInvalidatesWhenDependencyKindChanges(t *testing.T) {
 	if warnings != 1 {
 		t.Errorf("unfingerprintable dependency should warn once; got %d warnings", warnings)
 	}
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("dependency kind change incorrectly reused cache: %q", string(data))
 	}
@@ -403,8 +403,8 @@ func TestCachedTaskInvalidatesWhenDependencyKindChanges(t *testing.T) {
 
 func TestCachedTaskRechecksFileAfterMtimeOnlyChange(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-mtime-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-mtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -433,7 +433,7 @@ func TestCachedTaskRechecksFileAfterMtimeOnlyChange(t *testing.T) {
 		t.Errorf("mtime-only rerun failed: %s", second.Diagnostic.Code)
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "x" {
 		t.Errorf("mtime-only change reran unchanged input bytes: %s", string(data))
 	}
@@ -446,8 +446,8 @@ func TestCachedTaskRechecksFileAfterMtimeOnlyChange(t *testing.T) {
 
 func TestCachedTaskReplaysSeparatedStreams(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -496,8 +496,8 @@ func TestCachedTaskReplaysSeparatedStreams(t *testing.T) {
 
 func TestCachedTaskCachesDeferredOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -550,8 +550,8 @@ func TestCachedTaskCachesDeferredOutput(t *testing.T) {
 
 func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -566,19 +566,19 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	}
 	first := compiled.Program.Materialize("run")
 	first.Free(a)
-	entries, readErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not written")
 		return
 	}
-	if os.WriteFile(dir+"/.kame/cache/tasks/"+entries[0].Name, []byte("broken"), 0o644) != nil {
+	if os.WriteFile(dir+"/.kame/cache/tasks/"+entries[0].Name(), []byte("broken"), 0o644) != nil {
 		t.Fatal("cache corruption failed")
 		return
 	}
-	os.FreeDirEntry(a, entries)
+
 	second := compiled.Program.Materialize("run")
 	second.Free(a)
-	data, dataErr := os.ReadFile(a, dir+"/task-log")
+	data, dataErr := os.ReadFile(dir + "/task-log")
 	if dataErr != nil || string(data) != "xx" {
 		t.Error("malformed cache record was not treated as a miss")
 	}
@@ -586,13 +586,13 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	// Low-level cache warnings require verbose mode; reuse reasons do not.
 	compiled.Program.Free()
 	compiled.Free(a)
-	entries, readErr = os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr = os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not replaced")
 		return
 	}
-	verboseCorruptPath := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
+	verboseCorruptPath := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
 	if os.WriteFile(verboseCorruptPath, []byte("broken"), 0o644) != nil {
 		t.Fatal("cache corruption failed")
 		return
@@ -621,13 +621,13 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	verbose.Program.Free()
 	verbose.Free(a)
 	// Write another malformed record and ensure default mode remains silent.
-	entries, readErr = os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr = os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not replaced")
 		return
 	}
-	cacheFile := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
+	cacheFile := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
 	if os.WriteFile(cacheFile, []byte("broken"), 0o644) != nil {
 		t.Fatal("cache corruption failed")
 		return
@@ -668,13 +668,13 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 		t.Fatal("final compile failed")
 		return
 	}
-	entries, readErr = os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr = os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("replacement cache record was not written")
 		return
 	}
-	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
+	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
 	f, openErr := os.OpenFile(cachePath, os.O_WRONLY|os.O_APPEND, 0o644)
 	if openErr != nil {
 		t.Fatal("cannot append malformed trailing byte")
@@ -688,7 +688,7 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	f.Close()
 	third := compiled.Program.Materialize("run")
 	third.Free(a)
-	data, dataErr = os.ReadFile(a, dir+"/task-log")
+	data, dataErr = os.ReadFile(dir + "/task-log")
 	if dataErr != nil || string(data) != "xxxxx" {
 		t.Error("cache record with trailing garbage was not rejected")
 	}
@@ -701,8 +701,8 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 
 func TestCacheLookupRejectsMutatedDependencyManifest(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-manifest-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-manifest-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -717,14 +717,14 @@ func TestCacheLookupRejectsMutatedDependencyManifest(t *testing.T) {
 	}
 	first := compiled.Program.Materialize("run")
 	first.Free(a)
-	entries, readErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not written")
 		return
 	}
-	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
-	record, readErr := os.ReadFile(a, cachePath)
+	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
+	record, readErr := os.ReadFile(cachePath)
 	if readErr != nil || len(record) < 90 {
 		t.Fatal("cache record could not be read")
 		return
@@ -749,7 +749,7 @@ func TestCacheLookupRejectsMutatedDependencyManifest(t *testing.T) {
 	mem.FreeSlice(a, record)
 	second := compiled.Program.Materialize("run")
 	second.Free(a)
-	log, logErr := os.ReadFile(a, dir+"/task-log")
+	log, logErr := os.ReadFile(dir + "/task-log")
 	if logErr != nil || string(log) != "xx" {
 		t.Errorf("mutated manifest incorrectly produced a cache hit: %s", string(log))
 	}
@@ -762,8 +762,8 @@ func TestCacheLookupRejectsMutatedDependencyManifest(t *testing.T) {
 
 func TestCachedTaskInvalidatesForOperationVersion(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -797,7 +797,7 @@ func TestCachedTaskInvalidatesForOperationVersion(t *testing.T) {
 	}
 	second := secondProgram.Program.Materialize("run")
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Error("operation version did not invalidate cached task")
 	}
@@ -813,8 +813,8 @@ func TestCachedTaskInvalidatesForOperationVersion(t *testing.T) {
 // therefore produce a distinct cache fingerprint.
 func TestCachedTaskInvalidatesForExecutionEnvironment(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-env-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-env-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -846,7 +846,7 @@ func TestCachedTaskInvalidatesForExecutionEnvironment(t *testing.T) {
 		t.Error("second cached task failed")
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "onetwo" {
 		t.Errorf("consumed environment did not invalidate cache: %s", string(data))
 	}
@@ -859,8 +859,8 @@ func TestCachedTaskInvalidatesForExecutionEnvironment(t *testing.T) {
 
 func TestCachedTaskInvalidatesForDeclaredEnvironmentDependency(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-envdep-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-envdep-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -914,8 +914,8 @@ func TestCachedTaskInvalidatesForDeclaredEnvironmentDependency(t *testing.T) {
 
 func TestCachedTaskInvalidatesForShell(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-shell-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-shell-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -942,7 +942,7 @@ func TestCachedTaskInvalidatesForShell(t *testing.T) {
 		t.Error("second cached task failed")
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("shell change did not invalidate cache: %s", string(data))
 	}
@@ -955,8 +955,8 @@ func TestCachedTaskInvalidatesForShell(t *testing.T) {
 
 func TestCachedTaskInvalidatesForTimeoutOption(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-timeout-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-timeout-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -980,7 +980,7 @@ func TestCachedTaskInvalidatesForTimeoutOption(t *testing.T) {
 	}
 	second := secondProgram.Program.Materialize("run")
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("timeout change did not invalidate cached task: %s", string(data))
 	}
@@ -993,8 +993,8 @@ func TestCachedTaskInvalidatesForTimeoutOption(t *testing.T) {
 
 func TestCachedTaskInvalidatesForRetryCount(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-retry-option-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-retry-option-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1018,7 +1018,7 @@ func TestCachedTaskInvalidatesForRetryCount(t *testing.T) {
 	}
 	second := secondProgram.Program.Materialize("run")
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Error("retry count change did not invalidate the cached task")
 	}
@@ -1031,8 +1031,8 @@ func TestCachedTaskInvalidatesForRetryCount(t *testing.T) {
 
 func TestCachedTaskRetriesFailedRecipe(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-retry-run-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-retry-run-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1050,7 +1050,7 @@ func TestCachedTaskRetriesFailedRecipe(t *testing.T) {
 		t.Errorf("cached task failed after configured retry: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "success" {
 		t.Error("failed cached task did not execute its successful retry")
 	}
@@ -1063,8 +1063,8 @@ func TestCachedTaskRetriesFailedRecipe(t *testing.T) {
 
 func TestCachedTaskInvalidatesForRuleBody(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-rule-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-rule-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1093,7 +1093,7 @@ func TestCachedTaskInvalidatesForRuleBody(t *testing.T) {
 		t.Error("second cached task failed")
 	}
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "ab" {
 		t.Errorf("rule body change did not invalidate cache: %s", string(data))
 	}
@@ -1106,8 +1106,8 @@ func TestCachedTaskInvalidatesForRuleBody(t *testing.T) {
 
 func TestCachedTaskCapturesHaveDistinctIdentities(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-capture-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-capture-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1129,7 +1129,7 @@ func TestCachedTaskCapturesHaveDistinctIdentities(t *testing.T) {
 	first.Free(a)
 	second.Free(a)
 	third.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("capture values did not produce distinct identities and a subsequent hit: %s", string(data))
 	}
@@ -1142,8 +1142,8 @@ func TestCachedTaskCapturesHaveDistinctIdentities(t *testing.T) {
 
 func TestCachedTaskRetainedOutputLimitAndTruncation(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-output-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-output-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1192,8 +1192,8 @@ func TestCachedTaskRetainedOutputLimitAndTruncation(t *testing.T) {
 
 func TestCachedTaskInvalidatesWhenGlobMembershipChanges(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-glob-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-glob-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1263,8 +1263,8 @@ func TestCachedTaskInvalidatesWhenGlobMembershipChanges(t *testing.T) {
 
 func TestFailedCachedAttemptDoesNotReplacePriorSuccessfulRecord(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-failure-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-failure-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1288,14 +1288,14 @@ func TestFailedCachedAttemptDoesNotReplacePriorSuccessfulRecord(t *testing.T) {
 		t.Errorf("initial run failed: %s", success.Diagnostic.Code)
 	}
 	success.Free(a)
-	entries, listErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, listErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if listErr != nil || len(entries) != 1 {
 		t.Fatal("successful record was not written")
 		return
 	}
-	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name
-	before, beforeErr := os.ReadFile(a, cachePath)
-	os.FreeDirEntry(a, entries)
+	cachePath := dir + "/.kame/cache/tasks/" + entries[0].Name()
+	before, beforeErr := os.ReadFile(cachePath)
+
 	if beforeErr != nil {
 		t.Fatal("successful record was unreadable")
 		return
@@ -1309,7 +1309,7 @@ func TestFailedCachedAttemptDoesNotReplacePriorSuccessfulRecord(t *testing.T) {
 		t.Error("changed input should make the recipe fail")
 	}
 	failed.Free(a)
-	afterFailure, afterFailureErr := os.ReadFile(a, cachePath)
+	afterFailure, afterFailureErr := os.ReadFile(cachePath)
 	if afterFailureErr != nil || string(before) != string(afterFailure) {
 		t.Error("failed attempt replaced the previous successful record")
 	}
@@ -1325,7 +1325,7 @@ func TestFailedCachedAttemptDoesNotReplacePriorSuccessfulRecord(t *testing.T) {
 		t.Errorf("restored successful fingerprint failed: %s", restored.Diagnostic.Code)
 	}
 	restored.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || len(data) == 0 || data[0] != 'x' {
 		t.Errorf("failed attempt should not destroy prior successful output: %s", string(data))
 	}
@@ -1339,8 +1339,8 @@ func TestFailedCachedAttemptDoesNotReplacePriorSuccessfulRecord(t *testing.T) {
 
 func TestOversizedCacheRecordIsRejectedWithoutPanic(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-oversize-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-oversize-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1355,13 +1355,13 @@ func TestOversizedCacheRecordIsRejectedWithoutPanic(t *testing.T) {
 	}
 	first := compiled.Program.Materialize("run")
 	first.Free(a)
-	entries, readErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, readErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if readErr != nil || len(entries) != 1 {
 		t.Fatal("cache record was not written")
 		return
 	}
-	path := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
+	path := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
 	f, createErr := os.Create(path)
 	if createErr != nil {
 		t.Fatal("cannot open cache record for corruption")
@@ -1382,7 +1382,7 @@ func TestOversizedCacheRecordIsRejectedWithoutPanic(t *testing.T) {
 		t.Errorf("oversized record caused runtime failure: %s", second.Diagnostic.Code)
 	}
 	second.Free(a)
-	data, dataErr := os.ReadFile(a, dir+"/task-log")
+	data, dataErr := os.ReadFile(dir + "/task-log")
 	if dataErr != nil || string(data) != "xx" {
 		t.Errorf("oversized record was not a cache miss: %s", string(data))
 	}
@@ -1395,8 +1395,8 @@ func TestOversizedCacheRecordIsRejectedWithoutPanic(t *testing.T) {
 
 func TestIndependentProgramsUseAtomicConcurrentCacheWriters(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-writers-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-writers-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1460,7 +1460,7 @@ func TestIndependentProgramsUseAtomicConcurrentCacheWriters(t *testing.T) {
 		t.Errorf("cache record after concurrent writes was unreadable: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("concurrent cache writer left no reusable complete record: %s", string(data))
 	}
@@ -1472,14 +1472,14 @@ func TestIndependentProgramsUseAtomicConcurrentCacheWriters(t *testing.T) {
 }
 
 func cacheManifestLength(t *testing.T, a mem.Allocator, dir string) int {
-	entries, err := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, err := os.ReadDir(dir + "/.kame/cache/tasks")
 	if err != nil || len(entries) != 1 {
 		t.Fatal("cache record missing")
 		return 0
 	}
-	path := dir + "/.kame/cache/tasks/" + entries[0].Name
-	os.FreeDirEntry(a, entries)
-	data, readErr := os.ReadFile(a, path)
+	path := dir + "/.kame/cache/tasks/" + entries[0].Name()
+
+	data, readErr := os.ReadFile(path)
 	if readErr != nil || len(data) < 13 {
 		t.Fatal("cache record unreadable")
 		return 0
@@ -1503,14 +1503,14 @@ func cacheManifestLength(t *testing.T, a mem.Allocator, dir string) int {
 }
 
 func clearTaskCache(a mem.Allocator, dir string) {
-	entries, err := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, err := os.ReadDir(dir + "/.kame/cache/tasks")
 	if err != nil {
 		return
 	}
 	for i := range entries {
-		os.Remove(dir + "/.kame/cache/tasks/" + entries[i].Name)
+		os.Remove(dir + "/.kame/cache/tasks/" + entries[i].Name())
 	}
-	os.FreeDirEntry(a, entries)
+
 }
 
 func cacheWarningCount(a mem.Allocator, compiled *program.Program) int {
@@ -1585,8 +1585,8 @@ func finishMaterialize(t *testing.T, a mem.Allocator, compiled *program.Program,
 
 func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-overflow-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-overflow-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1678,7 +1678,7 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	underSecond.Free(a)
 	hit.Program.Free()
 	hit.Free(a)
-	underLog, underErr := os.ReadFile(a, dir+"/task-log")
+	underLog, underErr := os.ReadFile(dir + "/task-log")
 	if underErr != nil || string(underLog) != "x" {
 		t.Errorf("manifest at the limit did not cache: %s", string(underLog))
 	}
@@ -1706,17 +1706,17 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	if warnings := cacheWarningCount(a, over.Program); warnings != 1 {
 		t.Errorf("overflow warning count = %d, want 1", warnings)
 	}
-	overLog, overErr := os.ReadFile(a, dir+"/task-log")
+	overLog, overErr := os.ReadFile(dir + "/task-log")
 	if overErr != nil || string(overLog) != "x" {
 		t.Errorf("overflow did not execute the recipe: %s", string(overLog))
 	}
 	mem.FreeSlice(a, overLog)
-	entries, listErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, listErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if listErr == nil {
 		if len(entries) != 0 {
 			t.Error("overflow wrote a cache record")
 		}
-		os.FreeDirEntry(a, entries)
+
 	}
 	over.Program.Free()
 	over.Free(a)
@@ -1726,8 +1726,8 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 
 func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-missing-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-missing-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1760,7 +1760,7 @@ func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 		t.Errorf("appearance rerun failed: %s", third.Diagnostic.Code)
 	}
 	third.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Errorf("missing path appearance did not invalidate the cache: %s", string(data))
 	}
@@ -1782,8 +1782,8 @@ func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 
 func TestCachedTaskSymlinkDependencyUsesResolvedContent(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-symlink-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-symlink-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1820,7 +1820,7 @@ func TestCachedTaskSymlinkDependencyUsesResolvedContent(t *testing.T) {
 	if warnings := cacheWarningCount(a, compiled.Program); warnings != 0 {
 		t.Errorf("second symlink warning count = %d, want 0", warnings)
 	}
-	data, readErr := os.ReadFile(a, dir+"/task-log")
+	data, readErr := os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "x" {
 		t.Errorf("unchanged resolved symlink content did not reuse cache: %s", string(data))
 	}
@@ -1834,17 +1834,17 @@ func TestCachedTaskSymlinkDependencyUsesResolvedContent(t *testing.T) {
 		t.Error("changed symlink target failed")
 	}
 	third.Free(a)
-	data, readErr = os.ReadFile(a, dir+"/task-log")
+	data, readErr = os.ReadFile(dir + "/task-log")
 	if readErr != nil || string(data) != "xx" {
 		t.Error("changed resolved symlink bytes did not invalidate")
 	}
 	mem.FreeSlice(a, data)
-	entries, listErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, listErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if listErr == nil {
 		if len(entries) != 1 {
 			t.Error("symlink dependency did not write one accepted record")
 		}
-		os.FreeDirEntry(a, entries)
+
 	}
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -1854,8 +1854,8 @@ func TestCachedTaskSymlinkDependencyUsesResolvedContent(t *testing.T) {
 
 func TestCachePathIgnoresRawTargetText(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-path-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-path-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -1876,29 +1876,29 @@ func TestCachePathIgnoresRawTargetText(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	entries, listErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
+	entries, listErr := os.ReadDir(dir + "/.kame/cache/tasks")
 	if listErr != nil || len(entries) != len(targets) {
 		t.Fatalf("cache records = %d, want %d", len(entries), len(targets))
 	}
 	for i := range entries {
-		if !isCacheRecordName(entries[i].Name) {
-			t.Errorf("cache record escaped hashed name: %s", entries[i].Name)
+		if !isCacheRecordName(entries[i].Name()) {
+			t.Errorf("cache record escaped hashed name: %s", entries[i].Name())
 		}
 	}
-	os.FreeDirEntry(a, entries)
-	cacheEntries, cacheErr := os.ReadDir(a, dir+"/.kame/cache")
-	if cacheErr != nil || len(cacheEntries) != 2 || cacheEntries[0].Name != "locks" || cacheEntries[1].Name != "tasks" {
+
+	cacheEntries, cacheErr := os.ReadDir(dir + "/.kame/cache")
+	if cacheErr != nil || len(cacheEntries) != 2 || cacheEntries[0].Name() != "locks" || cacheEntries[1].Name() != "tasks" {
 		t.Error("cache directory contains a path derived from raw target text")
 	}
 	if cacheErr == nil {
-		os.FreeDirEntry(a, cacheEntries)
+
 	}
-	rootEntries, rootErr := os.ReadDir(a, dir+"/.kame")
-	if rootErr != nil || len(rootEntries) != 1 || rootEntries[0].Name != "cache" {
+	rootEntries, rootErr := os.ReadDir(dir + "/.kame")
+	if rootErr != nil || len(rootEntries) != 1 || rootEntries[0].Name() != "cache" {
 		t.Error("kame directory contains a path derived from raw target text")
 	}
 	if rootErr == nil {
-		os.FreeDirEntry(a, rootEntries)
+
 	}
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -1908,8 +1908,8 @@ func TestCachePathIgnoresRawTargetText(t *testing.T) {
 
 func TestYieldBufferFreedWhenLaterWriteFails(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return

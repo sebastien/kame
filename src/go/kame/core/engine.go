@@ -1,9 +1,9 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"path"
+	"slices"
 )
 
 type Root struct {
@@ -40,7 +40,7 @@ func canonicalName(a mem.Allocator, key ResourceKey) (string, bool) {
 		if IsResourceURIName(key.Name) {
 			return cloneResourceURIText(a, key.Name), true
 		}
-		return path.Clean(a, key.Name), true
+		return path.Clean(key.Name), true
 	}
 	return key.Name, false
 }
@@ -80,7 +80,7 @@ func (e *Engine) node(key ResourceKey) *Node {
 		mem.FreeString(e.Alloc, name)
 	}
 	n.State = NodeIdle
-	e.nodes = slices.Append(e.Alloc, e.nodes, n)
+	e.nodes = append(e.nodes, n)
 	lo, hi := 0, len(e.nodeIndex)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
@@ -91,7 +91,7 @@ func (e *Engine) node(key ResourceKey) *Node {
 			hi = mid
 		}
 	}
-	e.nodeIndex = slices.Append(e.Alloc, e.nodeIndex, nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n})
+	e.nodeIndex = append(e.nodeIndex, nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n})
 	copy(e.nodeIndex[lo+1:], e.nodeIndex[lo:])
 	e.nodeIndex[lo] = nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n}
 	return n
@@ -126,8 +126,8 @@ func (e *Engine) AddStatic(n *Node, dependency *Node) bool {
 	if slices.Contains(n.Static, dependency) {
 		return true
 	}
-	n.Static = slices.Append(e.Alloc, n.Static, dependency)
-	dependency.Dependents = slices.Append(e.Alloc, dependency.Dependents, n)
+	n.Static = append(n.Static, dependency)
+	dependency.Dependents = append(dependency.Dependents, n)
 	if n.Interest != 0 {
 		e.interest(dependency, n.Interest)
 	}
@@ -157,7 +157,7 @@ func (e *Engine) RequestRoot(n *Node) *Root {
 	}
 	r := mem.Alloc[Root](e.Alloc)
 	r.node, r.live = n, true
-	e.roots = slices.Append(e.Alloc, e.roots, r)
+	e.roots = append(e.roots, r)
 	e.interest(n, 1)
 	request(n)
 	return r
@@ -223,7 +223,7 @@ func (e *Engine) Subscribe(n *Node) *Subscription {
 	}
 	s := mem.Alloc[Subscription](e.Alloc)
 	s.Alloc, s.Node = e.Alloc, n
-	n.Subs = slices.Append(e.Alloc, n.Subs, s)
+	n.Subs = append(n.Subs, s)
 	e.interest(n, 1)
 	request(n)
 	if n.Current {
@@ -251,7 +251,7 @@ func (e *Engine) emit(n *Node, event Event) {
 			if len(s.updates) == 8 {
 				s.updates = s.updates[:1]
 			}
-			s.updates = slices.Append(e.Alloc, s.updates, event)
+			s.updates = append(s.updates, event)
 		}
 	}
 }
@@ -275,7 +275,7 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 	n.Revision++
 	e.releasePreviousDependencies(n)
 	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
-	dependents := slices.Clone(e.Alloc, n.Dependents)
+	dependents := slices.Clone(n.Dependents)
 	for i := range dependents {
 		dependent := dependents[i]
 		if dependent.State != NodeWaiting || dependent.ValidationPending {
@@ -289,7 +289,7 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 		}
 		dependent.State = NodeReady
 	}
-	slices.Free(e.Alloc, dependents)
+	mem.FreeSlice(nil, dependents)
 }
 
 // Publish makes a new current value visible for a live node without completing
@@ -311,7 +311,7 @@ func (e *Engine) Fail(n *Node, d Diagnostic) {
 		return
 	}
 	if n.Submitted {
-		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 		n.Submitted, n.HostRequestID = false, 0
 	}
 	if n.materializer != nil {
@@ -426,7 +426,7 @@ func (e *Engine) Ready(capacity int) []*Node {
 			break
 		}
 		selected.offered = true
-		nodes = slices.Append(e.Alloc, nodes, selected)
+		nodes = append(nodes, selected)
 	}
 	return nodes
 }
@@ -569,7 +569,7 @@ func (e *Engine) run(n *Node) *Node {
 // Complete consumes Value and Diagnostic, allocated with e.Alloc. The queue
 // owns them even for stale requests; callers must not free or reuse them.
 func (e *Engine) Complete(c Completion) {
-	e.completions = slices.Append(e.Alloc, e.completions, c)
+	e.completions = append(e.completions, c)
 }
 
 func (e *Engine) accept(c Completion) *Node {
@@ -596,10 +596,10 @@ func (e *Engine) accept(c Completion) *Node {
 func (e *Engine) Invalidate(n *Node) {
 	var reasons []*Node
 	e.collectInvalidationReasons(n, false, &reasons)
-	slices.Free(e.Alloc, reasons)
+	mem.FreeSlice(nil, reasons)
 	var seen []*Node
 	e.invalidate(n, &seen, false, true)
-	slices.Free(e.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 }
 
 // Collect reasons before edges are removed, so a normal diamond path dominates
@@ -613,7 +613,7 @@ func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node
 			return
 		}
 	} else {
-		*seen = slices.Append(e.Alloc, *seen, n)
+		*seen = append(*seen, n)
 	}
 	n.InvalidatedForOrderOnly = ordered
 	for i := range n.Dependents {
@@ -629,7 +629,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	if slices.Contains(*seen, n) {
 		return
 	}
-	*seen = slices.Append(e.Alloc, *seen, n)
+	*seen = append(*seen, n)
 	n.invalidating = true
 	if e.beginTeardown(n, true) {
 		n.invalidating = false
@@ -637,9 +637,9 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	}
 	// Invalidating a child can remove its dynamic reverse edge from this node.
 	// Traverse a stable copy so that mutation cannot skip a sibling.
-	dependents := slices.Clone(e.Alloc, n.Dependents)
+	dependents := slices.Clone(n.Dependents)
 	if n.Submitted {
-		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 	n.Generation++
 	n.ValidationPending = false
@@ -671,7 +671,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 		d := n.Dynamic[i]
 		removeDependent(d, n)
 		if retain {
-			n.previousDynamic = slices.Append(e.Alloc, n.previousDynamic, d)
+			n.previousDynamic = append(n.previousDynamic, d)
 		} else if n.Interest != 0 {
 			e.interest(d, -n.Interest)
 		}
@@ -679,11 +679,11 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	if !retain {
 		e.releasePreviousDependencies(n)
 	}
-	slices.Free(e.Alloc, n.Dynamic)
+	mem.FreeSlice(nil, n.Dynamic)
 	n.Dynamic = nil
-	slices.Free(e.Alloc, n.Observed)
+	mem.FreeSlice(nil, n.Observed)
 	n.Observed = nil
-	slices.Free(e.Alloc, n.OrderOnly)
+	mem.FreeSlice(nil, n.OrderOnly)
 	n.OrderOnly = nil
 	FreeObservations(e.Alloc, n.Observations)
 	n.Observations = nil
@@ -693,7 +693,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 			e.invalidate(dependents[i], seen, retain, true)
 		}
 	}
-	slices.Free(e.Alloc, dependents)
+	mem.FreeSlice(nil, dependents)
 	n.invalidating = false
 }
 
@@ -703,10 +703,10 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 func (e *Engine) restartFromPublication(n *Node) {
 	var seen []*Node
 	e.collectInvalidationReasons(n, false, &seen)
-	slices.Free(e.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 	seen = nil
 	e.invalidate(n, &seen, true, true)
-	slices.Free(e.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 }
 
 func (e *Engine) releasePreviousDependencies(n *Node) {
@@ -717,7 +717,7 @@ func (e *Engine) releasePreviousDependencies(n *Node) {
 			e.interest(previous[i], -n.Interest)
 		}
 	}
-	slices.Free(e.Alloc, previous)
+	mem.FreeSlice(nil, previous)
 }
 
 func removeDependent(n, dependent *Node) {
@@ -756,7 +756,7 @@ func (e *Engine) cancel(n *Node) {
 		n.HasCompletion = false
 	}
 	if n.Submitted {
-		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 	n.Submitted = false
 	n.HostRequestID = 0
@@ -811,7 +811,7 @@ func (e *Engine) Free() {
 	for i := range e.roots {
 		mem.Free(e.Alloc, e.roots[i])
 	}
-	slices.Free(e.Alloc, e.roots)
+	mem.FreeSlice(nil, e.roots)
 	for i := range e.nodes {
 		n := e.nodes[i]
 		e.freeNode(n)
@@ -820,10 +820,10 @@ func (e *Engine) Free() {
 		e.completions[i].Value.Free(e.Alloc)
 		e.completions[i].Diagnostic.Free(e.Alloc)
 	}
-	slices.Free(e.Alloc, e.nodes)
-	slices.Free(e.Alloc, e.nodeIndex)
-	slices.Free(e.Alloc, e.cancellations)
-	slices.Free(e.Alloc, e.completions)
+	mem.FreeSlice(nil, e.nodes)
+	mem.FreeSlice(nil, e.nodeIndex)
+	mem.FreeSlice(nil, e.cancellations)
+	mem.FreeSlice(nil, e.completions)
 	mem.Free(e.Alloc, e)
 }
 
@@ -867,13 +867,13 @@ func (e *Engine) freeNode(n *Node) {
 	for i := range n.Subs {
 		n.Subs[i].free()
 	}
-	slices.Free(e.Alloc, n.Subs)
-	slices.Free(e.Alloc, n.Static)
-	slices.Free(e.Alloc, n.Dynamic)
-	slices.Free(e.Alloc, n.previousDynamic)
-	slices.Free(e.Alloc, n.Dependents)
-	slices.Free(e.Alloc, n.Observed)
-	slices.Free(e.Alloc, n.OrderOnly)
+	mem.FreeSlice(nil, n.Subs)
+	mem.FreeSlice(nil, n.Static)
+	mem.FreeSlice(nil, n.Dynamic)
+	mem.FreeSlice(nil, n.previousDynamic)
+	mem.FreeSlice(nil, n.Dependents)
+	mem.FreeSlice(nil, n.Observed)
+	mem.FreeSlice(nil, n.OrderOnly)
 	FreeObservations(e.Alloc, n.Observations)
 	if n.Current {
 		n.Latest.Free(e.Alloc)
@@ -895,6 +895,6 @@ func (e *Engine) freeNode(n *Node) {
 }
 
 // TrackedNodes returns a caller-owned slice of borrowed runtime nodes.
-func (e *Engine) TrackedNodes() []*Node { return slices.Clone(e.Alloc, e.nodes) }
+func (e *Engine) TrackedNodes() []*Node { return slices.Clone(e.nodes) }
 
 func (e *Engine) Lookup(key ResourceKey) *Node { return e.find(key) }

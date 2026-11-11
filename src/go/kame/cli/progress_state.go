@@ -2,9 +2,8 @@ package cli
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type Outcome struct {
@@ -50,7 +49,7 @@ func (s *ProgressState) FreeOutcomes(a mem.Allocator) {
 	for i := range s.Outcomes {
 		mem.FreeString(a, s.Outcomes[i].Name)
 	}
-	slices.Free(a, s.Outcomes)
+	mem.FreeSlice(nil, s.Outcomes)
 	s.Outcomes = nil
 	s.Counts = Progress{}
 }
@@ -60,7 +59,7 @@ func (s *ProgressState) Free(a mem.Allocator) {
 	for i := range s.Workers {
 		s.freeWorker(a, i)
 	}
-	slices.Free(a, s.Workers)
+	mem.FreeSlice(nil, s.Workers)
 	s.Workers = nil
 }
 
@@ -85,7 +84,7 @@ func (s *ProgressState) ObserveOutcome(a mem.Allocator, event program.Event, now
 		if event.Kind == program.TargetEstimate {
 			return
 		}
-		s.Outcomes = slices.Append(a, s.Outcomes, Outcome{Scope: s.Scope, Node: event.NodeID, Generation: event.Generation, Kind: event.Key.Kind, Name: core.NewString(a, event.Key.Name).Text, Started: event.Kind == program.TargetStarted})
+		s.Outcomes = append(s.Outcomes, Outcome{Scope: s.Scope, Node: event.NodeID, Generation: event.Generation, Kind: event.Key.Kind, Name: core.NewString(a, event.Key.Name).Text, Started: event.Kind == program.TargetStarted})
 		index = len(s.Outcomes) - 1
 		if event.Kind == program.TargetStarted {
 			s.Outcomes[index].ProgressStartedNS = nowNS
@@ -164,7 +163,7 @@ func (s *ProgressState) ObserveWorker(a mem.Allocator, event program.Event, nowN
 			}
 		}
 		if slot < 0 {
-			s.Workers = slices.Append(a, s.Workers, work)
+			s.Workers = append(s.Workers, work)
 		} else {
 			s.Workers[slot] = work
 		}
@@ -223,7 +222,7 @@ func (s *ProgressState) Timing(event program.Event) Outcome {
 }
 
 func (s *ProgressState) WorkerView(a mem.Allocator, nowNS int64) []ProgressWorkerView {
-	workers := slices.Make[ProgressWorkerView](a, len(s.Workers))
+	workers := make([]ProgressWorkerView, len(s.Workers))
 	for i := range s.Workers {
 		w := s.Workers[i]
 		elapsed := int64(0)

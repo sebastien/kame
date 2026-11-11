@@ -1,10 +1,5 @@
 package cli
 
-import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-)
-
 // Presentation extracts only global controls, preserving option values and the
 // literal tail. Args owns its backing array; all strings still borrow argv.
 func Presentation(args []string) Invocation {
@@ -15,7 +10,7 @@ func Presentation(args []string) Invocation {
 		arg := args[i]
 		if arg == "--" {
 			for j := i; j < len(args); j++ {
-				inv.Args = slices.Append(mem.System, inv.Args, args[j])
+				inv.Args = append(inv.Args, args[j])
 			}
 			break
 		}
@@ -57,10 +52,10 @@ func Presentation(args []string) Invocation {
 			}
 			continue
 		}
-		inv.Args = slices.Append(mem.System, inv.Args, arg)
+		inv.Args = append(inv.Args, arg)
 		if OptionTakesValue(arg) && i+1 < len(args) {
 			i++
-			inv.Args = slices.Append(mem.System, inv.Args, args[i])
+			inv.Args = append(inv.Args, args[i])
 		}
 	}
 	for i := 0; i < len(inv.Args); i++ {

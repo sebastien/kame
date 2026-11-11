@@ -1,10 +1,10 @@
 package expr
 
 import (
+	"kame/internal/mem"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // Kash's process grammar and Kame expressions are mutually recursive. Keep the
@@ -25,10 +25,28 @@ func ParseCommandPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 }
 
 // ParseCommandSetupValuePrefix shares stage setup's scalar/typed word grammar.
-func ParseCommandSetupValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+func ParseCommandSetupValuePrefix(a mem.Allocator, s *source.Source, start int, key string) Prefix {
 	p := parser{a: a, s: s, pos: start}
-	e := p.commandWord(false)
+	e := p.commandSetupValue(key)
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
+func (p *parser) commandSetupValue(key string) *Expr {
+	if p.pos >= len(p.s.Text) {
+		p.error(p.pos, p.pos, "expected Kash stage setup value")
+		return nil
+	}
+	if (key == "env" || key == "accept-exit") && p.s.Text[p.pos] == '[' {
+		word := p.node(CommandWord, p.pos)
+		word.Bool = true
+		inner := p.expression()
+		if inner != nil {
+			word.Parts = append(word.Parts, StringPart{Expr: inner, Form: "(", Span: inner.Span})
+		}
+		word.Span.End = p.pos
+		return word
+	}
+	return p.commandWord(false)
 }
 
 // ParseKashValuePrefix adds Kash's reference wrappers, not word-list RHSs.
@@ -89,13 +107,13 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 		} else {
 			right := ParseKashValuePrefix(a, s, rightStart)
 			for i := range right.Diagnostics {
-				p.diags = slices.Append(a, p.diags, right.Diagnostics[i])
+				p.diags = append(p.diags, right.Diagnostics[i])
 			}
-			slices.Free(a, right.Diagnostics)
+			mem.FreeSlice(nil, right.Diagnostics)
 			recovery := mem.Alloc[Expr](a)
 			recovery.Kind, recovery.Span = ValueRecovery, source.Span{Start: start, End: right.End}
-			recovery.Items = slices.Append(a, recovery.Items, e)
-			recovery.Items = slices.Append(a, recovery.Items, right.Expr)
+			recovery.Items = append(recovery.Items, e)
+			recovery.Items = append(recovery.Items, right.Expr)
 			e, p.pos = recovery, right.End
 		}
 	}
@@ -132,11 +150,11 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			break
 		}
 		if len(operands) == 0 {
-			operands = slices.Append(p.a, operands, first)
+			operands = append(operands, first)
 		}
-		operators = slices.Append(p.a, operators, CommandOperator{Text: operator, Span: source.Span{Start: from, End: from + 2}, AfterNewline: afterNewline})
+		operators = append(operators, CommandOperator{Text: operator, Span: source.Span{Start: from, End: from + 2}, AfterNewline: afterNewline})
 		next := p.commandPipeline(p.pos, capture, false, false)
-		operands = slices.Append(p.a, operands, next)
+		operands = append(operands, next)
 		if len(p.diags) != 0 {
 			break
 		}
@@ -189,7 +207,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			stage.Kind = CommandInput
 		}
 	}
-	e.Items = slices.Append(p.a, e.Items, stage)
+	e.Items = append(e.Items, stage)
 	input, output := false, false
 	for {
 		p.commandSpace(capture || grouped || branch)
@@ -228,7 +246,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		if stage.Kind == CommandMux && streamOperatorImplicitStage(stage.Text) && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
 			input = false
-			e.Items = slices.Append(p.a, e.Items, stage)
+			e.Items = append(e.Items, stage)
 			continue
 		}
 		if stage.Kind == CommandStage && len(stage.Items) == 0 && IsCommandGroup(p.s.Text, p.pos) {
@@ -271,7 +289,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 					p.error(from, p.pos, "command recovery requires whitespace around ?")
 					break
 				}
-				e.Body = slices.Append(p.a, e.Body, p.commandPipeline(p.pos, capture, false, false))
+				e.Body = append(e.Body, p.commandPipeline(p.pos, capture, false, false))
 				break
 			}
 			e.AcceptExit = true
@@ -345,7 +363,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				case operator != nil && operator.Argument == argumentLineAdapter:
 					argument := p.expression()
 					if argument != nil {
-						mux.Items = slices.Append(p.a, mux.Items, argument)
+						mux.Items = append(mux.Items, argument)
 					}
 					if argument == nil || argument.Kind != Symbol || argument.Text != "lines" {
 						p.error(mux.Span.Start, p.pos, "line adapters require :lines")
@@ -354,7 +372,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				case operator != nil && operator.Argument == argumentPredicate:
 					predicate := p.expression()
 					if predicate != nil {
-						mux.Items = slices.Append(p.a, mux.Items, predicate)
+						mux.Items = append(mux.Items, predicate)
 					}
 					p.commandSpace(true)
 					if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '|' {
@@ -364,7 +382,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 							p.pos++
 						}
 						p.commandSpace(true)
-						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
+						mux.Body = append(mux.Body, p.commandPipeline(p.pos, false, false, true))
 					}
 				case operator != nil && operator.Policy:
 					p.streamPolicy(mux)
@@ -377,7 +395,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 					if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' {
 						p.error(mux.Span.Start, p.pos, "tee requires a path")
 					} else {
-						mux.Items = slices.Append(p.a, mux.Items, p.commandWord(false))
+						mux.Items = append(mux.Items, p.commandWord(false))
 						p.commandSpace(true)
 					}
 				}
@@ -388,14 +406,14 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				}
 				p.pos++
 				mux.Span.End = p.pos
-				e.Items = slices.Append(p.a, e.Items, mux)
+				e.Items = append(e.Items, mux)
 				stage = mux
 				input = false
 				continue
 			}
 			stage = p.node(CommandStage, p.pos)
 			input = false
-			e.Items = slices.Append(p.a, e.Items, stage)
+			e.Items = append(e.Items, stage)
 			p.commandSpace(capture || grouped || branch)
 			continue
 		}
@@ -446,10 +464,10 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			if op == "2>&1" {
 				redirection.Bool = aliasAfterWriter
 			} else {
-				redirection.Items = slices.Append(p.a, redirection.Items, path)
+				redirection.Items = append(redirection.Items, path)
 			}
 			redirection.Span.End = p.pos
-			target.Items = slices.Append(p.a, target.Items, redirection)
+			target.Items = append(target.Items, redirection)
 			if len(p.diags) != 0 {
 				break
 			}
@@ -472,7 +490,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 					e.Items[len(e.Items)-1] = endpoint
 				} else {
 					stage.Span.End = from
-					e.Items = slices.Append(p.a, e.Items, endpoint)
+					e.Items = append(e.Items, endpoint)
 				}
 				stage, output = endpoint, true
 				continue
@@ -512,7 +530,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			p.pos += 2
 			if producer {
 				p.commandSpace(true)
-				operand.Body = slices.Append(p.a, operand.Body, p.commandPipeline(p.pos, false, false, true))
+				operand.Body = append(operand.Body, p.commandPipeline(p.pos, false, false, true))
 				if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
 					p.error(operand.Span.Start, p.pos, "unclosed live producer graph")
 				} else {
@@ -532,7 +550,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				p.error(operand.Span.Start, p.pos+1, "live stream operands must be standalone arguments")
 			}
 			operand.Span.End = p.pos
-			stage.Items = slices.Append(p.a, stage.Items, operand)
+			stage.Items = append(stage.Items, operand)
 			if len(p.diags) != 0 {
 				break
 			}
@@ -561,9 +579,9 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			redirection := p.node(CommandRedirection, from)
 			redirection.Text = op
-			redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord(false))
+			redirection.Items = append(redirection.Items, p.commandWord(false))
 			redirection.Span.End = p.pos
-			stage.Items = slices.Append(p.a, stage.Items, redirection)
+			stage.Items = append(stage.Items, redirection)
 			if op == "<" {
 				input = true
 			} else {
@@ -604,18 +622,9 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			setup := p.node(CommandSetup, from)
 			setup.Text = key
-			if key == "accept-exit" && p.s.Text[p.pos] == '[' {
-				word := p.node(CommandWord, p.pos)
-				word.Bool = true
-				inner := p.expression()
-				word.Parts = slices.Append(p.a, word.Parts, StringPart{Expr: inner, Form: "(", Span: inner.Span})
-				word.Span.End = p.pos
-				setup.Items = slices.Append(p.a, setup.Items, word)
-			} else {
-				setup.Items = slices.Append(p.a, setup.Items, p.commandWord(false))
-			}
+			setup.Items = append(setup.Items, p.commandSetupValue(key))
 			setup.Span.End = p.pos
-			stage.Items = slices.Append(p.a, stage.Items, setup)
+			stage.Items = append(stage.Items, setup)
 			if len(p.diags) != 0 {
 				break
 			}
@@ -633,7 +642,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			p.error(before, p.pos, "control keywords are statements, not process stages")
 		}
 		if word != nil {
-			stage.Items = slices.Append(p.a, stage.Items, word)
+			stage.Items = append(stage.Items, word)
 		}
 		if len(p.diags) != 0 || p.pos == before {
 			break
@@ -712,7 +721,7 @@ func setupKeyByte(b byte, first bool) bool {
 func commandWhitespace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
 
 func commandOperator(b byte) bool {
-	return b == '|' || b == '<' || b == '>' || b == '&' || b == '?' || b == ';' || b == '(' || b == '\''
+	return b == '|' || b == '<' || b == '>' || b == '&' || b == '?' || b == ';' || b == '('
 }
 
 func stderrRedirection(stage *Expr) bool {
@@ -786,18 +795,28 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") || strings.HasPrefix(p.s.Text[start:], "@{") {
 		inner := p.pathAtom(true)
 		if len(inner.Parts) != 0 {
-			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "path", Span: inner.Span})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "path", Span: inner.Span})
 		} else {
 			freeExpr(p.a, inner)
 			p.pos = start
 		}
 	}
-	text := strings.NewBuilder(p.a)
+	text := strings.Builder{}
 	quoted, hadQuote, spread := false, false, false
+	singleQuoted := false
 	wordDelimiters := 0
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
+		if singleQuoted {
+			p.pos++
+			if b == '\'' {
+				singleQuoted = false
+			} else {
+				text.WriteByte(b)
+			}
+			continue
+		}
 		listOperator := p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == "&&" || p.s.Text[p.pos:p.pos+2] == "||")
 		if !quoted && ((p.commandGroup && b == ',' && wordDelimiters == 0) || listOperator || b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
 			break
@@ -805,6 +824,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 		if b == '"' {
 			quoted = !quoted
 			hadQuote = true
+			p.pos++
+			continue
+		}
+		if b == '\'' && !quoted {
+			singleQuoted, hadQuote = true, true
 			p.pos++
 			continue
 		}
@@ -816,7 +840,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			inner := p.expression()
 			p.kash = previousKash
 			if inner != nil {
-				e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}})
+				e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}})
 			}
 			partStart = p.pos
 			if len(p.diags) != 0 {
@@ -869,7 +893,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				break
 			}
 			inner := p.selector()
-			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "selector", Span: source.Span{Start: start, End: p.pos}})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "selector", Span: source.Span{Start: start, End: p.pos}})
 			partStart = p.pos
 			if len(p.diags) != 0 {
 				break
@@ -913,7 +937,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				}
 			}
 			if inner != nil {
-				e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: from, End: p.pos}})
+				e.Parts = append(e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: from, End: p.pos}})
 			}
 			partStart = p.pos
 			if len(p.diags) != 0 {
@@ -941,8 +965,8 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 		p.pos++
 	}
 	p.addTextPart(e, &text, partStart, p.pos)
-	text.Free()
-	if quoted {
+	text.Reset()
+	if quoted || singleQuoted {
 		p.error(start, p.pos, "unclosed Kash quoted word")
 	}
 	// A standalone unquoted substitution retains its typed value (list splice).
@@ -979,7 +1003,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 		}
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' {
+			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\'' || c == '\\' || c == '$' || c == '@' {
 				return true
 			}
 		}

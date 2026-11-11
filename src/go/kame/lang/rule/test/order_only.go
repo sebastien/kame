@@ -1,9 +1,9 @@
-package rule_test
+package rulecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {

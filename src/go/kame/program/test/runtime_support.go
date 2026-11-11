@@ -1,4 +1,4 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"

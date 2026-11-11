@@ -3,13 +3,12 @@
 package format
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Result carries either the formatted text (OK) or the first parse diagnostic.
@@ -34,7 +33,7 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 	indent := "\t"
 	if indentStyle == "spaces" {
 		for i := 0; i < indentWidth; i++ {
-			indentBuf = slices.Append(a, indentBuf, ' ')
+			indentBuf = append(indentBuf, ' ')
 		}
 		indent = string(indentBuf)
 	}
@@ -115,11 +114,11 @@ func cloneText(a mem.Allocator, text string) string {
 	if text == "" {
 		return ""
 	}
-	buffer := slices.Make[byte](a, len(text))
+	buffer := make([]byte, len(text))
 	copy(buffer, text)
 	return string(buffer)
 }
 
 func freeIndent(a mem.Allocator, indent []byte) {
-	slices.Free(a, indent)
+	mem.FreeSlice(nil, indent)
 }

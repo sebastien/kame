@@ -6,11 +6,11 @@ package program
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"math"
+	"path"
+	"slices"
 )
 
 // manifestSink is the shared writer for identity bytes. The manifest encoder
@@ -290,8 +290,8 @@ func (p *Program) cachePath(entry *instance) string {
 	key := p.cacheKey(entry)
 	hex := cacheHex(p.Alloc, key)
 	mem.FreeSlice(p.Alloc, key)
-	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/tasks")
-	result := path.Join(p.Alloc, root, hex+".kmkr")
+	root := path.Join(p.Options.Directory, ".kame/cache/tasks")
+	result := path.Join(root, hex+".kmkr")
 	mem.FreeString(p.Alloc, hex)
 	mem.FreeString(p.Alloc, root)
 	return result
@@ -299,10 +299,10 @@ func (p *Program) cachePath(entry *instance) string {
 
 func (p *Program) cacheLockPath(key []byte) string {
 	const digits = "0123456789abcdef"
-	name := slices.Make[byte](p.Alloc, 2)
+	name := make([]byte, 2)
 	name[0], name[1] = digits[key[0]>>4], digits[key[0]&15]
 	stripe := string(name)
-	result := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/locks", stripe+".lock")
+	result := path.Join(p.Options.Directory, ".kame/cache/locks", stripe+".lock")
 	mem.FreeString(p.Alloc, stripe)
 	return result
 }
@@ -318,7 +318,7 @@ func (p *Program) cacheKey(entry *instance) []byte {
 	mem.FreeString(p.Alloc, target)
 	var digest [32]byte
 	sink.state.Sum(digest[:])
-	return slices.Clone(p.Alloc, digest[:])
+	return slices.Clone(digest[:])
 }
 
 func (p *Program) cacheFingerprint(entry *instance) bool {
@@ -326,7 +326,7 @@ func (p *Program) cacheFingerprint(entry *instance) bool {
 	entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
 	data := core.EncodeSignatureRecord(p.Alloc, &entry.AcceptedRecord)
 	if len(data) > p.manifestLimit() {
-		slices.Free(p.Alloc, data)
+		mem.FreeSlice(nil, data)
 		p.cacheWarning(entry, "CACHE_UNUSABLE", "dependency manifest exceeds the cache size limit")
 		return false
 	}
@@ -335,7 +335,7 @@ func (p *Program) cacheFingerprint(entry *instance) bool {
 		return false
 	}
 	cacheHash(data, entry.CacheFingerprint[:])
-	slices.Free(p.Alloc, entry.CacheManifest)
+	mem.FreeSlice(nil, entry.CacheManifest)
 	entry.CacheManifest = data
 	return true
 }
@@ -440,7 +440,7 @@ func EncodeFingerprintValue(a mem.Allocator, value core.Value) []byte {
 		enc.free()
 		return nil
 	}
-	result := slices.Clone(a, enc.buf)
+	result := slices.Clone(enc.buf)
 	enc.free()
 	return result
 }

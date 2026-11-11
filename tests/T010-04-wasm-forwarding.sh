@@ -23,7 +23,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const bytes = await readFileSync('./build/wasm/kame.wasm');
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports } = instance;
 const alloc = (size, alignment = 1) => {
   const pointer = exports.kame_wasm_alloc(size, alignment);

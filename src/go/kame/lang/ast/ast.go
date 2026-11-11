@@ -1,15 +1,15 @@
 package ast
 
 import (
+	"io"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
 )
 
 // WriteAST parses text as lang and writes its schema-1 AST JSON to out. It

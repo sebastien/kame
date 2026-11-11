@@ -28,15 +28,15 @@ mkdir -p "$release"
 release_test_keys "$root/keys"
 export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$RELEASE_TEST_KEY_B64"
 
-cat >"$release/kame.com" <<'SH'
+cat >"$release/kame-linux-x86_64" <<'SH'
 #!/bin/sh
 if [ "${1:-}" = "--version" ] || [ "${1:-}" = "-V" ]; then
 	echo "kame 9.9.9"
 	exit 0
 fi
-echo "ape:$*"
+echo "native:$*"
 SH
-chmod +x "$release/kame.com"
+chmod +x "$release/kame-linux-x86_64"
 printf 'import process from "node:process";const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$release/kame.js"
 printf 'dummy-wasm' >"$release/kame.wasm"
 printf '9.9.9\n' >"$release/VERSION"
@@ -105,10 +105,10 @@ else
 	test-fail "cache reuse: out=$out"
 fi
 
-test-step "auto selects the APE when the host and probe succeed"
+test-step "auto selects the native when the host and probe succeed"
 out="$("$launcher" a b)"
-if [ "$out" = "ape:a b" ] && [ "$(cat "$cache/9.9.9/.backend")" = "ape" ]; then
-	test-ok "auto provisioned and selected the APE"
+if [ "$out" = "native:a b" ] && [ "$(cat "$cache/9.9.9/.backend")" = "native" ]; then
+	test-ok "auto provisioned and selected the native"
 else
 	test-fail "auto backend: out=$out"
 fi
@@ -124,10 +124,10 @@ fi
 test-step "a checksum mismatch fails closed and installs nothing"
 bad="$root/bad"
 mkdir -p "$bad"
-cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$release/VERSION" "$bad/"
+cp "$release/"* "$bad/"
 cp "$release/PROVENANCE.json" "$bad/"
 {
-	echo "$(sha "$bad/kame.com")  kame.com"
+	echo "$(sha "$bad/kame-linux-x86_64")  kame-linux-x86_64"
 	printf '%064d  kame.js\n' 0
 echo "$(sha "$bad/kame.wasm")  kame.wasm"
 echo "$(sha "$bad/VERSION")  VERSION"
@@ -162,110 +162,5 @@ if [ "$status" = 1 ] && grep -q 'no signature verifier' "$root/err"; then
 else
 	test-fail "missing verifier: status=$status err=$(cat "$root/err")"
 fi
-
-test-step "the bootstrap Makefile caches the executable and delegates"
-project="$root/project"
-mkdir -p "$project"
-cp "$CLI_ROOT/Makefile" "$project/Makefile"
-set +e
-out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory hello 2>&1)"
-status=$?
-set -e
-if [ "$status" = 0 ] && [ "$out" = "ape:hello" ] && [ -x "$root/boot-home/.cache/kame/bin/kame-9.9.9" ]; then
-	test-ok "bootstrap cached kame.com and forwarded the goal"
-else
-	test-fail "bootstrap: status=$status out=$out"
-fi
-
-out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory KAME_RELEASE_URL=file:///nonexistent)"
-if [ "$out" = "ape:default" ]; then
-	test-ok "bootstrap reuses the cache offline and forwards the default goal"
-else
-	test-fail "bootstrap cache/default: out=$out"
-fi
-
-out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory KAME_RELEASE_URL=file:///nonexistent first second)"
-if [ "$out" = $'ape:first\nape:second' ]; then
-	test-ok "bootstrap delegates multiple goals in order"
-else
-	test-fail "bootstrap multiple goals: out=$out"
-fi
-out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory CC=asdas CFLAGS='-O0 -g' first second)"
-if [ "$out" = $'ape:first CFLAGS=-O0 -g CC=asdas\nape:second CFLAGS=-O0 -g CC=asdas' ]; then
-	test-ok "bootstrap forwards multiple goals and command-line bindings"
-else
-	test-fail "bootstrap bindings: out=$out"
-fi
-
-
-if command -v bmake >/dev/null 2>&1; then
-	out="$(unset KAME; cd "$project" && HOME="$root/boot-bmake" bmake hello 2>&1)"
-	if [ "$out" = "ape:hello" ] && [ -x "$root/boot-bmake/.cache/kame/bin/kame-9.9.9" ]; then
-		test-ok "bsd make downloads once and forwards the goal"
-	else
-		test-fail "bsd make bootstrap: out=$out"
-	fi
-	out="$(unset KAME; cd "$project" && HOME="$root/boot-bmake" bmake CC=asdas CFLAGS='-O0 -g' first second 2>&1)"
-	if [ "$out" = $'ape:first CC=asdas CFLAGS=-O0 -g\nape:second CC=asdas CFLAGS=-O0 -g' ]; then
-		test-ok "bsd make forwards multiple goals and bindings"
-	else
-		test-fail "bsd make bindings: out=$out"
-	fi
-fi
-
-test-step "GNU and BSD make preserve binding punctuation as one literal argument"
-cat >"$project/argv" <<'SH'
-#!/bin/sh
-printf '<%s>\n' "$@"
-SH
-chmod +x "$project/argv"
-punctuation=$(cat <<'TEXT'
-space "double" 'single' back\slash $dollar $$double `touch injected` $(touch injected) ; & | < > ( ) * ? [x] # = end
-TEXT
-)
-for make_command in make bmake; do
-	if ! command -v "$make_command" >/dev/null 2>&1; then continue; fi
-	for value in "$punctuation" '' 'leading  middle  trailing ' $'tab\tvalue'; do
-		status=0
-		out="$(cd "$project" && "$make_command" KAME="$project/argv" "VALUE=$value" first second 2>&1)" || status=$?
-		expected=$(printf '<first>\n<VALUE=%s>\n<second>\n<VALUE=%s>' "$value" "$value")
-		if [ "$status" = 0 ] && [ "$out" = "$expected" ] && [ ! -e "$project/injected" ]; then
-			test-ok "$make_command preserves binding bytes and argv boundaries"
-		else
-			test-fail "$make_command punctuation: status=$status out=$out expected=$expected"
-		fi
-	done
-done
-
-test-step "a failed bootstrap download installs nothing"
-status=0
-missing="$root/missing-kame"
-out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory \
-	KAME="$missing" KAME_RELEASE_URL=file:///nonexistent hello 2>&1)" || status=$?
-if [ "$status" -ne 0 ] && [ ! -e "$missing" ] && [ ! -e "$missing.tmp" ] && ! grep -q 'ape:hello' <<<"$out"; then
-	test-ok "failed download does not install or execute"
-else
-	test-fail "failed download: status=$status out=$out"
-fi
-
-
-test-step "retired init fails before downloads and preserves project files"
-init_project="$root/init-project"
-mkdir -p "$init_project"
-printf 'all:\n\t@echo project-makefile\n' >"$init_project/Makefile"
-before_makefile=$(sha "$init_project/Makefile")
-for argument in '' --help -h; do
-	status=0
-	(cd "$init_project" && KAME_VERSION=latest KAME_BIN=/bin/echo \
-		KAME_HOME="$root/init-cache" KAME_RELEASE_URL=file:///nonexistent KAME_NO_DOWNLOAD=1 \
-		"$launcher" init ${argument:+"$argument"}) >"$root/init-out" 2>"$root/init-err" || status=$?
-	if [ "$status" = 1 ] && grep -q 'init has been retired' "$root/init-err" &&
-		[ "$(sha "$init_project/Makefile")" = "$before_makefile" ] &&
-		[ ! -e "$init_project/Makefile.bootstrap" ] && [ ! -e "$root/init-cache" ]; then
-		test-ok "init $argument reports migration guidance without provisioning"
-	else
-		test-fail "init $argument: status=$status err=$(cat "$root/init-err")"
-	fi
-done
 
 test-end

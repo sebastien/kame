@@ -1,9 +1,9 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
+	json "kame/internal/jsonstream"
 )
 
 func writeTopHelp(out io.Writer) { cli.WriteHelp(out, "", cliDiagnosticJSON, stdoutColor) }

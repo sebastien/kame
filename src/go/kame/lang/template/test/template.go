@@ -1,11 +1,11 @@
-package template_test
+package templatecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func sameSpan(span source.Span, start int, end int) bool {

@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	"io"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strings"
 )
 
 type CommandInfo struct {
@@ -64,7 +64,7 @@ const BuildHelp = `  -f, --file FILE         select/append source (repeatable in
 
 // HelpText returns allocator-owned text; free it with mem.System.
 func HelpText(topic string) string {
-	b := strings.NewBuilder(mem.System)
+	b := strings.Builder{}
 	if topic == "" {
 		b.WriteString("kame - a modern build system in the spirit of GNU Make.\n\nUsage:\n  kame [OPTIONS] [TARGET...]\n  kame [OPTIONS] INPUT... [-- ARG...]\n  kame do COMMAND [OPTIONS] [ARG...]\n\nSource discovery: ")
 		list := BuildSourceList()
@@ -171,7 +171,7 @@ func HelpText(topic string) string {
 	b.WriteString(GlobalHelp)
 	b.WriteString("\nHuman output is the default. Exact artifact/source/document bytes are never decorated.\nUse --output json for machine data: execution is JSON Lines; AST/graph/tool/cache lists are JSON documents.\n\nExamples:\n  kame\n  kame -f Build.kmk dist\n  kame do plan --json dist\n  kame do fmt -i Makefile.kmk\n  kame do run --lang expr -c '42'\n\nRun 'kame do COMMAND --help' for command-specific help.\n")
 	text := cloneText(b.String())
-	b.Free()
+	b.Reset()
 	return text
 }
 

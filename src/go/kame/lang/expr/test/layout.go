@@ -1,9 +1,9 @@
-package expr_test
+package exprcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestStructuralLayoutRoundTrip(t *testing.T) {

@@ -1,10 +1,9 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 type kashInterpreterCase struct {
@@ -41,6 +40,6 @@ func TestKashInterpreterArgs(t *testing.T) {
 				}
 			}
 		}
-		slices.Free(mem.System, got)
+		mem.FreeSlice(nil, got)
 	}
 }

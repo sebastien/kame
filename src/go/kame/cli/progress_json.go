@@ -1,10 +1,9 @@
 package cli
 
 import (
+	"io"
 	"kame/core"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // WriteProgressDocument adapts the WASM CLI's borrowed snapshot to the same
@@ -83,18 +82,18 @@ func WriteTrackedProgressDocument(out io.Writer, value core.Value, tracker *Prog
 	if tracked {
 		workers = tracker.WorkerView(mem.System, nowNS)
 	} else {
-		workers = slices.Make[ProgressWorkerView](mem.System, len(entries.List))
+		workers = make([]ProgressWorkerView, len(entries.List))
 		for i := range entries.List {
 			w := entries.List[i]
 			if w.Kind != core.Record || !validProgressFields(w) {
-				slices.Free(mem.System, workers)
+				mem.FreeSlice(nil, workers)
 				return false
 			}
 			workers[i] = ProgressWorkerView{Target: reportField(w, "target").Text, Program: reportField(w, "program").Text, State: reportField(w, "state").Text, Ready: reportField(w, "ready").Bool, ElapsedMS: reportField(w, "elapsedMS").Int}
 		}
 	}
 	WriteDashboard(out, ProgressView{Command: reportField(value, "command").Text, Subject: reportField(value, "subject").Text, DryRun: reportField(value, "dryRun").Bool, Idle: reportField(value, "idle").Bool, Cycle: int(reportField(value, "cycle").Int), ElapsedMS: elapsed, Width: int(width), Height: int(height), Color: color, Counts: counts, Workers: workers})
-	slices.Free(mem.System, workers)
+	mem.FreeSlice(nil, workers)
 	return true
 }
 

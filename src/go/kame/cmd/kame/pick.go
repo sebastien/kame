@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func runPick(args []string, out io.Writer, errOut io.Writer) int {
@@ -58,18 +58,18 @@ func pickCatalogue(inv cli.Invocation, errOut io.Writer, all *string, targets *s
 
 func collectPickLines(p *program.Program, all *string, targets *string) bool {
 	var report bytes.Buffer
-	report = bytes.NewBuffer(mem.System, nil)
-	defer report.Free()
+	report = bytes.Buffer{}
+	defer report.Reset()
 	p.WriteTargetReport(&report, "")
 	var value core.Value
 	if !core.ParseJSON(mem.System, report.Bytes(), &value) {
 		return false
 	}
 	defer value.Free(mem.System)
-	allLines := strings.NewBuilder(mem.System)
-	targetLines := strings.NewBuilder(mem.System)
-	defer allLines.Free()
-	defer targetLines.Free()
+	allLines := strings.Builder{}
+	targetLines := strings.Builder{}
+	defer allLines.Reset()
+	defer targetLines.Reset()
 	entries := documentField(value, "entries")
 	for i := range entries.List {
 		item := entries.List[i]
@@ -111,7 +111,7 @@ func pickChoose(explicit string, input string, prompt string, header string, pre
 		name = "fzf"
 	}
 	args := pickFilterArgs(prompt, header, preview)
-	defer slices.Free(mem.System, args)
+	defer mem.FreeSlice(nil, args)
 	status := posix.Pick(name, args, input, selection)
 	if status == 127 && fallback {
 		mem.FreeString(mem.System, *selection)
@@ -128,21 +128,21 @@ func pickFilterArgs(prompt string, header string, preview string) []string {
 		preview = pickPreview
 	}
 	var args []string
-	args = slices.Append(mem.System, args, "--ansi")
-	args = slices.Append(mem.System, args, "--delimiter")
-	args = slices.Append(mem.System, args, "\x1f")
-	args = slices.Append(mem.System, args, "--with-nth")
-	args = slices.Append(mem.System, args, "3")
+	args = append(args, "--ansi")
+	args = append(args, "--delimiter")
+	args = append(args, "\x1f")
+	args = append(args, "--with-nth")
+	args = append(args, "3")
 	// Do not also pass --nth. --with-nth already reduces the row to the label,
 	// and --nth 3 then searches a field that no longer exists.
-	args = slices.Append(mem.System, args, "--prompt")
-	args = slices.Append(mem.System, args, prompt)
-	args = slices.Append(mem.System, args, "--header")
-	args = slices.Append(mem.System, args, header)
-	args = slices.Append(mem.System, args, "--preview-window")
-	args = slices.Append(mem.System, args, "right,50%,wrap,border-left")
-	args = slices.Append(mem.System, args, "--preview")
-	args = slices.Append(mem.System, args, preview)
+	args = append(args, "--prompt")
+	args = append(args, prompt)
+	args = append(args, "--header")
+	args = append(args, header)
+	args = append(args, "--preview-window")
+	args = append(args, "right,50%,wrap,border-left")
+	args = append(args, "--preview")
+	args = append(args, preview)
 	return args
 }
 

@@ -1,11 +1,11 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func TestKashConstructionIsPureAndRetainsLexicalScope(t *testing.T) {
@@ -29,6 +29,24 @@ func TestKashConstructionIsPureAndRetainsLexicalScope(t *testing.T) {
 		t.Error("Kash construction accepted an incomplete block")
 	}
 	r.Free(a)
+	r = evaluate(t, program, "(kash ./module.kash)")
+	if r.Diagnostic.Code != "SEL_NO_CONTEXT" {
+		t.Error("literal module path did not require a file-backed source")
+	}
+	r.Free(a)
+	r = evaluate(t, program, "(kash \"./module.kash\")")
+	if r.Diagnostic.Code != "" || r.Value.Kind != core.Callable {
+		t.Error("quoted module-looking text did not construct a script")
+	}
+	r.Free(a)
+	invalid := []string{"(kash ./module.km)", "(kash ./*.kash)", "(kash ./@{name}.kash)"}
+	for i := range invalid {
+		r = evaluate(t, program, invalid[i])
+		if r.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("invalid module path was accepted")
+		}
+		r.Free(a)
+	}
 	engine.Free()
 	program.Free()
 	parsed.Free()

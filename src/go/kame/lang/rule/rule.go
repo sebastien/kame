@@ -2,12 +2,12 @@
 package rule
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type TargetKind int
@@ -115,7 +115,7 @@ func (p *Part) Free(a mem.Allocator) {
 		return
 	}
 	FreeRule(a, p.Rule)
-	slices.Free(a, p.Diagnostics)
+	mem.FreeSlice(nil, p.Diagnostics)
 	*p = Part{}
 }
 
@@ -125,7 +125,7 @@ func (r *Result) Free() {
 	}
 	a := r.Alloc
 	FreeRule(a, r.Rule)
-	slices.Free(a, r.Diagnostics)
+	mem.FreeSlice(nil, r.Diagnostics)
 	r.Source.Free(a)
 	*r = Result{}
 	mem.Free(a, r)
@@ -188,26 +188,26 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Outputs[i].TargetForm.Free()
 		r.Outputs[i].Expansion.Free()
 	}
-	slices.Free(a, r.Outputs)
+	mem.FreeSlice(nil, r.Outputs)
 	for i := range r.Inputs {
 		r.Inputs[i].Template.Free()
 		r.Inputs[i].TargetForm.Free()
 	}
-	slices.Free(a, r.Inputs)
+	mem.FreeSlice(nil, r.Inputs)
 	for i := range r.Environment {
 		mem.FreeString(a, r.Environment[i].Value)
 	}
-	slices.Free(a, r.Environment)
+	mem.FreeSlice(nil, r.Environment)
 	for i := range r.Arguments {
 		mem.FreeString(a, r.Arguments[i].Name)
 		mem.FreeString(a, r.Arguments[i].Default)
 	}
-	slices.Free(a, r.Arguments)
+	mem.FreeSlice(nil, r.Arguments)
 	for i := range r.Body {
 		r.Body[i].Template.Free()
 	}
-	slices.Free(a, r.Body)
-	slices.Free(a, r.RecipeDiagnostics)
+	mem.FreeSlice(nil, r.Body)
+	mem.FreeSlice(nil, r.RecipeDiagnostics)
 	if r.BodyDoc != nil {
 		r.BodyDoc.Free()
 		r.BodyDoc = nil
@@ -225,12 +225,12 @@ func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) takeDiagnostics(diags []source.Diagnostic) {
 	for i := range diags {
-		p.diags = slices.Append(p.a, p.diags, diags[i])
+		p.diags = append(p.diags, diags[i])
 	}
 }
 
@@ -239,7 +239,7 @@ func (p *parser) takeTargetDiagnostics(diags []source.Diagnostic, offset int) {
 		diagnostic := diags[i]
 		diagnostic.Span.Start += offset
 		diagnostic.Span.End += offset
-		p.diags = slices.Append(p.a, p.diags, diagnostic)
+		p.diags = append(p.diags, diagnostic)
 	}
 }
 
@@ -282,7 +282,7 @@ func (p *parser) rule() *Rule {
 
 func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	allItems := ranges(p.a, p.s.Text, start, end)
-	defer slices.Free(p.a, allItems)
+	defer mem.FreeSlice(nil, allItems)
 	items := allItems
 	if len(items) == 0 {
 		p.error(start, end, "expected rule output")
@@ -322,9 +322,9 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			p.targetArgument(r, span, text)
 			continue
 		}
-		words = slices.Append(p.a, words, span)
+		words = append(words, span)
 	}
-	defer slices.Free(p.a, words)
+	defer mem.FreeSlice(nil, words)
 	if r.Kind == CachedTaskRule || r.Kind == ServiceRule {
 		computed := false
 		for i := range words {
@@ -358,7 +358,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			if text[0] != '"' && len(expansion.Parts) == 1 && (expansion.Parts[0].Kind == template.Expression || expansion.Parts[0].Kind == template.Reference) {
 				kind = TargetExpression
 			}
-			r.Outputs = slices.Append(p.a, r.Outputs, Target{Kind: kind, Text: text, Span: span, Expansion: expansion})
+			r.Outputs = append(r.Outputs, Target{Kind: kind, Text: text, Span: span, Expansion: expansion})
 			continue
 		}
 		path, templated := explicitPath(value), hasTemplate(value)
@@ -385,7 +385,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			}
 			p.takeTargetDiagnostics(output.TargetForm.Diagnostics, offset)
 		}
-		r.Outputs = slices.Append(p.a, r.Outputs, output)
+		r.Outputs = append(r.Outputs, output)
 	}
 }
 
@@ -416,7 +416,7 @@ func (p *parser) targetArgument(r *Rule, span source.Span, text string) {
 			return
 		}
 	}
-	r.Arguments = slices.Append(p.a, r.Arguments, TargetArgument{Name: owned(p.a, name), Default: owned(p.a, defaultValue), Optional: optional, Span: span})
+	r.Arguments = append(r.Arguments, TargetArgument{Name: owned(p.a, name), Default: owned(p.a, defaultValue), Optional: optional, Span: span})
 }
 
 func (p *parser) validateArguments(r *Rule) {
@@ -440,7 +440,7 @@ func hasExpansion(text string) bool {
 func (p *parser) quotedTemplate(span source.Span) *template.String {
 	parsed := expr.ParseQuotedTemplatePrefix(p.a, p.s, span.Start)
 	p.takeDiagnostics(parsed.Diagnostics)
-	slices.Free(p.a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	value := mem.Alloc[template.String](p.a)
 	value.Alloc, value.Span = p.a, span
 	if parsed.Expr == nil || parsed.Expr.Kind != expr.String || parsed.End != span.End {
@@ -455,7 +455,7 @@ func (p *parser) quotedTemplate(span source.Span) *template.String {
 					kind = template.Reference
 				}
 			}
-			value.Parts = slices.Append(p.a, value.Parts, template.Part{Kind: kind, Text: part.Text, Expr: part.Expr, Span: part.Span})
+			value.Parts = append(value.Parts, template.Part{Kind: kind, Text: part.Text, Expr: part.Expr, Span: part.Span})
 			part.Text, part.Expr = "", nil
 		}
 	}
@@ -536,7 +536,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 				input.Template.Free()
 				input.Template = mem.Alloc[template.String](p.a)
 				input.Template.Alloc, input.Template.Span, input.Template.Diagnostics = p.a, span, parsed.Diagnostics
-				input.Template.Parts = slices.Append(p.a, input.Template.Parts, template.Part{Kind: template.Expression, Span: span, Expr: parsed.Expr})
+				input.Template.Parts = append(input.Template.Parts, template.Part{Kind: template.Expression, Span: span, Expr: parsed.Expr})
 				input.Kind = InputExpression
 			}
 		} else if hasTemplate(text) {
@@ -554,19 +554,19 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 		}
 		if input.Template != nil {
 			p.takeDiagnostics(input.Template.Diagnostics)
-			slices.Free(p.a, input.Template.Diagnostics)
+			mem.FreeSlice(nil, input.Template.Diagnostics)
 			input.Template.Diagnostics = nil
 		}
 		if trailingComma {
 			input.SequenceEnd = true
 		}
-		r.Inputs = slices.Append(p.a, r.Inputs, input)
+		r.Inputs = append(r.Inputs, input)
 	}
 	if len(r.Inputs) != 0 && r.Inputs[len(r.Inputs)-1].SequenceEnd {
 		last := r.Inputs[len(r.Inputs)-1]
 		p.error(last.Span.Start, last.Span.End, "expected prerequisite after comma")
 	}
-	slices.Free(p.a, items)
+	mem.FreeSlice(nil, items)
 }
 
 func (p *parser) classify(r *Rule) {
@@ -639,7 +639,7 @@ func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs [
 				p.error(output.Span.Start, output.Span.End, "duplicate rule output")
 			}
 		}
-		r.Outputs = slices.Append(a, r.Outputs, output)
+		r.Outputs = append(r.Outputs, output)
 	}
 	if (r.Kind == CachedTaskRule || r.Kind == ServiceRule) && len(r.Outputs) != 1 {
 		p.error(r.Header.Start, r.Header.End, "prefixed rule needs one target")
@@ -677,7 +677,7 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 				look++
 			}
 			if len(r.Body) != 0 && look < p.end && (p.s.Text[look] == ' ' || p.s.Text[look] == '\t') {
-				r.Body = slices.Append(p.a, r.Body, RecipeLine{Span: source.Span{Start: lineStart, End: contentEnd}})
+				r.Body = append(r.Body, RecipeLine{Span: source.Span{Start: lineStart, End: contentEnd}})
 				r.Span.End = end
 			}
 			pos = next
@@ -699,7 +699,7 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		}
 		bodyStart := lineStart + len(indent)
 		line := template.ParseStringRange(p.a, p.s, bodyStart, contentEnd)
-		r.Body = slices.Append(p.a, r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}, Template: line})
+		r.Body = append(r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}, Template: line})
 		r.Span.End = contentEnd
 		pos = end + 1
 	}
@@ -714,13 +714,13 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		if r.BodyDoc == nil {
 			for j := range line.Diagnostics {
 				if p.deferRecipeDiagnostics {
-					r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[j])
+					r.RecipeDiagnostics = append(r.RecipeDiagnostics, line.Diagnostics[j])
 				} else {
-					p.diags = slices.Append(p.a, p.diags, line.Diagnostics[j])
+					p.diags = append(p.diags, line.Diagnostics[j])
 				}
 			}
 		}
-		slices.Free(p.a, line.Diagnostics)
+		mem.FreeSlice(nil, line.Diagnostics)
 		line.Diagnostics = nil
 	}
 }
@@ -742,9 +742,9 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
 	for i := range doc.Diagnostics {
 		if p.deferRecipeDiagnostics {
-			r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i])
+			r.RecipeDiagnostics = append(r.RecipeDiagnostics, doc.Diagnostics[i])
 		} else {
-			p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i])
+			p.diags = append(p.diags, doc.Diagnostics[i])
 		}
 	}
 	r.BodyDoc = doc
@@ -865,7 +865,7 @@ func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 			}
 			start++
 		}
-		out = slices.Append(a, out, source.Span{Start: item, End: start})
+		out = append(out, source.Span{Start: item, End: start})
 	}
 	return out
 }
@@ -886,7 +886,7 @@ func FormatRule(a mem.Allocator, r *Rule) string {
 
 // FormatRuleWithIndent returns allocator-owned canonical rule text without a terminal newline.
 func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	if r.Always {
 		b.WriteString("always ")
 	}
@@ -944,7 +944,7 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		}
 	}
 	value := owned(a, b.String())
-	b.Free()
+	b.Reset()
 	return value
 }
 
@@ -957,9 +957,9 @@ func wildcardInput(a mem.Allocator, text string, span source.Span) *template.Str
 	name.Kind, name.Text, name.Span = expr.Name, "wildcard", span
 	pattern := mem.Alloc[expr.Expr](a)
 	pattern.Kind, pattern.Text, pattern.Span = expr.Symbol, text, span
-	call.Items = slices.Append(a, call.Items, name, pattern)
+	call.Items = append(call.Items, name, pattern)
 	value := mem.Alloc[template.String](a)
 	value.Alloc, value.Span = a, span
-	value.Parts = slices.Append(a, value.Parts, template.Part{Kind: template.Expression, Span: span, Expr: call})
+	value.Parts = append(value.Parts, template.Part{Kind: template.Expression, Span: span, Expr: call})
 	return value
 }

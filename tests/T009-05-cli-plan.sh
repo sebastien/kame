@@ -107,6 +107,45 @@ test-step "plan selects the default target when none is given"
 	cli_expect_stderr_empty
 )
 
+test-step "misplaced typed plan options cannot select build mode"
+(
+	mkdir inspection-guard
+	cat >inspection-guard/Makefile.kmk <<'EOF'
+NAME = 0
+do :
+	touch ./misexecuted
+plan :
+	touch ./misexecuted
+EOF
+	for option in '--set NAME=1' '--set=NAME=1' '--set NAME=1 --set=NAME=2'; do
+		read -r -a set_args <<<"$option"
+		cli_run -- -C inspection-guard "${set_args[@]}" do plan
+		cli_expect_status 2
+		cli_expect_stderr_contains "OPT_CONFLICT" "kame do plan --set NAME=VALUE TARGET"
+		cli_expect_no_file inspection-guard/misexecuted
+		(
+			cd inspection-guard
+			cli_run -- "${set_args[@]}" do plan
+			cli_expect_status 2
+			cli_expect_stderr_contains "OPT_CONFLICT"
+			cli_expect_no_file ./misexecuted
+		)
+	done
+	for ordering in '--set NAME=1 do -j 2 plan' 'do plan --set NAME=1' 'do plan --set NAME=1 --'; do
+		read -r -a invocation <<<"$ordering"
+		cli_run -- -C inspection-guard "${invocation[@]}"
+		cli_expect_status 2
+		cli_expect_stderr_contains "OPT_CONFLICT"
+		cli_expect_no_file inspection-guard/misexecuted
+	done
+	cli_run -- do plan -C inspection-guard --set NAME=1 do plan
+	cli_expect_status 0
+	cli_expect_no_file inspection-guard/misexecuted
+	cli_run -- -C inspection-guard --set NAME=1 -- do plan
+	cli_expect_status 0
+	cli_expect_file inspection-guard/misexecuted
+)
+
 test-step "plan without a default fails with the available targets"
 cli_run -- do plan -c 'task first :'
 cli_expect_status 1

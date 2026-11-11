@@ -2,10 +2,10 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // Retain completed operands only while their application is suspended. This is
@@ -41,7 +41,7 @@ func (p *Program) freeOperationMemo(state *operationMemo) {
 	for i := range state.WritePaths {
 		mem.FreeString(a, state.WritePaths[i])
 	}
-	slices.Free(a, state.WritePaths)
+	mem.FreeSlice(nil, state.WritePaths)
 	mem.FreeString(a, state.Source)
 	mem.FreeString(a, state.CallPath)
 	mem.FreeString(a, state.Operation)
@@ -254,17 +254,17 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			state.Values = nil
 			for i := range state.Effects {
 				effect := state.Effects[i]
-				effect.Data = slices.Clone(c.Run, effect.Data)
-				c.Effects = slices.Append(c.Run, c.Effects, effect)
+				effect.Data = slices.Clone(effect.Data)
+				c.Effects = append(c.Effects, effect)
 			}
 			for i := range state.WritePaths {
-				c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
+				c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
 			}
 		}
 		p.discardArgumentMemo(state)
 	}
 	if values == nil {
-		values = slices.Make[core.Value](c.Run, len(arguments))
+		values = make([]core.Value, len(arguments))
 	}
 	for i := next; i < len(arguments); i++ {
 		if deferReplacement && i == 1 && values[0].Kind == core.Pattern {
@@ -287,7 +287,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			pattern := expr.ParsePatternText(c.Run, r.Value.Text, arguments[0].Span.Start)
 			invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
 			pattern.Pattern.Free(c.Run)
-			slices.Free(c.Run, pattern.Diagnostics)
+			mem.FreeSlice(nil, pattern.Diagnostics)
 			if invalid {
 				freeValuesWithCallables(c.Run, values)
 				return argumentResult{Result: failure(c.Run, "PAT_INVALID", arguments[0].Span, "match pattern needs a matcher group")}
@@ -322,16 +322,16 @@ func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, op
 	for i := 0; i < facts; i++ {
 		item := c.Engine.AcceptedObservations()[i]
 		item.Key = item.Key.Clone(c.Run)
-		state.Inputs = slices.Append(c.Run, state.Inputs, item)
+		state.Inputs = append(state.Inputs, item)
 	}
 	for i := effects; i < completedEffects; i++ {
 		effect := c.Effects[i]
-		effect.Data = slices.Clone(c.Run, effect.Data)
-		state.Effects = slices.Append(c.Run, state.Effects, effect)
+		effect.Data = slices.Clone(effect.Data)
+		state.Effects = append(state.Effects, effect)
 	}
 	for i := paths; i < completedPaths; i++ {
-		state.WritePaths = slices.Append(c.Run, state.WritePaths, owned(c.Run, c.WritePaths[i]))
+		state.WritePaths = append(state.WritePaths, owned(c.Run, c.WritePaths[i]))
 	}
-	p.OperationMemos = slices.Append(p.Alloc, p.OperationMemos, state)
+	p.OperationMemos = append(p.OperationMemos, state)
 	return true
 }

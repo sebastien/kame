@@ -2,11 +2,11 @@
 package expr
 
 import (
+	"kame/internal/mem"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 type Kind int
@@ -114,7 +114,8 @@ type StringPart struct {
 type Expr struct {
 	// SourceOrigin is compiler loading metadata (one-based), not authored syntax.
 	// Generated trees retain zero even if their byte spans overlap a source file.
-	SourceOrigin int
+	SourceOrigin  int
+	CommentIndent int // Authored Kash comment depth; comments do not close blocks.
 	// Topology and Edges are used only by prepared process graphs. Authored
 	// syntax retains groups and connections until graph validation/lowering.
 	Topology       bool
@@ -200,7 +201,7 @@ func (r *Result) Free() {
 	}
 	a := r.Alloc
 	freeExpr(a, r.Expr)
-	slices.Free(a, r.Diagnostics)
+	mem.FreeSlice(nil, r.Diagnostics)
 	r.Source.Free(a)
 	*r = Result{}
 	mem.Free(a, r)
@@ -244,19 +245,19 @@ func freeExpr(a mem.Allocator, e *Expr) {
 			mem.FreeString(a, e.Fields[i].Key)
 		}
 	}
-	slices.Free(a, e.Parts)
-	slices.Free(a, e.Reference)
-	slices.Free(a, e.Items)
-	slices.Free(a, e.Fields)
-	slices.Free(a, e.Parameters)
-	slices.Free(a, e.Body)
-	slices.Free(a, e.Edges)
-	slices.Free(a, e.CommandOps)
-	slices.Free(a, e.StreamKinds)
+	mem.FreeSlice(nil, e.Parts)
+	mem.FreeSlice(nil, e.Reference)
+	mem.FreeSlice(nil, e.Items)
+	mem.FreeSlice(nil, e.Fields)
+	mem.FreeSlice(nil, e.Parameters)
+	mem.FreeSlice(nil, e.Body)
+	mem.FreeSlice(nil, e.Edges)
+	mem.FreeSlice(nil, e.CommandOps)
+	mem.FreeSlice(nil, e.StreamKinds)
 	for i := range e.Channels {
 		mem.FreeString(a, e.Channels[i])
 	}
-	slices.Free(a, e.Channels)
+	mem.FreeSlice(nil, e.Channels)
 	mem.Free(a, e)
 }
 
@@ -351,7 +352,7 @@ func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) node(kind Kind, start int) *Expr {
@@ -447,7 +448,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 				p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid")
 			}
 			if partStart < p.pos {
-				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
+				e.Parts = append(e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
 			}
 			open := p.pos
 			form := "@("
@@ -458,7 +459,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 			if inner == nil {
 				break
 			}
-			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
 			partStart = p.pos
 			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') {
 				message := "a leading path expansion requires / after it"
@@ -489,7 +490,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 			p.pos++
 			continue
 		}
-		if command && (commandOperator(b) || (p.commandGroup && b == ',' && patternDepth == 0)) {
+		if command && (commandOperator(b) || b == '\'' || (p.commandGroup && b == ',' && patternDepth == 0)) {
 			break
 		}
 		if p.valuePathStart == start+1 && b == ';' && patternDepth == 0 {
@@ -514,7 +515,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 		p.error(start, p.pos, "unclosed glob character class")
 	}
 	if len(e.Parts) != 0 && partStart < p.pos {
-		e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
+		e.Parts = append(e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
 	}
 	e.Span.End = p.pos
 	e.Text = p.s.Text[start:p.pos]
@@ -610,11 +611,11 @@ func (p *parser) verbatim(n int) *Expr {
 			if len(content) != 0 {
 				var value string
 				if p.indent != "" {
-					value = strings.ReplaceAll(p.a, content, "\n"+p.indent, "\n")
+					value = strings.ReplaceAll(content, "\n"+p.indent, "\n")
 				} else {
 					value = sourceText(p.a, content)
 				}
-				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: value, Span: source.Span{Start: contentStart, End: p.pos}})
+				e.Parts = append(e.Parts, StringPart{Text: value, Span: source.Span{Start: contentStart, End: p.pos}})
 			}
 			p.pos += n
 			e.Span.End = p.pos
@@ -633,7 +634,7 @@ func (p *parser) tplError(start int, end int, message string) {
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "TPL_PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "TPL_PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 // classifyPathPattern recognizes matcher/expansion patterns and lowers rooted
@@ -661,19 +662,19 @@ func (p *parser) classifyPathPattern(e *Expr, start int) {
 		}
 		if regex {
 			for i := range parsed.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i])
+				p.diags = append(p.diags, parsed.Diagnostics[i])
 			}
 		}
 		parsed.Pattern.Free(p.a)
-		slices.Free(p.a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
 	if !HasGroups(parsed.Pattern) {
 		parsed.Pattern.Free(p.a)
-		slices.Free(p.a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
-	slices.Free(p.a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	if parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0 {
 		p.error(start, start+len(e.Text), "pattern mixes matchers and references")
 		parsed.Pattern.Free(p.a)
@@ -701,14 +702,14 @@ func (p *parser) pathReferences(e *Expr) {
 			for next < len(previous) && previous[next].Expr == nil {
 				next++
 			}
-			parts = slices.Append(p.a, parts, previous[next])
+			parts = append(parts, previous[next])
 			next++
 		} else if part.Kind == PatternReference {
 			name := mem.Alloc[Expr](p.a)
 			name.Kind, name.Span, name.Text = Name, part.Span, p.s.Text[part.Span.Start+1:part.Span.End-1]
-			parts = slices.Append(p.a, parts, StringPart{Expr: name, Form: "{", Span: part.Span})
+			parts = append(parts, StringPart{Expr: name, Form: "{", Span: part.Span})
 		} else {
-			parts = slices.Append(p.a, parts, StringPart{Text: sourceText(p.a, p.s.Text[part.Span.Start:part.Span.End]), Span: part.Span})
+			parts = append(parts, StringPart{Text: sourceText(p.a, p.s.Text[part.Span.Start:part.Span.End]), Span: part.Span})
 		}
 	}
 	for i := range previous {
@@ -716,7 +717,7 @@ func (p *parser) pathReferences(e *Expr) {
 			mem.FreeString(p.a, previous[i].Text)
 		}
 	}
-	slices.Free(p.a, previous)
+	mem.FreeSlice(nil, previous)
 	e.Parts = parts
 	e.Pattern.Free(p.a)
 	e.Pattern = nil
@@ -1095,7 +1096,7 @@ func (p *parser) reference() *Expr {
 		return e
 	}
 	e := p.node(Reference, start)
-	e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: ReferenceName, Text: name.Text, Span: name.Span})
+	e.Reference = append(e.Reference, ReferencePart{Kind: ReferenceName, Text: name.Text, Span: name.Span})
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] == '.' {
 		partStart := p.pos
 		p.pos++
@@ -1113,7 +1114,7 @@ func (p *parser) reference() *Expr {
 				p.error(selectionStart, p.pos, "invalid reference selection")
 			}
 			p.pos++
-			e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: ReferenceSelection, Text: p.s.Text[selectionStart : p.pos-1], Span: source.Span{Start: partStart, End: p.pos}})
+			e.Reference = append(e.Reference, ReferencePart{Kind: ReferenceSelection, Text: p.s.Text[selectionStart : p.pos-1], Span: source.Span{Start: partStart, End: p.pos}})
 			continue
 		}
 		componentStart := p.pos
@@ -1166,7 +1167,7 @@ func (p *parser) reference() *Expr {
 		} else {
 			kind = ReferenceIndex
 		}
-		e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: kind, Text: text, Span: source.Span{Start: partStart, End: p.pos}})
+		e.Reference = append(e.Reference, ReferencePart{Kind: kind, Text: text, Span: source.Span{Start: partStart, End: p.pos}})
 	}
 	e.Span.End = p.pos
 	if name.Text == "env" {
@@ -1176,7 +1177,7 @@ func (p *parser) reference() *Expr {
 			e.Kind = EnvironmentReference
 			variable := p.node(Symbol, e.Reference[1].Span.Start)
 			variable.Text, variable.Span = e.Reference[1].Text, e.Reference[1].Span
-			e.Items = slices.Append(p.a, e.Items, variable)
+			e.Items = append(e.Items, variable)
 		}
 	}
 	return e
@@ -1271,7 +1272,7 @@ func (p *parser) list() *Expr {
 				freeExpr(p.a, record)
 				return nil
 			}
-			record.Fields = slices.Append(p.a, record.Fields, Field{Key: name.Text, Span: name.Span, Value: value})
+			record.Fields = append(record.Fields, Field{Key: name.Text, Span: name.Span, Value: value})
 			for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
 				if p.skipSpace() == 0 {
 					p.error(p.pos, p.pos+1, "record entries need whitespace")
@@ -1290,7 +1291,7 @@ func (p *parser) list() *Expr {
 				if value == nil {
 					break
 				}
-				record.Fields = slices.Append(p.a, record.Fields, Field{Key: key.Text, Span: key.Span, Value: value})
+				record.Fields = append(record.Fields, Field{Key: key.Text, Span: key.Span, Value: value})
 			}
 			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ']' {
 				p.error(start, p.pos, "unclosed record")
@@ -1313,7 +1314,7 @@ func (p *parser) list() *Expr {
 			} else {
 				operand := p.expression()
 				if operand != nil {
-					item.Items = slices.Append(p.a, item.Items, operand)
+					item.Items = append(item.Items, operand)
 				}
 			}
 			item.Span.End = p.pos
@@ -1328,7 +1329,7 @@ func (p *parser) list() *Expr {
 		if item == nil {
 			break
 		}
-		list.Items = slices.Append(p.a, list.Items, item)
+		list.Items = append(list.Items, item)
 		space := p.skipSpace()
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' {
 			p.pos++
@@ -1376,12 +1377,12 @@ func (p *parser) classifySection(app *Expr) *Expr {
 	app.Kind = Section
 	items := app.Items
 	app.Items = nil
-	slices.Free(p.a, items)
-	app.Body = slices.Append(p.a, app.Body, body)
+	mem.FreeSlice(nil, items)
+	app.Body = append(app.Body, body)
 	for i := int64(0); i < arity; i++ {
-		var buffer [strconv.MaxIntBase10Len]byte
-		name := sourceText(p.a, "_"+strconv.FormatInt(buffer[:], i, 10))
-		app.Parameters = slices.Append(p.a, app.Parameters, Parameter{Name: name, Span: body.Span})
+
+		name := sourceText(p.a, "_"+strconv.FormatInt(i, 10))
+		app.Parameters = append(app.Parameters, Parameter{Name: name, Span: body.Span})
 	}
 	return app
 }
@@ -1514,7 +1515,7 @@ func (p *parser) paren() *Expr {
 		return nil
 	}
 	app := p.node(Application, start)
-	app.Items = slices.Append(p.a, app.Items, first)
+	app.Items = append(app.Items, first)
 	for p.pos < len(p.s.Text) {
 		space := p.skipSpace()
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
@@ -1535,7 +1536,7 @@ func (p *parser) paren() *Expr {
 			left := app.Items[0]
 			items := app.Items
 			app.Items = nil
-			slices.Free(p.a, items)
+			mem.FreeSlice(nil, items)
 			mem.Free(p.a, app)
 			return p.pipe(start, left, false)
 		}
@@ -1551,7 +1552,7 @@ func (p *parser) paren() *Expr {
 			app.Span.End = p.pos
 			return app
 		}
-		app.Items = slices.Append(p.a, app.Items, item)
+		app.Items = append(app.Items, item)
 	}
 	p.error(start, p.pos, "unclosed application; expected ')'")
 	return app
@@ -1560,7 +1561,7 @@ func (p *parser) paren() *Expr {
 func (p *parser) pipe(start int, left *Expr, call bool) *Expr {
 	pipe := p.node(ValuePipe, start)
 	pipe.PipeCall = call
-	pipe.Items = slices.Append(p.a, pipe.Items, cloneExpr(p.a, left))
+	pipe.Items = append(pipe.Items, cloneExpr(p.a, left))
 	if call {
 		left = p.classifySection(left)
 	}
@@ -1574,7 +1575,7 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 		if item == nil {
 			break
 		}
-		right = slices.Append(p.a, right, item)
+		right = append(right, item)
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.skipSpace() == 0 {
 			p.error(p.pos, p.pos+1, "pipe items need whitespace")
 			break
@@ -1582,7 +1583,7 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 	}
 	if len(right) == 0 {
 		p.error(p.pos, p.pos, "pipe needs right expression")
-		slices.Free(p.a, right)
+		mem.FreeSlice(nil, right)
 		freeExpr(p.a, pipe)
 		return left
 	}
@@ -1591,14 +1592,14 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 		for i := range right {
 			freeExpr(p.a, right[i])
 		}
-		slices.Free(p.a, right)
+		mem.FreeSlice(nil, right)
 		freeExpr(p.a, pipe)
 		return left
 	}
 	stage := p.node(Application, right[0].Span.Start)
 	stage.Items = right
 	stage.Span.End = right[len(right)-1].Span.End
-	pipe.Items = slices.Append(p.a, pipe.Items, cloneExpr(p.a, stage))
+	pipe.Items = append(pipe.Items, cloneExpr(p.a, stage))
 	stage.Items = nil
 	mem.Free(p.a, stage)
 	result := p.node(Application, start)
@@ -1606,20 +1607,20 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 	for i := range right {
 		if right[i].Kind == Name && right[i].Text == "_" {
 			if used {
-				result.Items = slices.Append(p.a, result.Items, cloneExpr(p.a, left))
+				result.Items = append(result.Items, cloneExpr(p.a, left))
 			} else {
-				result.Items = slices.Append(p.a, result.Items, left)
+				result.Items = append(result.Items, left)
 			}
 			freeExpr(p.a, right[i])
 			used = true
 		} else {
-			result.Items = slices.Append(p.a, result.Items, right[i])
+			result.Items = append(result.Items, right[i])
 		}
 	}
 	if !used {
-		result.Items = slices.Append(p.a, result.Items, left)
+		result.Items = append(result.Items, left)
 	}
-	slices.Free(p.a, right)
+	mem.FreeSlice(nil, right)
 	if p.s.Text[p.pos] == ')' {
 		p.pos++
 		result.Span.End, pipe.Span.End = p.pos, p.pos
@@ -1641,12 +1642,12 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	}
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
-	copy.Edges = slices.Clone(a, original.Edges)
-	copy.CommandOps = slices.Clone(a, original.CommandOps)
-	copy.StreamKinds = slices.Clone(a, original.StreamKinds)
+	copy.Edges = slices.Clone(original.Edges)
+	copy.CommandOps = slices.Clone(original.CommandOps)
+	copy.StreamKinds = slices.Clone(original.StreamKinds)
 	copy.Channels = nil
 	for i := range original.Channels {
-		copy.Channels = slices.Append(a, copy.Channels, sourceText(a, original.Channels[i]))
+		copy.Channels = append(copy.Channels, sourceText(a, original.Channels[i]))
 	}
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.CapturePolicy = cloneExpr(a, original.CapturePolicy)
@@ -1665,22 +1666,22 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 		} else {
 			part.Text = sourceText(a, part.Text)
 		}
-		copy.Parts = slices.Append(a, copy.Parts, part)
+		copy.Parts = append(copy.Parts, part)
 	}
-	copy.Reference = slices.Clone(a, original.Reference)
+	copy.Reference = slices.Clone(original.Reference)
 	for i := range copy.Reference {
 		copy.Reference[i].Text = sourceText(a, original.Reference[i].Text)
 	}
 	for i := range original.Items {
-		copy.Items = slices.Append(a, copy.Items, cloneExpr(a, original.Items[i]))
+		copy.Items = append(copy.Items, cloneExpr(a, original.Items[i]))
 	}
 	for i := range original.Fields {
 		field := original.Fields[i]
 		field.Key = sourceText(a, field.Key)
 		field.Value = cloneExpr(a, field.Value)
-		copy.Fields = slices.Append(a, copy.Fields, field)
+		copy.Fields = append(copy.Fields, field)
 	}
-	copy.Parameters = slices.Clone(a, original.Parameters)
+	copy.Parameters = slices.Clone(original.Parameters)
 	// Cloned parameter names must outlive the original source, just like
 	// reference components and record keys.
 	if len(copy.Parameters) != 0 {
@@ -1689,7 +1690,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 		}
 	}
 	for i := range original.Body {
-		copy.Body = slices.Append(a, copy.Body, cloneExpr(a, original.Body[i]))
+		copy.Body = append(copy.Body, cloneExpr(a, original.Body[i]))
 	}
 	return copy
 }
@@ -1712,7 +1713,7 @@ func (p *parser) lambda(start int) *Expr {
 			p.pos += 3
 			rest = true
 		}
-		lambda.Parameters = slices.Append(p.a, lambda.Parameters, Parameter{Name: name.Text, Span: source.Span{Start: name.Span.Start, End: p.pos}, Rest: rest})
+		lambda.Parameters = append(lambda.Parameters, Parameter{Name: name.Text, Span: source.Span{Start: name.Span.Start, End: p.pos}, Rest: rest})
 		if rest && p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
 			p.error(p.pos, p.pos+1, "rest parameter must be last")
 		}
@@ -1738,7 +1739,7 @@ func (p *parser) lambda(start int) *Expr {
 		if body == nil {
 			return lambda
 		}
-		lambda.Body = slices.Append(p.a, lambda.Body, body)
+		lambda.Body = append(lambda.Body, body)
 	}
 	if p.pos == len(p.s.Text) {
 		p.error(start, p.pos, "unclosed lambda")
@@ -1754,7 +1755,7 @@ func (p *parser) quoted(patterns bool) *Expr {
 	p.pos++
 	e := p.node(String, start)
 	var text strings.Builder
-	text = strings.NewBuilder(p.a)
+	text = strings.Builder{}
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
@@ -1765,7 +1766,7 @@ func (p *parser) quoted(patterns bool) *Expr {
 			}
 			p.pos++
 			e.Span.End = p.pos
-			text.Free()
+			text.Reset()
 			return e
 		}
 		if b == '\\' {
@@ -1800,13 +1801,13 @@ func (p *parser) quoted(patterns bool) *Expr {
 			before := len(p.diags)
 			inner := p.expansion()
 			if inner == nil {
-				text.Free()
+				text.Reset()
 				e.Span.End = p.pos
 				return e
 			}
-			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
 			if p.pos == len(p.s.Text) && len(p.diags) > before {
-				text.Free()
+				text.Reset()
 				e.Span.End = p.pos
 				return e
 			}
@@ -1819,7 +1820,7 @@ func (p *parser) quoted(patterns bool) *Expr {
 			p.pos += len(p.indent)
 		}
 	}
-	text.Free()
+	text.Reset()
 	p.error(start, p.pos, "unclosed string")
 	return e
 }
@@ -1878,7 +1879,7 @@ func (p *parser) addTextPart(e *Expr, text *strings.Builder, start int, end int)
 	if text.Len() == 0 {
 		return
 	}
-	e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, text.String()), Span: source.Span{Start: start, End: end}})
+	e.Parts = append(e.Parts, StringPart{Text: sourceText(p.a, text.String()), Span: source.Span{Start: start, End: end}})
 	text.Reset()
 }
 
@@ -1890,16 +1891,16 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	// Parse the string's decoded value, not its source spelling: quoted-string
 	// escapes (for example, `\n`) have already been interpreted into Parts.
 	var decoded strings.Builder
-	decoded = strings.NewBuilder(p.a)
+	decoded = strings.Builder{}
 	for i := range e.Parts {
 		if e.Parts[i].Expr != nil {
-			decoded.Free()
+			decoded.Reset()
 			return
 		}
 		decoded.WriteString(e.Parts[i].Text)
 	}
 	text := sourceText(p.a, decoded.String())
-	decoded.Free()
+	decoded.Reset()
 	defer mem.FreeString(p.a, text)
 	if text == "" || strings.IndexByte(text, '{') < 0 {
 		return
@@ -1914,8 +1915,8 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 		} else {
 			pos++
 		}
-		sourceStarts = slices.Append(p.a, sourceStarts, from)
-		sourceEnds = slices.Append(p.a, sourceEnds, pos)
+		sourceStarts = append(sourceStarts, from)
+		sourceEnds = append(sourceEnds, pos)
 		if p.s.Text[from] == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[pos:], p.indent) {
 			pos += len(p.indent)
 		}
@@ -1938,24 +1939,24 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 			parsed.Diagnostics[i].Span = source.Span{Start: startAt, End: endAt}
 		}
 	}
-	slices.Free(p.a, sourceStarts)
-	slices.Free(p.a, sourceEnds)
+	mem.FreeSlice(nil, sourceStarts)
+	mem.FreeSlice(nil, sourceEnds)
 	if len(parsed.Diagnostics) != 0 {
 		if containsRegexGroupMarker(text) {
 			for i := range parsed.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i])
+				p.diags = append(p.diags, parsed.Diagnostics[i])
 			}
 		}
 		parsed.Pattern.Free(p.a)
-		slices.Free(p.a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
 	if !HasGroups(parsed.Pattern) {
 		parsed.Pattern.Free(p.a)
-		slices.Free(p.a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
-	slices.Free(p.a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	if parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0 {
 		p.error(start, end, "pattern mixes matchers and references")
 		parsed.Pattern.Free(p.a)
@@ -1964,7 +1965,7 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	for i := range e.Parts {
 		mem.FreeString(p.a, e.Parts[i].Text)
 	}
-	slices.Free(p.a, e.Parts)
+	mem.FreeSlice(nil, e.Parts)
 	e.Parts = nil
 	e.TextOwned = true
 	e.Text = CanonicalPattern(p.a, parsed.Pattern)
@@ -1987,10 +1988,10 @@ func Format(a mem.Allocator, e *Expr) string {
 
 // Compact preserves the surrounding grammar of templates and process words.
 func Compact(a mem.Allocator, e *Expr) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	writeExpr(&b, e)
 	text := sourceText(a, b.String())
-	b.Free()
+	b.Reset()
 	return text
 }
 
@@ -2275,13 +2276,13 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == Integer {
-		var buf [strconv.MaxIntBase10Len]byte
-		b.WriteString(strconv.FormatInt(buf[:], e.Int, 10))
+
+		b.WriteString(strconv.FormatInt(e.Int, 10))
 		return
 	}
 	if e.Kind == Float {
-		var buf [strconv.MaxFloat64Len]byte
-		text := strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)
+
+		text := strconv.FormatFloat(e.Float, 'g', -1, 64)
 		b.WriteString(text)
 		if !strings.ContainsAny(text, ".eE") {
 			b.WriteString(".0")
@@ -2301,9 +2302,9 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == Placeholder {
-		var buffer [strconv.MaxIntBase10Len]byte
+
 		b.WriteByte('_')
-		b.WriteString(strconv.FormatInt(buffer[:], e.Int, 10))
+		b.WriteString(strconv.FormatInt(e.Int, 10))
 		return
 	}
 	if e.Kind == Section {

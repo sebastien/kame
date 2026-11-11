@@ -1,12 +1,12 @@
 package wasm
 
 import (
+	"errors"
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/errors"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"slices"
+	"strings"
 )
 
 var errMemoryDirectory = errors.New("path is a directory")
@@ -45,11 +45,11 @@ func (h *MemoryHost) SetFile(path string, data []byte) {
 		return
 	}
 	if i := h.findFile(path); i >= 0 {
-		slices.Free(h.Alloc, h.Files[i].Data)
-		h.Files[i].Data = slices.Clone(h.Alloc, data)
+		mem.FreeSlice(nil, h.Files[i].Data)
+		h.Files[i].Data = slices.Clone(data)
 		return
 	}
-	h.Files = slices.Append(h.Alloc, h.Files, memoryFile{Path: pureText(h.Alloc, path), Data: slices.Clone(h.Alloc, data)})
+	h.Files = append(h.Files, memoryFile{Path: pureText(h.Alloc, path), Data: slices.Clone(data)})
 }
 
 func (h *MemoryHost) SetTime(nanos int64) {
@@ -121,7 +121,7 @@ func (h *MemoryHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 		return nil, errors.New("host unavailable")
 	}
 	if i := h.findFile(name); i >= 0 {
-		return slices.Clone(a, h.Files[i].Data), nil
+		return slices.Clone(h.Files[i].Data), nil
 	}
 	return nil, errors.New("file does not exist")
 }
@@ -196,7 +196,7 @@ func addEntry(a mem.Allocator, entries []host.DirEntry, name string, isDir bool)
 	for at > 0 && entries[at-1].Name > name {
 		at--
 	}
-	entries = slices.Append(a, entries, host.DirEntry{})
+	entries = append(entries, host.DirEntry{})
 	copy(entries[at+1:], entries[at:])
 	entries[at] = entry
 	return entries
@@ -233,7 +233,7 @@ func (h *MemoryHost) Mkdir(name string, perm uint32) error {
 			return nil
 		}
 	}
-	h.Dirs = slices.Append(h.Alloc, h.Dirs, pureText(h.Alloc, name))
+	h.Dirs = append(h.Dirs, pureText(h.Alloc, name))
 	return nil
 }
 
@@ -260,7 +260,7 @@ func (h *MemoryHost) Remove(name string) error {
 				copy(h.Dirs[j:], h.Dirs[j+1:])
 				h.Dirs = h.Dirs[:len(h.Dirs)-1]
 				if len(h.Dirs) == 0 {
-					slices.Free(h.Alloc, h.Dirs)
+					mem.FreeSlice(nil, h.Dirs)
 					h.Dirs = nil
 				}
 				return nil
@@ -269,11 +269,11 @@ func (h *MemoryHost) Remove(name string) error {
 		return errors.New("file does not exist")
 	}
 	mem.FreeString(h.Alloc, h.Files[i].Path)
-	slices.Free(h.Alloc, h.Files[i].Data)
+	mem.FreeSlice(nil, h.Files[i].Data)
 	copy(h.Files[i:], h.Files[i+1:])
 	h.Files = h.Files[:len(h.Files)-1]
 	if len(h.Files) == 0 {
-		slices.Free(h.Alloc, h.Files)
+		mem.FreeSlice(nil, h.Files)
 		h.Files = nil
 	}
 	return nil
@@ -349,16 +349,16 @@ func (h *MemoryHost) Free() {
 	for i := range h.Readers {
 		mem.FreeString(h.Alloc, h.Readers[i].Name)
 	}
-	slices.Free(h.Alloc, h.Readers)
+	mem.FreeSlice(nil, h.Readers)
 	for i := range h.Files {
 		mem.FreeString(h.Alloc, h.Files[i].Path)
-		slices.Free(h.Alloc, h.Files[i].Data)
+		mem.FreeSlice(nil, h.Files[i].Data)
 	}
 	for i := range h.Dirs {
 		mem.FreeString(h.Alloc, h.Dirs[i])
 	}
-	slices.Free(h.Alloc, h.Dirs)
-	slices.Free(h.Alloc, h.Files)
+	mem.FreeSlice(nil, h.Dirs)
+	mem.FreeSlice(nil, h.Files)
 	a := h.Alloc
 	*h = MemoryHost{}
 	mem.Free(a, h)

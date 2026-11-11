@@ -3,8 +3,7 @@ package wasm
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type memoryRecordCursor struct {
@@ -34,7 +33,7 @@ func (h *MemoryHost) ReadRecord(a mem.Allocator, id int64, name string, delimite
 		}
 	}
 	if index < 0 {
-		h.Readers = slices.Append(h.Alloc, h.Readers, memoryRecordCursor{ID: id, Name: pureText(h.Alloc, name), Delimiter: delimiter})
+		h.Readers = append(h.Readers, memoryRecordCursor{ID: id, Name: pureText(h.Alloc, name), Delimiter: delimiter})
 		index = len(h.Readers) - 1
 	}
 	cursor := &h.Readers[index]

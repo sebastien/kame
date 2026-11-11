@@ -3,7 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 func (p *Program) verifyForwardOutputs(c *core.EngineContext, index int) core.ProducerResult {

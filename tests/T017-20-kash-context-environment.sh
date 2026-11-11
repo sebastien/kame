@@ -82,12 +82,16 @@ SHELL = kash
 exports = [TOKEN: (env "K07_SECRET")]
 task chosen :
 	:env $exports sh -c "printf x >> runs; printf %s \"\$TOKEN\" > received"
+source-read :
+	(out! (read ./Makefile.kmk))
 KMK
 	check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.kmk" chosen
+	if ! grep -q INPUT_UNSTABLE "$work/err"; then test-ok "$backend validates loaded source without a read grant"; else test-fail "$backend source validation requires user read authority"; fi
 	check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.kmk" chosen
 	if [ "$(cat "$work/runs")" = x ]; then test-ok "$backend computed env permits warm reuse"; else test-fail "$backend computed env reran"; fi
 	K07_SECRET=changed check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.kmk" chosen
 	if [ "$(cat "$work/runs")" = xx ] && [ "$(cat "$work/received")" = changed ]; then test-ok "$backend changed env invalidates task"; else test-fail "$backend stale computed env"; fi
+	reject CAP_DENIED do run --allow-run --allow-env=K07_SECRET "$work/Makefile.kmk" source-read
 	test-step "$backend named operands, function arguments and invalid context"
 	check '<one><two words>' do run --allow-run --lang kash -c 'printf "<%s>" $args' -- one 'two words'
 	check 'one-two' do run --allow-run --lang kash -c $'(f one two) = (join "-" args)\nprintf "%s" (f "one" "two")'

@@ -1,6 +1,6 @@
 package definition
 
-import "solod.dev/so/strings"
+import "strings"
 
 // Override is a borrowed view of normalized configuration. NAME=TEXT remains
 // literal text; NAME:=LITERAL is the internal spelling of --set.

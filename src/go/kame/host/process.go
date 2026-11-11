@@ -2,8 +2,7 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // ProcessOutcome describes a terminal process result.
@@ -175,7 +174,7 @@ type ExecutionArtifact struct {
 
 func (a *ExecutionArtifact) Free(allocator mem.Allocator) {
 	mem.FreeString(allocator, a.Name)
-	slices.Free(allocator, a.Data)
+	mem.FreeSlice(nil, a.Data)
 	*a = ExecutionArtifact{}
 }
 
@@ -200,16 +199,16 @@ func EffectiveSignal(value core.Value) int64 {
 }
 
 func (e *ProcessEvent) Free(a mem.Allocator) {
-	slices.Free(a, e.Data)
-	slices.Free(a, e.Stdout)
-	slices.Free(a, e.Stderr)
-	slices.Free(a, e.Stages)
-	slices.Free(a, e.EdgeMetrics)
-	slices.Free(a, e.StageStates)
+	mem.FreeSlice(nil, e.Data)
+	mem.FreeSlice(nil, e.Stdout)
+	mem.FreeSlice(nil, e.Stderr)
+	mem.FreeSlice(nil, e.Stages)
+	mem.FreeSlice(nil, e.EdgeMetrics)
+	mem.FreeSlice(nil, e.StageStates)
 	for i := range e.Outputs {
 		e.Outputs[i].Free(a)
 	}
-	slices.Free(a, e.Outputs)
+	mem.FreeSlice(nil, e.Outputs)
 	mem.FreeString(a, e.Diagnostic.Code)
 	mem.FreeString(a, e.Diagnostic.Message)
 	*e = ProcessEvent{}

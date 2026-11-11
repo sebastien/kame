@@ -1,15 +1,15 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"os"
+	"strings"
 )
 
 const generatedRecordLimitForTest = 4096
@@ -17,8 +17,8 @@ const generatedListItemLimitForTest = 4096
 
 func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-generated-task-")
+
+	dir, err := os.MkdirTemp("", "kame-generated-task-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -54,7 +54,7 @@ func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing
 		t.Error("generated task did not materialize: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/generated-cli")
+	data, readErr := os.ReadFile(dir + "/generated-cli")
 	if readErr != nil || len(data) != 0 {
 		t.Error("generated recipe did not retain its computed module value")
 	}
@@ -67,8 +67,8 @@ func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing
 
 func TestGeneratedFileRuleWritesItsDeclaredOutput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-generated-rule-")
+
+	dir, err := os.MkdirTemp("", "kame-generated-rule-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -90,7 +90,7 @@ func TestGeneratedFileRuleWritesItsDeclaredOutput(t *testing.T) {
 		t.Error("generated file rule did not materialize: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/generated.txt")
+	data, readErr := os.ReadFile(dir + "/generated.txt")
 	if readErr != nil || string(data) != "generated" {
 		t.Error("generated file rule did not write its declared output")
 	}
@@ -192,7 +192,7 @@ func TestGeneratedDeclarationRejectsDefinitionCycles(t *testing.T) {
 
 func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 	a := t.Allocator()
-	text := strings.NewBuilder(a)
+	text := strings.Builder{}
 	text.WriteString("generate too-many = [")
 	record := "[kind: \"task\" target: \"same\" inputs: [] order-only: [] recipe: [\"true\"]]"
 	for i := 0; i <= generatedRecordLimitForTest; i++ {
@@ -203,7 +203,7 @@ func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 	}
 	text.WriteString("]\n")
 	parsed := script.Parse(a, "too-many-generated.kmk", text.String())
-	text.Free()
+	text.Reset()
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
 	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "EXPR_INVALID" {
@@ -216,7 +216,7 @@ func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 
 func TestGeneratedDeclarationEnforcesBatchListItemLimit(t *testing.T) {
 	a := t.Allocator()
-	text := strings.NewBuilder(a)
+	text := strings.Builder{}
 	text.WriteString("generate too-many = [[kind: \"task\" target: \"task\" inputs: [")
 	for i := 0; i <= generatedListItemLimitForTest; i++ {
 		if i != 0 {
@@ -226,7 +226,7 @@ func TestGeneratedDeclarationEnforcesBatchListItemLimit(t *testing.T) {
 	}
 	text.WriteString("] order-only: [] recipe: [\"true\"]]]\n")
 	parsed := script.Parse(a, "too-many-generated-items.kmk", text.String())
-	text.Free()
+	text.Reset()
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
 	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "EXPR_INVALID" {

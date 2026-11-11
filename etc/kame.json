@@ -5,9 +5,10 @@
       "kame"
     ]
   ],
+  "depends": "nodejs",
   "description": "Build tool for projects described with Kame",
-  "hash": "aedbbc1037e4ea77de3ec687699a5898ddfd5552844c6d2cfb64f392ae201de0",
+  "hash": "d4a8f5a350bff3b8eb7ffcfb5a4a2fab4c35f92b57b0b8874f8ce50958aad797",
   "homepage": "https://github.com/sebastien/kame",
-  "url": "https://github.com/sebastien/kame/releases/download/v0.2.3/kame.com#/kame.exe",
-  "version": "0.2.3"
+  "url": "https://github.com/sebastien/kame/releases/download/v0.4.0/kame-windows-x64.zip",
+  "version": "0.4.0"
 }

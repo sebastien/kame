@@ -1,12 +1,72 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
+
+func TestCompileManyHonorsSourceLanguagesWithoutKash(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	languages := []string{"km", "kmk", ""}
+	for i := range languages {
+		for extra := 0; extra < 2; extra++ {
+			sources := make([]program.CompileSource, 1+extra)
+			sources[0] = program.CompileSource{Name: "authored", Lang: languages[i], Text: "target :\n", Offset: 20}
+			if extra != 0 {
+				sources[1] = program.CompileSource{Name: "unrelated.kash", Lang: "kash", Text: "unused = 42\n"}
+			}
+			compiled := program.CompileMany(a, sources, registry, program.Options{})
+			if languages[i] == "km" {
+				if compiled.Program != nil || len(compiled.Diagnostics) == 0 {
+					t.Error("km source accepted rule syntax")
+				} else if compiled.Diagnostics[0].Source != "authored" || compiled.Diagnostics[0].Span.Start != 27 {
+					t.Error("language diagnostic lost authored location")
+				}
+			} else if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+				t.Error("rule grammar changed for kmk or unspecified language")
+			}
+			if compiled.Program != nil {
+				compiled.Program.Free()
+			}
+			compiled.Free(a)
+			mem.FreeSlice(nil, sources)
+		}
+	}
+}
+
+func TestCompileManyBoundsExplicitLanguageFragments(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	for mode := 0; mode < 2; mode++ {
+		lang := ""
+		if mode != 0 {
+			lang = "kmk"
+		}
+		sources := []program.CompileSource{
+			{Name: "first", Lang: lang, Text: "value = (str \"one\""},
+			{Name: "second", Lang: lang, Text: "\"two\")"},
+		}
+		compiled := program.CompileMany(a, sources, registry, program.Options{})
+		if mode == 0 {
+			if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+				t.Error("unspecified languages lost legacy combined parsing")
+			}
+		} else if compiled.Program != nil || len(compiled.Diagnostics) == 0 {
+			t.Error("explicit fragment syntax crossed source boundaries")
+		}
+		if compiled.Program != nil {
+			compiled.Program.Free()
+		}
+		compiled.Free(a)
+	}
+}
 
 func TestSessionSharesLazyDefinitionsAndKeepsParserBoundaries(t *testing.T) {
 	a := t.Allocator()

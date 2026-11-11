@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
+	"bytes"
 	"kame/host/wasm"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestListTargetsCatalogueAndMatching(t *testing.T) {
@@ -34,12 +34,12 @@ func TestListTargetsCatalogueAndMatching(t *testing.T) {
 		`["./build/app"]`, `["./build/app"]`, `["./café"]`, `["./café"]`, `[]`, `[]`,
 	}
 	for i := range queries {
-		var buffer = bytes.NewBuffer(a, nil)
+		var buffer = bytes.Buffer{}
 		compiled.Program.WriteTargetList(&buffer, queries[i])
 		if buffer.String() != expected[i] {
 			t.Error("unexpected list for '" + queries[i] + "': " + buffer.String())
 		}
-		buffer.Free()
+		buffer.Reset()
 	}
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -61,10 +61,10 @@ func TestListReportClassifiesWithoutPlanningPrerequisites(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	var first = bytes.NewBuffer(a, nil)
-	var second = bytes.NewBuffer(a, nil)
-	defer first.Free()
-	defer second.Free()
+	var first = bytes.Buffer{}
+	var second = bytes.Buffer{}
+	defer first.Reset()
+	defer second.Reset()
 	compiled.Program.WriteTargetReport(&first, "")
 	compiled.Program.WriteTargetReport(&second, "")
 	if first.String() != second.String() || compiled.Program.InspectionWaiting {
@@ -113,8 +113,8 @@ func TestListReportRefreshesAcceptedTaskAndArtifactProofs(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	compiled.Program.WriteTargetReport(&buffer, "")
 	initial := []string{`"name":"checked","group":"tasks","status":"built"`, `"name":"./downstream","group":"artifacts","status":"built"`}
 	for i := range initial {
@@ -123,8 +123,8 @@ func TestListReportRefreshesAcceptedTaskAndArtifactProofs(t *testing.T) {
 		}
 	}
 	host.SetFile("seed", []byte("two"))
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	compiled.Program.WriteTargetReport(&buffer, "")
 	expected := []string{`"name":"checked","group":"tasks","status":"outdated"`, `"name":"./result","group":"artifacts","status":"outdated"`, `"name":"./downstream","group":"artifacts","status":"unknown"`, `"name":"./missing","group":"artifacts","status":"missing"`}
 	for i := range expected {
@@ -151,25 +151,25 @@ func TestListReportDisabledTaskCacheDoesNotRequestHostProof(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
-	initial := bytes.NewBuffer(a, nil)
+	initial := bytes.Buffer{}
 	compiled.Program.WriteTargetReport(&initial, "")
 	if !strings.Contains(initial.String(), `"name":"checked","group":"tasks","status":"missing"`) {
 		t.Error("missing cache record was not reported as missing: " + initial.String())
 	}
-	initial.Free()
+	initial.Reset()
 	result := compiled.Program.Materialize("checked")
 	if result.Diagnostic.Code != "" {
 		t.Error("materialization failed: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	compiled.Program.WriteTargetReport(&buffer, "")
 	if !strings.Contains(buffer.String(), `"status":"built"`) {
 		t.Error("accepted task proof missing")
 	}
-	buffer.Free()
-	buffer = bytes.NewBuffer(a, nil)
+	buffer.Reset()
+	buffer = bytes.Buffer{}
 	compiled.Program.Options.CacheDisabled = true
 	compiled.Program.Forwarding = true
 	compiled.Program.WriteTargetReport(&buffer, "")
@@ -186,12 +186,12 @@ func TestListTargetsDeduplicatesPatternOutputs(t *testing.T) {
 	if compiled.Program == nil {
 		t.Error("compile failed")
 	} else {
-		var buffer = bytes.NewBuffer(a, nil)
+		var buffer = bytes.Buffer{}
 		compiled.Program.WriteTargetList(&buffer, "")
 		if buffer.String() != `["./build/{name}.o"]` {
 			t.Error("duplicate output was listed")
 		}
-		buffer.Free()
+		buffer.Reset()
 		compiled.Program.Free()
 	}
 	compiled.Free(a)

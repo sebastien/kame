@@ -1,11 +1,10 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"math"
 )
 
 func TestValueJSONStrictKindsOrderingAndEscapes(t *testing.T) {
@@ -16,7 +15,7 @@ func TestValueJSONStrictKindsOrderingAndEscapes(t *testing.T) {
 	if !core.ValueJSON(a, value, &data) || string(data) != `{"a":[true,"\u0001\n\"\\"],"z":null}` {
 		t.Error("JSON key order or control escaping failed")
 	}
-	slices.Free(a, data)
+	mem.FreeSlice(nil, data)
 	value.Free(a)
 	invalidUTF8 := []byte{0xff}
 	values := []core.Value{{Kind: core.Bytes, Bytes: []byte("text")}, {Kind: core.Float, Float: math.Inf(1)}, {Kind: core.Float, Float: math.Inf(-1)}, {Kind: core.Float, Float: math.NaN()}, {Kind: core.String, Text: string(invalidUTF8)}}
@@ -24,13 +23,13 @@ func TestValueJSONStrictKindsOrderingAndEscapes(t *testing.T) {
 		data = nil
 		if core.ValueJSON(a, values[i], &data) {
 			t.Error("non-JSON value accepted")
-			slices.Free(a, data)
+			mem.FreeSlice(nil, data)
 		}
 		nested := core.NewList(a, []core.Value{values[i]})
 		data = nil
 		if core.ValueJSON(a, nested, &data) {
 			t.Error("nested non-JSON value accepted")
-			slices.Free(a, data)
+			mem.FreeSlice(nil, data)
 		}
 		nested.Free(a)
 	}
@@ -49,18 +48,18 @@ func TestPresentationValueJSONPolicy(t *testing.T) {
 		if core.ValueJSON(a, values[i], &data) {
 			t.Error("strict JSON accepted presentation-only data")
 		}
-		slices.Free(a, data)
+		mem.FreeSlice(nil, data)
 		data = nil
 		if !core.PresentationValueJSON(a, values[i], &data) {
 			t.Error("presentation JSON rejected its documented string/byte policy")
 		}
-		slices.Free(a, data)
+		mem.FreeSlice(nil, data)
 	}
 }
 
 func TestPresentationValueJSONEncodesNativeValues(t *testing.T) {
 	a := t.Allocator()
-	cases := slices.Make[string](a, 22)
+	cases := make([]string, 22)
 	cases[0], cases[1] = `null`, `null`
 	cases[2], cases[3] = `true`, `true`
 	cases[4], cases[5] = `false`, `false`
@@ -90,7 +89,7 @@ func TestPresentationValueJSONEncodesNativeValues(t *testing.T) {
 		}
 		mem.FreeSlice(a, data)
 	}
-	slices.Free(a, cases)
+	mem.FreeSlice(nil, cases)
 }
 
 func TestPresentationValueJSONRejectsNonNativeValues(t *testing.T) {
@@ -122,11 +121,11 @@ func TestPresentationValueJSONRejectsNonNativeValues(t *testing.T) {
 		mem.FreeSlice(a, data)
 	}
 	binary.Free(a)
-	items := slices.Make[core.Value](a, 1)
+	items := make([]core.Value, 1)
 	items[0] = core.NewPattern(a, "{name:*}")
 	nested := core.NewList(a, items)
 	items[0].Free(a)
-	slices.Free(a, items)
+	mem.FreeSlice(nil, items)
 	if core.PresentationValueJSON(a, nested, &data) {
 		t.Error("nested pattern accepted as JSON")
 		mem.FreeSlice(a, data)

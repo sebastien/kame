@@ -9,7 +9,7 @@ set -eu
 
 # Bootstrap initialization was retired; fail before selecting or downloading anything.
 if [ "${1:-}" = "init" ]; then
-	printf '%s\n' 'kame: init has been retired; copy Makefile from a source checkout, or run kame.com / the npm CLI directly.' >&2
+	printf '%s\n' 'kame: init has been retired; copy Makefile from a source checkout, or run a native binary or the npm CLI directly.' >&2
 	exit 1
 fi
 
@@ -307,43 +307,42 @@ install_wasm() {
 	rmdir "$staging"
 }
 
-install_ape() {
-	ensure_manifest
-	if [ -x "$cache/ape/kame.com" ]; then
-		hex=$(manifest_entry "$cache/SHA256SUMS" "kame.com") || die "missing manifest entry: kame.com"
-		verify "$cache/ape/kame.com" "$hex" || die "checksum mismatch: cached kame.com"
-		return 0
-	fi
-	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached APE (download disabled)"
-	staging="$cache/.staging.$$"
-	rm -rf "$staging"
-	mkdir -p "$staging/ape"
-	note "fetching kame.com"
-	fetch "${release_base}kame.com" "$staging/ape/kame.com"
-	hex=$(manifest_entry "$cache/SHA256SUMS" "kame.com") || {
-		rm -rf "$staging"
-		die "missing manifest entry: kame.com"
-	}
-	verify "$staging/ape/kame.com" "$hex" || {
-		rm -rf "$staging"
-		die "checksum mismatch: kame.com"
-	}
-	chmod +x "$staging/ape/kame.com"
-	mv "$staging/ape" "$cache/ape"
-	rmdir "$staging"
+native_host() {
+	case $(uname -s 2>/dev/null) in
+	Linux) native_os=linux ;;
+	Darwin) native_os=darwin ;;
+	*) return 1 ;;
+	esac
+	case $(uname -m 2>/dev/null) in
+	x86_64 | amd64) native_arch=x86_64 ;;
+	aarch64 | arm64) native_arch=arm64 ;;
+	*) return 1 ;;
+	esac
+	printf '%s-%s' "$native_os" "$native_arch"
 }
 
-ape_host() {
-	kame_os=$(uname -s 2>/dev/null || true)
-	kame_arch=$(uname -m 2>/dev/null || true)
-	case $kame_arch in
-	x86_64 | amd64 | aarch64 | arm64) ;;
-	*) return 1 ;;
-	esac
-	case $kame_os in
-	Linux | Darwin | FreeBSD | NetBSD | OpenBSD | MINGW* | MSYS* | CYGWIN*) return 0 ;;
-	*) return 1 ;;
-	esac
+install_native() {
+	platform=$(native_host) || die "no native binary for this platform; use KAME_BACKEND=wasm"
+	asset=kame-$platform
+	native_binary=$cache/native/$platform/kame
+	ensure_manifest
+	if [ -x "$native_binary" ]; then
+		hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
+		verify "$native_binary" "$hex" || die "checksum mismatch: cached $asset"
+		return 0
+	fi
+	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached native binary (download disabled)"
+	staging="$cache/.staging.$$"
+	rm -rf "$staging"
+	mkdir -p "$staging/native"
+	note "fetching $asset"
+	fetch "${release_base}$asset" "$staging/native/kame"
+	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || { rm -rf "$staging"; die "missing manifest entry: $asset"; }
+	verify "$staging/native/kame" "$hex" || { rm -rf "$staging"; die "checksum mismatch: $asset"; }
+	chmod +x "$staging/native/kame"
+	mkdir -p "$cache/native"
+	mv "$staging/native" "$cache/native/$platform"
+	rmdir "$staging"
 }
 
 js_runtime() {
@@ -366,14 +365,14 @@ write_backend() {
 select_backend() {
 	requested=${KAME_BACKEND:-auto}
 	case $requested in
-	ape | wasm) printf '%s' "$requested"; return 0 ;;
+	native | wasm) printf '%s' "$requested"; return 0 ;;
 	auto) ;;
 	*) die "invalid KAME_BACKEND: $requested" ;;
 	esac
 	if [ -f "$cache/.backend" ]; then
 		cached=$(cat "$cache/.backend")
-		if [ "$cached" = "ape" ] && [ -x "$cache/ape/kame.com" ]; then
-			printf 'ape'
+		if [ "$cached" = "native" ] && native_host >/dev/null; then
+			printf 'native'
 			return 0
 		fi
 		if [ "$cached" = "wasm" ] && [ -f "$cache/wasm/kame.js" ]; then
@@ -382,10 +381,10 @@ select_backend() {
 		fi
 	fi
 	backend=wasm
-	if ape_host; then
-		install_ape
-		if "$cache/ape/kame.com" --version >/dev/null 2>&1; then
-			backend=ape
+	if native_host >/dev/null; then
+		install_native
+		if "$native_binary" --version >/dev/null 2>&1; then
+			backend=native
 		fi
 	fi
 	write_backend "$backend"
@@ -398,13 +397,11 @@ trap 'exit 143' TERM
 acquire_lock
 backend=$(select_backend)
 case $backend in
-ape)
-	# install_ape runs within the lock during selection; re-check for the forced path.
-	install_ape
-	apt=$cache/ape/kame.com
+native)
+	install_native
 	release_lock
 	trap - EXIT INT TERM
-	exec "$apt" "$@"
+	exec "$native_binary" "$@"
 	;;
 wasm)
 	install_wasm

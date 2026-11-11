@@ -2,8 +2,8 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/slices"
 )
 
 // recordField borrows the first matching field, or returns nil when absent.
@@ -96,14 +96,14 @@ func opItems(c *eval.Context, s any, v []core.Value) eval.Result {
 		field := v[0].Record[i]
 		key := core.NewString(c.Run, field.Key)
 		fields := []core.RecordField{{Key: "key", Value: key}, {Key: "value", Value: field.Value}}
-		values = slices.Append(c.Run, values, core.NewRecord(c.Run, fields))
+		values = append(values, core.NewRecord(c.Run, fields))
 		key.Free(c.Run)
 	}
 	result := core.NewList(c.Run, values)
 	for i := range values {
 		values[i].Free(c.Run)
 	}
-	slices.Free(c.Run, values)
+	mem.FreeSlice(nil, values)
 	return eval.Result{Value: result}
 }
 
@@ -124,13 +124,13 @@ func opSet(c *eval.Context, s any, v []core.Value) eval.Result {
 			c.FreeCallable(&v[2].Record[i].Value)
 			field.Value, found = v[1], true
 		}
-		fields = slices.Append(c.Run, fields, field)
+		fields = append(fields, field)
 	}
 	if !found {
-		fields = slices.Append(c.Run, fields, core.RecordField{Key: v[0].Text, Value: v[1]})
+		fields = append(fields, core.RecordField{Key: v[0].Text, Value: v[1]})
 	}
 	result := core.NewRecord(c.Run, fields)
-	slices.Free(c.Run, fields)
+	mem.FreeSlice(nil, fields)
 	return eval.Result{Value: result}
 }
 
@@ -154,7 +154,7 @@ func opMerge(c *eval.Context, s any, v []core.Value) eval.Result {
 				}
 			}
 			if found < 0 {
-				fields = slices.Append(c.Run, fields, field)
+				fields = append(fields, field)
 			} else {
 				c.FreeCallable(&fields[found].Value)
 				fields[found].Value = field.Value
@@ -162,6 +162,6 @@ func opMerge(c *eval.Context, s any, v []core.Value) eval.Result {
 		}
 	}
 	result := core.NewRecord(c.Run, fields)
-	slices.Free(c.Run, fields)
+	mem.FreeSlice(nil, fields)
 	return eval.Result{Value: result}
 }

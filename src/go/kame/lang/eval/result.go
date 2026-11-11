@@ -3,11 +3,11 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+
+	"strconv"
 )
 
 type Result struct {
@@ -44,9 +44,9 @@ func renderFailure(a mem.Allocator, expression *expr.Expr, span source.Span, act
 			name := expr.Compact(a, expression)
 			tip = owned(a, "Use @("+name+") to invoke it; @{...} only reads the reference.")
 			mem.FreeString(a, name)
-			result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, tip)
+			result.Diagnostic.Tips = append(result.Diagnostic.Tips, tip)
 		} else {
-			result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, tip))
+			result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, tip))
 		}
 	}
 	return result
@@ -64,7 +64,7 @@ func (c *Context) InvalidRender(index int, actual core.Kind) Result {
 
 func literalSelectorTip(a mem.Allocator, result Result) Result {
 	if result.Diagnostic.Code == "SEL_NO_CONTEXT" || result.Diagnostic.Code == "SEL_INDEX_INVALID" {
-		result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, "Escape \\@ for a literal at-sign in template text (for example, --mtime=\\@0)."))
+		result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, "Escape \\@ for a literal at-sign in template text (for example, --mtime=\\@0)."))
 	}
 	return result
 }
@@ -75,7 +75,7 @@ func environmentDenied(a mem.Allocator, span source.Span, name string) Result {
 		message += " for " + name
 	}
 	result := failure(a, "CAP_DENIED", span, message)
-	result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, "Use scoped --allow-env=NAME; explicit grants replace defaults. Definition configuration and child environment settings do not authorize environment reads."))
+	result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, "Use scoped --allow-env=NAME; explicit grants replace defaults. Definition configuration and child environment settings do not authorize environment reads."))
 	return result
 }
 
@@ -99,8 +99,8 @@ func (c *Context) InvalidArgument(index int, expected string, actual core.Kind) 
 	if index >= 0 && index < len(c.operationArguments) {
 		span = c.operationArguments[index].Span
 	}
-	var buffer [strconv.MaxIntBase10Len]byte
-	number := strconv.FormatInt(buffer[:], int64(index+1), 10)
+
+	number := strconv.FormatInt(int64(index+1), 10)
 	result := failure(c.Run, "EXPR_INVALID", span, "`"+c.OperationName+"` argument "+number+" expects "+expected+"; got "+core.KindName(actual))
 	attachSource(&result, c)
 	return result
@@ -113,9 +113,9 @@ func (c *Context) InvalidElement(index int, item int, expected string, actual co
 	if index >= 0 && index < len(c.operationArguments) {
 		span = c.operationArguments[index].Span
 	}
-	var argBuffer, itemBuffer [strconv.MaxIntBase10Len]byte
-	argNumber := strconv.FormatInt(argBuffer[:], int64(index+1), 10)
-	itemNumber := strconv.FormatInt(itemBuffer[:], int64(item+1), 10)
+
+	argNumber := strconv.FormatInt(int64(index+1), 10)
+	itemNumber := strconv.FormatInt(int64(item+1), 10)
 	result := failure(c.Run, "EXPR_INVALID", span, "`"+c.OperationName+"` argument "+argNumber+" item "+itemNumber+" expects "+expected+"; got "+core.KindName(actual))
 	attachSource(&result, c)
 	return result

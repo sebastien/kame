@@ -2,8 +2,8 @@
 package source
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/unicode/utf8"
+	"kame/internal/mem"
+	"unicode/utf8"
 )
 
 // Span is a zero-based, half-open byte range in one Source.

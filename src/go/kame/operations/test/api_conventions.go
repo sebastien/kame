@@ -1,12 +1,12 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func TestCanonicalTransformationPipes(t *testing.T) {

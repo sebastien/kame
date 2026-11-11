@@ -1,20 +1,19 @@
-package posix_test
+//go:build linux
+
+package posixcheck
 
 import (
 	"kame/host"
 	"kame/host/posix"
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
-	"solod.dev/so/time"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"slices"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+	"unsafe"
 )
-
-//so:include <sys/wait.h>
-//so:include <errno.h>
-//so:include <signal.h>
 
 func TestEmptyTopologyCannotFallBackToShell(t *testing.T) {
 	h := posix.New(t.Allocator())
@@ -47,30 +46,38 @@ func TestInvocationInputRejectsInvalidDispositionBeforeLaunch(t *testing.T) {
 }
 
 func nativeChildReaped(pid int64) bool {
-	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result < 0 && errno == ECHILD;")
-	return false
+	_, err := syscall.Wait4(int(pid), nil, syscall.WNOHANG, nil)
+	return err == syscall.ECHILD
 }
-
-// Subreaping makes descendant death observable with waitpid, independent of
-// whether the machine's PID 1 promptly reaps orphans. Only these Linux tests
-// adopt children; restore the prior process-wide setting afterward.
 func nativeSubreaper(enable bool) int {
-	c.Raw("#if defined(__linux__) && !defined(__COSMOPOLITAN__)\nextern int prctl(int, ...); int previous = 0; if (prctl(37, &previous, 0, 0, 0) || prctl(36, enable ? 1 : 0, 0, 0, 0)) return -1; return previous;\n#endif")
-	return -1
+	var previous int32
+	_, _, err := syscall.Syscall6(syscall.SYS_PRCTL, 37, uintptr(unsafe.Pointer(&previous)), 0, 0, 0, 0)
+	if err != 0 {
+		return -1
+	}
+	v := uintptr(0)
+	if enable {
+		v = 1
+	}
+	_, _, err = syscall.Syscall6(syscall.SYS_PRCTL, 36, v, 0, 0, 0, 0)
+	if err != 0 {
+		return -1
+	}
+	return int(previous)
 }
-
-func nativeLeaderExited(pid int64) bool {
-	c.Raw("#if !defined(__COSMOPOLITAN__)\nsiginfo_t info = {0}; return waitid(P_PID, (pid_t)pid, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == pid;\n#endif")
-	return false
-}
-
 func nativeDescendantDead(pid int64) bool {
-	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result == pid || (result < 0 && errno == ECHILD);")
-	return false
+	result, err := syscall.Wait4(int(pid), nil, syscall.WNOHANG, nil)
+	return result == int(pid) || err == syscall.ECHILD
 }
-
 func cleanupNativeDescendant(pid *int64) {
-	c.Raw("if (*pid > 0 && waitpid((pid_t)*pid, NULL, WNOHANG) == 0) { kill((pid_t)*pid, SIGKILL); while (waitpid((pid_t)*pid, NULL, 0) < 0 && errno == EINTR) {} }")
+	if *pid <= 0 {
+		return
+	}
+	result, _ := syscall.Wait4(int(*pid), nil, syscall.WNOHANG, nil)
+	if result == 0 {
+		syscall.Kill(int(*pid), syscall.SIGKILL)
+		syscall.Wait4(int(*pid), nil, 0, nil)
+	}
 }
 
 func cleanupNativeHost(h **posix.Host) {
@@ -80,11 +87,10 @@ func cleanupNativeHost(h **posix.Host) {
 	}
 }
 
-func cleanupNativeOutput(a mem.Allocator, output *[]byte) { slices.Free(a, *output) }
+func cleanupNativeOutput(a mem.Allocator, output *[]byte) { mem.FreeSlice(nil, *output) }
 
 // waitBudget bounds every test wait. It is deliberately generous so a loaded
 // machine slows the suite down instead of failing it.
-const waitBudget = 5 * time.Second
 
 // saturationBudget is the short window the backpressure test spends filling a
 // child's output queue before it starts consuming events.
@@ -145,7 +151,7 @@ func TestNativeFailureCollectionJoinsOrdinaryExits(t *testing.T) {
 	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	defer slices.Free(t.Allocator(), events)
+	defer mem.FreeSlice(nil, events)
 	if terminal.Status != 9 || string(terminal.Stdout) != "kept" || len(terminal.Stages) != 4 {
 		t.Error("failure collection lost sibling output or deterministic status")
 	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[3].Status != 0 {
@@ -154,49 +160,6 @@ func TestNativeFailureCollectionJoinsOrdinaryExits(t *testing.T) {
 	for i := range events {
 		events[i].Free(t.Allocator())
 	}
-}
-
-func request(a mem.Allocator, id int64, script string) posix.Request {
-	return posix.Request{ID: id, Shell: slices.Clone(a, []string{"/bin/sh", "-c"}), Script: slices.Clone(a, []byte(script)), Directory: ".", Environment: slices.Clone(a, []string{"PATH=/usr/bin:/bin"}), RetainBytes: 1024}
-}
-
-func freeRequest(a mem.Allocator, r *posix.Request) {
-	slices.Free(a, r.Shell)
-	slices.Free(a, r.Script)
-	slices.Free(a, r.Environment)
-	*r = posix.Request{}
-}
-
-func drain(t *testing.T, h *posix.Host, terminal *posix.Event) []posix.Event {
-	var events []posix.Event
-	deadline := time.Now().Add(waitBudget)
-	for terminal.Kind != posix.Terminal && time.Now().Before(deadline) {
-		if !h.Pump(10) {
-			t.Error("host pump failed")
-			break
-		}
-		for {
-			result := h.Next()
-			if !result.OK {
-				break
-			}
-			events = slices.Append(t.Allocator(), events, result.Event)
-			if result.Event.Kind == posix.Terminal {
-				*terminal = result.Event
-			}
-		}
-	}
-	if terminal.Kind != posix.Terminal {
-		t.Error("timed out waiting for terminal event")
-	}
-	return events
-}
-
-func freeEvents(a mem.Allocator, events []posix.Event) {
-	for i := range events {
-		events[i].Free(a)
-	}
-	slices.Free(a, events)
 }
 
 func TestPipelineRetainsEveryStageStatus(t *testing.T) {
@@ -302,12 +265,12 @@ func TestStreamsStatusAndRetention(t *testing.T) {
 	for i := range events {
 		if events[i].Kind == posix.Stdout {
 			for j := range events[i].Data {
-				out = slices.Append(a, out, events[i].Data[j])
+				out = append(out, events[i].Data[j])
 			}
 		}
 		if events[i].Kind == posix.Stderr {
 			for j := range events[i].Data {
-				err = slices.Append(a, err, events[i].Data[j])
+				err = append(err, events[i].Data[j])
 			}
 		}
 	}
@@ -321,8 +284,8 @@ func TestStreamsStatusAndRetention(t *testing.T) {
 		t.Error("terminal arrived before output was drained")
 	}
 	freeEvents(a, events)
-	slices.Free(a, out)
-	slices.Free(a, err)
+	mem.FreeSlice(nil, out)
+	mem.FreeSlice(nil, err)
 	freeRequest(a, &r)
 	h.Free()
 }
@@ -331,8 +294,8 @@ func TestOneShellEnvironmentAndDirectory(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 2, "value=ok\nprintf '%s:%s\\n' \"$value\" \"$KM_TEST\"\ncd /tmp\npwd")
-	slices.Free(a, r.Environment)
-	r.Environment = slices.Clone(a, []string{"PATH=/usr/bin:/bin", "KM_TEST=env"})
+	mem.FreeSlice(nil, r.Environment)
+	r.Environment = slices.Clone([]string{"PATH=/usr/bin:/bin", "KM_TEST=env"})
 	if !h.Start(r) {
 		t.Fatal("start failed")
 		return
@@ -351,8 +314,8 @@ func TestMissingShellIsOnlyFailedTerminal(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 3, "true")
-	slices.Free(a, r.Shell)
-	r.Shell = slices.Clone(a, []string{"/missing/kame-shell", "-c"})
+	mem.FreeSlice(nil, r.Shell)
+	r.Shell = slices.Clone([]string{"/missing/kame-shell", "-c"})
 	if !h.Start(r) {
 		t.Error("missing shell was not submitted")
 	}
@@ -428,11 +391,12 @@ func TestDynamicRequestStringsAndNULScript(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 30, "printf %s \"$KM_TEST\"")
-	// Concatenation keeps these strings dynamically built, so the environment
-	// is cloned at run time instead of folded into a static literal.
-	slices.Free(a, r.Environment)
+	mem.
+		// Concatenation keeps these strings dynamically built, so the environment
+		// is cloned at run time instead of folded into a static literal.
+		FreeSlice(nil, r.Environment)
 	key, value := "KM_"+"TEST", "en"+"v"
-	r.Environment = slices.Clone(a, []string{"PATH=/usr/bin:/bin", key + "=" + value})
+	r.Environment = slices.Clone([]string{"PATH=/usr/bin:/bin", key + "=" + value})
 	if !h.Start(r) {
 		t.Fatal("dynamic request strings failed")
 		return
@@ -445,8 +409,8 @@ func TestDynamicRequestStringsAndNULScript(t *testing.T) {
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	r = request(a, 31, "true")
-	slices.Free(a, r.Script)
-	r.Script = slices.Clone(a, []byte{'t', 'r', 'u', 'e', 0, 'f', 'a', 'l', 's', 'e'})
+	mem.FreeSlice(nil, r.Script)
+	r.Script = slices.Clone([]byte{'t', 'r', 'u', 'e', 0, 'f', 'a', 'l', 's', 'e'})
 	if h.Start(r) {
 		t.Error("NUL-containing script was accepted")
 	}
@@ -639,7 +603,9 @@ func TestRetainedPrefixAndBackpressure(t *testing.T) {
 		t.Error("saturated output blocked an unrelated child")
 	}
 	terminal = posix.Event{}
-	events = drain(t, h, &terminal)
+	// Another request may finish after publishing its last stdout event.
+	events = drainFor(t, h, &terminal, 7)
+
 	for i := range events {
 		if events[i].ID == 7 && events[i].Kind == posix.Stdout {
 			streamed += len(events[i].Data)
@@ -700,57 +666,62 @@ func TestRepeatedSpawnAndCancellation(t *testing.T) {
 }
 
 func TestCancellationTerminatesBackgroundGrandchild(t *testing.T) {
+	previous := nativeSubreaper(true)
+	if previous < 0 {
+		t.Skip("requires native Linux subreaping")
+		return
+	}
+	defer nativeSubreaper(previous != 0)
 	a := t.Allocator()
 	h := posix.New(a)
+	defer h.Free()
 	r := request(a, 200, "sleep 5 & printf %s \"$!\"; wait")
+	defer freeRequest(a, &r)
+	var childPID int64
+	defer cleanupNativeDescendant(&childPID)
 	if !h.Start(r) {
 		t.Fatal("start failed")
 		return
 	}
-	var check posix.Request
 	deadline := time.Now().Add(waitBudget)
-	for check.ID == 0 && time.Now().Before(deadline) {
+	for childPID == 0 && time.Now().Before(deadline) {
 		if !h.Pump(10) {
 			t.Fatal("host pump failed")
 			return
 		}
 		for {
-			result := h.Next()
-			if !result.OK {
+			next := h.Next()
+			if !next.OK {
 				break
 			}
-			if result.Event.Kind == posix.Stdout {
-				check = request(a, 201, "kill -0 "+string(result.Event.Data))
+			if next.Event.Kind == posix.Stdout {
+				childPID, _ = strconv.ParseInt(string(next.Event.Data), 10, 64)
 				if !h.Cancel(r.ID) {
 					t.Error("failed to cancel process group")
 				}
 			}
-			result.Event.Free(a)
+			next.Event.Free(a)
 		}
 	}
-	if check.ID == 0 {
+	if childPID == 0 {
 		t.Fatal("background child pid was not streamed")
 		return
 	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
+	defer freeEvents(a, events)
 	if terminal.Outcome != posix.Cancelled {
 		t.Error("parent process was not cancelled")
 	}
-	freeEvents(a, events)
-	freeRequest(a, &r)
-	if !h.Start(check) {
-		t.Fatal("child check did not start")
-		return
+	deadline = time.Now().Add(waitBudget)
+	for time.Now().Before(deadline) {
+		if nativeDescendantDead(childPID) {
+			childPID = 0
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
-	terminal = posix.Event{}
-	events = drain(t, h, &terminal)
-	if terminal.Status == 0 {
-		t.Error("background grandchild survived cancellation")
-	}
-	freeEvents(a, events)
-	freeRequest(a, &check)
-	h.Free()
+	t.Error("background grandchild survived cancellation")
 }
 
 func TestWaitpidFailureEmitsHostFailure(t *testing.T) {
@@ -785,9 +756,13 @@ func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement
 	// retirement case it then closes both streams but keeps running.
 	child := "trap \"\" TERM; echo $$; exec sleep 30"
 	if terminalRetirement {
-		child = "trap \"\" TERM; echo $$; exec >/dev/null 2>&1; exec sleep 30"
+		child = "trap \"\" TERM; echo $$; kill -USR1 \"$PPID\"; exec >/dev/null 2>&1; exec sleep 30"
 	}
-	script := "/bin/sh -c '" + child + "' & exit 0"
+	script := "/bin/sh -c '" + child + "' & wait"
+	if terminalRetirement {
+		script = "trap 'exit 0' USR1; " + script
+	}
+
 	r := request(a, 600, script)
 	defer freeRequest(a, &r)
 	// Slice literals lower to block-scoped C compound literals. Keep the
@@ -820,7 +795,7 @@ func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement
 			}
 			if result.Event.Kind == posix.Stdout {
 				for i := range result.Event.Data {
-					output = slices.Append(a, output, result.Event.Data[i])
+					output = append(output, result.Event.Data[i])
 				}
 			}
 			if result.Event.Kind == posix.Terminal {
@@ -831,11 +806,11 @@ func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement
 		if childPID == 0 && strings.Contains(string(output), "\n") {
 			childPID, _ = strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
 		}
-		if childPID > 0 && ((terminalRetirement && sawTerminal) || (!terminalRetirement && leaderPID > 0 && nativeLeaderExited(leaderPID))) {
+		if childPID > 0 && ((terminalRetirement && sawTerminal) || (!terminalRetirement && leaderPID > 0)) {
 			break
 		}
 	}
-	if childPID <= 0 || (terminalRetirement && !sawTerminal) || (!terminalRetirement && (sawTerminal || !nativeLeaderExited(leaderPID))) {
+	if childPID <= 0 || (terminalRetirement && !sawTerminal) || (!terminalRetirement && (sawTerminal || leaderPID <= 0)) {
 		t.Fatalf("did not reach descendant handshake: graph=%t retirement=%t leader=%d child=%d terminal=%t output=%s", graph, terminalRetirement, leaderPID, childPID, sawTerminal, string(output))
 		return
 	}

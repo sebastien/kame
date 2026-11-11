@@ -1,10 +1,9 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestCancelledHostClaimCannotDispatch(t *testing.T) {
@@ -17,7 +16,7 @@ func TestCancelledHostClaimCannotDispatch(t *testing.T) {
 	n := e.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "cancelled"}, publishOnce, state)
 	e.Request(n)
 	ready := e.Ready(1)
-	defer slices.Free(a, ready)
+	defer mem.FreeSlice(nil, ready)
 	if len(ready) != 1 || !e.CanDispatch(n) {
 		t.Error("live work was not claimed")
 		return

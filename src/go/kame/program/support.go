@@ -2,11 +2,11 @@ package program
 
 import (
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 // failure builds an owned diagnostic. Dynamic messages come from stack
@@ -17,7 +17,7 @@ func failure(a mem.Allocator, code string, message string) diagnostic.Diagnostic
 	if code == "TGT_NO_RULE" && strings.HasPrefix(message, "no rule for target: ") {
 		target := message[len("no rule for target: "):]
 		if strings.ContainsAny(target, "/.") && !isPathTarget(target) {
-			result.Tips = slices.Append(a, result.Tips, cloneText(a, "Unprefixed names are logical targets. Use an explicit ./ prefix when a file path is intended."))
+			result.Tips = append(result.Tips, cloneText(a, "Unprefixed names are logical targets. Use an explicit ./ prefix when a file path is intended."))
 		}
 	}
 	return result
@@ -37,12 +37,12 @@ func appendUniqueString(a mem.Allocator, values *[]string, value string) {
 	if slices.Contains(*values, value) {
 		return
 	}
-	*values = slices.Append(a, *values, cloneText(a, value))
+	*values = append(*values, cloneText(a, value))
 }
 func cloneCaptures(a mem.Allocator, in []template.CaptureValue) []template.CaptureValue {
 	var out []template.CaptureValue
 	for i := range in {
-		out = slices.Append(a, out, template.CaptureValue{Name: cloneText(a, in[i].Name), Text: cloneText(a, in[i].Text)})
+		out = append(out, template.CaptureValue{Name: cloneText(a, in[i].Name), Text: cloneText(a, in[i].Text)})
 	}
 	return out
 }
@@ -51,13 +51,13 @@ func freeCaptures(a mem.Allocator, values []template.CaptureValue) {
 		mem.FreeString(a, values[i].Name)
 		mem.FreeString(a, values[i].Text)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 func cloneArguments(a mem.Allocator, in []ArgumentValue) []ArgumentValue {
 	var out []ArgumentValue
 	for i := range in {
-		out = slices.Append(a, out, ArgumentValue{Name: cloneText(a, in[i].Name), Value: cloneText(a, in[i].Value)})
+		out = append(out, ArgumentValue{Name: cloneText(a, in[i].Name), Value: cloneText(a, in[i].Value)})
 	}
 	return out
 }
@@ -66,8 +66,8 @@ func renderTarget(a mem.Allocator, target rule.Target, captures []template.Captu
 	if !target.Template {
 		return cloneText(a, target.Text)
 	}
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	index := 0
 	for i := range target.TargetForm.Parts {
 		part := target.TargetForm.Parts[i]

@@ -1,12 +1,12 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definition.Definition {
@@ -57,8 +57,8 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 			}
 		}
 		span := source.Span{Start: parameterStart, End: pos}
-		d.Parameters = slices.Append(s.Alloc, d.Parameters, definition.Parameter{Name: name, Span: span, Rest: rest})
-		e.Parameters = slices.Append(s.Alloc, e.Parameters, expr.Parameter{Name: name, Span: span, Rest: rest})
+		d.Parameters = append(d.Parameters, definition.Parameter{Name: name, Span: span, Rest: rest})
+		e.Parameters = append(e.Parameters, expr.Parameter{Name: name, Span: span, Rest: rest})
 	}
 	for pos < len(text) && text[pos] != '\n' {
 		pos++
@@ -111,7 +111,7 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 	}
 	part := expr.ParseKashValuePrefix(s.Alloc, s.Source, pos)
 	s.takeDiagnostics(part.Diagnostics)
-	e.Items = slices.Append(s.Alloc, e.Items, part.Expr)
+	e.Items = append(e.Items, part.Expr)
 	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
 		s.error(pos, part.End, single)
 	}

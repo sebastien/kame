@@ -1,14 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/host/posix"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strings"
 )
 
 var lockOut io.Writer
@@ -18,7 +18,7 @@ var lockWaiting bool
 var busyLock posix.LockEvent
 
 func lockCommand(args []string, command string) string {
-	var text = bytes.NewBuffer(mem.System, nil)
+	var text = bytes.Buffer{}
 	io.WriteString(&text, "kame")
 	if command == "" {
 		io.WriteString(&text, " do clean")
@@ -45,7 +45,7 @@ func lockCommand(args []string, command string) string {
 		io.WriteString(&text, " "+arg)
 	}
 	result := cloneCommandText(text.String())
-	text.Free()
+	text.Reset()
 	return result
 }
 
@@ -117,7 +117,7 @@ func writeLockRow(out io.Writer, label string, value string, token string, width
 		labelToken = "message.tip"
 	}
 	writeStyledPadded(out, label, 8, labelToken)
-	var field = bytes.NewBuffer(mem.System, nil)
+	var field = bytes.Buffer{}
 	if width > 0 {
 		writeDashboardField(&field, value, width-12)
 	} else {
@@ -125,7 +125,7 @@ func writeLockRow(out io.Writer, label string, value string, token string, width
 	}
 	cli.Style(out, token, field.String(), diagnosticColor == "always")
 	io.WriteString(out, "\n")
-	field.Free()
+	field.Reset()
 }
 
 func writeLockHeading(out io.Writer, event *posix.LockEvent, width int) {
@@ -133,7 +133,7 @@ func writeLockHeading(out io.Writer, event *posix.LockEvent, width int) {
 	if event.State == "busy" {
 		status, detail = "! BUSY", "exclusive "+event.Kind+" lock"
 	}
-	var text = bytes.NewBuffer(mem.System, nil)
+	var text = bytes.Buffer{}
 	if width > 0 {
 		fmt.Fprintf(&text, "%s lock · ", event.Kind)
 		cli.WriteDuration(&text, event.ElapsedMS)
@@ -149,12 +149,15 @@ func writeLockHeading(out io.Writer, event *posix.LockEvent, width int) {
 		io.WriteString(out, text.String())
 	}
 	io.WriteString(out, "\n")
-	text.Free()
+	text.Reset()
 }
 
-func writeLockNotice(out io.Writer, event *posix.LockEvent) {
-	var text = bytes.NewBuffer(mem.System, nil)
-	defer text.Free()
+func writeLockNotice(destination io.Writer, event *posix.LockEvent) {
+	var notice bytes.Buffer
+	var out io.Writer = &notice
+	defer func() { destination.Write(notice.Bytes()) }()
+	var text = bytes.Buffer{}
+	defer text.Reset()
 	if event.State == "acquired" {
 		io.WriteString(&text, "  ✓ lock acquired after ")
 		cli.WriteDuration(&text, event.ElapsedMS)
@@ -194,13 +197,13 @@ func lockUpdateError(out io.Writer) {
 		cliError(out, "CLEAN_STATE", "cannot safely update output protection or release ownership")
 		return
 	}
-	var message = bytes.NewBuffer(mem.System, nil)
+	var message = bytes.Buffer{}
 	io.WriteString(&message, "project busy; lock: ")
 	writeLockText(&message, busyLock.Path)
 	io.WriteString(&message, "; owner: ")
 	writeLockOwner(&message, &busyLock)
 	cliError(out, "CLEAN_BUSY", message.String())
-	message.Free()
+	message.Reset()
 }
 
 // Called synchronously inside lock acquisition, before the blocked Tick can
@@ -257,19 +260,19 @@ func observeLock(event *posix.LockEvent) bool {
 		writeLockNotice(lockErr, event)
 	}
 	if event.State == "waiting" && dashboardCanDraw() {
-		var frame = bytes.NewBuffer(mem.System, nil)
+		var frame = bytes.Buffer{}
 		width, height := dashboardDimensions()
 		writeLockHeading(&frame, event, width)
 		writeLockRow(&frame, "lock:", event.Path, "value.path", width)
-		var owner = bytes.NewBuffer(mem.System, nil)
+		var owner = bytes.Buffer{}
 		writeLockOwner(&owner, event)
 		writeLockRow(&frame, "owner:", owner.String(), "value.tool", width)
 		dashboardWidth, dashboardHeight = width, height
 		previous := dashboardRows
 		dashboardRows = 3
 		paintDashboard(lockErr, frame.String(), previous, 3)
-		owner.Free()
-		frame.Free()
+		owner.Reset()
+		frame.Reset()
 	}
 	flushCLIOutput(lockErr)
 	return true

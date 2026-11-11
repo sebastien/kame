@@ -1,0 +1,41 @@
+name: Go distribution
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/go/kame/go.mod
+          cache-dependency-path: src/go/kame/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Test Go packages
+        run: make check test-examples
+      - name: Build native and WebAssembly artifacts
+        run: make dist-native dist-wasm wasm-check
+      - name: Verify native compiler identity
+        run: bash tests/native/test-toolchain.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            dist/native/
+            dist/kame.js
+            dist/kame.wasm
+          if-no-files-found: error

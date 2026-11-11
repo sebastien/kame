@@ -1,11 +1,34 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/script"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
+
+func TestKashCommentFormattingPreservesAuthoredDepth(t *testing.T) {
+	a := t.Allocator()
+	texts := []string{
+		"def example\n    if test -e ./file\n        echo present\n    # Next phase.\n    echo next\n",
+		"def example\n    if test -e ./file\n        echo present\n\n    # Next phase.\n    echo next\n",
+		"def example\n\tif test -e ./file\n\t\techo present\n\t# Next phase.\n\techo next\n",
+	}
+	want := "def example\n\tif test -e ./file\n\t\techo present\n\t# Next phase.\n\techo next\n"
+	for i := range texts {
+		s := script.ParseKash(a, "comments.kash", texts[i])
+		formatted := script.Format(a, s)
+		copy := script.ParseKash(a, "formatted.kash", formatted)
+		again := script.Format(a, copy)
+		if len(s.Diagnostics) != 0 || len(copy.Diagnostics) != 0 || formatted != want || again != formatted {
+			t.Error("comment indentation changed scope or formatting was not idempotent")
+		}
+		mem.FreeString(a, formatted)
+		mem.FreeString(a, again)
+		copy.Free()
+		s.Free()
+	}
+}
 
 func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 	a := t.Allocator()
@@ -60,6 +83,39 @@ func TestKashStatementDelimitersAndMultilineValues(t *testing.T) {
 	}
 	if s.Items[7].Kind != script.Command {
 		t.Error("Kash interpreted // as a comment")
+	}
+}
+
+func TestKashSingleQuotedWords(t *testing.T) {
+	a := t.Allocator()
+	text := "printf '' 'a $name; $(cmd) \\\\ @x' pre' (literal)'post ./dir/'two words'\n"
+	s := script.ParseKash(a, "quotes.kash", text)
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 1 {
+		t.Fatal("single-quoted command words did not parse")
+		return
+	}
+	words := s.Items[0].Expression.Items[0].Items
+	if len(words) != 5 || len(words[2].Parts) != 1 || words[2].Parts[0].Text != "a $name; $(cmd) \\\\ @x" || len(words[3].Parts) != 1 || words[3].Parts[0].Text != "pre (literal)post" {
+		t.Error("single-quoted data or adjacent fragments changed")
+	}
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	again := script.ParseKash(a, "formatted.kash", formatted)
+	defer again.Free()
+	if len(again.Diagnostics) != 0 {
+		t.Fatal("formatted single-quoted words did not parse")
+		return
+	}
+	round := script.Format(a, again)
+	defer mem.FreeString(a, round)
+	if formatted != round {
+		t.Error("single-quoted words changed on repeated formatting")
+	}
+	bad := script.ParseKash(a, "unclosed.kash", "printf 'unclosed")
+	defer bad.Free()
+	if len(bad.Diagnostics) == 0 {
+		t.Error("unclosed single quote was accepted")
 	}
 }
 

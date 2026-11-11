@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"kame/cli"
 	"kame/host/posix"
-	"solod.dev/so/bytes"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/time"
+	"kame/internal/mem"
+	"os"
+	"path"
+
+	"time"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 	}
 	status := Run(args, os.Stdin, os.Stdout, os.Stderr)
 	if kash {
-		slices.Free(mem.System, args)
+		mem.FreeSlice(nil, args)
 	}
 	os.Exit(status)
 }
@@ -85,9 +85,9 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		io.WriteString(errOut, "info "+command+": dry-run · no effects or processes\n")
 	}
 	document := mem.Alloc[bytes.Buffer](mem.System)
-	*document = bytes.NewBuffer(mem.System, nil)
+	*document = bytes.Buffer{}
 	defer mem.Free(mem.System, document)
-	defer document.Free()
+	defer document.Reset()
 	static := cliDiagnosticJSON && command == "" && len(args) > 1 && args[0] == "do" && args[1] != "plan"
 	destination := out
 	if static {

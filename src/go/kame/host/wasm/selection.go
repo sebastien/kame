@@ -1,12 +1,11 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // TargetOperandsJSON normalizes CLI operands against the compiled declarations.
@@ -27,8 +26,8 @@ func (r *Runtime) TargetOperandsJSON(encoded string) PureResult {
 	if value.Kind != core.List {
 		return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "target operands must be a string array")}
 	}
-	operands := slices.Make[string](r.Alloc, len(value.List))
-	defer slices.Free(r.Alloc, operands)
+	operands := make([]string, len(value.List))
+	defer mem.FreeSlice(nil, operands)
 	for i := range value.List {
 		if value.List[i].Kind != core.String || value.List[i].Text == "" {
 			return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "target operands must be nonempty strings")}
@@ -37,7 +36,7 @@ func (r *Runtime) TargetOperandsJSON(encoded string) PureResult {
 	}
 	targets := r.Program.NormalizeTargetOperands(operands)
 	defer program.FreeStrings(r.Alloc, targets)
-	buffer := bytes.NewBuffer(r.Alloc, nil)
+	buffer := bytes.Buffer{}
 	e := json.NewEncoder(&buffer)
 	e.BeginArray()
 	for i := range targets {
@@ -46,6 +45,6 @@ func (r *Runtime) TargetOperandsJSON(encoded string) PureResult {
 	e.EndArray()
 	e.Flush()
 	out := PureResult{Text: pureText(r.Alloc, buffer.String())}
-	buffer.Free()
+	buffer.Reset()
 	return out
 }

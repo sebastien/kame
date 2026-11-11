@@ -1,16 +1,16 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/time"
+	"path"
+	"slices"
+	"strconv"
+	"time"
 )
 
 type watchResource struct {
@@ -29,7 +29,7 @@ func freeWatchResources(items []watchResource) {
 		mem.FreeString(mem.System, items[i].Stamp)
 		mem.FreeString(mem.System, items[i].Probe)
 	}
-	slices.Free(mem.System, items)
+	mem.FreeSlice(nil, items)
 }
 
 func watchStamp(p *program.Program, key core.ResourceKey, source bool) string {
@@ -48,7 +48,7 @@ func watchStamp(p *program.Program, key core.ResourceKey, source bool) string {
 		return cloneCommandText("unreadable")
 	}
 	stamp := cloneCommandText(string(data))
-	slices.Free(mem.System, data)
+	mem.FreeSlice(nil, data)
 	return stamp
 }
 
@@ -63,7 +63,7 @@ func watchProbe(p *program.Program, key core.ResourceKey) string {
 	name := key.Name
 	owned := false
 	if !core.IsResourceURIName(name) && !path.IsAbs(name) {
-		name = path.Join(mem.System, p.Options.Directory, name)
+		name = path.Join(p.Options.Directory, name)
 		owned = true
 	}
 	h := posix.New(mem.System)
@@ -118,7 +118,7 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 			stamp = cloneCommandText("missing")
 		}
 	}
-	*items = slices.Append(mem.System, *items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
+	*items = append(*items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
 }
 
 func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) {
@@ -139,7 +139,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	} else if len(session.Source.Files) == 0 {
 		candidates := cli.BuildSourceCandidates()
 		for i := range candidates {
-			name := path.Join(mem.System, options.Directory, candidates[i])
+			name := path.Join(options.Directory, candidates[i])
 			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 			mem.FreeString(mem.System, name)
 		}
@@ -156,19 +156,19 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 			addWatchResource(items, session.Program, resources[i], false)
 			resources[i].Free(mem.System)
 		}
-		slices.Free(mem.System, resources)
+		mem.FreeSlice(nil, resources)
 	}
 	var current []watchResource
 	for i := range *items {
 		if (*items)[i].Seen {
-			current = slices.Append(mem.System, current, (*items)[i])
+			current = append(current, (*items)[i])
 		} else {
 			(*items)[i].Key.Free(mem.System)
 			mem.FreeString(mem.System, (*items)[i].Stamp)
 			mem.FreeString(mem.System, (*items)[i].Probe)
 		}
 	}
-	slices.Free(mem.System, *items)
+	mem.FreeSlice(nil, *items)
 	*items = current
 }
 
@@ -176,14 +176,14 @@ func freeWatchHandles(handles []*program.Handle) {
 	for i := range handles {
 		handles[i].Free()
 	}
-	slices.Free(mem.System, handles)
+	mem.FreeSlice(nil, handles)
 }
 
 func startWatchHandles(session *buildSession, options buildArguments, out io.Writer, errOut io.Writer) []*program.Handle {
 	if session.Program == nil {
 		return nil
 	}
-	targets := selectTargets(session.Program, slices.Clone(mem.System, options.Targets))
+	targets := selectTargets(session.Program, slices.Clone(options.Targets))
 	if len(targets) != 0 {
 		setDashboardSubject(targets[0])
 	}
@@ -197,7 +197,7 @@ func startWatchHandles(session *buildSession, options buildArguments, out io.Wri
 			emitDiagnostic(diagnosticWriter(out, errOut, options.JSON), started.Diagnostic, options.JSON, session.Program.Parsed.Source)
 			started.Diagnostic.Free(mem.System)
 		} else {
-			handles = slices.Append(mem.System, handles, started.Handle)
+			handles = append(handles, started.Handle)
 		}
 	}
 	program.FreeStrings(mem.System, targets)
@@ -212,7 +212,7 @@ func syncWatchNotifications(w *posix.Watcher, p *program.Program, items []watchR
 		name := items[i].Key.Name
 		owned := false
 		if p != nil && !items[i].Source && !core.IsResourceURIName(name) && !path.IsAbs(name) {
-			name = path.Join(mem.System, p.Options.Directory, name)
+			name = path.Join(p.Options.Directory, name)
 			owned = true
 		}
 		if !h.AddWatch(w, name, items[i].Key.Kind == core.ResourceGlob) {
@@ -249,12 +249,12 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	recompile, reported := false, false
 	cancelledForChange := false
 	validationQueued := false
-	var debounceDigits [24]byte
+
 	if !options.JSON {
 		if notifications {
-			io.WriteString(errOut, "Watching filesystem resources (OS notifications; 10s reconciliation; "+strconv.Itoa(debounceDigits[:], options.WatchDebounceMS)+"ms debounce)\n")
+			io.WriteString(errOut, "Watching filesystem resources (OS notifications; 10s reconciliation; "+strconv.Itoa(options.WatchDebounceMS)+"ms debounce)\n")
 		} else {
-			io.WriteString(errOut, "Watching filesystem resources (200ms polling fallback; "+strconv.Itoa(debounceDigits[:], options.WatchDebounceMS)+"ms debounce)\n")
+			io.WriteString(errOut, "Watching filesystem resources (200ms polling fallback; "+strconv.Itoa(options.WatchDebounceMS)+"ms debounce)\n")
 		}
 	}
 	status := 0
@@ -317,8 +317,8 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 				} else if outcome == "cancelled" {
 					cycleStatus = 130
 				}
-				var digits [24]byte
-				writeHumanSummary(errOut, "watch cycle "+strconv.Itoa(digits[:], cycle), cycleStatus, elapsed, progress)
+
+				writeHumanSummary(errOut, "watch cycle "+strconv.Itoa(cycle), cycleStatus, elapsed, progress)
 				io.WriteString(errOut, "watch · waiting for changes · last cycle "+outcome+" · Ctrl+C to stop\n")
 			}
 			cycleFinished, dashboardIdle = true, true
@@ -338,7 +338,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 					found = found || (pending[i].Kind == key.Kind && pending[i].Name == key.Name)
 				}
 				if !found {
-					pending = slices.Append(mem.System, pending, key.Clone(mem.System))
+					pending = append(pending, key.Clone(mem.System))
 					lastChange = now
 				}
 			}
@@ -371,7 +371,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 					if !options.JSON {
 						io.WriteString(errOut, "info watch: change queued: "+resources[i].Key.Name+"\n")
 					}
-					pending = slices.Append(mem.System, pending, resources[i].Key.Clone(mem.System))
+					pending = append(pending, resources[i].Key.Clone(mem.System))
 					recompile = recompile || resources[i].Source
 					mem.FreeString(mem.System, resources[i].Stamp)
 					resources[i].Stamp = stamp
@@ -420,7 +420,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			for i := range pending {
 				pending[i].Free(mem.System)
 			}
-			slices.Free(mem.System, pending)
+			mem.FreeSlice(nil, pending)
 			pending = nil
 			recompile, reported, cancelledForChange = false, false, false
 			validationQueued = false
@@ -456,6 +456,6 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	for i := range pending {
 		pending[i].Free(mem.System)
 	}
-	slices.Free(mem.System, pending)
+	mem.FreeSlice(nil, pending)
 	return status
 }

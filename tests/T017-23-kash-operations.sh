@@ -16,6 +16,11 @@ for backend in native wasm; do
 	printf '%s' "$payload" >"$work/payload"
 	invoke -l kash -c 'exports = [TOKEN: (text (read ./payload))]; :env $exports sh -c "printf %s \"\$TOKEN\""' >"$work/received" 2>"$work/err"
 	if cmp -s "$work/payload" "$work/received"; then test-ok "$backend exact environment bytes"; else test-fail "$backend environment altered data"; fi
+	printf '%s\n' "$payload" >"$work/expected-env"
+	for code in ':env [TOKEN: (text (read ./payload))] printenv TOKEN' $'with :env [TOKEN: (text (read ./payload))]\n\tprintenv TOKEN'; do
+		invoke -l kash -c "$code" >"$work/received" 2>"$work/err"
+		if cmp -s "$work/expected-env" "$work/received"; then test-ok "$backend inline environment record"; else test-fail "$backend inline environment altered data"; fi
+	done
 	invoke -l kash -c '(write! ./captured $(cat < ./payload))' >"$work/out" 2>"$work/err"
 	if cmp -s "$work/payload" "$work/captured"; then test-ok "$backend exact capture bytes"; else test-fail "$backend capture altered data"; fi
 	for value in '' $'\n\n' $'\r\n' $' \t'; do
@@ -29,7 +34,7 @@ for backend in native wasm; do
 	for record in '[TOKEN: [(text (read ./payload))]]' '(parse-json "{\"bad=name\":\"synthetic-credential-sentinel\"}")' '[TOKEN: (text (read ./nul))]'; do
 		printf '\0' >"$work/nul"
 		status=0
-		invoke --json -l kash -c "sh -c \"touch forbidden\" | :env (nop $record) true" >"$work/trace" 2>"$work/err" || status=$?
+		invoke --json -l kash -c "sh -c \"touch forbidden\" | :env $record true" >"$work/trace" 2>"$work/err" || status=$?
 		if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/trace" && ! grep -q synthetic-credential-sentinel "$work/trace" "$work/err" && [ ! -e "$work/forbidden" ]; then test-ok "$backend validates entire graph without disclosure"; else test-fail "$backend invalid env launched or leaked"; cat "$work/trace" "$work/err"; fi
 	done
 	test-step "$backend capture errors never truncate successful values or embed captured data"
@@ -72,6 +77,12 @@ SH
 	else
 		test-fail "$backend map ignored failure or changed exit status"
 	fi
+	test-step "$backend eager callback captures resume without replay"
+	invoke -l kash -c 'let result = (map ([item] (line $(sh -c "printf x >> capture-calls; printf %s \"\$1\"" sh $item))) ["one" "two words" "one"]); printf %s (json result)' >"$work/out" 2>"$work/err"
+	if [ "$(cat "$work/out")" = '["one","two words","one"]' ] && [ "$(cat "$work/capture-calls")" = xxx ]; then test-ok "$backend eager captures retain callback ownership and order"; else test-fail "$backend eager capture replay or corrupted callback"; fi
+	status=0
+	invoke -l kash -c 'let result = (map ([item] (line $(sh -c "exit 75"))) [1 2]); printf forbidden' >"$work/out" 2>"$work/err" || status=$?
+	if [ "$status" = 75 ] && [ ! -s "$work/out" ]; then test-ok "$backend eager capture failure propagates"; else test-fail "$backend eager capture lost failure"; fi
 	test-step "$backend cookbook lists and output ports run and clean up"
 	invoke -l kash "$CLI_ROOT/examples/kash/04-operations.kash" >"$work/out" 2>"$work/err"
 	printf 'typed argv\nfirst\nsecond\nrecovered\nfallback\ncaptured=payload\n' >"$work/expected"

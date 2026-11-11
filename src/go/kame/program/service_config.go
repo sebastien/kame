@@ -3,9 +3,9 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+
+	"strings"
 )
 
 type serviceConfigField struct {
@@ -101,7 +101,7 @@ func serviceArgv(a mem.Allocator, record core.Value, span diagnostic.Span, argv 
 			freeStrings(a, result)
 			return failureAt(a, "EXPR_INVALID", span, "service probe argv exceeds 16384 bytes")
 		}
-		result = slices.Append(a, result, cloneText(a, value.Text))
+		result = append(result, cloneText(a, value.Text))
 	}
 	*argv = result
 	return diagnostic.Diagnostic{}

@@ -1,11 +1,11 @@
-package posix_test
+package posixcheck
 
 import (
 	"kame/core"
 	"kame/host/posix"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"os"
 )
 
 func TestFileSignatureStreamsExactContentWithoutTrackedCopies(t *testing.T) {
@@ -13,8 +13,8 @@ func TestFileSignatureStreamsExactContentWithoutTrackedCopies(t *testing.T) {
 	tracker := a.(*mem.Tracker)
 	h := posix.New(a)
 	defer h.Free()
-	var pathBuffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(pathBuffer[:], "", "kame-signature-")
+
+	directory, err := os.MkdirTemp("", "kame-signature-")
 	if err != nil {
 		t.Fatal("create signature test directory")
 		return

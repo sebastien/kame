@@ -1,11 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/host/posix"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 var taskbarEnabled bool

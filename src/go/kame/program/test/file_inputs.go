@@ -1,15 +1,16 @@
-package program_test
+package programcheck
 
 import (
+	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
-	"solod.dev/so/time"
+	"os"
+	"time"
 )
 
 func materializeSource(t *testing.T, dir string, source string, read bool, force bool) (string, bool) {
@@ -54,7 +55,7 @@ func copyText(a mem.Allocator, value string) string {
 
 func readTemp(t *testing.T, name string) string {
 	a := t.Allocator()
-	data, err := os.ReadFile(a, name)
+	data, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal("read failed: " + name)
 		return ""
@@ -72,8 +73,8 @@ func tempMatches(t *testing.T, name string, want string) bool {
 }
 
 func TestFileInputsSkipShellAcrossProcesses(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -99,8 +100,8 @@ func TestFileInputsSkipShellAcrossProcesses(t *testing.T) {
 
 func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-source-directory-")
+
+	dir, err := os.MkdirTemp("", "kame-source-directory-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -135,9 +136,69 @@ func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
 	}
 }
 
+func TestFileFreshnessTracksReachedSignedSources(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	for mode := 0; mode < 2; mode++ {
+
+		dir, err := os.MkdirTemp("", "kame-signed-sources-")
+		if err != nil {
+			t.Fatal("temporary directory failed")
+			return
+		}
+		if os.WriteFile(dir+"/input", []byte("input"), 0o644) != nil {
+			t.Fatal("input write failed")
+			return
+		}
+		for phase := 0; phase < 5; phase++ {
+			value, unused := "old", "old"
+			if phase >= 2 {
+				unused = "new"
+			}
+			if phase >= 3 {
+				value = "new"
+			}
+			root := "SHELL = kash\n./output : ./input\n\t(yield! (payload))\n"
+			helper := "(payload) = \"" + value + "\"\n"
+			if mode == 0 {
+				root += helper
+				helper = ""
+			}
+			sources := []program.CompileSource{
+				{Name: dir + "/build.kmk", SourceDirectory: dir, Text: root},
+				{Name: dir + "/helper.kmk", SourceDirectory: dir, Text: helper},
+				{Name: dir + "/unused.kmk", SourceDirectory: dir, Text: "unused = \"" + unused + "\"\n"},
+			}
+			for i := range sources {
+				sources[i].Signature = core.ContentSignature([]byte(sources[i].Text))
+				if os.WriteFile(sources[i].Name, []byte(sources[i].Text), 0o644) != nil {
+					t.Fatal("source write failed")
+					return
+				}
+			}
+			compiled := program.CompileMany(a, sources, registry, program.Options{Host: posix.New(a), Directory: dir})
+			if compiled.Program == nil {
+				compiled.Free(a)
+				t.Fatal("signed source compilation failed")
+				return
+			}
+			result := compiled.Program.Materialize("./output")
+			if result.Diagnostic.Code != "" || result.Fresh != (phase == 1 || phase == 2 || phase == 4) || !tempMatches(t, dir+"/output", value) {
+				t.Errorf("signed source mode %d phase %d: fresh=%t diagnostic=%s", mode, phase, result.Fresh, result.Diagnostic.Code)
+			}
+			result.Free(a)
+			compiled.Program.Free()
+			compiled.Free(a)
+		}
+		os.Remove(dir)
+	}
+}
+
 func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -172,8 +233,8 @@ func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
 }
 
 func TestFileInputsRebuildWhenDiscoveredInputChanges(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -205,8 +266,8 @@ func TestFileInputsRebuildWhenDiscoveredInputChanges(t *testing.T) {
 
 func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -246,8 +307,8 @@ func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 }
 
 func TestFileInputsRebuildWhenSourceChanges(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -270,8 +331,8 @@ func TestFileInputsRebuildWhenSourceChanges(t *testing.T) {
 }
 
 func TestFileInputsSkipKashYield(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -302,8 +363,8 @@ func TestFileInputsSkipKashYield(t *testing.T) {
 }
 
 func TestFileInputsAlwaysAndForceRerun(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -337,8 +398,8 @@ func TestFileInputsAlwaysAndForceRerun(t *testing.T) {
 }
 
 func TestFileInputsDemandDiscoveredGeneratedInput(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")
+
+	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return

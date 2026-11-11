@@ -1,15 +1,15 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/host/wasm"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestTargetSnapshotReadsUseExplicitCapabilityPolicy(t *testing.T) {
-	a := t.Allocator()
-	buffer := slices.Make[byte](a, 1024*1024)
-	defer slices.Free(a, buffer)
+	_ = t.Allocator()
+	buffer := make([]byte, 1024*1024)
+	defer mem.FreeSlice(nil, buffer)
 	heap := wasm.NewHeap(buffer)
 	started := wasm.NewRuntimeWithHeap(&heap, "policy.kmk", "chosen : ; [shell: kash]\n\t(out! (env \"MODE\"))\n")
 	if started.Runtime == nil {

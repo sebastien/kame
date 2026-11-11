@@ -2,9 +2,9 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 type finalizerBodyState struct {
@@ -24,7 +24,7 @@ func freeFinalizerBody(a mem.Allocator, value any) {
 	for i := range s.Paths {
 		mem.FreeString(a, s.Paths[i])
 	}
-	slices.Free(a, s.Paths)
+	mem.FreeSlice(nil, s.Paths)
 	mem.Free(a, s)
 }
 
@@ -71,11 +71,11 @@ func (p *Program) finalizerBody(scope *Scope, body []*expr.Expr, c *Context) Res
 			return r
 		}
 		for i := before; i < len(c.Effects); i++ {
-			s.Effects = slices.Append(p.Alloc, s.Effects, c.Effects[i])
+			s.Effects = append(s.Effects, c.Effects[i])
 		}
 		c.Effects = c.Effects[:before]
 		for i := paths; i < len(c.WritePaths); i++ {
-			s.Paths = slices.Append(p.Alloc, s.Paths, c.WritePaths[i])
+			s.Paths = append(s.Paths, c.WritePaths[i])
 		}
 		c.WritePaths = c.WritePaths[:paths]
 		s.Index++
@@ -92,10 +92,10 @@ func (p *Program) finalizerBody(scope *Scope, body []*expr.Expr, c *Context) Res
 func replayFinalizerBodyEffects(s *finalizerBodyState, c *Context) {
 	for i := range s.Effects {
 		effect := s.Effects[i]
-		effect.Data = slices.Clone(c.Run, effect.Data)
-		c.Effects = slices.Append(c.Run, c.Effects, effect)
+		effect.Data = slices.Clone(effect.Data)
+		c.Effects = append(c.Effects, effect)
 	}
 	for i := range s.Paths {
-		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, s.Paths[i]))
+		c.WritePaths = append(c.WritePaths, owned(c.Run, s.Paths[i]))
 	}
 }

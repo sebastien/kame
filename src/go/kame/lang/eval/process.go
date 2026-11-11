@@ -4,13 +4,13 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	"slices"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // Progress is generation-owned: replaying an outer application must neither
@@ -65,19 +65,19 @@ func freeCaptureState(a mem.Allocator, value any) {
 	for i := range s.Predicates {
 		expr.Free(a, s.Predicates[i])
 	}
-	slices.Free(a, s.Predicates)
+	mem.FreeSlice(nil, s.Predicates)
 	for i := range s.OperandSlots {
 		s.OperandSlots[i].Free(a)
 	}
-	slices.Free(a, s.OperandSlots)
+	mem.FreeSlice(nil, s.OperandSlots)
 	for i := range s.Argv {
 		s.Argv[i].Free(a)
 	}
-	slices.Free(a, s.Argv)
+	mem.FreeSlice(nil, s.Argv)
 	for i := range s.Stages {
 		s.Stages[i].Free(a)
 	}
-	slices.Free(a, s.Stages)
+	mem.FreeSlice(nil, s.Stages)
 	mem.FreeString(a, s.Input)
 	mem.FreeString(a, s.Output)
 	mem.FreeString(a, s.Error)
@@ -85,19 +85,19 @@ func freeCaptureState(a mem.Allocator, value any) {
 	for i := range s.Setups {
 		s.Setups[i].Free(a)
 	}
-	slices.Free(a, s.Setups)
+	mem.FreeSlice(nil, s.Setups)
 	s.Accepted.Free(a)
 	s.CapturePolicy.Free(a)
 	for i := range s.Environment {
 		s.Environment[i].Free(a)
 	}
-	slices.Free(a, s.Environment)
+	mem.FreeSlice(nil, s.Environment)
 	s.Value.Free(a)
 	FreeEffects(a, s.Effects)
 	for i := range s.WritePaths {
 		mem.FreeString(a, s.WritePaths[i])
 	}
-	slices.Free(a, s.WritePaths)
+	mem.FreeSlice(nil, s.WritePaths)
 	mem.Free(a, s)
 }
 
@@ -145,21 +145,32 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if e.Topology && state.Program == nil {
 		state.Program, state.PredicateScope = p, c.Scope
 		c.Scope.Retain()
+		// Stream predicates run in a host callback without an engine context.
+		// Record every signed source before dispatch; pure predicate calls may
+		// reach closures that cannot report their own host-side observations.
+		for i := range e.Items {
+			if e.Items[i].Kind == expr.CommandMux && e.Items[i].Text == "filter" {
+				for j := range p.SourceParts {
+					c.observeSourcePart(j + 1)
+				}
+				break
+			}
+		}
 		for i := range e.Items {
 			var predicate *expr.Expr
 			if e.Items[i].Kind == expr.CommandMux && e.Items[i].Text == "filter" {
 				predicate = expr.Clone(state.Alloc, e.Items[i].Items[0])
 			}
-			state.Predicates = slices.Append(state.Alloc, state.Predicates, predicate)
+			state.Predicates = append(state.Predicates, predicate)
 		}
-		p.StreamStates = slices.Append(p.Alloc, p.StreamStates, state)
+		p.StreamStates = append(p.StreamStates, state)
 	}
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
+		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 	}
 	for i := range state.WritePaths {
-		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
+		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
 	if e.Topology || state.Stderr {
 		for i := range state.Setups {
@@ -313,7 +324,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	for state.Stage < len(e.Items) {
 		stage := e.Items[state.Stage]
 		if stage.Kind == expr.CommandMux {
-			state.Stages = slices.Append(state.Alloc, state.Stages, core.NewList(state.Alloc, nil))
+			state.Stages = append(state.Stages, core.NewList(state.Alloc, nil))
 			setup := host.StageSetupPayload(state.Alloc, "", 0, nil)
 			if stage.Text == "tee" {
 				if len(stage.Items) == 0 {
@@ -350,7 +361,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				c.Emit(EffectProcessWrite, []byte(resolved))
 				mem.FreeString(state.Alloc, resolved)
 			}
-			state.Setups = slices.Append(state.Alloc, state.Setups, setup)
+			state.Setups = append(state.Setups, setup)
 			state.Stage++
 			continue
 		}
@@ -361,8 +372,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					return failure(c.Run, "EXPR_INVALID", word.Span, "live stream operand cannot be an executable")
 				}
 				slot := []core.Value{{Kind: core.Int, Int: int64(state.Index + 1)}, {Kind: core.Int, Int: int64(len(state.Argv))}}
-				state.OperandSlots = slices.Append(state.Alloc, state.OperandSlots, core.NewList(state.Alloc, slot))
-				state.Argv = slices.Append(state.Alloc, state.Argv, core.NewString(state.Alloc, "<stream>"))
+				state.OperandSlots = append(state.OperandSlots, core.NewList(state.Alloc, slot))
+				state.Argv = append(state.Argv, core.NewString(state.Alloc, "<stream>"))
 				state.Index++
 				continue
 			}
@@ -401,7 +412,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					}
 					for i := range r.Value.Record {
 						field := r.Value.Record[i]
-						state.Environment = slices.Append(state.Alloc, state.Environment, core.NewString(state.Alloc, field.Key+"="+field.Value.Text))
+						state.Environment = append(state.Environment, core.NewString(state.Alloc, field.Key+"="+field.Value.Text))
 					}
 					r.Free(c.Run)
 					state.Index++
@@ -442,7 +453,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 						state.Timeout++
 					}
 				} else {
-					state.Environment = slices.Append(state.Alloc, state.Environment, core.NewString(state.Alloc, word.Text+"="+text))
+					state.Environment = append(state.Environment, core.NewString(state.Alloc, word.Text+"="+text))
 				}
 				mem.FreeString(c.Run, text)
 				state.Index++
@@ -604,7 +615,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		var environment []core.Value
 		for i := range c.Environment {
-			environment = slices.Append(state.Alloc, environment, core.NewString(state.Alloc, c.Environment[i]))
+			environment = append(environment, core.NewString(state.Alloc, c.Environment[i]))
 		}
 		for i := range state.Environment {
 			assignment := state.Environment[i]
@@ -619,26 +630,26 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 			}
 			if !replaced {
-				environment = slices.Append(state.Alloc, environment, assignment.Clone(state.Alloc))
+				environment = append(environment, assignment.Clone(state.Alloc))
 			}
 		}
 		timeout := state.Timeout
 		if timeout == 0 {
 			timeout = c.TimeoutMS
 		}
-		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, cwd, timeout, environment))
+		state.Setups = append(state.Setups, host.StageSetupPayload(state.Alloc, cwd, timeout, environment))
 		if state.Accepted.Kind == core.List {
 			setup := &state.Setups[len(state.Setups)-1]
-			setup.Record = slices.Append(state.Alloc, setup.Record, core.RecordField{Key: owned(state.Alloc, "acceptExit"), Value: state.Accepted})
+			setup.Record = append(setup.Record, core.RecordField{Key: owned(state.Alloc, "acceptExit"), Value: state.Accepted})
 			state.Accepted = core.Value{}
 		}
 		if len(state.OperandSlots) != 0 {
 			setup := &state.Setups[len(state.Setups)-1]
-			setup.Record = slices.Append(state.Alloc, setup.Record, core.RecordField{Key: owned(state.Alloc, "operandSlots"), Value: core.NewList(state.Alloc, state.OperandSlots)})
+			setup.Record = append(setup.Record, core.RecordField{Key: owned(state.Alloc, "operandSlots"), Value: core.NewList(state.Alloc, state.OperandSlots)})
 			for i := range state.OperandSlots {
 				state.OperandSlots[i].Free(state.Alloc)
 			}
-			slices.Free(state.Alloc, state.OperandSlots)
+			mem.FreeSlice(nil, state.OperandSlots)
 			state.OperandSlots = nil
 		}
 		if state.ErrorMode != 0 {
@@ -656,19 +667,19 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		for i := range environment {
 			environment[i].Free(state.Alloc)
 		}
-		slices.Free(state.Alloc, environment)
+		mem.FreeSlice(nil, environment)
 		mem.FreeString(state.Alloc, state.Cwd)
 		state.Cwd, state.Timeout = "", 0
 		for i := range state.Environment {
 			state.Environment[i].Free(state.Alloc)
 		}
-		slices.Free(state.Alloc, state.Environment)
+		mem.FreeSlice(nil, state.Environment)
 		state.Environment = nil
-		state.Stages = slices.Append(state.Alloc, state.Stages, core.NewList(state.Alloc, state.Argv))
+		state.Stages = append(state.Stages, core.NewList(state.Alloc, state.Argv))
 		for i := range state.Argv {
 			state.Argv[i].Free(state.Alloc)
 		}
-		slices.Free(state.Alloc, state.Argv)
+		mem.FreeSlice(nil, state.Argv)
 		state.Argv = nil
 		state.Stage++
 		state.Index = 0
@@ -730,13 +741,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if e.Items[i].Each {
 				kind, workers = "each", true
 			}
-			kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind))
+			kinds = append(kinds, core.NewString(c.Run, kind))
 		}
 		for i := range e.StreamKinds {
-			framed = slices.Append(c.Run, framed, core.Value{Kind: core.Bool, Bool: e.StreamKinds[i] == 1})
+			framed = append(framed, core.Value{Kind: core.Bool, Bool: e.StreamKinds[i] == 1})
 		}
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "framed"), Value: core.NewList(c.Run, framed)})
-		slices.Free(c.Run, framed)
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "framed"), Value: core.NewList(c.Run, framed)})
+		mem.FreeSlice(nil, framed)
 		for i := range e.Edges {
 			connection := e.Edges[i]
 			edge := []core.Value{{Kind: core.Int, Int: int64(connection.From)}, {Kind: core.Int, Int: int64(connection.To)}}
@@ -755,16 +766,16 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					for j := range kinds {
 						kinds[j].Free(c.Run)
 					}
-					slices.Free(c.Run, kinds)
+					mem.FreeSlice(nil, kinds)
 					for j := range edges {
 						edges[j].Free(c.Run)
 					}
-					slices.Free(c.Run, edges)
+					mem.FreeSlice(nil, edges)
 					return failure(c.Run, "KASH_DOUBLE_CONSUME", e.Span, "live operand lost its expanded argument slot")
 				}
-				value.List = slices.Append(c.Run, value.List, core.Value{Kind: core.Int, Int: int64(actual)})
+				value.List = append(value.List, core.Value{Kind: core.Int, Int: int64(actual)})
 			}
-			edges = slices.Append(c.Run, edges, value)
+			edges = append(edges, value)
 		}
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
 		var buffers, overflows, itemLimits, orders []core.Value
@@ -778,46 +789,46 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if budget != 0 {
 				configuredBuffer = true
 			}
-			buffers = slices.Append(c.Run, buffers, core.Value{Kind: core.Int, Int: budget})
-			overflows = slices.Append(c.Run, overflows, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOverflow)})
-			itemLimits = slices.Append(c.Run, itemLimits, core.Value{Kind: core.Int, Int: int64(e.Items[i].BufferItems)})
+			buffers = append(buffers, core.Value{Kind: core.Int, Int: budget})
+			overflows = append(overflows, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOverflow)})
+			itemLimits = append(itemLimits, core.Value{Kind: core.Int, Int: int64(e.Items[i].BufferItems)})
 			if e.Items[i].StreamOverflow != 0 {
 				lossy = true
 			}
-			orders = slices.Append(c.Run, orders, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOrder)})
+			orders = append(orders, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOrder)})
 			if e.Items[i].StreamOrder != 0 {
 				ordered = true
 			}
 		}
 		if configuredBuffer || ordered || collect || workers {
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)})
 		}
 		if ordered || collect || workers {
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)})
 		}
 		if collect || workers {
 			policy := int64(0)
 			if collect {
 				policy = 1
 			}
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "failurePolicy"), Value: core.Value{Kind: core.Int, Int: policy}})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "failurePolicy"), Value: core.Value{Kind: core.Int, Int: policy}})
 		}
 		if lossy || ordered || collect || workers {
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "overflows"), Value: core.NewList(c.Run, overflows)})
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "bufferItems"), Value: core.NewList(c.Run, itemLimits)})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "overflows"), Value: core.NewList(c.Run, overflows)})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "bufferItems"), Value: core.NewList(c.Run, itemLimits)})
 		}
-		slices.Free(c.Run, buffers)
-		slices.Free(c.Run, overflows)
-		slices.Free(c.Run, itemLimits)
-		slices.Free(c.Run, orders)
+		mem.FreeSlice(nil, buffers)
+		mem.FreeSlice(nil, overflows)
+		mem.FreeSlice(nil, itemLimits)
+		mem.FreeSlice(nil, orders)
 		for i := range kinds {
 			kinds[i].Free(c.Run)
 		}
-		slices.Free(c.Run, kinds)
+		mem.FreeSlice(nil, kinds)
 		for i := range edges {
 			edges[i].Free(c.Run)
 		}
-		slices.Free(c.Run, edges)
+		mem.FreeSlice(nil, edges)
 	}
 	if state.Input != "" || state.Output != "" {
 		host.ConfigureRedirections(c.Run, &payload, state.Input, state.Output, state.Append)
@@ -827,26 +838,26 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		mode = "invocation"
 		c.UnvalidatedRead()
 	}
-	payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "inputMode"), Value: core.NewString(c.Run, mode)})
+	payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "inputMode"), Value: core.NewString(c.Run, mode)})
 	if inheritInput {
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "inputRoot"), Value: core.Value{Kind: core.Int, Int: int64(inputRoot)}})
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "inputRoot"), Value: core.Value{Kind: core.Int, Int: int64(inputRoot)}})
 	}
 	if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	if e.AcceptExit {
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	captureLimit := p.CaptureLimit
 	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {
 		captureLimit = c.captureBudget
 	}
 	if captureLimit > 0 {
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(captureLimit)}})
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(captureLimit)}})
 	}
 	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		if state.CapturePolicy.Kind == core.Record {
-			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "capture"), Value: state.CapturePolicy.Clone(c.Run)})
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "capture"), Value: state.CapturePolicy.Clone(c.Run)})
 		}
 		host.ConfigureStages(c.Run, &payload, state.Setups)
 	}
@@ -901,10 +912,10 @@ func streamKind(name string) string {
 func rememberArgumentEffects(state *captureState, c *Context, before int, beforePaths int) {
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		state.Effects = slices.Append(state.Alloc, state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(state.Alloc, effect.Data)})
+		state.Effects = append(state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 	}
 	for i := beforePaths; i < len(c.WritePaths); i++ {
-		state.WritePaths = slices.Append(state.Alloc, state.WritePaths, owned(state.Alloc, c.WritePaths[i]))
+		state.WritePaths = append(state.WritePaths, owned(state.Alloc, c.WritePaths[i]))
 	}
 }
 
@@ -969,7 +980,7 @@ func appendArgument(state *captureState, value core.Value) bool {
 	if len(state.Argv) == 0 && value.ToolName != "" {
 		argument.ToolName = owned(state.Alloc, value.ToolName)
 	}
-	state.Argv = slices.Append(state.Alloc, state.Argv, argument)
+	state.Argv = append(state.Argv, argument)
 	return true
 }
 
@@ -980,16 +991,16 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 	var children []*expr.Expr
 	for i := range e.Parts {
 		if e.Parts[i].Expr != nil {
-			children = slices.Append(c.Run, children, e.Parts[i].Expr)
+			children = append(children, e.Parts[i].Expr)
 		}
 	}
 	operands := p.argumentValues(c.Scope, children, c, e.Span)
-	slices.Free(c.Run, children)
+	mem.FreeSlice(nil, children)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	defer freeValuesWithCallables(c.Run, operands.Values)
-	b := strings.NewBuilder(c.Run)
+	b := strings.Builder{}
 	next := 0
 	for i := range e.Parts {
 		part := e.Parts[i]
@@ -1000,19 +1011,19 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 		value := operands.Values[next]
 		next++
 		if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
-			b.Free()
+			b.Reset()
 			return failure(c.Run, "EXPR_INVALID", part.Span, destination+" word requires a scalar fragment; got "+core.KindName(value.Kind)+"; list splicing is only valid in standalone unquoted argv substitutions")
 		}
 		text, ok := Stringify(c.Run, value)
 		if !ok {
-			b.Free()
+			b.Reset()
 			return failure(c.Run, "EXPR_INVALID", part.Span, "invalid command word")
 		}
 		b.WriteString(text)
 		mem.FreeString(c.Run, text)
 	}
 	value := core.NewString(c.Run, b.String())
-	b.Free()
+	b.Reset()
 	return Result{Value: value}
 }
 

@@ -1,16 +1,16 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strconv"
+	"strings"
 )
 
 type wildcardProgressState struct {
@@ -56,16 +56,16 @@ func TestWildcardUnionResumesWithoutRevisitingEarlierPatterns(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	text := strings.NewBuilder(a)
+	text := strings.Builder{}
 	text.WriteString(`(wildcard ["./entries/z" "./entries/a"]`)
 	const count = 16
 	for i := 0; i < count; i++ {
-		var digits [32]byte
-		text.WriteString(` "./union/` + strconv.Itoa(digits[:], i) + `/*"`)
+
+		text.WriteString(` "./union/` + strconv.Itoa(i) + `/*"`)
 	}
 	text.WriteByte(')')
 	document := expr.Parse(a, "union.km", text.String())
-	text.Free()
+	text.Reset()
 	state := mem.Alloc[wildcardProgressState](a)
 	state.Program, state.Expression, state.Engine = p, document.Expr, engine
 	node := engine.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "union"}, evaluateWildcardProgress, state)
@@ -180,8 +180,8 @@ func TestWildcardFilteringResumesWithoutRevisitingEarlierEntries(t *testing.T) {
 				globs++
 				var paths [count]core.Value
 				for i := range paths {
-					var digits [32]byte
-					paths[i] = core.NewString(a, "./entries/"+strconv.Itoa(digits[:], i))
+
+					paths[i] = core.NewString(a, "./entries/"+strconv.Itoa(i))
 				}
 				value = core.NewList(a, paths[:])
 				for i := range paths {

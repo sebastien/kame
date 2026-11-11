@@ -1,11 +1,11 @@
-package program_test
+package programcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {

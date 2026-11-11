@@ -1,11 +1,10 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"math"
 )
 
 type signatureVector struct {
@@ -49,7 +48,7 @@ func TestDigestStandardVectorsAndIncrementalSnapshots(t *testing.T) {
 		t.Error("write after snapshot changed the digest")
 	}
 	// Exercise complete blocks and padding at both sides of the 56-byte boundary.
-	data := slices.Make[byte](t.Allocator(), 129)
+	data := make([]byte, 129)
 	for i := range data {
 		data[i] = byte(i)
 	}
@@ -63,7 +62,7 @@ func TestDigestStandardVectorsAndIncrementalSnapshots(t *testing.T) {
 			t.Error("chunk boundaries changed the digest")
 		}
 	}
-	slices.Free(t.Allocator(), data)
+	mem.FreeSlice(nil, data)
 }
 
 func TestValueSignaturesAreCanonicalAndTyped(t *testing.T) {
@@ -334,7 +333,7 @@ func TestAcceptedSignatureRecordRoundTripAndCorruption(t *testing.T) {
 		}
 		data[n] = before
 	}
-	slices.Free(a, data)
+	mem.FreeSlice(nil, data)
 	inputs[1] = inputs[0]
 	if core.EncodeSignatureRecord(a, &record) != nil {
 		t.Error("duplicate observations were persisted")

@@ -3,7 +3,6 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) prepareServiceRestart(entry *instance) bool {
@@ -24,7 +23,7 @@ func (p *Program) waitServiceRestart(c *core.EngineContext, entry *instance) cor
 	c.Submit(id)
 	if p.Forwarding {
 		payload := host.ServiceTimerPayload(p.Alloc, entry.Service.RestartBackoff)
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestTimer, Payload: payload})
+		p.Outbound = append(p.Outbound, host.Request{ID: id, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestTimer, Payload: payload})
 	} else if p.Host != nil {
 		entry.ServiceRestartDeadline = p.Host.Monotonic() + entry.Service.RestartBackoff*1000000
 	} else {

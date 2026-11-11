@@ -1,18 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
+	"os"
+	"path"
 )
 
 func runPlan(args []string, out io.Writer, errOut io.Writer) int {
@@ -36,8 +36,8 @@ func runList(args []string, out io.Writer, errOut io.Writer) int {
 	if len(parsed.Targets) != 0 {
 		query = parsed.Targets[0]
 	}
-	var buffer = bytes.NewBuffer(mem.System, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	if parsed.JSON {
 		session.Program.WriteTargetList(&buffer, query)
 		io.WriteString(out, buffer.String()+"\n")
@@ -69,8 +69,8 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 		program.FreeStrings(mem.System, targets)
 		return status
 	}
-	var buffer = bytes.NewBuffer(mem.System, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	e := json.NewEncoder(&buffer)
 	e.BeginArray()
 	for i := range session.Program.Tools {
@@ -156,9 +156,9 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		if started.Diagnostic.Code == "TGT_NO_RULE" {
 			name := targets[0]
 			if !path.IsAbs(name) {
-				name = path.Join(mem.System, parsed.Directory, name)
+				name = path.Join(parsed.Directory, name)
 			}
-			data, readErr := os.ReadFile(mem.System, name)
+			data, readErr := os.ReadFile(name)
 			if name != targets[0] {
 				mem.FreeString(mem.System, name)
 			}
@@ -223,9 +223,9 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		}
 		name := result.Result.Path
 		if !path.IsAbs(name) {
-			name = path.Join(mem.System, parsed.Directory, name)
+			name = path.Join(parsed.Directory, name)
 		}
-		data, readErr := os.ReadFile(mem.System, name)
+		data, readErr := os.ReadFile(name)
 		if name != result.Result.Path {
 			mem.FreeString(mem.System, name)
 		}
@@ -262,8 +262,8 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 		return 2
 	}
 	var graphDiagnostic diagnostic.Diagnostic
-	var buffer = bytes.NewBuffer(mem.System, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	if kind != "span" {
 		query := kind
 		if graph.Affected {
@@ -282,14 +282,14 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	if graph.JSON {
 		io.WriteString(out, buffer.String())
 	} else {
-		var heading = bytes.NewBuffer(mem.System, nil)
+		var heading = bytes.Buffer{}
 		fmt.Fprintf(&heading, "%s", kind)
 		for i := range targets {
 			io.WriteString(&heading, " "+targets[i])
 		}
 		fmt.Fprintf(&heading, " · depth %d", graph.Depth)
 		cli.WriteGraphReport(out, heading.String(), buffer.String(), stdoutColor, graph.Verbose)
-		heading.Free()
+		heading.Reset()
 	}
 	return 0
 }

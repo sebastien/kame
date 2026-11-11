@@ -1,8 +1,8 @@
-package source_test
+package sourcecheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/source"
-	"solod.dev/so/testing"
 )
 
 func TestPositionCountsCRLFTabsAndUTF8(t *testing.T) {

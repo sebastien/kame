@@ -29,10 +29,11 @@ paths are rejected. A quoted relative filename such as `"common.km"` is valid.
 
 Selected paths resolve relative to their containing file, not evaluation cwd.
 Includes expand depth-first at their declaration location, sharing caller scope
-and source order. Included text inherits the caller's outer language regardless
-of filename suffix: a value program cannot import rules, even from a `.kmk`
-file. Selected includes require a file-backed source. Active-ancestry cycles
-are errors; repeated nonrecursive includes expand again and ordinary declaration
+and source order. Included text inherits the caller's outer language except for
+the Kash library suffixes specified in `050-kash-libraries.md`: a value program
+cannot import rules, even from a `.kmk` file. Selected includes require a
+file-backed source. Active-ancestry cycles are errors; repeated nonrecursive
+includes expand again and ordinary declaration
 registration checks duplicates. Path identity is normalized lexically; this is
 not a claim of physical realpath or symlink-cycle detection.
 
@@ -912,10 +913,12 @@ name matching `[A-Za-z_][A-Za-z0-9_]*`. Empty values are valid. A semicolon
 inside a quoted input or balanced expression remains part of that input.
 Alternatively, a header may end with a Kame metadata record:
 `target : inputs ; [shell: kash env: [MODE: mode]]`. The supported keys are
-`shell` and `env` for all rule kinds. Service-specific keys are defined in
+`shell` and `env` for all rule kinds, plus `authority`, `tty`, and `foreground`
+as defined in `051-kash-session-authority.md`. Service-specific keys are defined in
 `024-managed-services.md`, and file-rule `executor` in `032-remote-execution.md`;
 duplicate keys and keys unsupported for the rule kind are errors. `env` contains valid
-environment names with string values, including pure Kame expressions. Settings
+environment names with string values, including pure Kame expressions. It is a
+child assignment record, not an environment-read or unset grant. Settings
 are evaluated under planning policy before prerequisite recipes execute.
 `shell` overrides the build-wide `SHELL` definition for this rule. It accepts the
 Kash constructor, an executable string with `-c` implied, or a nonempty argv
@@ -964,7 +967,8 @@ remains opaque shell.
 ## Scripts
 
 A script contains comments, blank lines, definitions, rules, and top-level
-expressions. Dynamic module imports are not part of the script language.
+expressions. Kash library module expressions are specified in
+`050-kash-libraries.md`; general dynamic module imports are not introduced.
 
 The parser uses line context to distinguish a rule header from expression and
 record punctuation. Indented text without a preceding rule is `PARSE_ERR`.
@@ -989,10 +993,10 @@ Thus a statement `42` is an integer and a statement `:nil` is nil. Balanced
 expressions may span lines, and comments/blank lines do not become statements.
 
 `(include PATH)` retains the source-composition behavior above. Included sources
-retain authored spans and inherit the caller's outer parser, not the included
-filename's suffix. A `.km` file can supply definitions to a `.kmk` caller; a
-value program cannot import rule declarations to circumvent its grammar restriction.
-Kash inclusion is not added by these execution conventions.
+retain authored spans and normally inherit the caller's outer parser. A `.km`
+file can supply definitions to a `.kmk` caller; a value program cannot import
+rule declarations to circumvent its grammar restriction. The `.kash` and `.ksh`
+library exception is specified in `050-kash-libraries.md`.
 
 File execution, named value entries, expression-statement result selection,
 program arguments, and the unified `kame do run` command are defined in

@@ -1,12 +1,12 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/cli"
 	"kame/core"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/strconv"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strconv"
 )
 
 func RenderPresentation(a mem.Allocator, text string) PureResult {
@@ -19,9 +19,9 @@ type Presentation struct {
 	State cli.ProgressState
 }
 
-func NewPresentation(heap *Heap) *Presentation {
-	p := mem.Alloc[Presentation](heap)
-	p.Alloc = heap
+func NewPresentation(a mem.Allocator) *Presentation {
+	p := mem.Alloc[Presentation](a)
+	p.Alloc = a
 	return p
 }
 
@@ -81,8 +81,8 @@ func renderPresentation(a mem.Allocator, text string, state *cli.ProgressState) 
 		return invalidPresentation(a)
 	}
 	defer value.Free(a)
-	var buffer = bytes.NewBuffer(a, nil)
-	defer buffer.Free()
+	var buffer = bytes.Buffer{}
+	defer buffer.Reset()
 	if state != nil && presentationField(value, "op").Text == "estimate" {
 		now := presentationField(value, "nowNS")
 		if now.Kind != core.Int || now.Int < 0 {
@@ -141,4 +141,13 @@ func renderPresentation(a mem.Allocator, text string, state *cli.ProgressState) 
 		return invalidPresentation(a)
 	}
 	return PureResult{Text: pureText(a, buffer.String())}
+}
+
+// Free releases invocation state and drops all Go references owned by it.
+func (p *Presentation) Free() {
+	if p == nil {
+		return
+	}
+	p.State.Free(p.Alloc)
+	mem.Free(p.Alloc, p)
 }

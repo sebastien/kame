@@ -3,10 +3,9 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Contributions are assembled at registration, never assignments at runtime.
@@ -16,7 +15,7 @@ func (p *Program) registerContribution(d *definition.Definition) {
 	b := p.Scope.lookup(d.Name)
 	if b != nil && b.Kind != bindingDefinition {
 		p.Valid = false
-		p.Diagnostics = slices.Append(p.Alloc, p.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "contributions require a value definition", Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}})
+		p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "contributions require a value definition", Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}})
 		return
 	}
 	for i := range p.Definitions {
@@ -27,7 +26,7 @@ func (p *Program) registerContribution(d *definition.Definition) {
 		aggregate = original
 		if !original.Aggregate {
 			aggregate = p.newAggregate(original)
-			aggregate.Expression.Items = slices.Append(p.Alloc, aggregate.Expression.Items, expr.Clone(p.Alloc, original.Expression))
+			aggregate.Expression.Items = append(aggregate.Expression.Items, expr.Clone(p.Alloc, original.Expression))
 			p.Definitions[i] = aggregate
 			for j := range p.Nodes {
 				if p.Nodes[j].Name == d.Name {
@@ -42,14 +41,14 @@ func (p *Program) registerContribution(d *definition.Definition) {
 	if aggregate == nil {
 		aggregate = p.newAggregate(d)
 		p.Scope.setDefinition(d.Name)
-		p.Definitions = slices.Append(p.Alloc, p.Definitions, aggregate)
+		p.Definitions = append(p.Definitions, aggregate)
 		state := mem.Alloc[definitionState](p.Alloc)
 		state.Program, state.Definition = p, aggregate
 		node := p.Engine.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: d.Name}, evaluateDefinition, state, freeDefinitionState)
 		node.Restartable = true
-		p.Nodes = slices.Append(p.Alloc, p.Nodes, definitionNode{Name: owned(p.Alloc, d.Name), Node: node})
+		p.Nodes = append(p.Nodes, definitionNode{Name: owned(p.Alloc, d.Name), Node: node})
 	}
-	aggregate.Expression.Items = slices.Append(p.Alloc, aggregate.Expression.Items, expr.Clone(p.Alloc, d.Expression))
+	aggregate.Expression.Items = append(aggregate.Expression.Items, expr.Clone(p.Alloc, d.Expression))
 }
 
 func (p *Program) newAggregate(d *definition.Definition) *definition.Definition {
@@ -58,7 +57,7 @@ func (p *Program) newAggregate(d *definition.Definition) *definition.Definition 
 	aggregate.Aggregate = true
 	aggregate.Expression = mem.Alloc[expr.Expr](p.Alloc)
 	aggregate.Expression.Kind, aggregate.Expression.Span = expr.List, d.Span
-	p.Aggregates = slices.Append(p.Alloc, p.Aggregates, aggregate)
+	p.Aggregates = append(p.Aggregates, aggregate)
 	return aggregate
 }
 
@@ -78,11 +77,11 @@ func (p *Program) aggregateValue(d *definition.Definition, scope *Scope, c *Cont
 	var items []core.Value
 	for i := range values {
 		for j := range values[i].List {
-			items = slices.Append(c.Run, items, values[i].List[j])
+			items = append(items, values[i].List[j])
 		}
 	}
 	result := Result{Value: core.NewList(c.Run, items)}
-	slices.Free(c.Run, items)
+	mem.FreeSlice(nil, items)
 	// NewList transfers callable wrappers; don't discard their captured scopes.
 	freeValues(c.Run, values)
 	return result

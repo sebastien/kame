@@ -26,12 +26,12 @@ mkdir -p "$root"
 release_test_keys "$root/keys"
 export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$RELEASE_TEST_KEY_B64"
 
-# build_release DIR APE_BODY writes a complete verified release tree.
+# build_release DIR native_BODY writes a complete verified release tree.
 build_release() {
 	local dir="$1" ape="$2"
 	mkdir -p "$dir"
-	printf '%s\n' "$ape" >"$dir/kame.com"
-	chmod +x "$dir/kame.com"
+	printf '%s\n' "$ape" >"$dir/kame-linux-x86_64"
+	chmod +x "$dir/kame-linux-x86_64"
 	printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$dir/kame.js"
 	printf 'dummy-wasm' >"$dir/kame.wasm"
 	printf '9.9.9\n' >"$dir/VERSION"
@@ -40,7 +40,7 @@ build_release() {
 
 good="$root/good"
 build_release "$good" '#!/bin/sh
-echo "ape:$*"'
+echo "native:$*"'
 
 broken="$root/broken"
 build_release "$broken" '#!/bin/sh
@@ -48,28 +48,28 @@ exit 1'
 
 export KAME_VERSION=9.9.9
 
-test-step "auto falls back to wasm when the APE probe fails"
+test-step "auto falls back to wasm when the native probe fails"
 out="$(KAME_RELEASE_URL="file://$broken" KAME_HOME="$root/broken-cache" "$launcher" a b)"
 if [ "$out" = "wasm:a,b" ] && [ "$(cat "$root/broken-cache/9.9.9/.backend")" = "wasm" ]; then
-	test-ok "a failed APE probe selects the wasm backend"
+	test-ok "a failed native probe selects the wasm backend"
 else
 	test-fail "ape probe fallback: out=$out backend=$(cat "$root/broken-cache/9.9.9/.backend" 2>/dev/null)"
 fi
 
-test-step "KAME_BACKEND forces the APE strategy"
-out="$(KAME_RELEASE_URL="file://$good" KAME_HOME="$root/ape-cache" KAME_BACKEND=ape "$launcher" a b)"
-if [ "$out" = "ape:a b" ] && [ -x "$root/ape-cache/9.9.9/ape/kame.com" ]; then
-	test-ok "KAME_BACKEND=ape provisions and runs the APE"
+test-step "KAME_BACKEND forces the native strategy"
+out="$(KAME_RELEASE_URL="file://$good" KAME_HOME="$root/ape-cache" KAME_BACKEND=native "$launcher" a b)"
+if [ "$out" = "native:a b" ] && [ -x "$root/ape-cache/9.9.9/native/linux-x86_64/kame" ]; then
+	test-ok "KAME_BACKEND=native provisions and runs the native"
 else
-	test-fail "forced ape: out=$out"
+	test-fail "forced native: out=$out"
 fi
 
 test-step "a missing manifest entry fails closed"
 nomanifest="$root/nomanifest"
 build_release "$nomanifest" '#!/bin/sh
-echo "ape:$*"'
+echo "native:$*"'
 {
-	echo "$(sha "$nomanifest/kame.com")  kame.com"
+	echo "$(sha "$nomanifest/kame-linux-x86_64")  kame-linux-x86_64"
 	echo "$(sha "$nomanifest/kame.wasm")  kame.wasm"
 	echo "$(sha "$nomanifest/VERSION")  VERSION"
 	echo "$(sha "$nomanifest/PROVENANCE.json")  PROVENANCE.json"

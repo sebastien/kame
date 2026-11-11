@@ -1,13 +1,13 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
@@ -43,9 +43,9 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 			if !matched.Matched || len(matched.Captures) != 1 || matched.Captures[0] != "demo" {
 				t.Error("dynamic literal bytes did not match exactly")
 			}
-			slices.Free(a, matched.Captures)
+			mem.FreeSlice(nil, matched.Captures)
 			pattern.Pattern.Free(a)
-			slices.Free(a, pattern.Diagnostics)
+			mem.FreeSlice(nil, pattern.Diagnostics)
 			copy.Free(a)
 		} else if i >= 6 && i <= 9 {
 			if r.Diagnostic.Code != "" || r.Value.Kind != core.Pattern {

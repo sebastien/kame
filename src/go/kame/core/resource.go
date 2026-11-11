@@ -1,6 +1,6 @@
 package core
 
-import "solod.dev/so/mem"
+import "kame/internal/mem"
 
 type ResourceKind int
 

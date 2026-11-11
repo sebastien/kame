@@ -1,11 +1,11 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 // The test allocator and sanitizer check closure/wrapper release as well as

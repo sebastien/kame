@@ -2,11 +2,11 @@ package wasm
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
 )
 
 // PureResult is intentionally byte-oriented at the module boundary. Text and

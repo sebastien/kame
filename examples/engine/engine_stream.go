@@ -1,10 +1,10 @@
 package examples
 
 import (
+	"fmt"
+	"io"
 	"kame/core"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 // logState drives a context source that emits a batch, blocks on host work,

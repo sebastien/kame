@@ -1,16 +1,16 @@
 package program
 
 import (
+	"io"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 func inspectionLifetime(key core.ResourceKey) string {

@@ -4,10 +4,10 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // A rendered recipe owns its deferred effects across host write suspensions.
@@ -31,7 +31,7 @@ func (p *Program) freeForwardEffects(state *forwardEffectsState) {
 	mem.FreeString(p.Alloc, state.Commands)
 	eval.FreeEffects(p.Alloc, state.Effects)
 	freeStrings(p.Alloc, state.WritePaths)
-	slices.Free(p.Alloc, state.Yielded)
+	mem.FreeSlice(nil, state.Yielded)
 	mem.Free(p.Alloc, state)
 }
 
@@ -56,7 +56,7 @@ func (p *Program) continueForwardEffects(c *core.EngineContext, index int) core.
 		effect := state.Effects[state.Index]
 		state.Index++
 		span := diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}
-		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: span, Data: slices.Clone(p.Alloc, effect.Data), Effect: effectName(effect.Kind)})
+		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: span, Data: slices.Clone(effect.Data), Effect: effectName(effect.Kind)})
 		if effect.Kind == eval.EffectOut || effect.Kind == eval.EffectErr {
 			kind := Stdout
 			if effect.Kind == eval.EffectErr {
@@ -72,7 +72,7 @@ func (p *Program) continueForwardEffects(c *core.EngineContext, index int) core.
 			}
 		} else if effect.Kind == eval.EffectYield {
 			for i := range effect.Data {
-				state.Yielded = slices.Append(p.Alloc, state.Yielded, effect.Data[i])
+				state.Yielded = append(state.Yielded, effect.Data[i])
 			}
 		} else if effect.Kind == eval.EffectWrite {
 			if state.WriteIndex >= len(state.WritePaths) {

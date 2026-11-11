@@ -1,16 +1,16 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 func TestProcessSnapshotsCoalesceAndRejectStaleRequests(t *testing.T) {
@@ -47,7 +47,7 @@ func TestProcessSnapshotsCoalesceAndRejectStaleRequests(t *testing.T) {
 			request := next.Request
 			if request.Kind == host.RequestProcess {
 				seen = true
-				states := slices.Make[int](a, len(host.PayloadList(request.Payload, "kinds")))
+				states := make([]int, len(host.PayloadList(request.Payload, "kinds")))
 				for i := range states {
 					states[i] = 2
 				}
@@ -89,7 +89,7 @@ func TestProcessSnapshotsCoalesceAndRejectStaleRequests(t *testing.T) {
 					t.Error("completed request accepted stale snapshot")
 				}
 				value.Free(a)
-				slices.Free(a, states)
+				mem.FreeSlice(nil, states)
 			} else if request.Kind == host.RequestReadFile && host.PayloadText(request.Payload, host.FieldOp) == "resolve-tool" {
 				p.Complete(request, core.NewString(a, "/bin/sh"), diagnostic.Diagnostic{})
 			} else if request.Kind == host.RequestReadFile && host.PayloadText(request.Payload, host.FieldOp) == host.OpToolContent {

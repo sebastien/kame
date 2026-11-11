@@ -1,10 +1,10 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
+	"kame/internal/testing"
 	"kame/lang/eval"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestRunInputsRetainOrderAndForwardLanguage(t *testing.T) {

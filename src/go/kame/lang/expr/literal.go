@@ -1,6 +1,6 @@
 package expr
 
-import "solod.dev/so/unicode/utf8"
+import "unicode/utf8"
 
 // IsLiteral accepts only closed data: no names, interpolation, patterns, calls,
 // selectors or captures. Typed configuration cannot execute caller-supplied

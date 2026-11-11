@@ -97,6 +97,9 @@ script = (kash """printf %s @_""")
 result = (script "hello")
 ```
 
+The distinct literal-path form `(kash ./module.kash)` loads a library module,
+not a script callable; see `050-kash-libraries.md`. A string remains script text.
+
 Verbatim strings preserve argument selectors for evaluation when the script is
 called. Calls bind arguments through the normal Kame argument selectors, create fresh
 script-local definitions and inherit the caller's execution policy, directory
@@ -522,9 +525,14 @@ explicit Kame value, such as `(wildcard ./src/**/*.go)`.
 Unquoted spaces and tabs separate words. Adjacent literal and substitution parts
 form one word, as in `revision=$revision`, `${name}.c` and
 `--config-path=(js-biome-config)`. Double quotes group
-parts into one word and allow reference and command-capture substitutions. An
-empty quoted word is one empty argument. Single quotes are reserved and rejected,
-consistent with Kame expression syntax.
+parts into one word and allow reference and command-capture substitutions. Single
+quotes group literal text into one word: everything between the delimiters is
+literal, including backslashes, dollar signs, at-signs, parentheses, operators,
+and double quotes. A single quote cannot occur inside a single-quoted fragment;
+end the fragment and use an escaped or double-quoted single quote instead.
+Adjacent quoted and unquoted fragments form one word. An empty quoted word is one
+empty argument. An unclosed single quote is `PARSE_ERR`. These are Kash command
+words only; Kame expression strings still use double quotes.
 
 Outside quotes, backslash escapes the next non-newline character; backslash plus
 newline continues the statement without inserting text. Inside double quotes,
@@ -541,7 +549,7 @@ parser, where `--mtime=\@0` supplies the literal argument. Canonical Kash
 formatting may emit `"--mtime=\@0"`; reparsing preserves the same argument bytes.
 This does not change valid standalone selectors or reference/call syntax.
 
-Unescaped `(` outside double quotes starts a Kame expression fragment, including
+Unescaped `(` outside quotes starts a Kame expression fragment, including
 in the middle of a word; it is not a shell subshell or literal punctuation.
 Escape a literal parenthesis or quote its text. Parentheses inside Kash double
 quotes remain literal: `"--config-path=(js-biome-config)"` does not call anything.
@@ -566,8 +574,8 @@ never splice lists: `$files` splices a flat list, while `"$files"` fails when
 but `--modules=(modules)` rejects that result rather than joining or splicing it.
 An empty scalar in a mixed word contributes empty text; whitespace in a scalar
 remains inside the one argument. A wildcard result supplies explicit argv items
-without shell globbing. Quoted/escaped `@` and `$` are literal only when escaped
-or not followed by substitution syntax; quotes do not disable valid substitutions.
+without shell globbing. In double quotes, `@` and `$` are literal only when escaped
+or not followed by substitution syntax; single quotes disable substitutions.
 
 Word fragments evaluate in authored order and retain completed values across
 suspension, without replaying calls or effects. Result bytes are inert data:
@@ -681,7 +689,9 @@ assignment to a name wins. Duplicate authored setup keys, including two `:env`
 keys in one stage, remain syntax errors. Record keys such as `cwd` and `timeout`
 are environment names, not process settings. Overrides belong only to that
 stage: they do not change later statements, other pipeline stages, Kame's `env`
-namespace, executable lookup, or parent/rule context.
+namespace, executable lookup, or parent/rule context. A scope overlay that may
+change later children and in-scope lookup is specified in
+`051-kash-session-authority.md`; it is not a stage override.
 
 Suspension retains evaluated assignments and their effects without replay;
 dependency tracking retains the computations/observations used to obtain them
@@ -1237,8 +1247,10 @@ live forwarding and explicit capture remain separate channels.
   agree with their corresponding ordinary Kame expressions.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.
 - Quoted/escaped operators are literal, empty quotes preserve an empty argument,
-  and invalid escapes and unsupported single-quote syntax are rejected. `&&` and
-  `||` are recognized only as sequential process-list operators.
+  and invalid escapes and unclosed quotes are rejected. Single-quoted substitutions,
+  backslashes and operators remain literal, including in adjacent word fragments;
+  parse/format/parse preserves argument bytes and substitution boundaries. `&&`
+  and `||` are recognized only as sequential process-list operators.
 - Quoted `"--mtime=@0"` in direct Kash remains one literal argument through
   repeated formatting; unquoted reserved at-sign syntax receives Kash quoting
   guidance, not an unrelated template selector diagnostic.

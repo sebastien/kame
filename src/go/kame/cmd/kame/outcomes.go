@@ -1,11 +1,11 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
 )
 
 type buildProgress = cli.Progress

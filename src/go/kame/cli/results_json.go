@@ -4,11 +4,11 @@ package cli
 // Runtime lifecycle events remain encoded by program.WriteJSONEvent.
 
 import (
+	"io"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
 )
 
 func WriteInvocation(out io.Writer, command string, dryRun bool) {

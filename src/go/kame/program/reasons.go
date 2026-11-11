@@ -2,9 +2,8 @@ package program
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // reasonIdentity owns only the fields needed for generation-local deduplication.
@@ -24,7 +23,7 @@ func (p *Program) clearReasonIdentities(entry *instance) {
 		identity.Dependency.Free(p.Alloc)
 		mem.FreeString(p.Alloc, identity.Aspect)
 	}
-	slices.Free(p.Alloc, entry.ReasonIdentities)
+	mem.FreeSlice(nil, entry.ReasonIdentities)
 	entry.ReasonIdentities = nil
 }
 
@@ -40,7 +39,7 @@ func (p *Program) reason(entry *instance, decision string, code string, message 
 	event := Event{Kind: TargetReason, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, Decision: decision, Reason: code, Message: message, DependencyKey: key, Aspect: aspect}
 	p.emit(event)
 	// Only the deduplication identity is retained after the event is drained.
-	entry.ReasonIdentities = slices.Append(p.Alloc, entry.ReasonIdentities, reasonIdentity{Decision: cloneText(p.Alloc, decision), Code: cloneText(p.Alloc, code), Dependency: key.Clone(p.Alloc), Aspect: cloneText(p.Alloc, aspect)})
+	entry.ReasonIdentities = append(entry.ReasonIdentities, reasonIdentity{Decision: cloneText(p.Alloc, decision), Code: cloneText(p.Alloc, code), Dependency: key.Clone(p.Alloc), Aspect: cloneText(p.Alloc, aspect)})
 }
 
 func reasonAspect(aspect core.ObservationAspect) string {

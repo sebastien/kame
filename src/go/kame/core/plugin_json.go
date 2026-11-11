@@ -1,10 +1,10 @@
 package core
 
 import (
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+
+	"strings"
 )
 
 type pluginFieldResult struct {
@@ -15,21 +15,21 @@ type pluginFieldResult struct {
 // PluginValueJSON returns an owned, tagged JSON encoding for values that may
 // cross a plugin boundary. Callable and process values have no wire form.
 func PluginValueJSON(a mem.Allocator, value Value) []byte {
-	builder := strings.NewBuilder(a)
+	builder := strings.Builder{}
 	e := json.NewEncoder(&builder)
 	if !encodePluginValue(a, &e, value) {
-		builder.Free()
+		builder.Reset()
 		return nil
 	}
 	e.Flush()
 	if e.Err() != nil {
-		builder.Free()
+		builder.Reset()
 		return nil
 	}
 	text := builder.String()
 	data := mem.AllocSlice[byte](a, len(text), len(text))
 	copy(data, text)
-	builder.Free()
+	builder.Reset()
 	return data
 }
 
@@ -200,7 +200,7 @@ func decodePluginValue(a mem.Allocator, raw Value, out *Value, depth int) bool {
 		if !items.Found || items.Value.Kind != List {
 			return false
 		}
-		values := slices.Make[Value](a, len(items.Value.List))
+		values := make([]Value, len(items.Value.List))
 		for i := range items.Value.List {
 			if !decodePluginValue(a, items.Value.List[i], &values[i], depth+1) {
 				freePluginValues(a, values)
@@ -219,7 +219,7 @@ func decodePluginValue(a mem.Allocator, raw Value, out *Value, depth int) bool {
 		if !fieldsValue.Found || fieldsValue.Value.Kind != List {
 			return false
 		}
-		fields := slices.Make[RecordField](a, len(fieldsValue.Value.List))
+		fields := make([]RecordField, len(fieldsValue.Value.List))
 		for i := range fieldsValue.Value.List {
 			pair := fieldsValue.Value.List[i]
 			if pair.Kind != List || len(pair.List) != 2 || pair.List[0].Kind != String {
@@ -257,7 +257,7 @@ func freePluginValues(a mem.Allocator, values []Value) {
 	for i := range values {
 		values[i].Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 func freePluginFields(a mem.Allocator, fields []RecordField) {
@@ -265,7 +265,7 @@ func freePluginFields(a mem.Allocator, fields []RecordField) {
 		mem.FreeString(a, fields[i].Key)
 		fields[i].Value.Free(a)
 	}
-	slices.Free(a, fields)
+	mem.FreeSlice(nil, fields)
 }
 
 func parsePluginBase64(a mem.Allocator, text string, out *[]byte) bool {
@@ -298,7 +298,7 @@ func parsePluginBase64(a mem.Allocator, text string, out *[]byte) bool {
 			}
 		}
 		if !valid || pad > 2 {
-			slices.Free(a, data)
+			mem.FreeSlice(nil, data)
 			return false
 		}
 		data[length] = byte(v >> 16)

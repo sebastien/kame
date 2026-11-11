@@ -1,15 +1,15 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host"
 	"kame/host/posix"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"os"
 )
 
 func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
@@ -20,8 +20,8 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 	}
 	for kind := range captures {
 		for scope := 0; scope < 3; scope++ {
-			dirBuffer := make([]byte, os.MaxPathLen)
-			dir, err := os.MkdirTemp(dirBuffer, "", "kame-recipe-capture-")
+
+			dir, err := os.MkdirTemp("", "kame-recipe-capture-")
 			if err != nil {
 				t.Fatal("temporary directory failed")
 				return

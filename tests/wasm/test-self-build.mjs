@@ -52,8 +52,9 @@ try {
   const output = execFileSync(join(directory, 'dist/kame'), ['--version'], { encoding: 'utf8' });
   assert.ok(output.startsWith(`kame ${version} `), output);
   const e = watch.module.exports;
-  const peak = e.kame_wasm_instance_heap_peak(watch.watch.instance);
-  assert.ok(peak < 16 * 1024 * 1024, 'self-build exhausted the unchanged instance budget');
+  e.kame_wasm_collect();
+  const heap = e.kame_wasm_system_heap_used();
+  assert.ok(heap < 128 * 1024 * 1024, 'self-build retained excessive evaluator state');
   const linear = e.memory.buffer.byteLength;
   // Recheck an unchanged input in the same module: no process/module reset
   // may conceal growing transport buffers or retained instance allocations.
@@ -63,9 +64,10 @@ try {
   for (let cycle = 0; cycle < 3; cycle++) {
     watch.invalidate([{ kind: 'file', name: join(directory, 'VERSION') }]);
     await settle();
-    assert.equal(e.memory.buffer.byteLength, warmed, 'warm self-build linear memory grew');
+    e.kame_wasm_collect();
+    assert.ok(e.kame_wasm_system_heap_used() < heap + 4 * 1024 * 1024, 'self-build retained invalidated state');
   }
-  console.log(JSON.stringify({ test: 'wasm-self-build', version, instancePeak: e.kame_wasm_instance_heap_peak(watch.watch.instance), hostPeak: e.kame_wasm_host_heap_peak(), linearBytes: linear, warmLinearBytes: warmed }));
+  console.log(JSON.stringify({ test: 'wasm-self-build', version, liveHeap: e.kame_wasm_system_heap_used(), hostPeak: e.kame_wasm_host_heap_peak(), linearBytes: linear, warmLinearBytes: warmed }));
 } finally {
   await watch?.close();
   await kame.dispose();

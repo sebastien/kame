@@ -1,11 +1,11 @@
 package core
 
 import (
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+
+	"strings"
+	"unicode/utf8"
 )
 
 // PresentationValueJSON encodes values for human-facing output. Unlike ValueJSON,
@@ -30,21 +30,21 @@ func valueJSON(a mem.Allocator, value Value, out *[]byte, presentation bool) boo
 	var builder strings.Builder
 	e := json.NewEncoder(&builder)
 	if !encodeValueJSON(a, &e, value, 0, presentation) {
-		builder.Free()
+		builder.Reset()
 		return false
 	}
 	e.Flush()
 	text := builder.String()
 	data := mem.AllocSlice[byte](a, len(text), len(text))
 	copy(data, text)
-	builder.Free()
+	builder.Reset()
 	*out = data
 	return true
 }
 
 func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, presentation bool) bool {
 	var order []int
-	defer slices.Free(a, order)
+	defer mem.FreeSlice(nil, order)
 	if depth >= 256 {
 		return false
 	}
@@ -86,7 +86,7 @@ func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, p
 		}
 		e.EndArray()
 	case Record:
-		order = slices.Make[int](a, len(value.Record))
+		order = make([]int, len(value.Record))
 		for i := range order {
 			order[i] = i
 			if !presentation {

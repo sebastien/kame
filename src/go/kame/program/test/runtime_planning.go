@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"os"
 )
 
 func TestLiteralSelectionAndFreshness(t *testing.T) {
@@ -57,8 +57,8 @@ func TestAmbiguousPatternsReportBothProducers(t *testing.T) {
 
 func TestTemplateCapturesRenderInputsAndOutputs(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -84,7 +84,7 @@ func TestTemplateCapturesRenderInputsAndOutputs(t *testing.T) {
 		t.Errorf("template materialization failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/out/demo")
+	data, readErr := os.ReadFile(dir + "/out/demo")
 	if readErr != nil || string(data) != "captured" {
 		t.Error("captures did not render corresponding input and output")
 	}
@@ -118,8 +118,8 @@ func TestMatchingTemplatesAreAmbiguous(t *testing.T) {
 
 func TestExistingFileNeedsNoRule(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -149,8 +149,8 @@ func TestExistingFileNeedsNoRule(t *testing.T) {
 
 func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -174,12 +174,12 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 	}
 	first.Free(a)
 	second.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "source" {
 		t.Error("expression input did not render")
 	}
 	mem.FreeSlice(a, data)
-	log, logErr := os.ReadFile(a, dir+"/recipe-log")
+	log, logErr := os.ReadFile(dir + "/recipe-log")
 	if logErr != nil || string(log) != "x" {
 		t.Error("fresh expression input reran recipe")
 	}
@@ -325,8 +325,8 @@ func TestPlanDefersHostBackedInputWithoutPhaseFailure(t *testing.T) {
 
 func TestExpandPlanResolvesHostBackedInputsWithoutRunningRecipe(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-expand-")
+
+	dir, err := os.MkdirTemp("", "kame-expand-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -360,8 +360,8 @@ func TestExpandPlanResolvesHostBackedInputsWithoutRunningRecipe(t *testing.T) {
 
 func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-expand-materialize-")
+
+	dir, err := os.MkdirTemp("", "kame-expand-materialize-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -392,7 +392,7 @@ func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
 		t.Errorf("materialize diagnostic: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "expanded" {
 		t.Errorf("output = %q", string(data))
 	}
@@ -407,8 +407,8 @@ func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
 
 func TestExpandPlanDoesNotMaterializeRuleDependency(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-expand-read-")
+
+	dir, err := os.MkdirTemp("", "kame-expand-read-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -443,8 +443,8 @@ func TestExpandPlanDoesNotMaterializeRuleDependency(t *testing.T) {
 
 func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-resolve-")
+
+	dir, err := os.MkdirTemp("", "kame-resolve-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -470,7 +470,7 @@ func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
 		t.Errorf("materialize diagnostic: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/output")
+	data, readErr := os.ReadFile(dir + "/output")
 	if readErr != nil || string(data) != "resolved\n" {
 		t.Errorf("resolved output = %q", string(data))
 	}
@@ -485,8 +485,8 @@ func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
 
 func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -521,8 +521,8 @@ func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 
 func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+
+	dir, err := os.MkdirTemp("", "kame-runtime-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -552,7 +552,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 		t.Errorf("pattern replace build failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/build/marker")
+	data, readErr := os.ReadFile(dir + "/build/marker")
 	if readErr != nil || string(data) != "ab" {
 		t.Error("pattern replace did not compute object inputs")
 	}
@@ -600,8 +600,8 @@ func TestCompileManyQualifiesDiagnostics(t *testing.T) {
 
 func TestBlankRecipeLinesCompileMaterializeAndRender(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-blank-recipe-")
+
+	dir, err := os.MkdirTemp("", "kame-blank-recipe-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -619,7 +619,7 @@ func TestBlankRecipeLinesCompileMaterializeAndRender(t *testing.T) {
 		t.Errorf("blank recipe line build failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/build/marker")
+	data, readErr := os.ReadFile(dir + "/build/marker")
 	if readErr != nil || string(data) != "onetwo" {
 		t.Errorf("blank recipe line rendered recipe = %q", string(data))
 	}

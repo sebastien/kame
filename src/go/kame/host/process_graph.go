@@ -1,8 +1,7 @@
 package host
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // ProcessTopologyError validates a host request independently of language
@@ -15,12 +14,12 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	if request.Input != "" || request.Output != "" {
 		return "KASH_DOUBLE_CONSUME"
 	}
-	incoming := slices.Make[int](a, n)
-	outgoing := slices.Make[int](a, n)
-	stdin := slices.Make[int](a, n)
-	defer slices.Free(a, incoming)
-	defer slices.Free(a, outgoing)
-	defer slices.Free(a, stdin)
+	incoming := make([]int, n)
+	outgoing := make([]int, n)
+	stdin := make([]int, n)
+	defer mem.FreeSlice(nil, incoming)
+	defer mem.FreeSlice(nil, outgoing)
+	defer mem.FreeSlice(nil, stdin)
 	for i := range request.Edges {
 		edge := request.Edges[i]
 		if edge.From < 0 || edge.From >= n || edge.To < 0 || edge.To >= n {
@@ -83,10 +82,10 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	// ponytail: O(nodes*edges) for small invocation graphs; index adjacency if
 	// large named graphs make validation a measured bottleneck.
 	var ready []int
-	defer slices.Free(a, ready)
+	defer mem.FreeSlice(nil, ready)
 	for i := range incoming {
 		if incoming[i] == 0 {
-			ready = slices.Append(a, ready, i)
+			ready = append(ready, i)
 		}
 	}
 	for cursor := 0; cursor < len(ready); cursor++ {
@@ -95,7 +94,7 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 			if edge.From == ready[cursor] {
 				incoming[edge.To]--
 				if incoming[edge.To] == 0 {
-					ready = slices.Append(a, ready, edge.To)
+					ready = append(ready, edge.To)
 				}
 			}
 		}

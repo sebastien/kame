@@ -1,8 +1,8 @@
-package template_test
+package templatecheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/template"
-	"solod.dev/so/testing"
 )
 
 func TestRemediation3TargetBudgets(t *testing.T) {

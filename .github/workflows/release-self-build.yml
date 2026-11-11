@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'Channel: auto, wasm, or ape'
+        description: 'Channel: auto, wasm, or native'
         required: false
         default: auto
       version:
@@ -30,11 +30,6 @@ jobs:
         with:
           go-version-file: src/go/kame/go.mod
           cache-dependency-path: src/go/kame/go.sum
-      - name: Install Solod compiler
-        shell: bash
-        run: |
-          go install solod.dev/cmd/so@v0.4.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: actions/setup-node@v7
         with:
           node-version: 24

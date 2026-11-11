@@ -1,15 +1,32 @@
 package posix
 
 import (
+	"errors"
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/c"
+	"kame/internal/c"
+	"os"
+	"syscall"
 )
 
-//so:extern nodecay
-func km_file_publish(staged string, destination string) c.Int {
-	_, _ = staged, destination
-	return 3
+func km_file_publish(staged, destination string) c.Int {
+	info, e := os.Lstat(staged)
+	if e != nil || !info.Mode().IsRegular() {
+		return -1
+	}
+	if e := os.Link(staged, destination); e != nil {
+		if errors.Is(e, syscall.EXDEV) || errors.Is(e, syscall.ENOTSUP) {
+			return 3
+		}
+		if errors.Is(e, os.ErrExist) {
+			return 1
+		}
+		return -1
+	}
+	if os.Remove(staged) != nil {
+		return 2
+	}
+	return 0
 }
 
 func (h *Host) PublishFile(staged string, destination string) host.PublishResult {

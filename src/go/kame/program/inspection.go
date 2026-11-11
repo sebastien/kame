@@ -1,15 +1,15 @@
 package program
 
 import (
+	"io"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 type inspectionResource struct {
@@ -87,12 +87,12 @@ func (g *inspectionGraph) free() {
 	}
 	for i := range g.Producers {
 		g.Producers[i].Plan.Free(a)
-		slices.Free(a, g.Producers[i].Outputs)
+		mem.FreeSlice(nil, g.Producers[i].Outputs)
 	}
-	slices.Free(a, g.Resources)
-	slices.Free(a, g.Producers)
-	slices.Free(a, g.Dependencies)
-	slices.Free(a, g.Deferred)
+	mem.FreeSlice(nil, g.Resources)
+	mem.FreeSlice(nil, g.Producers)
+	mem.FreeSlice(nil, g.Dependencies)
+	mem.FreeSlice(nil, g.Deferred)
 }
 
 // WriteGraph emits the schema-2 resource inventory for one target.
@@ -315,7 +315,7 @@ func (p *Program) releaseInspectionRoots() {
 			continue
 		}
 		if !slices.Contains(nodes, entry.Node) {
-			nodes = slices.Append(p.Alloc, nodes, entry.Node)
+			nodes = append(nodes, entry.Node)
 		}
 	}
 	if len(nodes) == 0 {
@@ -326,12 +326,12 @@ func (p *Program) releaseInspectionRoots() {
 		node := nodes[cursor]
 		for i := range node.Static {
 			if !slices.Contains(nodes, node.Static[i]) {
-				nodes = slices.Append(p.Alloc, nodes, node.Static[i])
+				nodes = append(nodes, node.Static[i])
 			}
 		}
 		for i := range node.Dynamic {
 			if !slices.Contains(nodes, node.Dynamic[i]) {
-				nodes = slices.Append(p.Alloc, nodes, node.Dynamic[i])
+				nodes = append(nodes, node.Dynamic[i])
 			}
 		}
 	}
@@ -384,24 +384,24 @@ func (p *Program) releaseInspectionRoots() {
 			p.Engine.Invalidate(entry.Node)
 		}
 	}
-	slices.Free(p.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 }
 
 // Cancellation is terminal in the engine. A new inspection may retry its own
 // resolver and abandoned observations, without invalidating shared live work.
 func (p *Program) restartInspectionNode(node *core.Node) {
 	var nodes []*core.Node
-	nodes = slices.Append(p.Alloc, nodes, node)
+	nodes = append(nodes, node)
 	for cursor := 0; cursor < len(nodes); cursor++ {
 		current := nodes[cursor]
 		for i := range current.Static {
 			if !slices.Contains(nodes, current.Static[i]) {
-				nodes = slices.Append(p.Alloc, nodes, current.Static[i])
+				nodes = append(nodes, current.Static[i])
 			}
 		}
 		for i := range current.Dynamic {
 			if !slices.Contains(nodes, current.Dynamic[i]) {
-				nodes = slices.Append(p.Alloc, nodes, current.Dynamic[i])
+				nodes = append(nodes, current.Dynamic[i])
 			}
 		}
 	}
@@ -411,7 +411,7 @@ func (p *Program) restartInspectionNode(node *core.Node) {
 			p.Engine.Invalidate(current)
 		}
 	}
-	slices.Free(p.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 }
 
 func (p *Program) inspectionKey(kind core.ResourceKind, name string) core.ResourceKey {
@@ -465,7 +465,7 @@ func (g *inspectionGraph) resource(key core.ResourceKey, request string, depth i
 		mem.FreeString(p.Alloc, display)
 		display = p.relativePath(key.Name)
 	}
-	g.Resources = slices.Append(p.Alloc, g.Resources, inspectionResource{Key: key.Clone(p.Alloc), Display: display, Request: cloneText(p.Alloc, request), Depth: depth})
+	g.Resources = append(g.Resources, inspectionResource{Key: key.Clone(p.Alloc), Display: display, Request: cloneText(p.Alloc, request), Depth: depth})
 	return len(g.Resources)
 }
 
@@ -477,7 +477,7 @@ func (g *inspectionGraph) dependency(producer, resource int, origin string, orde
 		}
 	}
 	g.Resources[resource-1].Input = true
-	g.Dependencies = slices.Append(g.Program.Alloc, g.Dependencies, inspectionDependency{Producer: producer, Resource: resource, Origin: origin, OrderOnly: ordered, Group: group})
+	g.Dependencies = append(g.Dependencies, inspectionDependency{Producer: producer, Resource: resource, Origin: origin, OrderOnly: ordered, Group: group})
 }
 
 func (g *inspectionGraph) deferred(producer, resource int, reason string) {
@@ -486,7 +486,7 @@ func (g *inspectionGraph) deferred(producer, resource int, reason string) {
 			return
 		}
 	}
-	g.Deferred = slices.Append(g.Program.Alloc, g.Deferred, inspectionDeferred{Producer: producer, Resource: resource, Reason: reason})
+	g.Deferred = append(g.Deferred, inspectionDeferred{Producer: producer, Resource: resource, Reason: reason})
 }
 
 func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
@@ -557,7 +557,7 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 		observe = true
 	}
 	producer := len(g.Producers) + 1
-	g.Producers = slices.Append(p.Alloc, g.Producers, inspectionProducer{Plan: plan, Resource: resource, Depth: r.Depth})
+	g.Producers = append(g.Producers, inspectionProducer{Plan: plan, Resource: resource, Depth: r.Depth})
 	g.Resources[resource-1].Producer = producer
 	if limit == 0 {
 		if len(plan.Inputs) != 0 || (plan.Rule != nil && hasExpressionInput(plan.Rule)) {
@@ -571,7 +571,7 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 			id := g.resource(key, plan.Outputs[i], r.Depth)
 			key.Free(p.Alloc)
 			g.Resources[id-1].Producer, g.Resources[id-1].Artifact = producer, true
-			g.Producers[producer-1].Outputs = slices.Append(p.Alloc, g.Producers[producer-1].Outputs, id)
+			g.Producers[producer-1].Outputs = append(g.Producers[producer-1].Outputs, id)
 		}
 	}
 	if observe {
@@ -676,7 +676,7 @@ func (g *inspectionGraph) observed(producer int, depth int) {
 		if p.Instances[i].Inspection && p.Instances[i].InspectionStatus == nil && sameInspectionPlan(p.Instances[i].Plan, g.Producers[producer-1].Plan) {
 			g.Producers[producer-1].Resolver = p.Instances[i].Node
 			g.Producers[producer-1].Generation = p.Instances[i].Node.Generation
-			pending = slices.Append(p.Alloc, pending, p.Instances[i].Node)
+			pending = append(pending, p.Instances[i].Node)
 			break
 		}
 	}
@@ -684,7 +684,7 @@ func (g *inspectionGraph) observed(producer int, depth int) {
 		node := pending[cursor]
 		for i := range node.Dynamic {
 			if !slices.Contains(pending, node.Dynamic[i]) {
-				pending = slices.Append(p.Alloc, pending, node.Dynamic[i])
+				pending = append(pending, node.Dynamic[i])
 			}
 		}
 		if cursor == 0 || node.Key.Kind == core.ResourceOperation {
@@ -706,7 +706,7 @@ func (g *inspectionGraph) observed(producer int, depth int) {
 			g.deferred(producer, id, "generated-input-unavailable")
 		}
 	}
-	slices.Free(p.Alloc, pending)
+	mem.FreeSlice(nil, pending)
 }
 
 func (g *inspectionGraph) contextDiagnostic(d diagnostic.Diagnostic, resource int) diagnostic.Diagnostic {
@@ -722,7 +722,7 @@ func (g *inspectionGraph) contextDiagnostic(d diagnostic.Diagnostic, resource in
 		var reversed []string
 		cursor := resource
 		for {
-			reversed = slices.Append(g.Program.Alloc, reversed, g.Resources[cursor-1].Display)
+			reversed = append(reversed, g.Resources[cursor-1].Display)
 			parent := 0
 			for i := range g.Dependencies {
 				e := g.Dependencies[i]
@@ -741,9 +741,9 @@ func (g *inspectionGraph) contextDiagnostic(d diagnostic.Diagnostic, resource in
 			cursor = parent
 		}
 		for i := len(reversed) - 1; i >= 0; i-- {
-			d.TargetStack = slices.Append(g.Program.Alloc, d.TargetStack, cloneText(g.Program.Alloc, reversed[i]))
+			d.TargetStack = append(d.TargetStack, cloneText(g.Program.Alloc, reversed[i]))
 		}
-		slices.Free(g.Program.Alloc, reversed)
+		mem.FreeSlice(nil, reversed)
 	}
 	return d
 }
@@ -763,16 +763,16 @@ func (g *inspectionGraph) stage(producer int, stack []int) diagnostic.Diagnostic
 			}
 		}
 		for i := start; i < len(stack); i++ {
-			d.TargetStack = slices.Append(g.Program.Alloc, d.TargetStack, cloneText(g.Program.Alloc, g.Producers[stack[i]-1].Plan.Target))
+			d.TargetStack = append(d.TargetStack, cloneText(g.Program.Alloc, g.Producers[stack[i]-1].Plan.Target))
 		}
-		d.TargetStack = slices.Append(g.Program.Alloc, d.TargetStack, cloneText(g.Program.Alloc, entry.Plan.Target))
+		d.TargetStack = append(d.TargetStack, cloneText(g.Program.Alloc, entry.Plan.Target))
 		d.Target = cloneText(g.Program.Alloc, entry.Plan.Target)
 		return d
 	}
 	g.Producers[producer-1].State = 1
-	path := slices.Clone(g.Program.Alloc, stack)
-	path = slices.Append(g.Program.Alloc, path, producer)
-	defer slices.Free(g.Program.Alloc, path)
+	path := slices.Clone(stack)
+	path = append(path, producer)
+	defer mem.FreeSlice(nil, path)
 	level := 1
 	for i := range g.Dependencies {
 		edge := g.Dependencies[i]
@@ -801,9 +801,9 @@ func (g *inspectionGraph) reaches(from, to int, seen []int) bool {
 	if slices.Contains(seen, from) {
 		return false
 	}
-	path := slices.Clone(g.Program.Alloc, seen)
-	path = slices.Append(g.Program.Alloc, path, from)
-	defer slices.Free(g.Program.Alloc, path)
+	path := slices.Clone(seen)
+	path = append(path, from)
+	defer mem.FreeSlice(nil, path)
 	for i := range g.Dependencies {
 		e := g.Dependencies[i]
 		if e.Producer != from || e.Origin == "configuration" {

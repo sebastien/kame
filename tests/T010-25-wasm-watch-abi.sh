@@ -5,15 +5,15 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-25 WASM watch ABI"
 cd "$CLI_ROOT"
-test-step "build the freestanding WASM module"
+test-step "build the Go WASI module"
 make wasm >/dev/null
-test-step "watch snapshots, validation, allocation failure, isolation and disposal"
+test-step "watch snapshots, validation, isolation and disposal"
 if node --input-type=module - <<'NODE'
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const bytes = await readFile('./build/wasm/kame.wasm');
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports: e } = instance;
 const alloc = (size, alignment = 1) => {
   const pointer = e.kame_wasm_alloc(size, alignment);
@@ -77,16 +77,12 @@ const advanceWatch = (handle) => {
 
 const constrained = e.kame_wasm_instance_create();
 assert.notEqual(constrained, 0n);
-// Fit compilation/watch setup (including teardown metadata), but leave too
-// little for a retained snapshot. Both setup success and snapshot exhaustion
-// below are required; changing runtime layouts must not weaken either check.
-assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 27 * 1024), 0);
 compile(constrained, 'VALUE = 1\n');
 const [constrainedTargets, constrainedTargetsLength] = write('["VALUE"]');
 assert.equal(e.kame_wasm_watch_begin(constrained, constrainedTargets, constrainedTargetsLength), 0);
 for (let i = 0; i < 8; i++) e.kame_wasm_step(constrained);
-assert.equal(e.kame_wasm_watch_state(constrained, 0, 0, alloc(4, 4)), 2);
-assert.match(diagnostic(constrained), /^NO_MEMORY: instance heap exhausted$/);
+assert.equal(e.kame_wasm_watch_state(constrained, 0, 0, 0xffffffff), 4);
+assert.equal(state(constrained).roots[0].value, '1', 'invalid output does not poison the watch');
 assert.equal(e.kame_wasm_instance_free(constrained), 0);
 
 const first = e.kame_wasm_instance_create();

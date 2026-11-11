@@ -1,20 +1,20 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"os"
 )
 
 func TestInputlessFileMaterializeRunsForEachRootEpoch(t *testing.T) {
 	a := t.Allocator()
-	buffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(buffer, "", "kame-inputless-")
+
+	dir, err := os.MkdirTemp("", "kame-inputless-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -33,7 +33,7 @@ func TestInputlessFileMaterializeRunsForEachRootEpoch(t *testing.T) {
 			}
 			result.Free(a)
 		}
-		data, readErr := os.ReadFile(a, dir+"/runs")
+		data, readErr := os.ReadFile(dir + "/runs")
 		if readErr != nil || string(data) != "xx" {
 			t.Error("separate root epochs did not rerun the inputless recipe")
 		}

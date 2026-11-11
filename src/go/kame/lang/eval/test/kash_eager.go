@@ -1,12 +1,12 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
@@ -37,6 +37,10 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 }
 
 func TestKashEagerBindingRetainsInitializerAcrossSuspension(t *testing.T) {
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (map ([item] (list (once) (async))) [1 2])\n\treturn (count values) ?\nresult = (probe)\n", 2)
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (flatmap ([item] [(list (once) (async))]) [1 2])\n\treturn (count values) ?\nresult = (probe)\n", 2)
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (filter ([item] (list (once) (async))) [1 2])\n\treturn (count values) ?\nresult = (probe)\n", 2)
+	checkKashEagerSuspension(t, "def probe\n\tlet values = (reduce ([acc item] (list (once) (async))) [] [1 2])\n\treturn (count values) ?\nresult = (probe)\n", 2)
 	checkKashEagerSuspension(t, "def probe\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
 	checkKashEagerSuspension(t, "def probe\n\tunused = (once)\n\t(helper) = 42\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe)\n", 1)
 	checkKashEagerSuspension(t, "def probe callback\n\tlet values = (list (once) (async))\n\treturn (count values) ?\nresult = (probe ([] 42))\n", 1)

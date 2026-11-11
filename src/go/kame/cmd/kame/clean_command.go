@@ -1,21 +1,20 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/source"
 	"kame/ownership"
 	"kame/program"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"os"
+	"path"
 )
 
 type outputLedger struct {
@@ -134,15 +133,15 @@ func unlockProduction(state any, resources []program.LockedResource) {
 
 func cleanRoot(directory string) string {
 	if path.IsAbs(directory) {
-		return path.Clean(mem.System, directory)
+		return path.Clean(directory)
 	}
-	buffer := slices.Make[byte](mem.System, os.MaxPathLen)
-	wd, err := os.Getwd(buffer)
+	buffer := make([]byte, 4096)
+	wd, err := os.Getwd()
 	result := ""
 	if err == nil {
-		result = path.Join(mem.System, wd, directory)
+		result = path.Join(wd, directory)
 	}
-	slices.Free(mem.System, buffer)
+	mem.FreeSlice(nil, buffer)
 	return result
 }
 
@@ -210,7 +209,7 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 		for i := range inputs {
 			member := store.Member(inputs[i])
 			if member != "" {
-				protected = slices.Append(mem.System, protected, member)
+				protected = append(protected, member)
 			}
 		}
 		program.FreeStrings(mem.System, inputs)
@@ -219,14 +218,14 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 			member := store.Member(physical)
 			mem.FreeString(mem.System, physical)
 			if member != "" {
-				protected = slices.Append(mem.System, protected, member)
+				protected = append(protected, member)
 			}
 		}
 	}
 	defer program.FreeStrings(mem.System, protected)
 	items := store.Clean(context.Digest, context.Mode == core.SignatureContent, dry, protected)
 	if session.Status != 0 && !session.Source.Missing {
-		items = slices.Append(mem.System, items, ownership.Decision{State: "error", Reason: "build-context-invalid"})
+		items = append(items, ownership.Decision{State: "error", Reason: "build-context-invalid"})
 	}
 	defer ownership.FreeDecisions(mem.System, items)
 	status, removed, preserved, missing, wouldRemove := 0, 0, 0, 0, 0

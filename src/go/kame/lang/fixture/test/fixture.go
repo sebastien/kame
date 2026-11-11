@@ -1,59 +1,59 @@
-package fixture_test
+package fixturecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"os"
+
+	"strings"
 )
 
 func fixtureText(t *testing.T, path string) string {
-	bytes, err := os.ReadFile(t.Allocator(), path)
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %s", path, err.Error())
 		return ""
 	}
-	text := strings.Clone(t.Allocator(), string(bytes))
-	slices.Free(t.Allocator(), bytes)
+	text := strings.Clone(string(bytes))
+	mem.FreeSlice(nil, bytes)
 	return text
 }
 
 func TestRepresentativeFixtures(t *testing.T) {
 	a := t.Allocator()
-	text := fixtureText(t, "../../../tests/data/lang/expr/pipe-chain.km")
+	text := fixtureText(t, "../../../../../../tests/data/lang/expr/pipe-chain.km")
 	e := expr.Parse(a, "pipe-chain.km", text)
 	mem.FreeString(a, text)
 	if len(e.Diagnostics) != 0 {
 		t.Errorf("pipe-chain fixture diagnostics=%d %s", len(e.Diagnostics), e.Diagnostics[0].Message)
 	}
 	e.Free()
-	text = fixtureText(t, "../../../tests/data/lang/template/target/literal-only.km")
+	text = fixtureText(t, "../../../../../../tests/data/lang/template/target/literal-only.km")
 	target := template.ParseTarget(a, "literal-only.km", text)
 	mem.FreeString(a, text)
 	if len(target.Diagnostics) != 0 {
 		t.Error("literal target fixture did not parse")
 	}
 	target.Free()
-	text = fixtureText(t, "../../../tests/data/lang/rule/definition/quoted.km")
+	text = fixtureText(t, "../../../../../../tests/data/lang/rule/definition/quoted.km")
 	s := script.Parse(a, "quoted.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
 		t.Errorf("quoted definition fixture diagnostics=%d %s", len(s.Diagnostics), s.Diagnostics[0].Message)
 	}
 	s.Free()
-	text = fixtureText(t, "../../../tests/data/lang/rule/rules/inputs.km")
+	text = fixtureText(t, "../../../../../../tests/data/lang/rule/rules/inputs.km")
 	s = script.Parse(a, "inputs.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
 		t.Errorf("rule input fixture diagnostics=%d %s", len(s.Diagnostics), s.Diagnostics[0].Message)
 	}
 	s.Free()
-	text = fixtureText(t, "../../../tests/data/lang/script/default-task.km")
+	text = fixtureText(t, "../../../../../../tests/data/lang/script/default-task.km")
 	s = script.Parse(a, "default-task.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
@@ -63,18 +63,18 @@ func TestRepresentativeFixtures(t *testing.T) {
 }
 
 func TestInvalidFixture(t *testing.T) {
-	entries, err := os.ReadDir(t.Allocator(), "../../../tests/data/lang/invalid")
+	entries, err := os.ReadDir("../../../../../../tests/data/lang/invalid")
 	if err != nil {
 		t.Fatalf("ReadDir(invalid): %s", err.Error())
 		return
 	}
-	defer os.FreeDirEntry(t.Allocator(), entries)
+
 	for i := range entries {
-		name := entries[i].Name
+		name := entries[i].Name()
 		if !strings.HasSuffix(name, ".km") {
 			continue
 		}
-		path := "../../../tests/data/lang/invalid/" + name
+		path := "../../../../../../tests/data/lang/invalid/" + name
 		text := fixtureText(t, path)
 		count := 0
 		diagnostic := source.Diagnostic{}
@@ -139,11 +139,11 @@ const (
 )
 
 func TestValidFixtureTree(t *testing.T) {
-	checkFixtureDirectory(t, "../../../tests/data/lang/expr", fixtureExpr)
-	checkFixtureDirectory(t, "../../../tests/data/lang/template/string", fixtureString)
-	checkFixtureDirectory(t, "../../../tests/data/lang/template/target", fixtureTarget)
-	checkFixtureDirectory(t, "../../../tests/data/lang/rule", fixtureScript)
-	checkFixtureDirectory(t, "../../../tests/data/lang/script", fixtureScript)
+	checkFixtureDirectory(t, "../../../../../../tests/data/lang/expr", fixtureExpr)
+	checkFixtureDirectory(t, "../../../../../../tests/data/lang/template/string", fixtureString)
+	checkFixtureDirectory(t, "../../../../../../tests/data/lang/template/target", fixtureTarget)
+	checkFixtureDirectory(t, "../../../../../../tests/data/lang/rule", fixtureScript)
+	checkFixtureDirectory(t, "../../../../../../tests/data/lang/script", fixtureScript)
 }
 
 func TestFormatIdempotence(t *testing.T) {
@@ -184,43 +184,43 @@ func TestFormatIdempotence(t *testing.T) {
 }
 
 func checkFixtureDirectory(t *testing.T, path string, kind int) {
-	entries, err := os.ReadDir(t.Allocator(), path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		t.Fatalf("ReadDir(%s): %s", path, err.Error())
 		return
 	}
-	defer os.FreeDirEntry(t.Allocator(), entries)
+
 	for i := range entries {
 		entry := entries[i]
-		name := path + "/" + entry.Name
-		if entry.IsDir {
+		name := path + "/" + entry.Name()
+		if entry.IsDir() {
 			checkFixtureDirectory(t, name, kind)
 			continue
 		}
-		if !strings.HasSuffix(entry.Name, ".km") {
+		if !strings.HasSuffix(entry.Name(), ".km") {
 			continue
 		}
 		text := fixtureText(t, name)
 		if kind == fixtureExpr {
-			parsed := expr.Parse(t.Allocator(), entry.Name, text)
+			parsed := expr.Parse(t.Allocator(), entry.Name(), text)
 			if len(parsed.Diagnostics) != 0 {
 				t.Errorf("%s: expression diagnostics=%d %s", name, len(parsed.Diagnostics), parsed.Diagnostics[0].Message)
 			}
 			parsed.Free()
 		} else if kind == fixtureString {
-			parsed := template.ParseString(t.Allocator(), entry.Name, text)
+			parsed := template.ParseString(t.Allocator(), entry.Name(), text)
 			if len(parsed.Diagnostics) != 0 {
 				t.Errorf("%s: template diagnostics=%d", name, len(parsed.Diagnostics))
 			}
 			parsed.Free()
 		} else if kind == fixtureTarget {
-			parsed := template.ParseTarget(t.Allocator(), entry.Name, text)
+			parsed := template.ParseTarget(t.Allocator(), entry.Name(), text)
 			if len(parsed.Diagnostics) != 0 {
 				t.Errorf("%s: target diagnostics=%d", name, len(parsed.Diagnostics))
 			}
 			parsed.Free()
 		} else {
-			parsed := script.Parse(t.Allocator(), entry.Name, text)
+			parsed := script.Parse(t.Allocator(), entry.Name(), text)
 			if len(parsed.Diagnostics) != 0 {
 				t.Errorf("%s: script diagnostics=%d", name, len(parsed.Diagnostics))
 			}

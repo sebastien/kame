@@ -3,11 +3,10 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) Evaluate(run mem.Allocator, expression *expr.Expr, scope *Scope) Result {
@@ -20,7 +19,7 @@ func (p *Program) Evaluate(run mem.Allocator, expression *expr.Expr, scope *Scop
 // Validate public roots once; recursive evaluation consumes trusted children.
 func validateValueExpression(a mem.Allocator, expression *expr.Expr) Result {
 	diagnostics := script.ValidateValueExpression(a, expression)
-	defer slices.Free(a, diagnostics)
+	defer mem.FreeSlice(nil, diagnostics)
 	if len(diagnostics) == 0 {
 		return Result{}
 	}
@@ -112,7 +111,7 @@ func attachSource(result *Result, context *Context) {
 				if result.Diagnostic.Owned {
 					frame.Kind, frame.Label, frame.Source = owned(context.Run, frame.Kind), owned(context.Run, frame.Label), owned(context.Run, frame.Source)
 				}
-				result.Diagnostic.Frames = slices.Append(context.Run, result.Diagnostic.Frames, frame)
+				result.Diagnostic.Frames = append(result.Diagnostic.Frames, frame)
 			}
 		}
 		result.Diagnostic.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}

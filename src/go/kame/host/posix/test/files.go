@@ -1,12 +1,12 @@
-package posix_test
+package posixcheck
 
 import (
 	"kame/core"
 	"kame/host/posix"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
-	"solod.dev/so/time"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"os"
+	"time"
 )
 
 func TestWatchRejectsEmptyNames(t *testing.T) {
@@ -27,8 +27,8 @@ func TestWatchRejectsEmptyNames(t *testing.T) {
 }
 
 func TestAtomicWriteIgnoresPredictableStagingSymlink(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "", "kame-atomic-")
+
+	directory, err := os.MkdirTemp("", "kame-atomic-")
 	if err != nil {
 		t.Fatal("create test directory")
 		return
@@ -46,12 +46,12 @@ func TestAtomicWriteIgnoresPredictableStagingSymlink(t *testing.T) {
 		t.Fatal("atomic write failed")
 		return
 	}
-	data, readErr := os.ReadFile(mem.System, victim)
+	data, readErr := os.ReadFile(victim)
 	if readErr != nil || string(data) != "untouched" {
 		t.Error("staging symlink victim was modified")
 	}
 	mem.FreeSlice(mem.System, data)
-	data, readErr = os.ReadFile(mem.System, output)
+	data, readErr = os.ReadFile(output)
 	if readErr != nil || string(data) != "new output" {
 		t.Error("wrong atomic output")
 	}
@@ -93,8 +93,8 @@ func TestPosixHostServesMemoryResourceURIs(t *testing.T) {
 }
 
 func TestPosixHostMapsFileResourceURIs(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "", "kame-file-uri-")
+
+	directory, err := os.MkdirTemp("", "kame-file-uri-")
 	if err != nil {
 		t.Fatal("create URI test directory")
 		return
@@ -119,7 +119,7 @@ func TestPosixHostMapsFileResourceURIs(t *testing.T) {
 		t.Error("file URI did not map to its absolute path")
 	}
 	mem.FreeSlice(t.Allocator(), data)
-	data, readErr = os.ReadFile(t.Allocator(), directory+"/entry%2F#? é")
+	data, readErr = os.ReadFile(directory + "/entry%2F#? é")
 	if readErr != nil || string(data) != "uri" {
 		t.Error("file URI write did not preserve the decoded filename")
 	}
@@ -173,8 +173,8 @@ func TestPosixHostRejectsInvalidFileResourceURIs(t *testing.T) {
 }
 
 func TestAtomicWriteCleansFailedRenameAndDurableWrite(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "", "kame-atomic-")
+
+	directory, err := os.MkdirTemp("", "kame-atomic-")
 	if err != nil {
 		t.Fatal("create test directory")
 		return
@@ -185,42 +185,42 @@ func TestAtomicWriteCleansFailedRenameAndDurableWrite(t *testing.T) {
 	if h.WriteFileAtomic(directory, []byte("cannot replace directory"), 0o600, false) == nil {
 		t.Error("rename onto directory succeeded")
 	}
-	entries, readErr := os.ReadDir(mem.System, directory)
+	entries, readErr := os.ReadDir(directory)
 	if readErr != nil || len(entries) != 0 {
 		t.Error("failed write left a temporary")
 	}
-	os.FreeDirEntry(mem.System, entries)
+
 	output := directory + "/cache"
 	if h.WriteFileAtomic(output, []byte("record"), 0o600, true) != nil {
 		t.Fatal("durable write failed")
 		return
 	}
-	data, readErr := os.ReadFile(mem.System, output)
+	data, readErr := os.ReadFile(output)
 	if readErr != nil || string(data) != "record" {
 		t.Error("wrong durable output")
 	}
 	mem.FreeSlice(mem.System, data)
-	entries, readErr = os.ReadDir(mem.System, directory)
+	entries, readErr = os.ReadDir(directory)
 	if readErr != nil || len(entries) != 1 {
 		t.Error("successful write left a temporary")
 	}
-	os.FreeDirEntry(mem.System, entries)
+
 }
 
 func removeAtomicTestDirectory(directory string) {
-	entries, err := os.ReadDir(mem.System, directory)
+	entries, err := os.ReadDir(directory)
 	if err == nil {
 		for i := range entries {
-			os.Remove(directory + "/" + entries[i].Name)
+			os.Remove(directory + "/" + entries[i].Name())
 		}
-		os.FreeDirEntry(mem.System, entries)
+
 	}
 	os.Remove(directory)
 }
 
 func TestStatPreservesSubsecondModificationTimes(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "", "kame-stat-")
+
+	directory, err := os.MkdirTemp("", "kame-stat-")
 	if err != nil {
 		t.Fatal("create test directory")
 		return

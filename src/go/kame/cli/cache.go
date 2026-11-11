@@ -1,10 +1,5 @@
 package cli
 
-import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-)
-
 func parseCache(inv *Invocation, args []string) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -24,7 +19,7 @@ func parseCache(inv *Invocation, args []string) {
 				inv.fail("OPT_CONFLICT", "cache accepts one action")
 				return
 			}
-			inv.Args = slices.Append(mem.System, inv.Args, arg)
+			inv.Args = append(inv.Args, arg)
 			continue
 		}
 		if arg == "-C" || arg == "--directory" {

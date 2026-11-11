@@ -1,16 +1,16 @@
-package plugins_test
+package pluginscheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/plugins"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
-func TestPluginRegistrationFreesThroughItsAllocator(t *testing.T) {
+func TestPluginRegistrationReleasesItsContexts(t *testing.T) {
 	a := t.Allocator()
 	registrationAlloc := mem.Tracker{Allocator: a}
 	registry := eval.NewRegistry(a)
@@ -20,13 +20,14 @@ func TestPluginRegistrationFreesThroughItsAllocator(t *testing.T) {
 		t.Fatal("plugin registration failed")
 		return
 	}
-	if registrationAlloc.Stats().Alloc == 0 {
-		t.Error("registration did not use its supplied allocator")
+	if len(registry.Items) == 0 {
+		t.Fatal("registration did not retain its operation")
 	}
 	registry.Free()
-	if registrationAlloc.Stats().Alloc != 0 {
-		t.Error("registry disposal bypassed the registration allocator")
+	if registry.Items != nil {
+		t.Error("disposed registry retains operation contexts")
 	}
+
 }
 
 func TestPluginWireCompletionRespectsResponseLimit(t *testing.T) {

@@ -1,10 +1,10 @@
-package posix_test
+package posixcheck
 
 import (
 	"kame/host/posix"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"os"
 )
 
 func TestToolWindowsPathPolicy(t *testing.T) {
@@ -96,8 +96,8 @@ func removeToolTestDirectory(directory string) {
 }
 
 func TestToolResolutionPlatformPolicyAndLinuxFiles(t *testing.T) {
-	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "", "kame-tools-")
+
+	directory, err := os.MkdirTemp("", "kame-tools-")
 	if err != nil {
 		t.Fatal("create tool directory")
 		return

@@ -1,13 +1,13 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 type recordLoopTestState struct {
@@ -43,7 +43,7 @@ func recordLoopCheck(c *eval.Context, state any, args []core.Value) eval.Result 
 	if len(nodes) > s.MaximumNodes {
 		s.MaximumNodes = len(nodes)
 	}
-	slices.Free(s.Program.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	return eval.Result{}
 }
 
@@ -55,12 +55,12 @@ func TestKashFileRecordLoopsRetireCompletedScopeAndOperationHistory(t *testing.T
 	registry.Add(eval.Operation{Name: "record-source", Context: &state, Call: recordLoopSource, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "record-check", Context: &state, Call: recordLoopCheck, MinArity: 1, MaxArity: 1})
 	memory := wasm.NewMemoryHost(a)
-	data := slices.Make[byte](a, 512*6)
+	data := make([]byte, 512*6)
 	for i := 0; i < 512; i++ {
 		copy(data[i*6:], []byte("value\n"))
 	}
 	memory.SetFile("items", data)
-	slices.Free(a, data)
+	mem.FreeSlice(nil, data)
 	fragments := []program.Fragment{{Name: "records.kash", Lang: "kash", Text: "for line from (record-source) :lines\n\twith\n\t\tlet local = line\n\t\tdefer (record-check local)\n\t\tcontinue\n"}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
 	if compiled.Session == nil {

@@ -120,7 +120,7 @@ node --input-type=module - <<'NODE'
 import { readFile } from 'node:fs/promises';
 
 const bytes = await readFile(process.env.KAME_WASM);
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports } = instance;
 const handle = exports.kame_wasm_instance_create();
 if (handle === 0n || exports.kame_wasm_instance_free(handle) !== 0 || exports.kame_wasm_instance_free(handle) !== 1) {

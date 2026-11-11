@@ -1,14 +1,30 @@
 package program
 
 import (
+	"encoding/hex"
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/encoding/hex"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"path"
+
+	"strings"
 )
+
+func (p *Program) isSourcePath(name string) bool {
+	for i := range p.Eval.SourceParts {
+		part := p.Eval.SourceParts[i]
+		if part.Signature.Mode != core.SignatureContent || part.Directory == "" {
+			continue
+		}
+		filename := path.Join(part.Directory, path.Base(part.Name))
+		matches := filename == name
+		mem.FreeString(p.Alloc, filename)
+		if matches {
+			return true
+		}
+	}
+	return false
+}
 
 func (p *Program) fileCompletion(request host.Request, op string, name string) core.Completion {
 	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID}
@@ -149,17 +165,17 @@ func (p *Program) wildcard(pattern string) core.Completion {
 		for i := range names {
 			mem.FreeString(p.Alloc, names[i])
 		}
-		slices.Free(p.Alloc, names)
+		mem.FreeSlice(nil, names)
 		return core.Completion{Diagnostic: failure(p.Alloc, "FS_ERR", "cannot traverse wildcard path")}
 	}
 	var values []core.Value
 	for i := range names {
 		relative := p.relativePath(names[i])
-		values = slices.Append(p.Alloc, values, core.NewString(p.Alloc, relative))
+		values = append(values, core.NewString(p.Alloc, relative))
 		mem.FreeString(p.Alloc, relative)
 		mem.FreeString(p.Alloc, names[i])
 	}
-	slices.Free(p.Alloc, names)
+	mem.FreeSlice(nil, names)
 	for i := 1; i < len(values); i++ {
 		for j := i; j > 0 && values[j].Text < values[j-1].Text; j-- {
 			values[j], values[j-1] = values[j-1], values[j]
@@ -179,7 +195,7 @@ func (p *Program) wildcard(pattern string) core.Completion {
 	for i := range values {
 		values[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, values)
+	mem.FreeSlice(nil, values)
 	return core.Completion{Value: result, HasValue: true}
 }
 
@@ -199,7 +215,7 @@ func (p *Program) relativePath(name string) string {
 
 func joinFilesystemPath(a mem.Allocator, directory string, child string) string {
 	if !core.IsResourceURIName(directory) {
-		return path.Join(a, directory, child)
+		return path.Join(directory, child)
 	}
 	if strings.HasPrefix(directory, "file://") {
 		// POSIX directory entries are decoded names. Join in path space, then
@@ -210,7 +226,7 @@ func joinFilesystemPath(a mem.Allocator, directory string, child string) string 
 		}
 		parsed := core.ParseResourceURI(a, name)
 		if parsed.Error == "" {
-			joined := path.Join(a, parsed.URI.Path, child)
+			joined := path.Join(parsed.URI.Path, child)
 			mem.FreeString(a, parsed.URI.Path)
 			parsed.URI.Path = joined
 			result := parsed.URI.Canonical(a)
@@ -227,27 +243,27 @@ func joinFilesystemPath(a mem.Allocator, directory string, child string) string 
 		}
 	}
 	if pathStart < 0 {
-		return path.Join(a, directory, child)
+		return path.Join(directory, child)
 	}
 	for pathStart < len(directory) && directory[pathStart] != '/' {
 		pathStart++
 	}
 	if pathStart == len(directory) {
-		b := strings.NewBuilder(a)
+		b := strings.Builder{}
 		b.WriteString(directory)
 		b.WriteByte('/')
 		b.WriteString(child)
 		result := cloneText(a, b.String())
-		b.Free()
+		b.Reset()
 		return result
 	}
-	joined := path.Join(a, directory[pathStart:], child)
+	joined := path.Join(directory[pathStart:], child)
 	defer mem.FreeString(a, joined)
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	b.WriteString(directory[:pathStart])
 	b.WriteString(joined)
 	result := cloneText(a, b.String())
-	b.Free()
+	b.Reset()
 	return result
 }
 
@@ -283,7 +299,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		if info.Failed {
 			*failed = true
 		} else if info.Exists {
-			*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, directory))
+			*names = append(*names, cloneText(p.Alloc, directory))
 		}
 		return
 	}
@@ -314,7 +330,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 			}
 			mem.FreeString(p.Alloc, name)
 		}
-		slices.Free(p.Alloc, entries)
+		mem.FreeSlice(nil, entries)
 		return
 	}
 	meta := false
@@ -340,7 +356,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 			return
 		}
 		if end == len(pattern) {
-			*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
+			*names = append(*names, cloneText(p.Alloc, name))
 		} else if info.Info.IsDir {
 			p.collectGlob(pattern, next, name, names, failed)
 		}
@@ -358,14 +374,14 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		matched, matchErr := path.Match(segment, path.Base(name))
 		if matchErr == nil && matched {
 			if end == len(pattern) {
-				*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
+				*names = append(*names, cloneText(p.Alloc, name))
 			} else if entries[i].IsDir {
 				p.collectGlob(pattern, next, name, names, failed)
 			}
 		}
 		mem.FreeString(p.Alloc, name)
 	}
-	slices.Free(p.Alloc, entries)
+	mem.FreeSlice(nil, entries)
 }
 
 func (p *Program) globDirectoryFailed(directory string) bool {
@@ -382,11 +398,11 @@ func (p *Program) collectDescendants(directory string, names *[]string, failed *
 		*failed = *failed || p.globDirectoryFailed(directory)
 		return
 	}
-	defer slices.Free(p.Alloc, entries)
+	defer mem.FreeSlice(nil, entries)
 	for i := range entries {
 		name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 		mem.FreeString(p.Alloc, entries[i].Name)
-		*names = slices.Append(p.Alloc, *names, name)
+		*names = append(*names, name)
 		if entries[i].IsDir {
 			p.collectDescendants(name, names, failed)
 		}

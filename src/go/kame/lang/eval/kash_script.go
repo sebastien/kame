@@ -4,11 +4,11 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // KashConstructor is a pure, invocation-owned script constructor.
@@ -20,7 +20,7 @@ func (p *Program) KashConstructor() core.Value {
 	}
 	f := mem.Alloc[Function](p.Alloc)
 	f.Kind, f.Owner, f.KashConstructor = FunctionInvocation, p, true
-	p.KashFunctions = slices.Append(p.Alloc, p.KashFunctions, f)
+	p.KashFunctions = append(p.KashFunctions, f)
 	return kashFunctionValue(p, f)
 }
 
@@ -97,7 +97,7 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 		digest.Sum(f.KashSignature.Digest[:])
 	}
 	f.Scope.Retain()
-	p.KashFunctions = slices.Append(p.Alloc, p.KashFunctions, f)
+	p.KashFunctions = append(p.KashFunctions, f)
 	if c.Engine != nil {
 		state := mem.Alloc[kashConstruction](p.Alloc)
 		state.Function = f
@@ -118,7 +118,7 @@ func (p *Program) freeKashFunctions() {
 	for i := range p.KashFunctions {
 		mem.Free(p.Alloc, p.KashFunctions[i])
 	}
-	slices.Free(p.Alloc, p.KashFunctions)
+	mem.FreeSlice(nil, p.KashFunctions)
 }
 
 type kashInvocation struct {
@@ -156,7 +156,7 @@ func freeKashInvocation(a mem.Allocator, value any) {
 		state.Parsed.Free()
 	}
 	if state.Native {
-		slices.Free(a, state.Items)
+		mem.FreeSlice(nil, state.Items)
 	}
 	freeCallables(a, &state.Value)
 	state.Value.Free(a)
@@ -164,7 +164,7 @@ func freeKashInvocation(a mem.Allocator, value any) {
 	for i := range state.WritePaths {
 		mem.FreeString(a, state.WritePaths[i])
 	}
-	slices.Free(a, state.WritePaths)
+	mem.FreeSlice(nil, state.WritePaths)
 	mem.Free(a, state)
 }
 
@@ -246,7 +246,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 				if e.Kind == expr.CommandGraph || e.Kind == expr.CommandList || e.Kind == expr.KashReturn || expr.IsKashControl(e.Kind) {
 					kind = script.Command
 				}
-				state.Items = slices.Append(p.Alloc, state.Items, script.ScriptItem{Kind: kind, Expression: e, Span: e.Span})
+				state.Items = append(state.Items, script.ScriptItem{Kind: kind, Expression: e, Span: e.Span})
 			}
 		} else {
 			state.Items = parsed.Items
@@ -308,10 +308,10 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
+		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 	}
 	for i := range state.WritePaths {
-		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
+		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
 	if !state.Finishing {
 		r := p.advanceKashBody(state, c)
@@ -350,9 +350,9 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	if state.Primary.Code != "" {
 		primary := state.Primary.Clone(c.Run)
 		if r.Diagnostic.Code != "" {
-			primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
+			primary.Notes = append(primary.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
 			for i := range r.Diagnostic.Notes {
-				primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, r.Diagnostic.Notes[i]))
+				primary.Notes = append(primary.Notes, owned(c.Run, r.Diagnostic.Notes[i]))
 			}
 		}
 		r.Free(c.Run)
@@ -429,11 +429,11 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 func (p *Program) retainKashEffects(state *kashInvocation, c *Context, before int, beforePaths int) {
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		effect.Data = slices.Clone(p.Alloc, effect.Data)
-		state.Effects = slices.Append(p.Alloc, state.Effects, effect)
+		effect.Data = slices.Clone(effect.Data)
+		state.Effects = append(state.Effects, effect)
 	}
 	for i := beforePaths; i < len(c.WritePaths); i++ {
-		state.WritePaths = slices.Append(p.Alloc, state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
+		state.WritePaths = append(state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
 	}
 }
 

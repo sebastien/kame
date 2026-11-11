@@ -1,9 +1,9 @@
 package cli
 
 import (
+	"io"
+	json "kame/internal/jsonstream"
 	"kame/lang/eval"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
 )
 
 // WriteJSON serializes a parsed Invocation as the schema-1 object the

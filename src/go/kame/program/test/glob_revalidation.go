@@ -1,22 +1,21 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 func globObservation(a mem.Allocator, names []string) core.Value {
 	value := core.Value{Kind: core.List}
 	for i := range names {
-		value.List = slices.Append(a, value.List, core.NewString(a, names[i]))
+		value.List = append(value.List, core.NewString(a, names[i]))
 	}
 	return value
 }

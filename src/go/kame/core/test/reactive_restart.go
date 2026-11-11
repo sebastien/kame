@@ -1,9 +1,9 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 type rebindingConsumer struct {

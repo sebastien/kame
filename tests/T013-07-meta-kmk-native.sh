@@ -11,21 +11,14 @@ work="$TMPDIR/project"
 mkdir -p "$work/bin" "$work/src/go/kame" "$work/src/sh"
 sed -n '/^SHELL =/,/^# --- Source sets/p; /^# --- Native binaries/,/^# --- WebAssembly/p' \
 	"$CLI_ROOT/Makefile.kmk" | sed 's/@{KAME_INPUTS}/.\/seed/g' >"$work/Makefile.kmk"
-# Toolchain provisioning is tested separately; this fixture stubs the compiler.
-printf '\ntoolchain :\n' >>"$work/Makefile.kmk"
 printf seed >"$work/seed"
 printf unused >"$work/src/sh/platform_id.py"
-cat >"$work/src/sh/provision-cosmocc.sh" <<'SH'
-#!/bin/sh
-mkdir -p "$1/bin"
-touch "$1/bin/cosmocc"
-chmod +x "$1/bin/cosmocc"
-SH
-cat >"$work/bin/so" <<'SH'
+cat >"$work/bin/go" <<'SH'
 #!/bin/sh
 set -eu
+arguments="$*"
 while [ "$1" != -o ]; do shift; done
-printf '%s|%s\n' "${CC-<unset>}" "$CFLAGS" >"$2"
+printf '%s|%s\n' "${CGO_ENABLED-<unset>}" "$arguments" >"$2"
 SH
 cat >"$work/bin/python3" <<'SH'
 #!/bin/sh
@@ -37,7 +30,7 @@ cat >"$work/bin/cp" <<'SH'
 printf x >> copy-runs
 exec /bin/cp "$@"
 SH
-chmod +x "$work/bin/so" "$work/bin/python3" "$work/bin/cp" "$work/src/sh/provision-cosmocc.sh"
+chmod +x "$work/bin/go" "$work/bin/python3" "$work/bin/cp"
 export PATH="$work/bin:$PATH"
 unset CC KAME_CC KAME_CFLAGS KAME_PLATFORM KAME_KAME_PLATFORM
 run() {
@@ -47,26 +40,13 @@ run() {
 		exit 1
 	fi
 }
-expect_compiler() {
-	if [ "$(cut -d '|' -f 1 "$work/$1")" = "$2" ]; then test-ok "$1 compiler: $2"; else test-fail "$1 compiler: $(cat "$work/$1")"; fi
-}
-
-test-step "debug and release honor configuration without blanking inherited CC"
-for target in build/kame.debug dist/kame; do
-	run --force "./$target"
-	expect_compiler "$target" '<unset>'
-	CC=raw KAME_CC=alias run --force "./$target"
-	expect_compiler "$target" alias
-	CC=raw KAME_CC=alias run --force "./$target" 'CC=assignment compiler'
-	expect_compiler "$target" 'assignment compiler'
-	CC=raw KAME_CC=alias run --force "./$target" CC=
-	expect_compiler "$target" raw
+test-step "native recipes disable cgo and select Go artifact modes"
+for pair in build/kame.debug:debug dist/kame:release build/kame.sanitize:sanitize; do
+	target=${pair%:*}; mode=${pair#*:}
+	CC=invalid run --force "./$target"
+	if [ "$(cut -d '|' -f 1 "$work/$target")" = 0 ] && grep -q "main.artifactMode=$mode" "$work/$target"; then test-ok "$target uses Go with cgo disabled"; else test-fail "$target build arguments: $(cat "$work/$target")"; fi
 done
-test-step "sanitizer and APE compilers remain pinned"
-CC=raw KAME_CC=alias run --force ./build/kame.sanitize CC=assignment
-expect_compiler build/kame.sanitize clang
-CC=raw KAME_CC=alias run --force ./dist/kame.com CC=assignment
-expect_compiler dist/kame.com "$work/build/tools/cosmocc-4.0.2/bin/cosmocc"
+if grep -q -- '-d=checkptr=2' "$work/build/kame.sanitize"; then test-ok "sanitizer artifact enables Go pointer checks"; else test-fail "sanitizer flags missing"; fi
 
 test-step "planning and dry-run never execute platform detection or copies"
 for command in plan inputs; do
@@ -82,10 +62,11 @@ if [ "$(cat "$work/copy-runs")" = x ] && [ -x "$work/dist/native/test-host/kame"
 printf changed >"$work/seed"
 run dist-native
 if [ "$(cat "$work/copy-runs")" = x ]; then test-ok "byte-identical rebuilt release does not recopy"; else test-fail "identical release recopied"; fi
-run dist-native CC=changed
+sed -i 's/main.artifactMode=release/main.artifactMode=changed/' "$work/Makefile.kmk"
+run dist-native
 if [ "$(cat "$work/copy-runs")" = xx ] && cmp -s "$work/dist/kame" "$work/dist/native/test-host/kame"; then test-ok "changed release refreshes host copy"; else test-fail "changed release did not refresh copy"; fi
 rm "$work/dist/native/test-host/kame"
-run dist-native CC=changed
+run dist-native
 if [ "$(cat "$work/copy-runs")" = xxx ]; then test-ok "missing copy is rebuilt"; else test-fail "missing copy was not rebuilt"; fi
 
 test-step "automatic clean recognizes the dynamically requested platform output"

@@ -4,10 +4,10 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 type Result struct {
@@ -216,7 +216,7 @@ func (p *Program) Start(target string) HandleStart {
 				p.Engine.Invalidate(resource)
 			}
 		}
-		slices.Free(p.Alloc, nodes)
+		mem.FreeSlice(nil, nodes)
 	}
 	if index >= 0 {
 		if !p.claimEnvironment(index, p.Options.Environment) {
@@ -247,7 +247,7 @@ func (p *Program) invalidateStaleBareTasks(root int, epoch int64) {
 	for i := len(closure) - 1; i >= 0; i-- {
 		p.claimStaleTask(p.Instances[closure[i]].Node, epoch)
 	}
-	slices.Free(p.Alloc, closure)
+	mem.FreeSlice(nil, closure)
 }
 
 func taskTerminal(state core.NodeState) bool {
@@ -285,7 +285,7 @@ func (p *Program) claimStaleTask(node *core.Node, epoch int64) {
 
 func (p *Program) taskClosure(root int) []int {
 	var seen []int
-	seen = slices.Append(p.Alloc, seen, root)
+	seen = append(seen, root)
 	i := 0
 	for i < len(seen) {
 		p.appendTaskClosure(seen[i], &seen)
@@ -305,7 +305,7 @@ func (p *Program) appendTaskClosure(index int, seen *[]int) {
 	for n := range inputs {
 		dep := p.instanceByTarget(inputs[n])
 		if dep >= 0 && !slices.Contains(*seen, dep) {
-			*seen = slices.Append(p.Alloc, *seen, dep)
+			*seen = append(*seen, dep)
 		}
 	}
 	node := p.Instances[index].Node
@@ -315,13 +315,13 @@ func (p *Program) appendTaskClosure(index int, seen *[]int) {
 	for n := range node.Dynamic {
 		dep := p.instanceIndex(node.Dynamic[n])
 		if dep >= 0 && !slices.Contains(*seen, dep) {
-			*seen = slices.Append(p.Alloc, *seen, dep)
+			*seen = append(*seen, dep)
 		}
 	}
 	for n := range node.Static {
 		dep := p.instanceIndex(node.Static[n])
 		if dep >= 0 && !slices.Contains(*seen, dep) {
-			*seen = slices.Append(p.Alloc, *seen, dep)
+			*seen = append(*seen, dep)
 		}
 	}
 }
@@ -413,7 +413,7 @@ func (p *Program) tick(wait int) {
 			p.workDispatching = false
 		}
 		if p.workIndex >= len(p.workReady) {
-			slices.Free(p.Alloc, p.workReady)
+			mem.FreeSlice(nil, p.workReady)
 			p.workReady = nil
 			p.workPrepared = false
 			p.workIndex = 0
@@ -426,7 +426,7 @@ func (p *Program) tick(wait int) {
 	for i := range ready {
 		p.dispatchWork(ready[i])
 	}
-	slices.Free(p.Alloc, ready)
+	mem.FreeSlice(nil, ready)
 	p.observeInstances()
 	p.advanceProductionValidation()
 }
@@ -558,7 +558,7 @@ func (p *Program) instanceFor(target string) instanceResult {
 		state.Program, state.Index = p, index
 		state.Artifact = cloneText(p.Alloc, name)
 		node = p.Engine.AddOwned(key, produceArtifact, state, freeInstanceState)
-		p.Instances[index].Artifacts = slices.Append(p.Alloc, p.Instances[index].Artifacts, node)
+		p.Instances[index].Artifacts = append(p.Instances[index].Artifacts, node)
 	}
 	mem.FreeString(p.Alloc, name)
 	resolved.Node = node
@@ -619,7 +619,7 @@ func (p *Program) producerFor(target string) instanceResult {
 		plan.Free(p.Alloc)
 		return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")}
 	}
-	p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: plan.Rule, Captures: cloneCaptures(p.Alloc, plan.Captures), Node: node, Plan: plan})
+	p.Instances = append(p.Instances, instance{Rule: plan.Rule, Captures: cloneCaptures(p.Alloc, plan.Captures), Node: node, Plan: plan})
 	node.DisableReuse = plan.Rule.Always || plan.Rule.Kind == rule.TaskRule || p.Options.Force
 	return instanceResult{Node: node}
 }

@@ -1,10 +1,9 @@
 package template
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Document is a lowered document template: Root evaluates to the rendered
@@ -23,7 +22,7 @@ func (d *Document) Free() {
 		return
 	}
 	expr.Free(d.Alloc, d.Root)
-	slices.Free(d.Alloc, d.Diagnostics)
+	mem.FreeSlice(nil, d.Diagnostics)
 	if d.OwnSource {
 		d.Source.Free(d.Alloc)
 	}
@@ -105,7 +104,7 @@ func ParseDocument(a mem.Allocator, name string, text string, style string) *Doc
 		d := mem.Alloc[Document](a)
 		d.Alloc, d.Source, d.OwnSource = a, s, true
 		d.Root = newCat(a, nil, source.Span{Start: 0, End: 0})
-		d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: "unknown comment style"})
+		d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: "unknown comment style"})
 		return d
 	}
 	if norm == "auto" {
@@ -133,7 +132,7 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 		d := mem.Alloc[Document](a)
 		d.Alloc = a
 		d.Root = newCat(a, nil, source.Span{Start: start, End: start})
-		d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "unknown comment style"})
+		d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "unknown comment style"})
 		return d
 	}
 	if norm == "auto" {
@@ -143,7 +142,7 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 			d := mem.Alloc[Document](a)
 			d.Alloc = a
 			d.Root = newCat(a, nil, source.Span{Start: start, End: start})
-			d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "ambiguous template comment style"})
+			d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "ambiguous template comment style"})
 			return d
 		}
 	}
@@ -162,7 +161,7 @@ func styleErrorDocument(a mem.Allocator, name string, text string, message strin
 	d := mem.Alloc[Document](a)
 	d.Alloc, d.Source, d.OwnSource = a, s, true
 	d.Root = newCat(a, nil, source.Span{Start: 0, End: 0})
-	d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: message})
+	d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: message})
 	return d
 }
 
@@ -213,7 +212,7 @@ func HasDocumentDirectivesRange(a mem.Allocator, s *source.Source, start int, en
 		}
 		pos = lineEnd + 1
 	}
-	slices.Free(a, p.diags)
+	mem.FreeSlice(nil, p.diags)
 	return found
 }
 
@@ -233,7 +232,7 @@ func (p *docParser) diag(code string, span source.Span, msg string) {
 	if span.Start > span.End {
 		span.Start = span.End
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: code, Severity: source.Error, Span: span, Message: msg})
+	p.diags = append(p.diags, source.Diagnostic{Code: code, Severity: source.Error, Span: span, Message: msg})
 }
 
 func (p *docParser) parseRange(start int, end int) *expr.Expr {
@@ -243,7 +242,7 @@ func (p *docParser) parseRange(start int, end int) *expr.Expr {
 		p.diag("TPL_BLOCK", out.TermSpan, "stray template directive")
 		freeArgs(p.a, out.TermArgs)
 	} else {
-		slices.Free(p.a, out.TermArgs)
+		mem.FreeSlice(nil, out.TermArgs)
 	}
 	root := newCat(p.a, items, source.Span{Start: start, End: end})
 	return root
@@ -302,8 +301,8 @@ func wrapTemplateTrim(a mem.Allocator, value *expr.Expr, trimStart bool) *expr.E
 	} else {
 		head.Text = "template-trim-end"
 	}
-	call.Items = slices.Append(a, call.Items, head)
-	call.Items = slices.Append(a, call.Items, value)
+	call.Items = append(call.Items, head)
+	call.Items = append(call.Items, value)
 	return call
 }
 
@@ -314,18 +313,18 @@ func wrapTemplateTrimTail(a mem.Allocator, items []*expr.Expr, from int) []*expr
 	span := source.Span{Start: items[from].Span.Start, End: items[len(items)-1].Span.End}
 	var tail []*expr.Expr
 	for i := from; i < len(items); i++ {
-		tail = slices.Append(a, tail, items[i])
+		tail = append(tail, items[i])
 		items[i] = nil
 	}
 	cat := newCat(a, tail, span)
 	trimmed := wrapTemplateTrim(a, cat, true)
 	var prefix []*expr.Expr
 	for i := 0; i < from; i++ {
-		prefix = slices.Append(a, prefix, items[i])
+		prefix = append(prefix, items[i])
 		items[i] = nil
 	}
-	slices.Free(a, items)
-	prefix = slices.Append(a, prefix, trimmed)
+	mem.FreeSlice(nil, items)
+	prefix = append(prefix, trimmed)
 	return prefix
 }
 
@@ -353,7 +352,7 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 				// containing directive-looking text.
 				value := p.inlineExpr(i, end)
 				expr.Free(p.a, value.Expr)
-				slices.Free(p.a, value.Diagnostics)
+				mem.FreeSlice(nil, value.Diagnostics)
 				if !value.Closed {
 					return 0
 				}
@@ -497,9 +496,9 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 				inline := p.inlineFound
 				parts := p.inlineParts(cur, inline.Start, inline.Start)
 				for i := range parts {
-					items = slices.Append(p.a, items, parts[i])
+					items = append(items, parts[i])
 				}
-				slices.Free(p.a, parts)
+				mem.FreeSlice(nil, parts)
 				lineStart, contentEnd, lineEnd, d = inline.Start, inline.End, inline.End, inline.Dir
 			}
 		}
@@ -507,9 +506,9 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			// Body text line: parse inline expansions + preserve ending.
 			parts := p.inlineParts(lineStart, contentEnd, lineEnd)
 			for i := range parts {
-				items = slices.Append(p.a, items, parts[i])
+				items = append(items, parts[i])
 			}
-			slices.Free(p.a, parts)
+			mem.FreeSlice(nil, parts)
 			cur = lineEnd
 			continue
 		}
@@ -518,9 +517,9 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			// continue parsing and surface further errors.
 			parts := p.inlineParts(lineStart, contentEnd, lineEnd)
 			for i := range parts {
-				items = slices.Append(p.a, items, parts[i])
+				items = append(items, parts[i])
 			}
-			slices.Free(p.a, parts)
+			mem.FreeSlice(nil, parts)
 			cur = lineEnd
 			continue
 		}
@@ -535,7 +534,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 				ending = p.s.Text[contentEnd:lineEnd]
 			}
 			combined := "@" + restText + ending
-			items = slices.Append(p.a, items, newStringLit(p.a, combined, source.Span{Start: lineStart, End: lineEnd}))
+			items = append(items, newStringLit(p.a, combined, source.Span{Start: lineStart, End: lineEnd}))
 			cur = lineEnd
 			continue
 		}
@@ -555,12 +554,12 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			restCat := newCat(p.a, rest.Items, source.Span{Start: lineEnd, End: rest.Next})
 			nameExpr := d.Args[0]
 			valExpr := d.Args[1]
-			slices.Free(p.a, d.Args)
+			mem.FreeSlice(nil, d.Args)
 			bind := mem.Alloc[expr.Expr](p.a)
 			bind.Kind = expr.List
 			bind.Span = d.Span
-			bind.Items = slices.Append(p.a, bind.Items, nameExpr)
-			bind.Items = slices.Append(p.a, bind.Items, valExpr)
+			bind.Items = append(bind.Items, nameExpr)
+			bind.Items = append(bind.Items, valExpr)
 			letApp := mem.Alloc[expr.Expr](p.a)
 			letApp.Kind = expr.Application
 			letApp.Span = source.Span{Start: d.Span.Start, End: rest.Next}
@@ -568,10 +567,10 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			head.Kind = expr.Name
 			head.Span = d.Span
 			head.Text = "let"
-			letApp.Items = slices.Append(p.a, letApp.Items, head)
-			letApp.Items = slices.Append(p.a, letApp.Items, bind)
-			letApp.Items = slices.Append(p.a, letApp.Items, restCat)
-			items = slices.Append(p.a, items, letApp)
+			letApp.Items = append(letApp.Items, head)
+			letApp.Items = append(letApp.Items, bind)
+			letApp.Items = append(letApp.Items, restCat)
+			items = append(items, letApp)
 			// @let consumes the remainder; propagate terminator outward.
 			return blockOut{Items: items, Next: rest.Next, Term: rest.Term, TermSpan: rest.TermSpan, TermArgs: rest.TermArgs, TermEnd: rest.TermEnd, TermTrimRight: rest.TermTrimRight, TrimRight: rest.TrimRight}
 		}
@@ -583,19 +582,19 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			head.Kind = expr.Name
 			head.Span = d.Span
 			head.Text = "render"
-			inc.Items = slices.Append(p.a, inc.Items, head)
+			inc.Items = append(inc.Items, head)
 			for i := 1; i < len(d.Args); i++ {
-				inc.Items = slices.Append(p.a, inc.Items, d.Args[i])
+				inc.Items = append(inc.Items, d.Args[i])
 			}
-			inc.Items = slices.Append(p.a, inc.Items, d.Args[0])
-			slices.Free(p.a, d.Args)
-			items = slices.Append(p.a, items, inc)
+			inc.Items = append(inc.Items, d.Args[0])
+			mem.FreeSlice(nil, d.Args)
+			items = append(items, inc)
 			cur = lineEnd
 			continue
 		}
 		if d.Kind == dirIf {
 			r := p.parseIf(d, lineEnd, end)
-			items = slices.Append(p.a, items, r.Expr)
+			items = append(items, r.Expr)
 			cur = r.Next
 			if r.TrimRight && trimStartAt < 0 {
 				trimStartAt = len(items)
@@ -604,7 +603,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 		}
 		if d.Kind == dirFor {
 			r := p.parseFor(d, lineEnd, end)
-			items = slices.Append(p.a, items, r.Expr)
+			items = append(items, r.Expr)
 			cur = r.Next
 			if r.TrimRight && trimStartAt < 0 {
 				trimStartAt = len(items)
@@ -613,7 +612,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 		}
 		if d.Kind == dirWith {
 			r := p.parseWith(d, lineEnd, end)
-			items = slices.Append(p.a, items, r.Expr)
+			items = append(items, r.Expr)
 			cur = r.Next
 			if r.TrimRight && trimStartAt < 0 {
 				trimStartAt = len(items)
@@ -622,7 +621,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 		}
 		if d.Kind == dirRaw {
 			r := p.parseRaw(d, lineEnd, end)
-			items = slices.Append(p.a, items, r.Expr)
+			items = append(items, r.Expr)
 			cur = r.Next
 			if r.TrimRight && trimStartAt < 0 {
 				trimStartAt = len(items)
@@ -631,7 +630,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 		}
 		if d.Kind == dirMatch {
 			r := p.parseMatch(d, lineEnd, end)
-			items = slices.Append(p.a, items, r.Expr)
+			items = append(items, r.Expr)
 			cur = r.Next
 			if r.TrimRight && trimStartAt < 0 {
 				trimStartAt = len(items)
@@ -657,10 +656,10 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 	ifHead.Kind = expr.Name
 	ifHead.Span = head.Span
 	ifHead.Text = "if"
-	app.Items = slices.Append(p.a, app.Items, ifHead)
-	app.Items = slices.Append(p.a, app.Items, head.Args[0])
-	app.Items = slices.Append(p.a, app.Items, firstCat)
-	slices.Free(p.a, head.Args)
+	app.Items = append(app.Items, ifHead)
+	app.Items = append(app.Items, head.Args[0])
+	app.Items = append(app.Items, firstCat)
+	mem.FreeSlice(nil, head.Args)
 	curTerm := first.Term
 	curPos := first.Next
 	curEnd := first.TermEnd
@@ -676,9 +675,9 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 		}
 		// curArgs has exactly one condition (validated at parse).
 		cond := curArgs[0]
-		slices.Free(p.a, curArgs)
-		app.Items = slices.Append(p.a, app.Items, cond)
-		app.Items = slices.Append(p.a, app.Items, branchCat)
+		mem.FreeSlice(nil, curArgs)
+		app.Items = append(app.Items, cond)
+		app.Items = append(app.Items, branchCat)
 		app.Span.End = branch.Next
 		curTerm = branch.Term
 		curPos = branch.Next
@@ -694,7 +693,7 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 		if curTrimRight {
 			branchCat = wrapTemplateTrim(p.a, branchCat, true)
 		}
-		app.Items = slices.Append(p.a, app.Items, branchCat)
+		app.Items = append(app.Items, branchCat)
 		app.Span.End = branch.Next
 		curTerm = branch.Term
 		curPos = branch.Next
@@ -740,7 +739,7 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	inner.Kind = expr.Lambda
 	inner.Span = head.Span
 	inner.Parameters = lambdaParams(p.a, head.Args[0])
-	inner.Body = slices.Append(p.a, inner.Body, bodyCat)
+	inner.Body = append(inner.Body, bodyCat)
 	getApp := templateItemField(p.a, "__template_item", "value", head.Span)
 	argsApp := mem.Alloc[expr.Expr](p.a)
 	argsApp.Kind = expr.Application
@@ -749,8 +748,8 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	argsHead.Kind = expr.Name
 	argsHead.Text = "list"
 	argsHead.Span = head.Span
-	argsApp.Items = slices.Append(p.a, argsApp.Items, argsHead)
-	argsApp.Items = slices.Append(p.a, argsApp.Items, getApp)
+	argsApp.Items = append(argsApp.Items, argsHead)
+	argsApp.Items = append(argsApp.Items, getApp)
 	applyApp := mem.Alloc[expr.Expr](p.a)
 	applyApp.Kind = expr.Application
 	applyApp.Span = head.Span
@@ -758,9 +757,9 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	applyHead.Kind = expr.Name
 	applyHead.Text = "template-apply"
 	applyHead.Span = head.Span
-	applyApp.Items = slices.Append(p.a, applyApp.Items, applyHead)
-	applyApp.Items = slices.Append(p.a, applyApp.Items, inner)
-	applyApp.Items = slices.Append(p.a, applyApp.Items, argsApp)
+	applyApp.Items = append(applyApp.Items, applyHead)
+	applyApp.Items = append(applyApp.Items, inner)
+	applyApp.Items = append(applyApp.Items, argsApp)
 	withApp := mem.Alloc[expr.Expr](p.a)
 	withApp.Kind = expr.Application
 	withApp.Span = head.Span
@@ -768,19 +767,19 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	withHead.Kind = expr.Name
 	withHead.Text = "with"
 	withHead.Span = head.Span
-	withApp.Items = slices.Append(p.a, withApp.Items, withHead)
+	withApp.Items = append(withApp.Items, withHead)
 	bindings := mem.Alloc[expr.Expr](p.a)
 	bindings.Kind = expr.Record
 	bindings.Span = head.Span
-	bindings.Fields = slices.Append(p.a, bindings.Fields, expr.Field{Key: "index", Span: head.Span, Value: templateItemField(p.a, "__template_item", "index", head.Span)})
-	bindings.Fields = slices.Append(p.a, bindings.Fields, expr.Field{Key: "key", Span: head.Span, Value: templateItemField(p.a, "__template_item", "key", head.Span)})
-	withApp.Items = slices.Append(p.a, withApp.Items, bindings)
-	withApp.Items = slices.Append(p.a, withApp.Items, applyApp)
+	bindings.Fields = append(bindings.Fields, expr.Field{Key: "index", Span: head.Span, Value: templateItemField(p.a, "__template_item", "index", head.Span)})
+	bindings.Fields = append(bindings.Fields, expr.Field{Key: "key", Span: head.Span, Value: templateItemField(p.a, "__template_item", "key", head.Span)})
+	withApp.Items = append(withApp.Items, bindings)
+	withApp.Items = append(withApp.Items, applyApp)
 	lam := mem.Alloc[expr.Expr](p.a)
 	lam.Kind = expr.Lambda
 	lam.Span = head.Span
-	lam.Parameters = slices.Append(p.a, lam.Parameters, expr.Parameter{Name: "__template_item", Span: head.Span})
-	lam.Body = slices.Append(p.a, lam.Body, withApp)
+	lam.Parameters = append(lam.Parameters, expr.Parameter{Name: "__template_item", Span: head.Span})
+	lam.Body = append(lam.Body, withApp)
 	itemsApp := mem.Alloc[expr.Expr](p.a)
 	itemsApp.Kind = expr.Application
 	itemsApp.Span = head.Span
@@ -788,8 +787,8 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	itemsHead.Kind = expr.Name
 	itemsHead.Text = "template-items"
 	itemsHead.Span = head.Span
-	itemsApp.Items = slices.Append(p.a, itemsApp.Items, itemsHead)
-	itemsApp.Items = slices.Append(p.a, itemsApp.Items, head.Args[1])
+	itemsApp.Items = append(itemsApp.Items, itemsHead)
+	itemsApp.Items = append(itemsApp.Items, head.Args[1])
 	// (map lam xs)
 	mapApp := mem.Alloc[expr.Expr](p.a)
 	mapApp.Kind = expr.Application
@@ -798,9 +797,9 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	mapHead.Kind = expr.Name
 	mapHead.Span = head.Span
 	mapHead.Text = "map"
-	mapApp.Items = slices.Append(p.a, mapApp.Items, mapHead)
-	mapApp.Items = slices.Append(p.a, mapApp.Items, lam)
-	mapApp.Items = slices.Append(p.a, mapApp.Items, itemsApp)
+	mapApp.Items = append(mapApp.Items, mapHead)
+	mapApp.Items = append(mapApp.Items, lam)
+	mapApp.Items = append(mapApp.Items, itemsApp)
 	// (join sep mapApp)
 	joinApp := mem.Alloc[expr.Expr](p.a)
 	joinApp.Kind = expr.Application
@@ -809,15 +808,15 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	joinHead.Kind = expr.Name
 	joinHead.Span = head.Span
 	joinHead.Text = "join"
-	joinApp.Items = slices.Append(p.a, joinApp.Items, joinHead)
+	joinApp.Items = append(joinApp.Items, joinHead)
 	if len(head.Args) == 3 {
-		joinApp.Items = slices.Append(p.a, joinApp.Items, head.Args[2])
+		joinApp.Items = append(joinApp.Items, head.Args[2])
 	} else {
-		joinApp.Items = slices.Append(p.a, joinApp.Items, newStringLit(p.a, "", head.Span))
+		joinApp.Items = append(joinApp.Items, newStringLit(p.a, "", head.Span))
 	}
-	joinApp.Items = slices.Append(p.a, joinApp.Items, mapApp)
+	joinApp.Items = append(joinApp.Items, mapApp)
 	expr.Free(p.a, head.Args[0])
-	slices.Free(p.a, head.Args)
+	mem.FreeSlice(nil, head.Args)
 	joinApp.Span.End = nextPos
 	if head.TrimRight {
 		joinApp = wrapTemplateTrim(p.a, joinApp, true)
@@ -837,9 +836,9 @@ func templateItemField(a mem.Allocator, rowName string, field string, span sourc
 	row.Kind = expr.Name
 	row.Text = rowName
 	row.Span = span
-	app.Items = slices.Append(a, app.Items, head)
-	app.Items = slices.Append(a, app.Items, newStringLit(a, field, span))
-	app.Items = slices.Append(a, app.Items, row)
+	app.Items = append(app.Items, head)
+	app.Items = append(app.Items, newStringLit(a, field, span))
+	app.Items = append(app.Items, row)
 	return app
 }
 
@@ -864,10 +863,10 @@ func (p *docParser) parseWith(head dirOut, bodyPos int, end int) pairRes {
 	headExpr.Kind = expr.Name
 	headExpr.Span = head.Span
 	headExpr.Text = "with"
-	app.Items = slices.Append(p.a, app.Items, headExpr)
-	app.Items = slices.Append(p.a, app.Items, head.Args[0])
-	app.Items = slices.Append(p.a, app.Items, bodyCat)
-	slices.Free(p.a, head.Args)
+	app.Items = append(app.Items, headExpr)
+	app.Items = append(app.Items, head.Args[0])
+	app.Items = append(app.Items, bodyCat)
+	mem.FreeSlice(nil, head.Args)
 	if head.TrimRight {
 		app = wrapTemplateTrim(p.a, app, true)
 	}
@@ -882,9 +881,9 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 	matchHead.Kind = expr.Name
 	matchHead.Text = "match"
 	matchHead.Span = head.Span
-	app.Items = slices.Append(p.a, app.Items, matchHead)
-	app.Items = slices.Append(p.a, app.Items, head.Args[0])
-	slices.Free(p.a, head.Args)
+	app.Items = append(app.Items, matchHead)
+	app.Items = append(app.Items, head.Args[0])
+	mem.FreeSlice(nil, head.Args)
 	first := p.parseBlock(bodyPos, end)
 	if first.Term != dirCase || first.Next != bodyPos || len(first.TermArgs) != 1 {
 		p.diag("TPL_BLOCK", head.Span, "@match must begin with @case")
@@ -893,7 +892,7 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 		return pairRes{Expr: app, Next: first.Next}
 	}
 	pattern := first.TermArgs[0]
-	slices.Free(p.a, first.TermArgs)
+	mem.FreeSlice(nil, first.TermArgs)
 	cur := first.TermEnd
 	caseTrimRight := first.TermTrimRight
 	for {
@@ -905,12 +904,12 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 		clause := mem.Alloc[expr.Expr](p.a)
 		clause.Kind = expr.List
 		clause.Span = source.Span{Start: pattern.Span.Start, End: block.Next}
-		clause.Items = slices.Append(p.a, clause.Items, pattern)
-		clause.Items = slices.Append(p.a, clause.Items, bodyCat)
-		app.Items = slices.Append(p.a, app.Items, clause)
+		clause.Items = append(clause.Items, pattern)
+		clause.Items = append(clause.Items, bodyCat)
+		app.Items = append(app.Items, clause)
 		if block.Term == dirCase {
 			pattern = block.TermArgs[0]
-			slices.Free(p.a, block.TermArgs)
+			mem.FreeSlice(nil, block.TermArgs)
 			cur = block.TermEnd
 			caseTrimRight = block.TermTrimRight
 			continue
@@ -931,13 +930,13 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 			elseClause := mem.Alloc[expr.Expr](p.a)
 			elseClause.Kind = expr.List
 			elseClause.Span = source.Span{Start: marker.Span.Start, End: fallback.Next}
-			elseClause.Items = slices.Append(p.a, elseClause.Items, marker)
+			elseClause.Items = append(elseClause.Items, marker)
 			fallbackCat := newCat(p.a, fallback.Items, source.Span{Start: block.TermEnd, End: fallback.Next})
 			if head.TrimRight || block.TermTrimRight {
 				fallbackCat = wrapTemplateTrim(p.a, fallbackCat, true)
 			}
-			elseClause.Items = slices.Append(p.a, elseClause.Items, fallbackCat)
-			app.Items = slices.Append(p.a, app.Items, elseClause)
+			elseClause.Items = append(elseClause.Items, fallbackCat)
+			app.Items = append(app.Items, elseClause)
 			p.checkEndLabel(fallback.TermArgs, "match", fallback.TermSpan)
 			freeArgs(p.a, fallback.TermArgs)
 			app.Span.End = fallback.TermEnd
@@ -1660,7 +1659,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		for i := range args {
 			expr.Free(p.a, args[i])
 		}
-		slices.Free(p.a, args)
+		mem.FreeSlice(nil, args)
 		return dirOut{Kind: dirError, Span: lineSpan}
 	}
 	if argsEnd != innerEnd {
@@ -1668,7 +1667,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		for i := range args {
 			expr.Free(p.a, args[i])
 		}
-		slices.Free(p.a, args)
+		mem.FreeSlice(nil, args)
 		return dirOut{Kind: dirError, Span: lineSpan}
 	}
 	// Validate arity and shapes.
@@ -1679,14 +1678,14 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		if len(args) > 1 {
 			app := mem.Alloc[expr.Expr](p.a)
 			app.Kind, app.Span, app.Items = expr.Application, source.Span{Start: args[0].Span.Start, End: args[len(args)-1].Span.End}, args
-			args = slices.Append(p.a, []*expr.Expr(nil), app)
+			args = append([]*expr.Expr(nil), app)
 		}
 		if len(args) != 1 {
 			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 	case dirFor:
@@ -1695,7 +1694,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 		if args[0].Kind != expr.List {
@@ -1703,7 +1702,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 		if !validParams(args[0]) {
@@ -1720,7 +1719,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 	case dirLet:
@@ -1729,7 +1728,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 	case dirInclude:
@@ -1738,7 +1737,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 	case dirEnd:
@@ -1747,7 +1746,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 	}
@@ -1773,7 +1772,7 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 				for i := range args {
 					expr.Free(p.a, args[i])
 				}
-				slices.Free(p.a, args)
+				mem.FreeSlice(nil, args)
 				return argsRes{End: innerEnd, OK: false}
 			}
 			return argsRes{Args: args, End: cur, OK: true}
@@ -1782,7 +1781,7 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
+			mem.FreeSlice(nil, args)
 			return argsRes{End: innerEnd, OK: false}
 		}
 		prefix := expr.ParsePrefix(p.a, p.s, cur)
@@ -1790,8 +1789,8 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
-			slices.Free(p.a, prefix.Diagnostics)
+			mem.FreeSlice(nil, args)
+			mem.FreeSlice(nil, prefix.Diagnostics)
 			return argsRes{End: innerEnd, OK: false}
 		}
 		if len(prefix.Diagnostics) != 0 {
@@ -1799,12 +1798,12 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
-			slices.Free(p.a, args)
-			slices.Free(p.a, prefix.Diagnostics)
+			mem.FreeSlice(nil, args)
+			mem.FreeSlice(nil, prefix.Diagnostics)
 			return argsRes{End: innerEnd, OK: false}
 		}
-		slices.Free(p.a, prefix.Diagnostics)
-		args = slices.Append(p.a, args, prefix.Expr)
+		mem.FreeSlice(nil, prefix.Diagnostics)
+		args = append(args, prefix.Expr)
 		cur = prefix.End
 		if cur < innerEnd && text[cur] != ')' && text[cur] != ' ' && text[cur] != '\t' {
 			freeArgs(p.a, args)
@@ -1907,7 +1906,7 @@ func lambdaParams(a mem.Allocator, list *expr.Expr) []expr.Parameter {
 		if rest {
 			end += 3
 		}
-		out = slices.Append(a, out, expr.Parameter{Name: it.Text, Span: source.Span{Start: it.Span.Start, End: end}, Rest: rest})
+		out = append(out, expr.Parameter{Name: it.Text, Span: source.Span{Start: it.Span.Start, End: end}, Rest: rest})
 	}
 	return out
 }
@@ -1925,39 +1924,39 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 		b := text[i]
 		if b == '\\' && i+1 < contentEnd && (text[i+1] == '@' || text[i+1] == '\\') {
 			if i > litStart {
-				items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
+				items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 			}
-			items = slices.Append(p.a, items, newStringLit(p.a, text[i+1:i+2], source.Span{Start: i, End: i + 2}))
+			items = append(items, newStringLit(p.a, text[i+1:i+2], source.Span{Start: i, End: i + 2}))
 			i += 2
 			litStart = i
 			continue
 		}
 		if b == '@' && i+1 < contentEnd && (text[i+1] == '(' || text[i+1] == '{') {
 			if i > litStart {
-				items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
+				items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 			}
 			prefix := p.inlineExpr(i, contentEnd)
 			if !prefix.Closed {
 				expr.Free(p.a, prefix.Expr)
-				slices.Free(p.a, prefix.Diagnostics)
+				mem.FreeSlice(nil, prefix.Diagnostics)
 				message := "unclosed template expression; expected ')'"
 				if text[i+1] == '{' {
 					message = "unclosed reference expansion; expected '}'"
 				}
-				p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i + 2}, Message: message})
-				items = slices.Append(p.a, items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
+				p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i + 2}, Message: message})
+				items = append(items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
 				i++
 				litStart = i
 				continue
 			}
 			for j := range prefix.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[j])
+				p.diags = append(p.diags, prefix.Diagnostics[j])
 			}
-			slices.Free(p.a, prefix.Diagnostics)
+			mem.FreeSlice(nil, prefix.Diagnostics)
 			if prefix.Expr == nil {
-				items = slices.Append(p.a, items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End + 1}))
+				items = append(items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End + 1}))
 			} else {
-				items = slices.Append(p.a, items, prefix.Expr)
+				items = append(items, prefix.Expr)
 			}
 			i = prefix.End + 1
 			litStart = i
@@ -1967,14 +1966,14 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			selEnd := docSelectorEnd(text, contentEnd, i)
 			if selEnd > i {
 				if i > litStart {
-					items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
+					items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 				}
 				sel := mem.Alloc[expr.Expr](p.a)
 				sel.Kind = expr.Selector
 				sel.Expansion = "selector"
 				sel.Span = source.Span{Start: i, End: selEnd}
 				sel.Text = text[i:selEnd]
-				items = slices.Append(p.a, items, sel)
+				items = append(items, sel)
 				i = selEnd
 				litStart = i
 				continue
@@ -1983,11 +1982,11 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 		i++
 	}
 	if contentEnd > litStart {
-		items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:contentEnd], source.Span{Start: litStart, End: contentEnd}))
+		items = append(items, newStringLit(p.a, text[litStart:contentEnd], source.Span{Start: litStart, End: contentEnd}))
 	}
 	if lineEnd > contentEnd {
 		ending := text[contentEnd:lineEnd]
-		items = slices.Append(p.a, items, newStringLit(p.a, ending, source.Span{Start: contentEnd, End: lineEnd}))
+		items = append(items, newStringLit(p.a, ending, source.Span{Start: contentEnd, End: lineEnd}))
 	}
 	return items
 }
@@ -2061,7 +2060,7 @@ func newStringLit(a mem.Allocator, text string, span source.Span) *expr.Expr {
 			copy(b, []byte(text))
 			partText = string(b)
 		}
-		e.Parts = slices.Append(a, e.Parts, expr.StringPart{Text: partText, Span: span})
+		e.Parts = append(e.Parts, expr.StringPart{Text: partText, Span: span})
 	}
 	return e
 }
@@ -2074,11 +2073,11 @@ func newCat(a mem.Allocator, items []*expr.Expr, span source.Span) *expr.Expr {
 	head.Kind = expr.Name
 	head.Span = span
 	head.Text = "template-cat"
-	e.Items = slices.Append(a, e.Items, head)
+	e.Items = append(e.Items, head)
 	for i := range items {
-		e.Items = slices.Append(a, e.Items, items[i])
+		e.Items = append(e.Items, items[i])
 	}
-	slices.Free(a, items)
+	mem.FreeSlice(nil, items)
 	return e
 }
 
@@ -2086,5 +2085,5 @@ func freeArgs(a mem.Allocator, args []*expr.Expr) {
 	for i := range args {
 		expr.Free(a, args[i])
 	}
-	slices.Free(a, args)
+	mem.FreeSlice(nil, args)
 }

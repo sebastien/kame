@@ -2,7 +2,7 @@ package script
 
 import (
 	"kame/lang/source"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 // Legacy markers are rejected only in directive context; named definitions

@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/source"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) ruleDiagnostic(d diagnostic.Diagnostic, entry *instance) diagnostic.Diagnostic {
@@ -36,7 +35,7 @@ func (p *Program) ruleDiagnostic(d diagnostic.Diagnostic, entry *instance) diagn
 		}
 	}
 	frame.Kind, frame.Label, frame.Source = cloneText(p.Alloc, frame.Kind), cloneText(p.Alloc, frame.Label), cloneText(p.Alloc, frame.Source)
-	d.Frames = slices.Append(p.Alloc, d.Frames, frame)
+	d.Frames = append(d.Frames, frame)
 	return d
 }
 

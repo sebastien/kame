@@ -2,9 +2,8 @@ package cli
 
 import (
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func parseRender(inv *Invocation, args []string) {
@@ -66,7 +65,7 @@ func parseRender(inv *Invocation, args []string) {
 					inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name")
 					return
 				}
-				inv.Defines = slices.Append(mem.System, inv.Defines, value)
+				inv.Defines = append(inv.Defines, value)
 			} else if option == "--comment" {
 				_, ok := template.NormalizeStyle(value)
 				if !ok {
@@ -79,7 +78,7 @@ func parseRender(inv *Invocation, args []string) {
 					inv.fail("OPT_CONFLICT", "render accepts one source")
 					return
 				}
-				inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "command", Value: value, Lang: "template"})
+				inv.Inputs = append(inv.Inputs, RunInput{Kind: "command", Value: value, Lang: "template"})
 				selected = true
 			}
 			continue
@@ -100,11 +99,11 @@ func parseRender(inv *Invocation, args []string) {
 		if arg == "-" {
 			kind = "stdin"
 		}
-		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: kind, Value: arg, Lang: "template"})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: kind, Value: arg, Lang: "template"})
 		selected = true
 	}
 	if !selected {
-		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "stdin", Lang: "template"})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "stdin", Lang: "template"})
 	}
 	inv.OK = true
 }

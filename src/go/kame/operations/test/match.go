@@ -1,12 +1,12 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestMatchAndSub(t *testing.T) {
@@ -66,7 +66,7 @@ func TestMatchAndSub(t *testing.T) {
 		result.Free(a)
 	}
 	var subject strings.Builder
-	subject = strings.NewBuilder(a)
+	subject = strings.Builder{}
 	for i := 0; i < 1600; i++ {
 		subject.WriteByte('a')
 	}
@@ -78,7 +78,7 @@ func TestMatchAndSub(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	subject.Free()
+	subject.Reset()
 	program.Free()
 	registry.Free()
 	engine.Free()

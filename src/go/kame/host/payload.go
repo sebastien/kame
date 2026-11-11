@@ -2,11 +2,11 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+
+	"strconv"
+	"strings"
 )
 
 // Payload record fields shared by library operations and runtime hosts.
@@ -96,11 +96,11 @@ func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion strin
 		if encoded == nil {
 			continue
 		}
-		encodedArgs = slices.Append(a, encodedArgs, core.NewString(a, string(encoded)))
+		encodedArgs = append(encodedArgs, core.NewString(a, string(encoded)))
 		mem.FreeSlice(a, encoded)
 	}
 	wireValues := core.NewList(a, encodedArgs)
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("plugin")
@@ -147,16 +147,16 @@ func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion strin
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	for i := range encodedArgs {
 		encodedArgs[i].Free(a)
 	}
-	slices.Free(a, encodedArgs)
+	mem.FreeSlice(nil, encodedArgs)
 	return payload
 }
 
 func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool, capture bool) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("script")
@@ -192,30 +192,30 @@ func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, en
 	fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
 	payload := core.NewRecord(a, fields)
 	if capture {
-		payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, FieldCapture).Text, Value: core.Value{Kind: core.Bool, Bool: true}})
+		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldCapture).Text, Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	if includeEnvironment {
 		var values []core.Value
 		for i := range environment {
-			values = slices.Append(a, values, core.NewString(a, environment[i]))
+			values = append(values, core.NewString(a, environment[i]))
 		}
-		payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, FieldEnvironment).Text, Value: core.NewList(a, values)})
+		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldEnvironment).Text, Value: core.NewList(a, values)})
 		for i := range values {
 			values[i].Free(a)
 		}
-		slices.Free(a, values)
+		mem.FreeSlice(nil, values)
 	}
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return payload
 }
 
 // ArgvPayload is a structured process request, distinct from shell script text.
 // The JSON data is the portable wire spelling used by freestanding hosts.
 func ArgvPayload(a mem.Allocator, argv []core.Value) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginArray()
 	for i := range argv {
@@ -228,7 +228,7 @@ func ArgvPayload(a mem.Allocator, argv []core.Value) core.Value {
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return payload
 }
 
@@ -237,16 +237,16 @@ func ArgvPayload(a mem.Allocator, argv []core.Value) core.Value {
 func ServiceProbePayload(a mem.Allocator, argv []string, cwd string, timeout int64, environment []string) core.Value {
 	var arguments []core.Value
 	for i := range argv {
-		arguments = slices.Append(a, arguments, core.NewString(a, argv[i]))
+		arguments = append(arguments, core.NewString(a, argv[i]))
 	}
 	var envValues []core.Value
 	for i := range environment {
-		envValues = slices.Append(a, envValues, core.NewString(a, environment[i]))
+		envValues = append(envValues, core.NewString(a, environment[i]))
 	}
 	setup := StageSetupPayload(a, cwd, timeout, envValues)
 	var setups []core.Value
-	setups = slices.Append(a, setups, setup)
-	b := strings.NewBuilder(a)
+	setups = append(setups, setup)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("serviceReady")
@@ -293,21 +293,21 @@ func ServiceProbePayload(a mem.Allocator, argv []string, cwd string, timeout int
 		fields[i].Value.Free(a)
 	}
 	setup.Free(a)
-	slices.Free(a, setups)
+	mem.FreeSlice(nil, setups)
 	for i := range arguments {
 		arguments[i].Free(a)
 	}
-	slices.Free(a, arguments)
+	mem.FreeSlice(nil, arguments)
 	for i := range envValues {
 		envValues[i].Free(a)
 	}
-	slices.Free(a, envValues)
-	b.Free()
+	mem.FreeSlice(nil, envValues)
+	b.Reset()
 	return payload
 }
 
 func ServiceTimerPayload(a mem.Allocator, milliseconds int64) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.Int(milliseconds)
 	e.Flush()
@@ -319,17 +319,17 @@ func ServiceTimerPayload(a mem.Allocator, milliseconds int64) core.Value {
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return payload
 }
 
 func ServiceCancelPayload(a mem.Allocator, processID int64, graceMS int64) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
-	var id [strconv.MaxIntBase10Len]byte
+
 	e.Str("id")
-	e.Str(strconv.FormatInt(id[:], processID, 10))
+	e.Str(strconv.FormatInt(processID, 10))
 	e.Str("graceMS")
 	e.Int(graceMS)
 	e.EndObject()
@@ -342,7 +342,7 @@ func ServiceCancelPayload(a mem.Allocator, processID int64, graceMS int64) core.
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return payload
 }
 
@@ -359,7 +359,7 @@ func PayloadArgv(payload core.Value) []core.Value {
 // PipelinePayload carries all stage argv lists in one launch request. Hosts
 // connect them with streaming pipes, never shell text or intermediate capture.
 func PipelinePayload(a mem.Allocator, stages []core.Value) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginArray()
 	for i := range stages {
@@ -383,7 +383,7 @@ func PipelinePayload(a mem.Allocator, stages []core.Value) core.Value {
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return payload
 }
 
@@ -402,7 +402,7 @@ func PayloadStages(payload core.Value) []core.Value {
 func ConfigureStderr(a mem.Allocator, payload *core.Value, path string, appendFile bool, mode int) {
 	fields := []core.RecordField{{Key: FieldError, Value: core.NewString(a, path)}, {Key: FieldErrorAppend, Value: core.Value{Kind: core.Bool, Bool: appendFile}}, {Key: FieldErrorMode, Value: core.Value{Kind: core.Int, Int: int64(mode)}}}
 	for i := range fields {
-		payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, fields[i].Key).Text, Value: fields[i].Value})
+		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, fields[i].Key).Text, Value: fields[i].Value})
 	}
 }
 
@@ -410,7 +410,7 @@ func ConfigureStderr(a mem.Allocator, payload *core.Value, path string, appendFi
 func ConfigureRedirections(a mem.Allocator, payload *core.Value, input string, output string, appendOutput bool) {
 	fields := []core.RecordField{{Key: FieldInput, Value: core.NewString(a, input)}, {Key: FieldOutput, Value: core.NewString(a, output)}, {Key: FieldAppend, Value: core.Value{Kind: core.Bool, Bool: appendOutput}}}
 	for i := range fields {
-		payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, fields[i].Key).Text, Value: fields[i].Value})
+		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, fields[i].Key).Text, Value: fields[i].Value})
 	}
 	writeConfiguredGraph(a, payload)
 }
@@ -425,13 +425,13 @@ func StageSetupPayload(a mem.Allocator, cwd string, timeout int64, environment [
 }
 
 func ConfigureStages(a mem.Allocator, payload *core.Value, setups []core.Value) {
-	payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, FieldSetup).Text, Value: core.NewList(a, setups)})
+	payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldSetup).Text, Value: core.NewList(a, setups)})
 	writeConfiguredGraph(a, payload)
 }
 
 func ConfigureTopology(a mem.Allocator, payload *core.Value, kinds []core.Value, edges []core.Value) {
-	payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, "kinds").Text, Value: core.NewList(a, kinds)})
-	payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, "edges").Text, Value: core.NewList(a, edges)})
+	payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, "kinds").Text, Value: core.NewList(a, kinds)})
+	payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, "edges").Text, Value: core.NewList(a, edges)})
 	writeConfiguredGraph(a, payload)
 }
 
@@ -456,7 +456,7 @@ func PayloadInt(payload core.Value, field string) int64 {
 }
 
 func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("stages")
@@ -623,7 +623,7 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 			payload.Record[i].Value = core.NewString(a, b.String())
 		}
 	}
-	b.Free()
+	b.Reset()
 }
 
 // PayloadAppend is the named form of PayloadBool for the output-append field.

@@ -2,11 +2,11 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	"slices"
+	"strings"
+	"unicode/utf8"
 )
 
 func opMap(c *eval.Context, s any, v []core.Value) eval.Result     { return transform(c, s, v, false) }
@@ -34,12 +34,12 @@ func freeCallbackState(a mem.Allocator, value any) {
 		eval.ReleaseCallable(a, &state.Values[i])
 		state.Values[i].Free(a)
 	}
-	slices.Free(a, state.Values)
+	mem.FreeSlice(nil, state.Values)
 	eval.FreeEffects(a, state.Effects)
 	for i := range state.WritePaths {
 		mem.FreeString(a, state.WritePaths[i])
 	}
-	slices.Free(a, state.WritePaths)
+	mem.FreeSlice(nil, state.WritePaths)
 	if state.HasAccumulator {
 		eval.ReleaseCallable(a, &state.Accumulator)
 		state.Accumulator.Free(a)
@@ -52,11 +52,11 @@ func callbackProgress(c *eval.Context) *callbackState {
 		state := existing.(*callbackState)
 		for i := range state.Effects {
 			effect := state.Effects[i]
-			effect.Data = slices.Clone(c.Run, effect.Data)
-			c.Effects = slices.Append(c.Run, c.Effects, effect)
+			effect.Data = slices.Clone(effect.Data)
+			c.Effects = append(c.Effects, effect)
 		}
 		for i := range state.WritePaths {
-			c.WritePaths = slices.Append(c.Run, c.WritePaths, cloneText(c.Run, state.WritePaths[i]))
+			c.WritePaths = append(c.WritePaths, cloneText(c.Run, state.WritePaths[i]))
 		}
 		return state
 	}
@@ -72,11 +72,11 @@ func callbackProgress(c *eval.Context) *callbackState {
 func rememberCallbackEffects(c *eval.Context, state *callbackState, effects int, paths int) {
 	for i := effects; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		effect.Data = slices.Clone(c.Run, effect.Data)
-		state.Effects = slices.Append(c.Run, state.Effects, effect)
+		effect.Data = slices.Clone(effect.Data)
+		state.Effects = append(state.Effects, effect)
 	}
 	for i := paths; i < len(c.WritePaths); i++ {
-		state.WritePaths = slices.Append(c.Run, state.WritePaths, cloneText(c.Run, c.WritePaths[i]))
+		state.WritePaths = append(state.WritePaths, cloneText(c.Run, c.WritePaths[i]))
 	}
 }
 func discardCallback(c *eval.Context, state *callbackState) {
@@ -98,7 +98,7 @@ func finishCallback(c *eval.Context, state *callbackState) core.Value {
 	for i := range state.Values {
 		state.Values[i].Free(state.Alloc)
 	}
-	slices.Free(state.Alloc, state.Values)
+	mem.FreeSlice(nil, state.Values)
 	state.Values = nil
 	discardCallback(c, state)
 	return result
@@ -136,11 +136,11 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 				return d
 			}
 			for j := range result.Value.List {
-				state.Values = slices.Append(c.Run, state.Values, result.Value.List[j].Clone(c.Run))
+				state.Values = append(state.Values, result.Value.List[j].Clone(c.Run))
 			}
 			result.Value.Free(c.Run)
 		} else {
-			state.Values = slices.Append(c.Run, state.Values, result.Value.Clone(c.Run))
+			state.Values = append(state.Values, result.Value.Clone(c.Run))
 			result.Value.Free(c.Run)
 		}
 		rememberCallbackEffects(c, state, effects, paths)
@@ -205,7 +205,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 			rememberCallbackEffects(c, state, effects, paths)
 		}
 		if keep != invert {
-			state.Values = slices.Append(c.Run, state.Values, c.BorrowValue(values[state.Index]))
+			state.Values = append(state.Values, c.BorrowValue(values[state.Index]))
 		}
 		state.Index++
 	}
@@ -264,10 +264,10 @@ func opConcat(c *eval.Context, s any, v []core.Value) eval.Result {
 	for i := range v {
 		if v[i].Kind == core.List {
 			for j := range v[i].List {
-				out = slices.Append(c.Run, out, v[i].List[j].Clone(c.Run))
+				out = append(out, v[i].List[j].Clone(c.Run))
 			}
 		} else {
-			out = slices.Append(c.Run, out, v[i].Clone(c.Run))
+			out = append(out, v[i].Clone(c.Run))
 		}
 	}
 	result := core.NewList(c.Run, out)
@@ -399,7 +399,7 @@ func opUnique(c *eval.Context, s any, v []core.Value) eval.Result {
 			}
 		}
 		if !found {
-			out = slices.Append(c.Run, out, v[0].List[i].Clone(c.Run))
+			out = append(out, v[0].List[i].Clone(c.Run))
 		}
 	}
 	result := core.NewList(c.Run, out)

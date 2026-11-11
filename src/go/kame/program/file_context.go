@@ -1,15 +1,15 @@
 package program
 
 import (
+	"encoding/hex"
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/encoding/hex"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"path"
+	"slices"
+	"strings"
 )
 
 // File reuse and publication use one accepted signature record. The host only
@@ -37,7 +37,7 @@ func (p *Program) freeFileContext(state *fileContextState) {
 	mem.FreeString(p.Alloc, state.Rendered.Commands)
 	eval.FreeEffects(p.Alloc, state.Rendered.Effects)
 	freeStrings(p.Alloc, state.Rendered.WritePaths)
-	slices.Free(p.Alloc, state.Rendered.LineSpans)
+	mem.FreeSlice(nil, state.Rendered.LineSpans)
 	state.Rendered.Diagnostic.Free(p.Alloc)
 	state.Stored.Free(p.Alloc)
 	state.Cached.Free(p.Alloc)
@@ -57,14 +57,14 @@ func appendAcceptedObservation(a mem.Allocator, values []core.Observation, item 
 		}
 	}
 	item.Key = item.Key.Clone(a)
-	return slices.Append(a, values, item)
+	return append(values, item)
 }
 
 func (p *Program) collectAcceptedInputs(node *core.Node, values *[]core.Observation, seen *[]*core.Node) {
 	if slices.Contains(*seen, node) {
 		return
 	}
-	*seen = slices.Append(p.Alloc, *seen, node)
+	*seen = append(*seen, node)
 	for i := range node.Observations {
 		item := node.Observations[i]
 		if item.Key.Kind == core.ResourceDefinition {
@@ -90,7 +90,7 @@ func (p *Program) acceptedInputs(entry *instance) []core.Observation {
 	var inputs []core.Observation
 	var seen []*core.Node
 	p.collectAcceptedInputs(entry.Node, &inputs, &seen)
-	slices.Free(p.Alloc, seen)
+	mem.FreeSlice(nil, seen)
 	return inputs
 }
 
@@ -140,7 +140,7 @@ func (p *Program) isToolPath(name string) bool {
 func (p *Program) fileImplementation(entry *instance, rendered renderResult) core.Signature {
 	var sink hashSink
 	sink.state = core.NewDigest()
-	sink.appendText("kame-file-signatures-v2")
+	sink.appendText("kame-file-signatures-v3")
 	sink.appendText(entry.Executor)
 	sink.appendText(entry.ExecutorVersion)
 	sink.appendU64(uint64(len(entry.Shell)))
@@ -161,14 +161,14 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 	var assignments []string
 	for i := range entry.Environment {
 		if !slices.Contains(p.Options.Environment, entry.Environment[i]) {
-			assignments = slices.Append(p.Alloc, assignments, entry.Environment[i])
+			assignments = append(assignments, entry.Environment[i])
 		}
 	}
 	sink.appendU64(uint64(len(assignments)))
 	for i := range assignments {
 		sink.appendText(assignments[i])
 	}
-	slices.Free(p.Alloc, assignments)
+	mem.FreeSlice(nil, assignments)
 	sink.appendU64(uint64(p.Options.TimeoutMS))
 	sink.appendU64(uint64(p.Options.RetryCount))
 	if entry.Kash || p.needsNewerInputs(entry) {
@@ -178,11 +178,16 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 		for i := range entry.Rule.Body {
 			sink.appendText(entry.Rule.Body[i].Text)
 		}
-		if entry.Kash && rendered.Commands != "" {
-			// ponytail: predicates and helper closures run outside dependency
-			// discovery. Conservatively fingerprint their whole lexical context
-			// until they can report individual, effect-free observations. The
-			// empty implementation avoids recursion through fileGuard.
+		unsigned := len(p.Eval.SourceParts) == 0
+		for i := range p.Eval.SourceParts {
+			part := p.Eval.SourceParts[i]
+			if part.Signature.Mode != core.SignatureContent || part.Directory == "" {
+				unsigned = true
+				break
+			}
+		}
+		if entry.Kash && rendered.Commands != "" && (unsigned || len(p.Configuration) != 0) {
+			// Signed sources prove file identity, but not configured predicate values.
 			context := p.fileGuardWithImplementation(entry, core.Signature{})
 			sink.state.Write(context.Digest[:])
 		}
@@ -252,7 +257,7 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 
 func (p *Program) submitFileContextRequest(c *core.EngineContext, kind host.RequestKind, payload core.Value) {
 	p.nextRequest++
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: kind, Payload: payload})
+	p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: kind, Payload: payload})
 	c.Submit(p.nextRequest)
 }
 
@@ -553,8 +558,8 @@ func (p *Program) finishFileContext(c *core.EngineContext, index int) core.Produ
 
 func (p *Program) fileContextPath(entry *instance) string {
 	hex := cacheHex(p.Alloc, entry.FileContextKey[:])
-	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/file-context")
-	name := path.Join(p.Alloc, root, hex)
+	root := path.Join(p.Options.Directory, ".kame/cache/file-context")
+	name := path.Join(root, hex)
 	mem.FreeString(p.Alloc, hex)
 	mem.FreeString(p.Alloc, root)
 	return name
@@ -574,7 +579,7 @@ func (p *Program) saveAcceptedFileRecord(entry *instance) {
 	}
 	if p.Forwarding {
 		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: host.CachePutPayload(p.Alloc, entry.FileContextKey[:], data)})
+		p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: host.CachePutPayload(p.Alloc, entry.FileContextKey[:], data)})
 	} else {
 		name := p.fileContextPath(entry)
 		if p.mkdirParent(name) {
@@ -582,7 +587,7 @@ func (p *Program) saveAcceptedFileRecord(entry *instance) {
 		}
 		mem.FreeString(p.Alloc, name)
 	}
-	slices.Free(p.Alloc, data)
+	mem.FreeSlice(nil, data)
 }
 
 func fileResultSignature(record *core.SignatureRecord) core.Signature {

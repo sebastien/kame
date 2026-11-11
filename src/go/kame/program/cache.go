@@ -8,10 +8,10 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"path"
+	"slices"
+	"strings"
 )
 
 const cacheFormat byte = 1
@@ -37,11 +37,11 @@ func (p *Program) pruneCacheDirectory(directory string) {
 		if entries[i].IsDir || strings.HasPrefix(entries[i].Name, ".kame-write-") {
 			continue
 		}
-		name := path.Join(p.Alloc, directory, entries[i].Name)
+		name := path.Join(directory, entries[i].Name)
 		info := p.Host.Lstat(name)
 		mem.FreeString(p.Alloc, name)
 		if info.Exists && info.Info.Regular {
-			records = slices.Append(p.Alloc, records, retainedCacheFile{Name: entries[i].Name, Time: info.Info.ModTime})
+			records = append(records, retainedCacheFile{Name: entries[i].Name, Time: info.Info.ModTime})
 		}
 	}
 	for i := 1; i < len(records); i++ {
@@ -55,15 +55,15 @@ func (p *Program) pruneCacheDirectory(directory string) {
 	}
 	remove := len(records) - cacheRecordsPerBackend
 	for i := 0; i < remove; i++ {
-		name := path.Join(p.Alloc, directory, records[i].Name)
+		name := path.Join(directory, records[i].Name)
 		_ = p.Host.Remove(name)
 		mem.FreeString(p.Alloc, name)
 	}
-	slices.Free(p.Alloc, records)
+	mem.FreeSlice(nil, records)
 	for i := range entries {
 		mem.FreeString(p.Alloc, entries[i].Name)
 	}
-	slices.Free(p.Alloc, entries)
+	mem.FreeSlice(nil, entries)
 }
 
 type cacheRecord struct {
@@ -83,9 +83,9 @@ type cacheRecord struct {
 
 func (r *cacheRecord) Free(a mem.Allocator) {
 	mem.FreeString(a, r.Identity)
-	slices.Free(a, r.Manifest)
-	slices.Free(a, r.Stdout)
-	slices.Free(a, r.Stderr)
+	mem.FreeSlice(nil, r.Manifest)
+	mem.FreeSlice(nil, r.Stdout)
+	mem.FreeSlice(nil, r.Stderr)
 	*r = cacheRecord{}
 }
 
@@ -103,7 +103,7 @@ func FingerprintSHA256(data []byte, output []byte) bool {
 
 func appendU64(out []byte, n uint64) []byte {
 	for i := 0; i < 8; i++ {
-		out = slices.Append(mem.System, out, byte(n>>uint(i*8)))
+		out = append(out, byte(n>>uint(i*8)))
 	}
 	return out
 }
@@ -146,49 +146,49 @@ func (p *Program) configuredEnvironment(name string) (string, bool) {
 
 func cacheHex(a mem.Allocator, digest []byte) string {
 	const hex = "0123456789abcdef"
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	for i := 0; i < 32; i++ {
 		b.WriteByte(hex[digest[i]>>4])
 		b.WriteByte(hex[digest[i]&15])
 	}
 	out := cloneText(a, b.String())
-	b.Free()
+	b.Reset()
 	return out
 }
 func FingerprintHex(digest []byte) string {
 	const hex = "0123456789abcdef"
-	b := strings.NewBuilder(mem.System)
+	b := strings.Builder{}
 	for i := range digest {
 		b.WriteByte(hex[digest[i]>>4])
 		b.WriteByte(hex[digest[i]&15])
 	}
 	result := cloneText(mem.System, b.String())
-	b.Free()
+	b.Reset()
 	return result
 }
 
 func recordBytes(r *cacheRecord) []byte {
 	var out []byte
-	out = slices.Append(mem.System, out, 'L')
-	out = slices.Append(mem.System, out, 'M')
-	out = slices.Append(mem.System, out, 'K')
-	out = slices.Append(mem.System, out, 'R')
-	out = slices.Append(mem.System, out, cacheFormat)
+	out = append(out, 'L')
+	out = append(out, 'M')
+	out = append(out, 'K')
+	out = append(out, 'R')
+	out = append(out, cacheFormat)
 	out = appendU64(out, uint64(len(r.Identity)))
 	for i := range r.Identity {
-		out = slices.Append(mem.System, out, r.Identity[i])
+		out = append(out, r.Identity[i])
 	}
 	for i := range r.Fingerprint {
-		out = slices.Append(mem.System, out, r.Fingerprint[i])
+		out = append(out, r.Fingerprint[i])
 	}
-	out = slices.Append(mem.System, out, r.Schema)
+	out = append(out, r.Schema)
 	out = appendU64(out, uint64(r.StartedAt))
 	out = appendU64(out, uint64(r.CompletedAt))
 	out = appendU64(out, uint64(r.Duration))
 	out = appendU64(out, uint64(r.ExitStatus))
 	out = appendU64(out, uint64(len(r.Manifest)))
 	for i := range r.Manifest {
-		out = slices.Append(mem.System, out, r.Manifest[i])
+		out = append(out, r.Manifest[i])
 	}
 	flags := byte(0)
 	if r.StdoutTruncated {
@@ -197,14 +197,14 @@ func recordBytes(r *cacheRecord) []byte {
 	if r.StderrTruncated {
 		flags |= 2
 	}
-	out = slices.Append(mem.System, out, flags)
+	out = append(out, flags)
 	out = appendU64(out, uint64(len(r.Stdout)))
 	for i := range r.Stdout {
-		out = slices.Append(mem.System, out, r.Stdout[i])
+		out = append(out, r.Stdout[i])
 	}
 	out = appendU64(out, uint64(len(r.Stderr)))
 	for i := range r.Stderr {
-		out = slices.Append(mem.System, out, r.Stderr[i])
+		out = append(out, r.Stderr[i])
 	}
 	return out
 }
@@ -262,7 +262,7 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 		r.Free(a)
 		return cacheRecord{}
 	}
-	r.Manifest = slices.Clone(a, data[at:at+int(n)])
+	r.Manifest = slices.Clone(data[at : at+int(n)])
 	at += int(n)
 	if at >= len(data) {
 		r.Free(a)
@@ -283,7 +283,7 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 		r.Free(a)
 		return cacheRecord{}
 	}
-	r.Stdout = slices.Clone(a, data[at:at+int(n)])
+	r.Stdout = slices.Clone(data[at : at+int(n)])
 	r.StdoutTruncated = flags&1 != 0
 	at += int(n)
 	if at+8 > len(data) {
@@ -295,7 +295,7 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 		r.Free(a)
 		return cacheRecord{}
 	}
-	r.Stderr = slices.Clone(a, data[at:])
+	r.Stderr = slices.Clone(data[at:])
 	r.StderrTruncated = flags&2 != 0
 	return r
 }
@@ -436,7 +436,7 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 	p.nextRequest++
 	entry.cacheLockStripe = int(key[0])
 	entry.cacheLockHeld, entry.cachePending, entry.cacheWaitingLock = true, true, true
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheLock, Payload: host.CacheGetPayload(p.Alloc, key)})
+	p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheLock, Payload: host.CacheGetPayload(p.Alloc, key)})
 	mem.FreeSlice(p.Alloc, key)
 	c.Submit(p.nextRequest)
 	return cacheLookupResult{Waiting: true}
@@ -447,7 +447,7 @@ func (p *Program) cacheLookupForwarded(c *core.EngineContext, entry *instance) c
 	payload := host.CacheGetPayload(p.Alloc, key)
 	mem.FreeSlice(p.Alloc, key)
 	p.nextRequest++
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheGet, Payload: payload})
+	p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheGet, Payload: payload})
 	c.Submit(p.nextRequest)
 	entry.cachePending = true
 	return cacheLookupResult{Waiting: true}
@@ -462,7 +462,7 @@ func (p *Program) releaseCacheLock(entry *instance) {
 		payload := host.CacheGetPayload(p.Alloc, key)
 		mem.FreeSlice(p.Alloc, key)
 		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCacheUnlock, Payload: payload})
+		p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCacheUnlock, Payload: payload})
 	} else {
 		p.Host.UnlockCache(entry.cacheLockStripe)
 	}
@@ -487,7 +487,7 @@ func (p *Program) cacheSave(entry *instance, r *cacheRecord) bool {
 		mem.FreeSlice(p.Alloc, key)
 		mem.FreeSlice(mem.System, data)
 		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: payload})
+		p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: payload})
 		return true
 	}
 	name := p.cachePath(entry)
@@ -500,7 +500,7 @@ func (p *Program) cacheSave(entry *instance, r *cacheRecord) bool {
 	mem.FreeSlice(mem.System, data)
 	mem.FreeString(p.Alloc, name)
 	if ok {
-		directory := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/tasks")
+		directory := path.Join(p.Options.Directory, ".kame/cache/tasks")
 		p.pruneCacheDirectory(directory)
 		mem.FreeString(p.Alloc, directory)
 	}

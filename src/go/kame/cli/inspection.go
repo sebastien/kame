@@ -1,14 +1,14 @@
 package cli
 
 import (
+	"fmt"
+	"io"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func reportField(value core.Value, key string) core.Value {
@@ -76,7 +76,7 @@ func writeInlineReportField(out io.Writer, key string, value core.Value, styled 
 		var data []byte
 		if core.PresentationValueJSON(mem.System, value, &data) {
 			Style(out, "value.literal", string(data), styled)
-			slices.Free(mem.System, data)
+			mem.FreeSlice(nil, data)
 			return
 		}
 	}
@@ -101,10 +101,10 @@ func reportText(out io.Writer, text string, token string, styled bool) {
 	e := json.NewEncoder(&buffer)
 	e.Str(text)
 	e.Flush()
-	escaped := strings.ReplaceAll(mem.System, buffer.String(), "\x7f", "\\u007f")
+	escaped := strings.ReplaceAll(buffer.String(), "\x7f", "\\u007f")
 	Style(out, token, escaped, styled)
 	mem.FreeString(mem.System, escaped)
-	buffer.Free()
+	buffer.Reset()
 }
 
 func reportReferences(resource core.Value, producers core.Value, dependencies core.Value) int {

@@ -96,7 +96,7 @@ async function waits() {
     for (const signal of [false, true]) {
       const fd = fifo();
       try {
-        const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', signal ? '3000' : '100', '-l', 'kash', '-c', 'printf R\ndefer printf D\nfor line from :stdin :lines\n\tprintf forbidden'], { stdio: [fd, 'pipe', 'pipe'] });
+        const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', signal ? '3000' : '500', '-l', 'kash', '-c', 'defer printf D\nprintf R\nfor line from :stdin :lines\n\tprintf forbidden'], { stdio: [fd, 'pipe', 'pipe'] });
         let output = '', error = '', sent = false;
         child.stdout.on('data', (chunk) => {
           output += chunk;

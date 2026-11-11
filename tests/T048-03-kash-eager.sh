@@ -54,7 +54,7 @@ KASH
 	reject DEF_INVALID --set value=2 -l kash -c 'let value = 1'
 	printf 'let eager = $(touch ./executed)\n' >"$work/library.kash"
 	printf '(include ./library.kash)\n' >"$work/include.kash"
-	reject EXPR_INVALID ./include.kash
+	reject PARSE_ERR ./include.kash
 	invoke -n -l kash -c $'printf %s $value\nlet value = $(touch ./executed)\nprintf %s $value' >"$work/out" 2>"$work/err"
 	if [ ! -s "$work/out" ] && [ ! -e "$work/executed" ]; then test-ok "$backend dry-run skips eager effects and defers reads"; else test-fail "$backend eager dry-run effects"; fi
 	KAME_value=override invoke -l kash -c 'let value = 1; printf %s $value' >"$work/out" 2>"$work/err"

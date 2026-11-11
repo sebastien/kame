@@ -1,10 +1,10 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
 	"kame/core"
+	"kame/internal/testing"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestProgressLifecycleIdentityAndClock(t *testing.T) {

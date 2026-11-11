@@ -92,7 +92,7 @@ KAME
 	reject EXPR_INVALID -l kash -c '(if :false (include ./library.kash) :nil)'
 	printf 'printf forbidden\n' >"$work/scripts/lib/invalid.kash"
 	printf 'touch ./executed\n(include ./lib/invalid.kash)\n' >"$work/scripts/invalid.kash"
-	reject EXPR_INVALID ../scripts/invalid.kash
+	reject PARSE_ERR ../scripts/invalid.kash
 	printf 'value = 1\n' >"$work/scripts/lib/repeated.kash"
 	printf 'touch ./executed\n(include ./lib/repeated.kash)\n(include ./lib/repeated.kash)\n' >"$work/scripts/repeated.kash"
 	reject DEF_INVALID ../scripts/repeated.kash

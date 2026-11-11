@@ -1,11 +1,10 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // ParseFragment parses only this bounded range, in the selected language. The
@@ -31,7 +30,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		}
 		part := expr.ParsePrefix(a, s.Source, start)
 		s.takeDiagnostics(part.Diagnostics)
-		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
+		s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
 		for part.End < end && (space(original.Text[part.End]) || original.Text[part.End] == '\n') {
 			part.End++
 		}
@@ -58,7 +57,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		}
 		if comment(text, pos, lineEnd) {
 			_, commentEnd := trim(text, pos, lineEnd)
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Comment, Text: text[pos:commentEnd], Span: source.Span{Start: pos, End: commentEnd}})
+			s.Items = append(s.Items, ScriptItem{Kind: Comment, Text: text[pos:commentEnd], Span: source.Span{Start: pos, End: commentEnd}})
 			pos = nextLine(text, lineEnd)
 			continue
 		}
@@ -83,12 +82,12 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 				break
 			}
 			pos = part.Definition.Span.End
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: part.Definition.Span, Definition: part.Definition})
+			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: part.Definition.Span, Definition: part.Definition})
 		} else {
 			part := expr.ParsePrefix(a, s.Source, pos)
 			s.takeDiagnostics(part.Diagnostics)
 			pos = part.End
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: from, End: pos}, Expression: part.Expr})
+			s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: from, End: pos}, Expression: part.Expr})
 		}
 		for pos < end && space(text[pos]) {
 			pos++

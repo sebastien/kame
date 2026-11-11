@@ -1,8 +1,7 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // ObservationAspect distinguishes independent views of the same resource.
@@ -33,7 +32,7 @@ func FreeObservations(a mem.Allocator, values []Observation) {
 	for i := range values {
 		values[i].Key.Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 // Observe records what the computation actually consumed, not a later live
@@ -62,7 +61,7 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 			return
 		}
 	}
-	c.node.Observations = slices.Append(c.engine.Alloc, c.node.Observations, Observation{Key: key.Clone(c.engine.Alloc), Aspect: aspect, Signature: signature})
+	c.node.Observations = append(c.node.Observations, Observation{Key: key.Clone(c.engine.Alloc), Aspect: aspect, Signature: signature})
 	if owned {
 		mem.FreeString(c.engine.Alloc, name)
 	}

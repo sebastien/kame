@@ -2,7 +2,7 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 // CacheLockStatus keeps cancellation distinct from an unavailable cache, which
@@ -16,9 +16,7 @@ const (
 )
 
 // ProgramHost is the complete host contract for materializing targets: process
-// execution plus the filesystem and clock the build runtime needs. Solod does
-// not support embedded interfaces, so every method is declared directly. It
-// lives in a file that orders after the process types it refers to.
+// execution plus the filesystem and clock the build runtime needs.
 type ProgramHost interface {
 	SupportsStreamOperands() bool
 	SupportsExecutor(name string, version string) bool

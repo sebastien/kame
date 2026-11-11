@@ -1,8 +1,8 @@
 package wasm
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"slices"
 )
 
 const EventSchemaVersion uint16 = 1
@@ -53,7 +53,7 @@ func (q *EventQueue) Emit(header EventHeader, payload []byte) bool {
 	}
 	header.Schema = EventSchemaVersion
 	header.PayloadLen = uint32(len(payload))
-	q.items = slices.Append(q.alloc, q.items, QueuedEvent{Header: header, Payload: slices.Clone(q.alloc, payload)})
+	q.items = append(q.items, QueuedEvent{Header: header, Payload: slices.Clone(payload)})
 	return true
 }
 
@@ -93,7 +93,7 @@ func (q *EventQueue) Discard() bool {
 }
 
 func (q *EventQueue) discardCurrent() {
-	slices.Free(q.alloc, q.current.Payload)
+	mem.FreeSlice(nil, q.current.Payload)
 	q.current, q.pinned = QueuedEvent{}, false
 }
 
@@ -105,9 +105,9 @@ func (q *EventQueue) Free() {
 		q.discardCurrent()
 	}
 	for i := range q.items {
-		slices.Free(q.alloc, q.items[i].Payload)
+		mem.FreeSlice(nil, q.items[i].Payload)
 	}
-	slices.Free(q.alloc, q.items)
+	mem.FreeSlice(nil, q.items)
 	mem.Free(q.alloc, q)
 }
 
@@ -156,5 +156,5 @@ func CopyPayload(dst []byte, payload []byte) bool {
 // ClonePayload is kept in this package to make the ABI ownership boundary
 // explicit at the call site.
 func ClonePayload(a mem.Allocator, payload []byte) []byte {
-	return slices.Clone(a, payload)
+	return slices.Clone(payload)
 }

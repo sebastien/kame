@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"os"
+	"strings"
 )
 
 func checkPrecedencePlan(t *testing.T, source, target, input, code string) {
@@ -78,8 +78,8 @@ func TestRulePrecedenceSelection(t *testing.T) {
 
 func checkPrecedenceGroupExecution(t *testing.T, specialFirst bool) {
 	a := t.Allocator()
-	buffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(buffer, "", "kame-precedence-group-")
+
+	dir, err := os.MkdirTemp("", "kame-precedence-group-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -111,12 +111,12 @@ func checkPrecedenceGroupExecution(t *testing.T, specialFirst bool) {
 		}
 		result.Free(a)
 	}
-	marker, markerErr := os.ReadFile(a, dir+"/ran-broad")
+	marker, markerErr := os.ReadFile(dir + "/ran-broad")
 	if markerErr == nil {
 		t.Error("shadowed grouped recipe executed")
 	}
 	mem.FreeSlice(a, marker)
-	data, readErr := os.ReadFile(a, dir+"/out/xml/feed.html")
+	data, readErr := os.ReadFile(dir + "/out/xml/feed.html")
 	if readErr != nil || string(data) != "special" {
 		t.Error("group overwrote specialized output")
 	}
@@ -188,8 +188,8 @@ func TestRulePrecedenceCollectsAllMatches(t *testing.T) {
 
 func TestRulePrecedenceExecutionDoesNotFallback(t *testing.T) {
 	a := t.Allocator()
-	buffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(buffer, "", "kame-precedence-")
+
+	dir, err := os.MkdirTemp("", "kame-precedence-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -242,7 +242,7 @@ func TestRulePrecedenceExecutionDoesNotFallback(t *testing.T) {
 		t.Errorf("specialized execution failed: %s", built.Diagnostic.Code)
 	}
 	built.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/out/xml/feed.html")
+	data, readErr := os.ReadFile(dir + "/out/xml/feed.html")
 	if readErr != nil || string(data) != "special" {
 		t.Error("wrong producer executed")
 	}

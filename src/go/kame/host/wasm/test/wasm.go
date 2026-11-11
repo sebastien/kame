@@ -1,16 +1,16 @@
-package wasm_test
+package wasmcheck
 
 import (
+	"encoding/hex"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
-	"solod.dev/so/encoding/hex"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+
+	"strconv"
+	"strings"
 )
 
 func TestNilRuntimePhaseFailuresUseSystemAllocator(t *testing.T) {
@@ -449,7 +449,7 @@ func assertInspectionRootsReleased(t *testing.T, r *wasm.Runtime) {
 			t.Error("abandoned inspection retained engine interest")
 		}
 	}
-	slices.Free(r.Alloc, nodes)
+	mem.FreeSlice(nil, nodes)
 	if r.Program.InspectionWaiting {
 		t.Error("finished inspection still reports waiting")
 	}
@@ -701,7 +701,7 @@ func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 			break
 		}
 		if next.Request.Kind == host.RequestCacheGet {
-			encoded := hex.EncodeToString(a, host.CacheKey(next.Request.Payload))
+			encoded := hex.EncodeToString(host.CacheKey(next.Request.Payload))
 			name := ".kame/cache/file-context/" + encoded
 			memory := r.Program.Host.(*wasm.MemoryHost)
 			data, err := memory.ReadFile(a, name)
@@ -789,7 +789,7 @@ func TestInspectionStatusInvalidationRestartsPendingRead(t *testing.T) {
 			r.Program.Engine.Invalidate(nodes[i])
 		}
 	}
-	slices.Free(a, nodes)
+	mem.FreeSlice(nil, nodes)
 	query = r.PlanJSON("./result", false)
 	reread := false
 	for retry := 0; query.HostNeeded && retry < 20; retry++ {
@@ -890,11 +890,11 @@ func TestInspectionPendingReadDoesNotRebuildCompletedGraph(t *testing.T) {
 	r.InspectionGrant("read", "")
 	prepared := r.Prepare()
 	prepared.Free(a)
-	inputs := strings.NewBuilder(a)
-	defer inputs.Free()
+	inputs := strings.Builder{}
+	defer inputs.Reset()
 	for i := 0; i < 128; i++ {
-		var digits [32]byte
-		inputs.WriteString("./leaf" + strconv.Itoa(digits[:], i) + "\n")
+
+		inputs.WriteString("./leaf" + strconv.Itoa(i) + "\n")
 	}
 	query := r.PlanJSON("root", false)
 	checked := false
@@ -1588,8 +1588,8 @@ func TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents(t *testing.T) {
 			} else {
 				kind := request.Kind
 				request.Free(a)
-				var kindBuffer [16]byte
-				t.Error("unexpected embedding request kind " + strconv.Itoa(kindBuffer[:], int(kind)))
+
+				t.Error("unexpected embedding request kind " + strconv.Itoa(int(kind)))
 			}
 		}
 		result := r.Result()

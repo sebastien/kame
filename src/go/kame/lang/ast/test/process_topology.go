@@ -1,15 +1,15 @@
-package ast_test
+package astcheck
 
 import (
+	"bytes"
+	"kame/internal/testing"
 	"kame/lang/ast"
-	"solod.dev/so/bytes"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestProcessTopologyInspectionDoesNotEvaluatePredicates(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "printf a |(frame :lines) |(filter $(touch ./must-not-run) | cat |(frame :lines) >&) | cat"
 	if ast.WriteAST(&buffer, "kash", "topology.kash", text) != 0 {
 		t.Error("topology failed inspection")
@@ -23,8 +23,8 @@ func TestProcessTopologyInspectionDoesNotEvaluatePredicates(t *testing.T) {
 }
 
 func TestInvalidFramedRejoinStaysInspectable(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	if ast.WriteAST(&buffer, "kash", "invalid.kash", "printf a |(frame :lines) |(filter :true | cat >&) | cat") != 0 {
 		t.Error("semantic framing mismatch became a parse error")
 	}
@@ -34,8 +34,8 @@ func TestInvalidFramedRejoinStaysInspectable(t *testing.T) {
 }
 
 func TestSchedulingInspectionReportsEffectiveClosedPolicies(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "printf $(touch ./must-not-run) |(frame :lines) |(balance :buffer 4096 :strategy round-robin) (cat, cat) |(merge :buffer 8192) cat"
 	if ast.WriteAST(&buffer, "kash", "scheduling.kash", text) != 0 {
 		t.Error("scheduling failed inspection")
@@ -49,8 +49,8 @@ func TestSchedulingInspectionReportsEffectiveClosedPolicies(t *testing.T) {
 }
 
 func TestLossyInspectionReportsPendingAndProtectedFlightBounds(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "printf $(touch ./must-not-run) |(frame :lines) |(broadcast :buffer 4096 :items 8 :overflow drop-old) (cat, cat)"
 	if ast.WriteAST(&buffer, "kash", "lossy.kash", text) != 0 {
 		t.Error("lossy topology failed inspection")
@@ -64,8 +64,8 @@ func TestLossyInspectionReportsPendingAndProtectedFlightBounds(t *testing.T) {
 }
 
 func TestOrderedMergeInspectionRetainsStrictPolicyWithoutEffects(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "(printf $(touch ./must-not-run) |(frame :lines), printf b |(frame :lines)) |(merge :order round-robin :buffer 8) |(encode :lines)"
 	if ast.WriteAST(&buffer, "kash", "ordered.kash", text) != 0 {
 		t.Error("ordered graph failed inspection")
@@ -76,14 +76,14 @@ func TestOrderedMergeInspectionRetainsStrictPolicyWithoutEffects(t *testing.T) {
 }
 
 func TestGraphFailureCollectionInspectionAndConflicts(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "(printf $(touch ./must-not-run), printf b) |(merge :failure collect) cat"
 	if ast.WriteAST(&buffer, "kash", "collect.kash", text) != 0 || !strings.Contains(buffer.String(), "\"failure\":\"collect\"") {
 		t.Error("graph-wide collection policy not inspectable")
 	}
-	other := bytes.NewBuffer(t.Allocator(), nil)
-	defer other.Free()
+	other := bytes.Buffer{}
+	defer other.Reset()
 	text = "(printf a, printf b) |(merge :failure collect) |(broadcast :failure fail-fast) (cat, cat)"
 	if ast.WriteAST(&other, "kash", "conflict.kash", text) != 0 || !strings.Contains(other.String(), "KASH_FAILURE_POLICY") {
 		t.Error("conflicting graph failure policies not diagnosed statically")
@@ -91,14 +91,14 @@ func TestGraphFailureCollectionInspectionAndConflicts(t *testing.T) {
 }
 
 func TestEachWorkerInspectionRequiresFramesBeforeArgumentEvaluation(t *testing.T) {
-	buffer := bytes.NewBuffer(t.Allocator(), nil)
-	defer buffer.Free()
+	buffer := bytes.Buffer{}
+	defer buffer.Reset()
 	text := "printf a |(frame :lines) |(each) cat $(touch ./must-not-run)"
 	if ast.WriteAST(&buffer, "kash", "each.kash", text) != 0 || !strings.Contains(buffer.String(), "\"kind\":\"each\"") || !strings.Contains(buffer.String(), "\"maxWorkers\":1") {
 		t.Error("per-record worker template not inspectable")
 	}
-	other := bytes.NewBuffer(t.Allocator(), nil)
-	defer other.Free()
+	other := bytes.Buffer{}
+	defer other.Reset()
 	text = "printf a |(each) cat $(touch ./must-not-run)"
 	if ast.WriteAST(&other, "kash", "unframed.kash", text) != 0 || !strings.Contains(other.String(), "KASH_FRAME_REQUIRED") {
 		t.Error("unframed worker not rejected statically")

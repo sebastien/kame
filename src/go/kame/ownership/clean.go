@@ -1,8 +1,7 @@
 package ownership
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 type Decision struct {
@@ -19,7 +18,7 @@ func FreeDecisions(a mem.Allocator, items []Decision) {
 		mem.FreeString(a, items[i].Producer)
 		mem.FreeString(a, items[i].Recovery)
 	}
-	slices.Free(a, items)
+	mem.FreeSlice(nil, items)
 }
 
 func equal(a []byte, b []byte) bool {
@@ -36,7 +35,7 @@ func equal(a []byte, b []byte) bool {
 
 func (s *Store) marker(name string) int {
 	data := s.read(name)
-	slices.Free(s.Alloc, data)
+	mem.FreeSlice(nil, data)
 	return s.Status
 }
 
@@ -73,12 +72,12 @@ func (s *Store) Protect(name string, release bool) bool {
 func (s *Store) Clean(context [32]byte, verified bool, dry bool, protected []string) []Decision {
 	var items []Decision
 	if s.cancelled() {
-		return slices.Append(s.Alloc, items, Decision{State: "error", Reason: "cleanup-cancelled"})
+		return append(items, Decision{State: "error", Reason: "cleanup-cancelled"})
 	}
 	shared := s.lease == leaseShared
 	if !s.Open(false) {
 		if s.Status != 1 {
-			items = slices.Append(s.Alloc, items, Decision{State: "error", Reason: statusReason(s.Status)})
+			items = append(items, Decision{State: "error", Reason: statusReason(s.Status)})
 		}
 		return items
 	}
@@ -88,12 +87,12 @@ func (s *Store) Clean(context [32]byte, verified bool, dry bool, protected []str
 	defer s.finishClean(shared)
 	size := int(km_own_list(s.native, nil))
 	if size < 0 {
-		return slices.Append(s.Alloc, items, Decision{State: "error", Reason: "ledger-unreadable"})
+		return append(items, Decision{State: "error", Reason: "ledger-unreadable"})
 	}
-	data := slices.Make[byte](s.Alloc, size)
+	data := make([]byte, size)
 	if int(km_own_list(s.native, data)) != size {
-		slices.Free(s.Alloc, data)
-		return slices.Append(s.Alloc, items, Decision{State: "error", Reason: "ledger-unreadable"})
+		mem.FreeSlice(nil, data)
+		return append(items, Decision{State: "error", Reason: "ledger-unreadable"})
 	}
 	start := 0
 	for i := range data {
@@ -101,14 +100,14 @@ func (s *Store) Clean(context [32]byte, verified bool, dry bool, protected []str
 			continue
 		}
 		if s.cancelled() {
-			items = slices.Append(s.Alloc, items, Decision{State: "error", Reason: "cleanup-cancelled"})
+			items = append(items, Decision{State: "error", Reason: "cleanup-cancelled"})
 			break
 		}
 		name := string(data[start:i])
 		start = i + 1
-		items = slices.Append(s.Alloc, items, s.cleanMember(name, context, verified, dry, protected))
+		items = append(items, s.cleanMember(name, context, verified, dry, protected))
 	}
-	slices.Free(s.Alloc, data)
+	mem.FreeSlice(nil, data)
 	if s.cancelled() {
 		found := false
 		for i := range items {
@@ -117,7 +116,7 @@ func (s *Store) Clean(context [32]byte, verified bool, dry bool, protected []str
 			}
 		}
 		if !found {
-			items = slices.Append(s.Alloc, items, Decision{State: "error", Reason: "cleanup-cancelled"})
+			items = append(items, Decision{State: "error", Reason: "cleanup-cancelled"})
 		}
 	}
 	for i := 1; i < len(items); i++ {
@@ -145,11 +144,11 @@ func (s *Store) cleanMember(name string, context [32]byte, verified bool, dry bo
 	result := Decision{State: "error", Reason: "ledger-invalid"}
 	data := s.read(name)
 	if s.Status != 0 {
-		slices.Free(s.Alloc, data)
+		mem.FreeSlice(nil, data)
 		return result
 	}
 	r := s.decode(data)
-	slices.Free(s.Alloc, data)
+	mem.FreeSlice(nil, data)
 	defer r.free(s.Alloc)
 	if s.Status != 0 {
 		return result

@@ -4,15 +4,15 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 type recipeSettingsResolver struct {
@@ -22,8 +22,8 @@ type recipeSettingsResolver struct {
 }
 
 func invocationRecipePath(a mem.Allocator, retry int) string {
-	var buffer [strconv.MaxIntBase10Len]byte
-	return cloneText(a, "recipe/"+strconv.Itoa(buffer[:], retry))
+
+	return cloneText(a, "recipe/"+strconv.Itoa(retry))
 }
 
 func resolveRecipeDefinition(value any, key core.ResourceKey, c *eval.Context) eval.Result {
@@ -32,9 +32,9 @@ func resolveRecipeDefinition(value any, key core.ResourceKey, c *eval.Context) e
 		return eval.Result{Diagnostic: failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")}
 	}
 	if !slices.Contains(state.Dependencies, key.Name) {
-		state.Dependencies = slices.Append(state.Program.Alloc, state.Dependencies, cloneText(state.Program.Alloc, key.Name))
+		state.Dependencies = append(state.Dependencies, cloneText(state.Program.Alloc, key.Name))
 	}
-	state.Resolving = slices.Append(state.Program.Alloc, state.Resolving, key.Name)
+	state.Resolving = append(state.Resolving, key.Name)
 	r := state.Program.Eval.EvaluateDefinition(key, c)
 	state.Resolving = state.Resolving[:len(state.Resolving)-1]
 	return r
@@ -151,15 +151,15 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 		if p.Eval.IsKashConstructor(shell) {
 			entry.Kash = true
 		} else if shell.Kind == core.String && shell.Text != "" && strings.IndexByte(shell.Text, 0) < 0 {
-			entry.Shell = slices.Append(p.Alloc, entry.Shell, cloneText(p.Alloc, shell.Text))
-			entry.Shell = slices.Append(p.Alloc, entry.Shell, cloneText(p.Alloc, "-c"))
+			entry.Shell = append(entry.Shell, cloneText(p.Alloc, shell.Text))
+			entry.Shell = append(entry.Shell, cloneText(p.Alloc, "-c"))
 		} else if shell.Kind == core.List && len(shell.List) != 0 {
 			for i := range shell.List {
 				v := shell.List[i]
 				if v.Kind != core.String || strings.IndexByte(v.Text, 0) >= 0 || (i == 0 && v.Text == "") {
 					return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
 				}
-				entry.Shell = slices.Append(p.Alloc, entry.Shell, cloneText(p.Alloc, v.Text))
+				entry.Shell = append(entry.Shell, cloneText(p.Alloc, v.Text))
 			}
 		} else {
 			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
@@ -190,7 +190,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 			if !validEnvironmentName(assignment.Key) || assignment.Value.Kind != core.String || strings.IndexByte(assignment.Value.Text, 0) >= 0 {
 				return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End}, "env metadata requires valid names and string values without NUL")
 			}
-			entry.MetadataEnvironment = slices.Append(p.Alloc, entry.MetadataEnvironment, cloneText(p.Alloc, assignment.Key+"="+assignment.Value.Text))
+			entry.MetadataEnvironment = append(entry.MetadataEnvironment, cloneText(p.Alloc, assignment.Key+"="+assignment.Value.Text))
 		}
 	}
 	if c.PhaseInvalid() || len(c.Effects) != 0 {
@@ -205,7 +205,7 @@ func (p *Program) parseKameRecipe(entry *instance) diagnostic.Diagnostic {
 	}
 	body := entry.Rule.Body
 	parsed := expr.ParseRange(p.Alloc, p.Parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(p.Parsed.Source.Text, body[0].Span.Start))
-	defer slices.Free(p.Alloc, parsed.Diagnostics)
+	defer mem.FreeSlice(nil, parsed.Diagnostics)
 	entry.KameExpression = parsed.Expr
 	if len(parsed.Diagnostics) != 0 {
 		d := parsed.Diagnostics[0]
@@ -223,7 +223,7 @@ func recipeIndent(text string, start int) string {
 }
 
 func (p *Program) freeSettingsContext(state *recipeSettingsResolver, c *eval.Context) {
-	slices.Free(p.Alloc, state.Resolving)
+	mem.FreeSlice(nil, state.Resolving)
 	eval.FreeEffects(p.Alloc, c.Effects)
 	freeStrings(p.Alloc, c.WritePaths)
 }
@@ -278,11 +278,11 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
 	state := mem.Alloc[renderDependencyState](p.Alloc)
 	*state = renderDependencyState{Program: p, Index: index}
-	frames := slices.Make[eval.RuleFrame](p.Alloc, 1)
+	frames := make([]eval.RuleFrame, 1)
 	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule}
 	if entry.NewerInputs != nil {
 		for i := range entry.NewerInputs.Values {
-			frames[0].NewerInputs = slices.Append(p.Alloc, frames[0].NewerInputs, entry.NewerInputs.Values[i].Clone(p.Alloc))
+			frames[0].NewerInputs = append(frames[0].NewerInputs, entry.NewerInputs.Values[i].Clone(p.Alloc))
 		}
 	}
 	context := mem.Alloc[eval.Context](p.Alloc)
@@ -300,7 +300,7 @@ func (p *Program) freeKashContext(context *eval.Context) {
 		freeValues(p.Alloc, context.RuleFrames[i].Outputs)
 		freeValues(p.Alloc, context.RuleFrames[i].NewerInputs)
 	}
-	slices.Free(p.Alloc, context.RuleFrames)
+	mem.FreeSlice(nil, context.RuleFrames)
 	eval.FreeEffects(p.Alloc, context.Effects)
 	freeStrings(p.Alloc, context.WritePaths)
 	mem.Free(p.Alloc, context.ResolverState.(*renderDependencyState))
@@ -388,7 +388,7 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 		} else {
 			payload := host.RecipeExecutionPayload(p.Alloc, "", entry.Plan.Outputs, nil, nil)
 			p.nextRequest++
-			p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestPrepareOutputs, Payload: payload})
+			p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestPrepareOutputs, Payload: payload})
 			c.Submit(p.nextRequest)
 			entry.KashPreparing = true
 			return core.ProducerSubmitted
@@ -432,8 +432,8 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	if result.Diagnostic.Code != "" {
 		if entry.retryCount < p.Options.RetryCount && !result.Diagnostic.Protected && result.Diagnostic.Code != "EXEC_CANCELLED" && result.Diagnostic.Code != "PARSE_ERR" {
 			entry.retryCount++
-			slices.Free(p.Alloc, entry.CacheStdout)
-			slices.Free(p.Alloc, entry.CacheStderr)
+			mem.FreeSlice(nil, entry.CacheStdout)
+			mem.FreeSlice(nil, entry.CacheStderr)
 			entry.CacheStdout, entry.CacheStderr = nil, nil
 			entry.CacheStdoutTruncated, entry.CacheStderrTruncated = false, false
 			entry.KashRunning = true
@@ -457,7 +457,7 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 		pending.HasYield = hasYield(context.Effects)
 		for i := range context.Effects {
 			effect := context.Effects[i]
-			pending.Effects = slices.Append(p.Alloc, pending.Effects, eval.Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(p.Alloc, effect.Data)})
+			pending.Effects = append(pending.Effects, eval.Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
 		}
 		entry.ForwardEffects = pending
 		return p.continueForwardEffects(c, index)

@@ -16,6 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { Socket } from 'node:net';
 import { isatty } from 'node:tty';
+import { createRequire } from 'node:module';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
 // Numeric graph kinds are part of the stable WASM ABI.
@@ -188,6 +189,15 @@ let dashboardLast = 0;
 let formatCounts = { completed: 0, failed: 0, cancelled: 0 };
 let watchIdle = false;
 const cliLockWaits = new Map();
+// A resized terminal may reflow the region we previously painted. Retire its
+// coordinates on the resize event before another timer can erase that region.
+stderr.on('resize', () => {
+  if (!dashboardRows) return;
+  dashboardRows = 0;
+  dashboardFrame = '';
+  dashboardUnsafe = true;
+  stderr.write('\n');
+});
 let watchCycle = 0, watchCycleElapsed = 0;
 // lastDiagnostic holds the rich diagnostic from the most recent failed target
 // event, so the trailing --json diagnostic matches the native duplicate.
@@ -251,7 +261,14 @@ function processExitStatus(diagnostic, explicitRun) {
   return cause.status || 1;
 }
 function writeReport(heading, document, verbose = false) {
-  const data = typeof document === 'string' || Buffer.isBuffer(document) || document instanceof Uint8Array ? JSON.parse(Buffer.from(document).toString('utf8')) : document;
+  const encoded = typeof document === 'string' || Buffer.isBuffer(document) || document instanceof Uint8Array;
+  if (jsonMode && encoded) {
+    const bytes = Buffer.from(document);
+    stdout.write(bytes);
+    if (bytes.at(-1) !== 10) stdout.write('\n');
+    return;
+  }
+  const data = encoded ? JSON.parse(Buffer.from(document).toString('utf8')) : document;
   if (jsonMode) { stdout.write(`${JSON.stringify(data)}\n`); return; }
   stdout.write(`${styled('heading', heading, outputColor)}\n`);
   const write = (value, label = '', depth = 1, root = false) => {
@@ -1354,7 +1371,31 @@ class Module {
     } catch (error) {
       throw Object.assign(new Error(`cannot read ${path}: ${error.message}`), { code: 'FS_ERR' });
     }
-    const { instance } = await WebAssembly.instantiate(bytes, {});
+    const compiled = await WebAssembly.compile(bytes);
+    let wasi;
+    const imports = {};
+    if (WebAssembly.Module.imports(compiled).some(entry => entry.module === 'wasi_snapshot_preview1')) {
+      // Loading Node's bundled runtime emits a dependency warning on stderr.
+      // Suppress only that exact notice, synchronously during the first load,
+      // so CLI diagnostics and embedders' warning handling remain unchanged.
+      const emitWarning = process.emitWarning;
+      let WASI;
+      try {
+        process.emitWarning = function (warning, type, ...rest) {
+          if (type === 'ExperimentalWarning' && warning === 'WASI is an experimental feature and might change at any time') return;
+          return emitWarning.call(this, warning, type, ...rest);
+        };
+        ({ WASI } = createRequire(import.meta.url)('node:wasi'));
+      } finally {
+        process.emitWarning = emitWarning;
+      }
+      // Filesystem, environment and process authority stays in the explicit
+      // Kame host protocol. The Go runtime needs only an empty WASI reactor.
+      wasi = new WASI({ version: 'preview1', returnOnExit: true, args: [], env: {}, preopens: {} });
+      imports.wasi_snapshot_preview1 = wasi.wasiImport;
+    }
+    const instance = await WebAssembly.instantiate(compiled, imports);
+    wasi?.initialize(instance);
     const exports = instance.exports;
     const missing = REQUIRED_EXPORTS.filter((name) => !(name in exports));
     if (missing.length !== 0) throw Object.assign(new Error(`WASM ABI is incomplete: missing ${missing.join(', ')}`), { code: 'FEATURE_UNSUP' });
@@ -1692,7 +1733,7 @@ class Module {
       }
     }
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39, 42].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1774,8 +1815,8 @@ class Module {
       if (!resolved) return this.completeFailure(instance, request, 'TOOL_MISSING', `cannot resolve tool: ${payload}`);
       return this.completeJSON(instance, request, resolved);
     }
-    if (kind === 1) {
-      if (!grants.read) return this.deny(instance, request, 'read');
+    if (kind === 1 || kind === 42) {
+      if (kind === 1 && !grants.read) return this.deny(instance, request, 'read');
       try {
         const bytes = await readResource(payload);
         const pointer = this.scratch('fileRead', bytes.length || 1);
@@ -4325,13 +4366,17 @@ async function discoverSource(inv) {
   if (inv.command) return { name: inv.sourceName ?? '<command>', text: inv.command };
   if (inv.file) {
     try {
-      return { name: inv.sourceName ?? inv.file, text: await readFile(inv.file, 'utf8') };
+      const bytes = await readFile(inv.file);
+      return { name: inv.sourceName ?? inv.file, text: bytes.toString('utf8'), bytes };
     } catch (error) {
       throw Object.assign(new Error(`cannot read file: ${error.message}`), { code: 'FS_ERR' });
     }
   }
   for (const candidate of BUILD_SOURCE_CANDIDATES) {
-    if (existsSync(candidate)) return { name: candidate, text: await readFile(candidate, 'utf8') };
+    if (existsSync(candidate)) {
+      const bytes = await readFile(candidate);
+      return { name: candidate, text: bytes.toString('utf8'), bytes };
+    }
   }
   return null;
 }
@@ -4383,21 +4428,23 @@ async function runSession(module, inv, sourceDirectory) {
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
     let name = `<command:${i + 1}>`, text = input.value;
+    let sourceBytes = null;
     const fileBacked = input.kind === 'file' || input.kind === 'discover';
     if (input.kind === 'discover') {
       const source = await discoverSource({});
       if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
       name = normalize(join(inv.directory || '.', source.name));
       text = source.text;
+      sourceBytes = source.bytes ?? null;
     } else if (input.kind === 'file') {
       name = isAbsolute(input.value) ? normalize(input.value) : normalize(join(inv.directory || '.', input.value));
-      try { text = await readFile(resolve(sourceDirectory, name), 'utf8'); }
+      try { sourceBytes = await readFile(resolve(sourceDirectory, name)); text = sourceBytes.toString('utf8'); }
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
     sourceTexts.set(name, text);
     if (input.lang === 'km' || input.lang === 'kmk' || input.lang === 'kash') {
-      const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection);
-      for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
+      const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection, [], sourceBytes);
+      for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, ...(fileBacked ? { sourceDirectory: dirname(resolve(sourceDirectory, name)) } : {}), lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
   if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1 && !inv.timeoutMS) {
@@ -4425,7 +4472,7 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   watchedSources?.add(resolve(sourceDirectory, name));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
   const selection = { defines: [...inv.defines, ...inv.parameters], environment, parts: [], watchedSources };
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, selection);
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, selection, [], source.bytes ?? null);
   parts.defines = inv.defines;
   parts.parameters = inv.parameters;
   parts.toolOverrides = inv.toolOverrides;
@@ -4441,7 +4488,7 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
-async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }, includes = []) {
+async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }, includes = [], sourceBytes = null) {
   const identity = resolve(sourceDirectory, name);
   selection.watchedSources?.add(identity);
   sourceTexts.set(name, text);
@@ -4453,12 +4500,13 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name, ...(includes.length ? { frames: includes.map((frame) => ({ kind: 'include', source: frame.source, label: frame.label, span: { start: frame.start, end: frame.end } })) } : {}) })) });
   }
   const bytes = new TextEncoder().encode(text);
+  const sourceSignature = fileBacked ? createHash('sha256').update(sourceBytes ?? bytes).digest('hex') : null;
   const parts = [];
   const slice = (span) => new TextDecoder().decode(bytes.subarray(span.start, span.end));
   const append = (end) => {
-    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start, ...(fileBacked ? { sourceDirectory: dirname(identity) } : {}), ...(includes.length ? { includes } : {}) };
+    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), lang, offset: start, ...(fileBacked ? { sourceDirectory: dirname(identity) } : {}), ...(sourceSignature ? { sourceSignature } : {}), ...(includes.length ? { includes } : {}) };
     parts.push(part);
-    selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), offset: item.span.start, ...(includes.length ? { includes } : {}) })));
+    selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), lang, offset: item.span.start, ...(includes.length ? { includes } : {}) })));
   };
   const include = async (path, optional, span) => {
     if (!fileBacked) {
@@ -4474,14 +4522,15 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
     let child;
-    try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
+    try { child = await readFile(resolve(sourceDirectory, included)); }
     catch (error) {
       if (optional && error.code === 'ENOENT') return;
       primarySource = { name, text };
       const detail = { code: 'FS_ERR', severity: 'error', message: `cannot read included source: ${included}`, source: name, span };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
-    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }]));
+    const childLang = lang === 'kash' || /\.(?:kash|ksh)$/.test(included) ? 'kash' : lang;
+    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child.toString('utf8'), childLang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }], child));
   };
   // All branches have already been validated by the portable parser. Walk only
   // the selected application AST; never interpret source text as JS grammar.

@@ -3,21 +3,22 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 type Fragment struct {
 	Name            string
 	Text            string
 	SourceDirectory string
+	Signature       core.Signature
 	Lang            string
 	Entries         []string
 	Inline          bool
@@ -70,7 +71,7 @@ func DefinitionEventEffect(state any, effect eval.Effect) {
 	} else if effect.Kind != eval.EffectOut && effect.Kind != eval.EffectYield {
 		return
 	}
-	p.emit(Event{Kind: kind, Data: slices.Clone(p.Alloc, effect.Data), FinalizationDeadlineNS: effect.FinalizationDeadlineNS})
+	p.emit(Event{Kind: kind, Data: slices.Clone(effect.Data), FinalizationDeadlineNS: effect.FinalizationDeadlineNS})
 }
 
 // Observe reports root failures in every mode and JSON value/statement roots once.
@@ -127,7 +128,7 @@ func (s *SessionCompile) Free(a mem.Allocator) {
 	for i := range s.Diagnostics {
 		s.Diagnostics[i].Free(a)
 	}
-	slices.Free(a, s.Diagnostics)
+	mem.FreeSlice(nil, s.Diagnostics)
 	*s = SessionCompile{}
 }
 
@@ -139,7 +140,7 @@ func (s *Session) Free() {
 	for i := range s.retained {
 		s.Program.Engine.Release(s.retained[i])
 	}
-	slices.Free(a, s.retained)
+	mem.FreeSlice(nil, s.retained)
 	freeSessionWork(a, s.Work)
 	s.Program.Free()
 	mem.Free(a, s)
@@ -148,19 +149,19 @@ func (s *Session) Free() {
 // CompileSession parses every fragment independently before registering their
 // declarations in one scope. The shared text is only span/borrowed-text storage.
 func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Registry, options Options) SessionCompile {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	var offsets []int
 	var sources []CompileSource
 	for i := range fragments {
-		sources = slices.Append(a, sources, CompileSource{Name: fragments[i].Name, Text: fragments[i].Text, SourceDirectory: fragments[i].SourceDirectory, Offset: fragments[i].Offset, Includes: fragments[i].Includes})
-		offsets = slices.Append(a, offsets, b.Len())
+		sources = append(sources, CompileSource{Name: fragments[i].Name, Text: fragments[i].Text, Lang: fragments[i].Lang, SourceDirectory: fragments[i].SourceDirectory, Signature: fragments[i].Signature, Offset: fragments[i].Offset, Includes: fragments[i].Includes})
+		offsets = append(offsets, b.Len())
 		b.WriteString(fragments[i].Text)
 		b.WriteByte('\n')
 	}
 	parsed := mem.Alloc[script.Script](a)
 	parsed.Alloc, parsed.Source = a, source.New(a, "<session>", b.String())
 	parsed.Source.Expanded = true
-	b.Free()
+	b.Reset()
 	var work []SessionWork
 	valueDefinitions, ruleFragments, kashFragments := false, false, false
 	for i := range fragments {
@@ -177,53 +178,42 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			}
 			doc := template.ParseDocumentRange(a, parsed.Source, offsets[i], offsets[i]+len(f.Text), style)
 			for j := range doc.Diagnostics {
-				parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, doc.Diagnostics[j])
+				parsed.Diagnostics = append(parsed.Diagnostics, doc.Diagnostics[j])
 			}
-			slices.Free(a, doc.Diagnostics)
+			mem.FreeSlice(nil, doc.Diagnostics)
 			doc.Diagnostics = nil
 			root := templateBindings(a, doc.Root, f.Defines)
 			valueDiagnostics := script.ValidateValueExpression(a, root)
 			for j := range valueDiagnostics {
-				parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, valueDiagnostics[j])
+				parsed.Diagnostics = append(parsed.Diagnostics, valueDiagnostics[j])
 			}
-			slices.Free(a, valueDiagnostics)
+			mem.FreeSlice(nil, valueDiagnostics)
 			doc.Root = nil
 			doc.Free()
-			parsed.Items = slices.Append(a, parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})
+			parsed.Items = append(parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})
 			if !f.Check {
-				work = slices.Append(a, work, SessionWork{Expression: root, Value: true, Display: true, Raw: true})
+				work = append(work, SessionWork{Expression: root, Value: true, Display: true, Raw: true})
 			}
 			continue
 		}
-		part := script.ParseFragment(a, parsed.Source, f.Lang, offsets[i], offsets[i]+len(f.Text))
-		if f.Lang == "kash" && len(f.Includes) != 0 {
-			script.ValidateKashLibrary(part)
-		}
-		for j := range part.Diagnostics {
-			parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, part.Diagnostics[j])
-		}
-		slices.Free(a, part.Diagnostics)
-		part.Diagnostics = nil
-		for j := range part.Items {
-			item := part.Items[j]
-			parsed.Items = slices.Append(a, parsed.Items, item)
+		part := parseSourceFragment(a, parsed.Source, sources[i], offsets[i])
+		first := len(parsed.Items)
+		appendSourceFragment(parsed, part)
+		for j := first; j < len(parsed.Items); j++ {
+			item := parsed.Items[j]
 			if len(f.Entries) == 0 && !f.SkipStatements && item.Kind == script.Definition && item.Definition.Eager {
-				work = slices.Append(a, work, SessionWork{Expression: item.Definition.Expression})
+				work = append(work, SessionWork{Expression: item.Definition.Expression})
 			}
 			if item.Kind == script.Include || item.Kind == script.Composition {
-				parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "source composition is required before declaration registration"})
+				parsed.Diagnostics = append(parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "source composition is required before declaration registration"})
 			}
 			if item.Kind == script.Definition && f.Lang == "km" {
 				valueDefinitions = true
 			}
 			if len(f.Entries) == 0 && !f.SkipStatements && f.Lang != "kmk" && (item.Kind == script.Expression || item.Kind == script.Command) {
-				work = slices.Append(a, work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash", Display: f.Lang == "expr" || (f.Lang == "km" && options.PrintResult)})
+				work = append(work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash", Display: f.Lang == "expr" || (f.Lang == "km" && options.PrintResult)})
 			}
 		}
-		// Transfer child ownership while retaining the original source storage.
-		slices.Free(a, part.Items)
-		part.Items = nil
-		part.Free()
 		if f.Lang == "kash" {
 			kashFragments = true
 		}
@@ -231,20 +221,20 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			ruleFragments = true
 		}
 		for j := range f.Entries {
-			work = slices.Append(a, work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", Display: true, entryGroup: i + 1})
+			work = append(work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", Display: true, entryGroup: i + 1})
 		}
 		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 {
-			work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Display: true, ImplicitDefault: true, entryGroup: i + 1})
+			work = append(work, SessionWork{Target: cloneText(a, "default"), Display: true, ImplicitDefault: true, entryGroup: i + 1})
 		}
 	}
 	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) {
-		work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, Display: ruleFragments || options.PrintResult, ImplicitDefault: true})
+		work = append(work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, Display: ruleFragments || options.PrintResult, ImplicitDefault: true})
 	}
 	compiled := compileSources(a, parsed, registry, options, sources, offsets)
 	p := compiled.Program
 	result := SessionCompile{}
 	for i := range compiled.Diagnostics {
-		result.Diagnostics = slices.Append(a, result.Diagnostics, compiled.Diagnostics[i].Clone(a))
+		result.Diagnostics = append(result.Diagnostics, compiled.Diagnostics[i].Clone(a))
 	}
 	compiled.Free(a)
 	if p == nil {
@@ -257,33 +247,33 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		var normalized []SessionWork
 		for i := 0; i < len(work); i++ {
 			if work[i].Target == "" {
-				normalized = slices.Append(a, normalized, work[i])
+				normalized = append(normalized, work[i])
 				continue
 			}
 			var entries []string
 			start := i
 			// Only operands authored in the same fragment share entry policy.
 			for i < len(work) && work[i].Target != "" && work[i].entryGroup == work[start].entryGroup {
-				entries = slices.Append(a, entries, work[i].Target)
+				entries = append(entries, work[i].Target)
 				i++
 			}
 			selected := p.NormalizeTargetOperands(entries)
 			if len(selected) == 0 {
-				selected = slices.Append(a, selected, cloneText(a, "default"))
+				selected = append(selected, cloneText(a, "default"))
 			}
-			slices.Free(a, entries)
+			mem.FreeSlice(nil, entries)
 			for j := range selected {
 				entry := work[start]
 				entry.Target = selected[j]
-				normalized = slices.Append(a, normalized, entry)
+				normalized = append(normalized, entry)
 			}
-			slices.Free(a, selected)
+			mem.FreeSlice(nil, selected)
 			for j := start; j < i; j++ {
 				mem.FreeString(a, work[j].Target)
 			}
 			i--
 		}
-		slices.Free(a, work)
+		mem.FreeSlice(nil, work)
 		work = normalized
 		p.SessionPolicy = true
 		if len(fragments) == 1 {
@@ -307,7 +297,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 					e := mem.Alloc[expr.Expr](a)
 					e.Kind, e.Text, e.Span = expr.Name, work[i].Target, item.Definition.NameSpan
 					work[i].Expression = e
-					parsed.Items = slices.Append(a, parsed.Items, script.ScriptItem{Kind: script.Expression, Span: e.Span, Expression: e})
+					parsed.Items = append(parsed.Items, script.ScriptItem{Kind: script.Expression, Span: e.Span, Expression: e})
 					function = true
 					break
 				}
@@ -316,22 +306,22 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 					if work[i].Target == "default" {
 						code = "TGT_NO_DEFAULT"
 					}
-					result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, code, "unknown value entry: "+work[i].Target))
+					result.Diagnostics = append(result.Diagnostics, failure(a, code, "unknown value entry: "+work[i].Target))
 				}
 			}
 			if work[i].Target != "" && !work[i].Value {
 				if work[i].ImplicitDefault && !p.HasTarget("default") {
 					d := failure(a, "TGT_NO_DEFAULT", "no target was requested and no default target is defined")
 					names := p.NamedTargets()
-					joined := strings.Join(a, names, ", ")
+					joined := strings.Join(names, ", ")
 					if len(names) == 0 {
-						d.Notes = slices.Append(a, d.Notes, cloneText(a, "available targets: (none)"))
+						d.Notes = append(d.Notes, cloneText(a, "available targets: (none)"))
 					} else {
-						d.Notes = slices.Append(a, d.Notes, cloneText(a, "available targets: "+joined))
+						d.Notes = append(d.Notes, cloneText(a, "available targets: "+joined))
 					}
 					mem.FreeString(a, joined)
 					freeStrings(a, names)
-					result.Diagnostics = slices.Append(a, result.Diagnostics, d)
+					result.Diagnostics = append(result.Diagnostics, d)
 					continue
 				}
 				// Preflight only authored target selection, not dynamic inputs:
@@ -340,11 +330,11 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 				freeArguments(p.Alloc, selected.Arguments)
 				mem.FreeString(p.Alloc, selected.Target)
 				if selected.Diagnostic.Code != "" {
-					result.Diagnostics = slices.Append(a, result.Diagnostics, selected.Diagnostic)
+					result.Diagnostics = append(result.Diagnostics, selected.Diagnostic)
 				} else if selected.Ambiguous {
-					result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_AMBIG", "multiple rules match target"))
+					result.Diagnostics = append(result.Diagnostics, failure(a, "TGT_AMBIG", "multiple rules match target"))
 				} else if selected.Rule == nil && p.Eval.Definition(work[i].Target) == nil {
-					result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_NO_RULE", "no rule for target: "+work[i].Target))
+					result.Diagnostics = append(result.Diagnostics, failure(a, "TGT_NO_RULE", "no rule for target: "+work[i].Target))
 				}
 				freeCaptures(a, selected.Captures)
 			}
@@ -362,8 +352,8 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	for i := range result.Diagnostics {
 		qualifyCompileDiagnostic(a, &result.Diagnostics[i], "<session>", sources, offsets)
 	}
-	slices.Free(a, sources)
-	slices.Free(a, offsets)
+	mem.FreeSlice(nil, sources)
+	mem.FreeSlice(nil, offsets)
 	return result
 }
 
@@ -382,7 +372,7 @@ func freeSessionWork(a mem.Allocator, work []SessionWork) {
 	for i := range work {
 		mem.FreeString(a, work[i].Target)
 	}
-	slices.Free(a, work)
+	mem.FreeSlice(nil, work)
 }
 
 func freeStatement(a mem.Allocator, value any) {
@@ -411,8 +401,8 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 					p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, effect)
 					continue
 				}
-				effect.Data = slices.Clone(p.Alloc, effect.Data)
-				state.Effects = slices.Append(p.Alloc, state.Effects, effect)
+				effect.Data = slices.Clone(effect.Data)
+				state.Effects = append(state.Effects, effect)
 			}
 			eval.FreeEffects(c.Allocator(), context.Effects)
 			context.Effects = nil
@@ -484,8 +474,8 @@ func (s *Session) Start(index int) HandleStart {
 	state.Program, state.Expression, state.Raw = p, w.Expression, w.Raw
 	state.Deferred = s.Deferred
 	state.Session = s
-	var buffer [strconv.MaxIntBase10Len]byte
-	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(buffer[:], index)+">")
+
+	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(index)+">")
 	node := p.Engine.AddOwned(key, runStatement, state, freeStatement)
 	key.Free(p.Alloc)
 	if node == nil {
@@ -507,6 +497,6 @@ func (h *Handle) retainSessionStatement() {
 		return
 	}
 	s := h.Session
-	s.retained = slices.Append(s.Program.Alloc, s.retained, s.Program.Engine.RequestRoot(h.Node))
+	s.retained = append(s.retained, s.Program.Engine.RequestRoot(h.Node))
 	h.Session = nil
 }

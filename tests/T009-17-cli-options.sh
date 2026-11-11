@@ -7,6 +7,9 @@ test-step "build both hosts"
 cli_build
 make -C "$CLI_ROOT" dist-wasm >/dev/null
 test-step "source, action, option, and effect-boundary matrix"
-python3 "$CLI_ROOT/tests/cli-options.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js"
-test-ok "native and WASM command options agree"
+if python3 "$CLI_ROOT/tests/cli-options.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js"; then
+	test-ok "native and WASM command options agree"
+else
+	test-fail "CLI option matrix failed"
+fi
 test-end

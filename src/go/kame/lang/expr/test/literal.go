@@ -1,8 +1,8 @@
-package expr_test
+package exprcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/expr"
-	"solod.dev/so/testing"
 )
 
 func TestClosedConfigurationLiterals(t *testing.T) {

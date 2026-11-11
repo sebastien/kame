@@ -2,12 +2,12 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 func opNot(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -25,8 +25,8 @@ func opBool(c *eval.Context, s any, v []core.Value) eval.Result {
 
 func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range v {
 		kind := v[i].Kind
 		if kind != core.Nil && kind != core.Bool && kind != core.Int && kind != core.Float && kind != core.String {
@@ -49,13 +49,13 @@ func opJSON(c *eval.Context, s any, v []core.Value) eval.Result {
 		return invalidArgument(c, v, 0, "JSON-compatible value without bytes, nonfinite numbers, patterns, resources, or callables")
 	}
 	value := core.NewString(c.Run, string(data))
-	slices.Free(c.Run, data)
+	mem.FreeSlice(nil, data)
 	return eval.Result{Value: value}
 }
 
 func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	if v.Kind == core.Nil {
 		b.WriteString("nil")
 	} else if v.Kind == core.Bool {
@@ -65,11 +65,11 @@ func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
 			b.WriteString("false")
 		}
 	} else if v.Kind == core.Int {
-		var buf [strconv.MaxIntBase10Len]byte
-		b.WriteString(strconv.FormatInt(buf[:], v.Int, 10))
+
+		b.WriteString(strconv.FormatInt(v.Int, 10))
 	} else if v.Kind == core.Float {
-		var buf [strconv.MaxFloat64Len]byte
-		b.WriteString(strconv.FormatFloat(buf[:], v.Float, 'g', -1, 64))
+
+		b.WriteString(strconv.FormatFloat(v.Float, 'g', -1, 64))
 	} else if v.Kind == core.String {
 		if quoted {
 			quote(&b, v.Text)
@@ -129,7 +129,7 @@ func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
 	} else {
 		return "", false
 	}
-	return strings.Clone(a, b.String()), true
+	return strings.Clone(b.String()), true
 }
 
 func quote(b *strings.Builder, value string) {
@@ -174,6 +174,22 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	record := len(v) - 1
+	if v[record].Kind == core.Module {
+		if v[0].Kind != core.String {
+			return invalidArgument(c, v, 0, "string")
+		}
+		selected := c.ModuleField(v[record], v[0].Text, c.Span)
+		if selected.Found {
+			if !selected.Result.Waiting && len(v) == 3 {
+				c.FreeCallable(&v[1])
+			}
+			return selected.Result
+		}
+		if len(v) == 3 {
+			return eval.Result{Value: v[1].Clone(c.Run)}
+		}
+		return eval.Result{Value: core.Value{Kind: core.Nil}}
+	}
 	if v[record].Kind != core.Record {
 		return invalidArgument(c, v, record, "record")
 	}
@@ -265,9 +281,6 @@ func runeOffset(text string, index int) int {
 }
 func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	// Frees are explicit, never deferred: Solod emits textually-prior defers
-	// at every later return, so conditional defers would also run on paths
-	// whose branch never executed (double free with rejected-argument cleanup).
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
 		result := c.Call(v[0], v[1].List)
 		discardArgCallables(c, v)

@@ -34,7 +34,8 @@ Kame environment reads. The host's unsupplied ambient environment is not an inpu
 
 The host must:
 
-- Create separate stdout and stderr pipes.
+- Create separate stdout and stderr pipes, except for an authorized foreground
+  terminal handoff in `051-kash-session-authority.md`.
 - Put the child in a new process group before user commands run.
 - Execute the configured shell with the script as one shell session.
 - Close every unused pipe endpoint in parent and child.

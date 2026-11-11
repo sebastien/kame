@@ -1,12 +1,12 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // IncludeForm borrows decoded path storage from its expression. It remains
@@ -53,7 +53,7 @@ func CompositionInclude(e *expr.Expr) IncludeForm {
 }
 
 func (s *Script) compositionError(e *expr.Expr, message string) {
-	s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "EXPR_INVALID", Severity: source.Error, Span: e.Span, Message: message})
+	s.Diagnostics = append(s.Diagnostics, source.Diagnostic{Code: "EXPR_INVALID", Severity: source.Error, Span: e.Span, Message: message})
 }
 
 // ValidateValueExpression rejects source-composition heads anywhere in a value
@@ -98,7 +98,7 @@ func ValidateKashLibrary(s *Script) {
 	for i := range s.Items {
 		item := s.Items[i]
 		if (item.Kind != Comment && item.Kind != Definition && item.Kind != Include) || (item.Definition != nil && item.Definition.Eager) {
-			s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "EXPR_INVALID", Severity: source.Error, Span: item.Span, Message: "Kash libraries allow only definitions, comments, and literal top-level includes"})
+			s.Diagnostics = append(s.Diagnostics, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: item.Span, Message: "Kash libraries allow only definitions, comments, and literal top-level includes"})
 		}
 	}
 }

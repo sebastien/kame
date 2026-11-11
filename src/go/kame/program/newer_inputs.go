@@ -2,10 +2,10 @@ package program
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 // One accepted content snapshot serves every newer-input selector in a rule render.
@@ -51,8 +51,8 @@ func (p *Program) prepareNewerInputs(c *core.EngineContext, index int, names []s
 			mem.FreeString(p.Alloc, canonical)
 			continue
 		}
-		state.Paths = slices.Append(p.Alloc, state.Paths, canonical)
-		state.Names = slices.Append(p.Alloc, state.Names, cloneText(p.Alloc, names[i]))
+		state.Paths = append(state.Paths, canonical)
+		state.Names = append(state.Names, cloneText(p.Alloc, names[i]))
 		key := core.ResourceKey{Kind: core.ResourceFile, Name: canonical}
 		c.ObserveAspect(key, core.ObservationContent, p.dependencyContentSignature(key))
 	}
@@ -88,7 +88,7 @@ func (p *Program) selectNewerInputs(state *newerInputState, stored *core.Signatu
 			}
 		}
 		if all || !current.Equal(previous) {
-			state.Values = slices.Append(p.Alloc, state.Values, core.NewString(p.Alloc, state.Names[i]))
+			state.Values = append(state.Values, core.NewString(p.Alloc, state.Names[i]))
 		}
 	}
 	state.Ready = true

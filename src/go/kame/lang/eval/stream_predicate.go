@@ -4,7 +4,7 @@ import (
 	"kame/core"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/unicode/utf8"
+	"unicode/utf8"
 )
 
 // Stream operator statuses are reserved for native nodes, never interpreted for

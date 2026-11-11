@@ -1,12 +1,11 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // DeclarationPredicate is a host-free configuration query used by source
@@ -39,8 +38,8 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 	var sources []program.CompileSource
 	var condition program.CompileSource
 	hasSources, hasCondition, hasPrefix := false, false, false
-	defer slices.Free(a, defines)
-	defer slices.Free(a, environment)
+	defer mem.FreeSlice(nil, defines)
+	defer mem.FreeSlice(nil, environment)
 	defer freeConditionSources(a, sources)
 	defer freeDescriptorIncludes(a, condition.Includes)
 	hasPredicate := false
@@ -69,7 +68,7 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 				if !validConditionSource(field.Value.List[j]) {
 					return invalidConditionDescriptor(a)
 				}
-				sources = slices.Append(a, sources, conditionSource(a, field.Value.List[j]))
+				sources = append(sources, conditionSource(a, field.Value.List[j]))
 			}
 		} else if !requireBoolean && field.Key == "condition" {
 			if hasCondition || !validConditionSource(field.Value) {
@@ -86,9 +85,9 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 					return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate settings must contain strings")}
 				}
 				if field.Key == "defines" {
-					defines = slices.Append(a, defines, setting.Text)
+					defines = append(defines, setting.Text)
 				} else {
-					environment = slices.Append(a, environment, setting.Text)
+					environment = append(environment, setting.Text)
 				}
 			}
 		} else {
@@ -114,10 +113,10 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 	if result.Diagnostic.Code != "" {
 		out := PureResult{Code: pureText(a, result.Diagnostic.Code), Message: pureText(a, result.Diagnostic.Message), SpanStart: result.Diagnostic.Span.Start, SpanEnd: result.Diagnostic.Span.End}
 		if !requireBoolean {
-			buffer := bytes.NewBuffer(a, nil)
+			buffer := bytes.Buffer{}
 			program.WriteJSONDiagnostic(&buffer, result.Diagnostic)
 			out.Text = pureText(a, buffer.String())
-			buffer.Free()
+			buffer.Reset()
 		}
 		return out
 	}
@@ -142,7 +141,7 @@ func validConditionSource(value core.Value) bool {
 			hasName = true
 		} else if f.Key == "text" {
 			hasText = true
-		} else if f.Key != "offset" && f.Key != "includes" {
+		} else if f.Key != "offset" && f.Key != "includes" && f.Key != "lang" {
 			return false
 		}
 	}
@@ -150,12 +149,12 @@ func validConditionSource(value core.Value) bool {
 }
 
 func conditionSource(a mem.Allocator, value core.Value) program.CompileSource {
-	return program.CompileSource{Name: host.PayloadText(value, "name"), Text: host.PayloadText(value, "text"), Offset: int(host.PayloadInt(value, "offset")), Includes: descriptorIncludes(a, value)}
+	return program.CompileSource{Name: host.PayloadText(value, "name"), Text: host.PayloadText(value, "text"), Lang: host.PayloadText(value, "lang"), Offset: int(host.PayloadInt(value, "offset")), Includes: descriptorIncludes(a, value)}
 }
 
 func freeConditionSources(a mem.Allocator, sources []program.CompileSource) {
 	for i := range sources {
 		freeDescriptorIncludes(a, sources[i].Includes)
 	}
-	slices.Free(a, sources)
+	mem.FreeSlice(nil, sources)
 }

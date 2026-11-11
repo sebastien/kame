@@ -3,9 +3,9 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
 )
 
 // Keep recursive evaluation within the native and WASM stack budgets.
@@ -23,9 +23,11 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	previousEnv := context.ReserveEnv
 	previousOrigin := context.SourceOrigin
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
+	context.Engine = engine
 	if expression != nil {
 		context.ReserveEnv = expression.Kash
 		context.SourceOrigin = expression.SourceOrigin
+		context.observeExpressionSource(expression)
 	}
 	result := p.evaluateExpression(engine, scope, expression, context)
 	if context.dependencyFailure.Code != "" {
@@ -229,12 +231,14 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return Result{Value: borrowValue(context.Run, b.Value)}
 	}
 	if b.Kind == bindingFunction {
+		context.observeDefinitionSource(b.Function.Definition)
 		// A definition can be returned from its defining let scope. Keep
 		// that scope alive until the returned value is consumed or rejected.
 		wrapper := borrowFunction(context.Run, b.Function)
 		return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
 	}
 	if b.Kind == bindingLocalDefinition {
+		context.observeExpressionSource(b.Local.Expression)
 		return context.Program.localValue(b.Local, context)
 	}
 	if context.PurePredicate {

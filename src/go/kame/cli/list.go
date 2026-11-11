@@ -1,8 +1,8 @@
 package cli
 
 import (
+	"io"
 	"kame/core"
-	"solod.dev/so/io"
 )
 
 func writeTargetReport(out io.Writer, doc core.Value, styled bool) {

@@ -4,13 +4,13 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
@@ -243,15 +243,15 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		// then distinguish proven generated absence from an unrelated read error.
 		label := core.NewString(c.Run, name)
 		kind := core.NewString(c.Run, "resource")
-		result.Diagnostic.Frames = slices.Append(c.Run, result.Diagnostic.Frames, diagnostic.Frame{Kind: kind.Text, Label: label.Text})
+		result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: kind.Text, Label: label.Text})
 	}
 	return result
 }
 
 // Check the literal search root, not the escaped glob spelling or its matches.
 func allowsWildcard(c *eval.Context, pattern string) bool {
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	rootEnd := -1
 	for i := 0; i < len(pattern); i++ {
 		ch := pattern[i]
@@ -351,13 +351,13 @@ func wildcardShorthand(c *eval.Context, v []core.Value, name string, flag string
 		}
 	}
 	flagValue := core.NewString(c.Run, flag)
-	args := slices.Append(c.Run, nil, flagValue)
+	args := []core.Value{flagValue}
 	for i := range v {
-		args = slices.Append(c.Run, args, v[i])
+		args = append(args, v[i])
 	}
 	result := opWildcard(c, nil, args)
 	flagValue.Free(c.Run)
-	slices.Free(c.Run, args)
+	mem.FreeSlice(nil, args)
 	return result
 }
 
@@ -387,7 +387,7 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 		if value.Kind == core.String && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
 			bit := wildcardKindFlag(value.Text[1:])
 			if bit == 0 {
-				slices.Free(c.Run, patterns)
+				mem.FreeSlice(nil, patterns)
 				discardArgCallables(c, v)
 				return c.InvalidOperation("unknown wildcard kind flag: " + value.Text)
 			}
@@ -397,7 +397,7 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 				negative |= bit
 			}
 			if positive&negative != 0 {
-				slices.Free(c.Run, patterns)
+				mem.FreeSlice(nil, patterns)
 				discardArgCallables(c, v)
 				return c.InvalidOperation("opposite wildcard kind flags are invalid")
 			}
@@ -405,19 +405,19 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 			if value.Kind == core.List {
 				for j := range value.List {
 					if value.List[j].Kind != core.String {
-						slices.Free(c.Run, patterns)
+						mem.FreeSlice(nil, patterns)
 						return invalidArgument(c, v, i, "flat list of path strings")
 					}
 				}
 			} else if value.Kind != core.String && !(value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile) {
-				slices.Free(c.Run, patterns)
+				mem.FreeSlice(nil, patterns)
 				return invalidArgument(c, v, i, "string")
 			}
-			patterns = slices.Append(c.Run, patterns, value)
+			patterns = append(patterns, value)
 		}
 	}
 	if len(patterns) == 0 {
-		slices.Free(c.Run, patterns)
+		mem.FreeSlice(nil, patterns)
 		return c.InvalidOperation("wildcard requires at least one pattern")
 	}
 	mask := positive
@@ -426,8 +426,8 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	mask &= ^negative
 	previous := c.CallPath
-	var digits [32]byte
-	identity := core.NewString(c.Run, previous+"/wildcard-mask:"+strconv.Itoa(digits[:], mask))
+
+	identity := core.NewString(c.Run, previous+"/wildcard-mask:"+strconv.Itoa(mask))
 	c.CallPath = identity.Text
 	result := eval.Result{}
 	// The filter owns the union while suspended; do not rebuild it on replay.
@@ -445,7 +445,7 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	c.CallPath = previous
 	identity.Free(c.Run)
-	slices.Free(c.Run, patterns)
+	mem.FreeSlice(nil, patterns)
 	return result
 }
 
@@ -477,7 +477,7 @@ func freeWildcardState(a mem.Allocator, value any) {
 	for i := range state.Values {
 		state.Values[i].Free(state.Alloc)
 	}
-	slices.Free(state.Alloc, state.Values)
+	mem.FreeSlice(nil, state.Values)
 	mem.Free(state.Alloc, state)
 }
 
@@ -510,8 +510,8 @@ func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Res
 	for state.Index < len(state.Matches.List) {
 		i := state.Index
 		previous := c.CallPath
-		var digits [32]byte
-		identity := core.NewString(c.Run, previous+"/wildcard-kind:"+strconv.Itoa(digits[:], i))
+
+		identity := core.NewString(c.Run, previous+"/wildcard-kind:"+strconv.Itoa(i))
 		c.CallPath = identity.Text
 		result := fileRequest(c, host.OpLstat, state.Matches.List[i])
 		c.CallPath = previous
@@ -560,7 +560,7 @@ func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Res
 			bit = 1
 		}
 		if mask&bit != 0 {
-			state.Values = slices.Append(state.Alloc, state.Values, state.Matches.List[i].Clone(state.Alloc))
+			state.Values = append(state.Values, state.Matches.List[i].Clone(state.Alloc))
 		}
 		state.Index++
 	}
@@ -579,8 +579,8 @@ func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 	for state.Index < len(v) {
 		i := state.Index
 		previous := c.CallPath
-		var digits [32]byte
-		index := strconv.Itoa(digits[:], i)
+
+		index := strconv.Itoa(i)
 		member := core.NewString(c.Run, previous+"/wildcard:"+index)
 		c.CallPath = member.Text
 		result := eval.Result{}
@@ -602,7 +602,7 @@ func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 			return result
 		}
 		for j := range result.Value.List {
-			state.Values = slices.Append(state.Alloc, state.Values, result.Value.List[j].Clone(state.Alloc))
+			state.Values = append(state.Values, result.Value.List[j].Clone(state.Alloc))
 		}
 		result.Value.Free(c.Run)
 		state.Index++
@@ -625,8 +625,7 @@ func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 	return eval.Result{Value: out}
 }
 
-func compareWildcardPaths(left any, right any) int {
-	a, b := left.(*core.Value), right.(*core.Value)
+func compareWildcardPaths(a core.Value, b core.Value) int {
 	return strings.Compare(a.Text, b.Text)
 }
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -762,8 +761,8 @@ func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}
 	}
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := range v[0].List {
 		b.WriteString(v[0].List[i].Text)
 		if i == len(v[1].List) {

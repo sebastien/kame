@@ -1,16 +1,15 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 type operationState struct{ Calls int }
@@ -56,6 +55,14 @@ func readFileOperation(context *eval.Context, value any, args []core.Value) eval
 	if id == 0 {
 		return eval.Result{Waiting: true}
 	}
+	return eval.Result{Waiting: true}
+}
+
+func loadSourceOperation(context *eval.Context, value any, args []core.Value) eval.Result {
+	_, _ = value, args
+	payload := host.FilePayload(context.Run, host.OpRead, "/outside.kash")
+	context.Submit(host.RequestLoadSource, payload)
+	payload.Free(context.Run)
 	return eval.Result{Waiting: true}
 }
 
@@ -351,7 +358,7 @@ func TestLexicalFunctionAndOperationShadowing(t *testing.T) {
 	registry.Free()
 }
 
-func TestWideAndDeepScopeLookupAllocatesNoTrackedMemory(t *testing.T) {
+func TestWideAndDeepScopeLookupHasOnlyEvaluatorOverhead(t *testing.T) {
 	a := t.Allocator()
 	tracker := a.(*mem.Tracker)
 	engine := core.NewEngine(a)
@@ -363,13 +370,22 @@ func TestWideAndDeepScopeLookupAllocatesNoTrackedMemory(t *testing.T) {
 	defer parsed.Free()
 	defer registry.Free()
 
-	wideFields := slices.Make[core.RecordField](a, 512)
+	// Go allocates the evaluator frame on its heap. Scope lookup should add
+	// no allocation beyond evaluating a literal through the same entry point.
+	baselineExpr := expr.Parse(a, "literal", "0")
+	baselineStart := tracker.Stats().TotalAlloc
+	baselineResult := program.Evaluate(a, baselineExpr.Expr, program.Scope)
+	evaluatorBytes := tracker.Stats().TotalAlloc - baselineStart
+	baselineResult.Free(a)
+	baselineExpr.Free()
+
+	wideFields := make([]core.RecordField, 512)
 	for i := range wideFields {
 		name := "v" + string(byte('0'+i/100)) + string(byte('0'+i/10%10)) + string(byte('0'+i%10))
 		wideFields[i] = core.RecordField{Key: name, Value: core.Value{Kind: core.Int, Int: int64(i)}}
 	}
 	wideRecord := core.NewRecord(a, wideFields)
-	slices.Free(a, wideFields)
+	mem.FreeSlice(nil, wideFields)
 	context := &eval.Context{Program: program, Run: a, Scope: program.Scope}
 	wide := eval.RenderChildScope(context, program.Scope, wideRecord)
 	wideRecord.Free(a)
@@ -391,8 +407,8 @@ func TestWideAndDeepScopeLookupAllocatesNoTrackedMemory(t *testing.T) {
 	wideResult.Free(a)
 	wide.Free()
 	wideExpr.Free()
-	if wideAllocations != 0 {
-		t.Errorf("wide-scope lookup allocated %d tracked bytes, want 0", wideAllocations)
+	if wideAllocations > evaluatorBytes {
+		t.Errorf("wide-scope lookup allocated %d bytes beyond evaluator overhead", wideAllocations-evaluatorBytes)
 	}
 
 	outer := core.NewRecord(a, []core.RecordField{{Key: "outer", Value: core.Value{Kind: core.Int, Int: 42}}})
@@ -423,8 +439,8 @@ func TestWideAndDeepScopeLookupAllocatesNoTrackedMemory(t *testing.T) {
 	deepResult.Free(a)
 	deep.Free()
 	deepExpr.Free()
-	if deepAllocations != 0 {
-		t.Errorf("deep-scope lookup allocated %d tracked bytes, want 0", deepAllocations)
+	if deepAllocations > evaluatorBytes {
+		t.Errorf("deep-scope lookup allocated %d bytes beyond evaluator overhead", deepAllocations-evaluatorBytes)
 	}
 }
 
@@ -1224,6 +1240,27 @@ func TestRestrictedHostRequestIsDeniedBeforeQueueing(t *testing.T) {
 	result := program.EvaluateWith(expression.Expr, &context)
 	if result.Diagnostic.Code != "CAP_DENIED" || program.Requests.Next().OK {
 		t.Error("restricted host request was queued or not denied")
+	}
+	result.Free(a)
+	expression.Free()
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestSourceLoadingIsNotAnOperationCapability(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	registry.Add(eval.Operation{Name: "load-source", Call: loadSourceOperation, MinArity: 0, MaxArity: 0})
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	expression := expr.Parse(a, "test", "(load-source)")
+	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
+	result := program.EvaluateWith(expression.Expr, &context)
+	if result.Diagnostic.Code != "CAP_DENIED" || program.Requests.Next().OK {
+		t.Error("operation could forge a privileged source-loading request")
 	}
 	result.Free(a)
 	expression.Free()

@@ -3,8 +3,9 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 func (p *Program) emit(event Event) {
@@ -24,7 +25,7 @@ func (p *Program) emit(event Event) {
 	if event.DependencyKey.Name != "" {
 		event.DependencyKey = event.DependencyKey.Clone(p.Alloc)
 	}
-	p.Events = slices.Append(p.Alloc, p.Events, event)
+	p.Events = append(p.Events, event)
 }
 
 // ObserveDefinition reports selected value roots; rule roots report themselves.
@@ -44,7 +45,7 @@ func (p *Program) emitNode(node *core.Node, target string, kind EventKind, span 
 	}
 	event := Event{Kind: kind, Target: target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID, Span: span}
 	if len(data) != 0 {
-		event.Data = slices.Clone(p.Alloc, data)
+		event.Data = slices.Clone(data)
 	}
 	p.emit(event)
 }
@@ -96,7 +97,7 @@ func (p *Program) observeInstances() {
 			p.timingSave(entry)
 		}
 		if kind == TargetCompleted && p.productionDirty {
-			p.deferredTerminal = slices.Append(p.Alloc, p.deferredTerminal, i)
+			p.deferredTerminal = append(p.deferredTerminal, i)
 		} else {
 			p.emitTerminal(entry, kind)
 		}
@@ -130,7 +131,7 @@ func (p *Program) flushDeferredTerminals() {
 		}
 		p.emitTerminal(entry, TargetCompleted)
 	}
-	slices.Free(p.Alloc, p.deferredTerminal)
+	mem.FreeSlice(nil, p.deferredTerminal)
 	p.deferredTerminal = nil
 }
 

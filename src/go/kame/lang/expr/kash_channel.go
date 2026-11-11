@@ -1,8 +1,8 @@
 package expr
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"slices"
 )
 
 func ChannelName(text string) bool {
@@ -44,7 +44,7 @@ func SetCommandChannels(a mem.Allocator, e *Expr, names []string) {
 	if e.Kind == CommandGraph || e.Kind == CommandCapture || e.Kind == CommandTest {
 		for i := range names {
 			if !slices.Contains(e.Channels, names[i]) {
-				e.Channels = slices.Append(a, e.Channels, sourceText(a, names[i]))
+				e.Channels = append(e.Channels, sourceText(a, names[i]))
 			}
 		}
 	}

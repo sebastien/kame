@@ -3,9 +3,8 @@ package eval
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, completion core.Value, argv []core.Value) Result {
@@ -101,7 +100,7 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 			{Key: "signal", Value: core.Value{Kind: core.Int, Int: signal}},
 			{Key: "outcome", Value: core.Value{Kind: core.Int, Int: outcome}},
 		}
-		nodes = slices.Append(a, nodes, core.NewRecord(a, fields))
+		nodes = append(nodes, core.NewRecord(a, fields))
 		for j := range fields {
 			fields[j].Value.Free(a)
 		}
@@ -142,7 +141,7 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 			{Key: "queueHighWaterBytes", Value: highBytes}, {Key: "queueHighWaterItems", Value: highItems},
 			{Key: "saturated", Value: core.Value{Kind: core.Bool, Bool: saturated}},
 		}
-		edges = slices.Append(a, edges, core.NewRecord(a, fields))
+		edges = append(edges, core.NewRecord(a, fields))
 		for j := range fields {
 			fields[j].Value.Free(a)
 		}
@@ -155,11 +154,11 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 	for i := range nodes {
 		nodes[i].Free(a)
 	}
-	slices.Free(a, nodes)
+	mem.FreeSlice(nil, nodes)
 	for i := range edges {
 		edges[i].Free(a)
 	}
-	slices.Free(a, edges)
-	result.Value.Record = slices.Append(a, result.Value.Record, core.RecordField{Key: owned(a, "graph"), Value: value})
+	mem.FreeSlice(nil, edges)
+	result.Value.Record = append(result.Value.Record, core.RecordField{Key: owned(a, "graph"), Value: value})
 	return result
 }

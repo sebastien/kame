@@ -2,9 +2,8 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 type bindingKind int
@@ -77,7 +76,7 @@ func (s *Scope) setValue(name string, value core.Value) {
 }
 
 func (s *Scope) appendBinding(value binding) {
-	s.Bindings = slices.Append(s.Alloc, s.Bindings, value)
+	s.Bindings = append(s.Bindings, value)
 	lo, hi := 0, len(s.bindingIndex)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
@@ -91,7 +90,7 @@ func (s *Scope) appendBinding(value binding) {
 		s.bindingIndex[lo].index = len(s.Bindings) - 1
 		return
 	}
-	s.bindingIndex = slices.Append(s.Alloc, s.bindingIndex, bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1})
+	s.bindingIndex = append(s.bindingIndex, bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1})
 	copy(s.bindingIndex[lo+1:], s.bindingIndex[lo:])
 	s.bindingIndex[lo] = bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1}
 }
@@ -181,7 +180,7 @@ func (s *Scope) Free() {
 			for j := range local.WritePaths {
 				mem.FreeString(s.Alloc, local.WritePaths[j])
 			}
-			slices.Free(s.Alloc, local.WritePaths)
+			mem.FreeSlice(nil, local.WritePaths)
 			mem.Free(s.Alloc, local)
 		}
 		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Kind == FunctionDefinition {
@@ -191,13 +190,13 @@ func (s *Scope) Free() {
 						mem.FreeString(s.Alloc, s.Bindings[i].Function.Parameters[j].Name)
 					}
 				}
-				slices.Free(s.Alloc, s.Bindings[i].Function.Parameters)
+				mem.FreeSlice(nil, s.Bindings[i].Function.Parameters)
 			}
 			if s.Bindings[i].Function.BodyOwned {
 				for j := range s.Bindings[i].Function.Body {
 					expr.Free(s.Alloc, s.Bindings[i].Function.Body[j])
 				}
-				slices.Free(s.Alloc, s.Bindings[i].Function.Body)
+				mem.FreeSlice(nil, s.Bindings[i].Function.Body)
 			}
 			mem.Free(s.Alloc, s.Bindings[i].Function)
 		}
@@ -206,9 +205,9 @@ func (s *Scope) Free() {
 		freeCallables(s.Alloc, &s.Section[i])
 		s.Section[i].Free(s.Alloc)
 	}
-	slices.Free(s.Alloc, s.Section)
-	slices.Free(s.Alloc, s.Bindings)
-	slices.Free(s.Alloc, s.bindingIndex)
+	mem.FreeSlice(nil, s.Section)
+	mem.FreeSlice(nil, s.Bindings)
+	mem.FreeSlice(nil, s.bindingIndex)
 	parent := s.Parent
 	mem.Free(s.Alloc, s)
 	parent.Free()

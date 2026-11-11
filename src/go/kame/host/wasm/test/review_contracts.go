@@ -1,10 +1,9 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/host/wasm"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestReviewRuntimeOwnershipAndReversePhase(t *testing.T) {
@@ -54,8 +53,8 @@ func TestReviewPureDiscardsEffectsOnEveryExit(t *testing.T) {
 
 func TestReviewConvenienceHeapOwnsDescriptorAndFailure(t *testing.T) {
 	a := t.Allocator()
-	buf := slices.Make[byte](a, 1024*1024)
-	defer slices.Free(a, buf)
+	buf := make([]byte, 1024*1024)
+	defer mem.FreeSlice(nil, buf)
 	// Route the documented system-owned storage through the test tracker.
 	system := mem.System
 	mem.System = a
@@ -156,9 +155,9 @@ func TestReviewDescriptorRejectsKnownMalformedFields(t *testing.T) {
 }
 
 func TestReviewHeapTargetFailureOwnedByRuntime(t *testing.T) {
-	a := t.Allocator()
-	buf := slices.Make[byte](a, 1024*1024)
-	defer slices.Free(a, buf)
+	_ = t.Allocator()
+	buf := make([]byte, 1024*1024)
+	defer mem.FreeSlice(nil, buf)
 	heap := wasm.NewHeap(buf)
 	start := wasm.NewRuntimeWithHeap(&heap, "target.kmk", "")
 	if start.Runtime == nil {
@@ -212,7 +211,7 @@ func TestReviewMemoryHostRecordedDirectories(t *testing.T) {
 	for i := range entries {
 		mem.FreeString(a, entries[i].Name)
 	}
-	slices.Free(a, entries)
+	mem.FreeSlice(nil, entries)
 	entries, err = h.ReadDir(a, "parent/empty")
 	if err != nil || len(entries) != 0 {
 		t.Error("empty directory is not readable")
@@ -220,7 +219,7 @@ func TestReviewMemoryHostRecordedDirectories(t *testing.T) {
 	for i := range entries {
 		mem.FreeString(a, entries[i].Name)
 	}
-	slices.Free(a, entries)
+	mem.FreeSlice(nil, entries)
 	h.Mkdir("parent", 0o755)
 	if h.Remove("parent") == nil {
 		t.Error("nonempty ancestor removed")
@@ -239,7 +238,7 @@ func TestReviewMemoryHostRecordedDirectories(t *testing.T) {
 	for i := range entries {
 		mem.FreeString(a, entries[i].Name)
 	}
-	slices.Free(a, entries)
+	mem.FreeSlice(nil, entries)
 	h.Mkdir("dir", 0o755)
 	if h.WriteFileAtomic("dir", nil, 0o644, false) == nil {
 		t.Error("write replaced directory")

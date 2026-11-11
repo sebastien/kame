@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 // BuildSourceCandidates returns the ordered build sources tried by discovery.
@@ -16,7 +14,7 @@ var buildSourceCandidates = []string{"Kamefile", "Makefile.kmk", "make.kmk", "sr
 // BuildSourceList returns the candidates in human-readable diagnostic form.
 // The caller owns and frees the returned string.
 func BuildSourceList() string {
-	return strings.Join(mem.System, BuildSourceCandidates(), ", ")
+	return strings.Join(BuildSourceCandidates(), ", ")
 }
 
 // sourceOption shares file, inline, and directory spelling across language tools.
@@ -44,7 +42,7 @@ func sourceOption(inv *Invocation, args []string, index *int) bool {
 	if option == "-C" || option == "--directory" {
 		assignBuildOption(inv, option, value)
 	} else if option == "-c" || option == "--command" {
-		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "command", Value: value})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "command", Value: value})
 	} else {
 		languageFile(inv, value)
 	}
@@ -60,12 +58,12 @@ func languageFile(inv *Invocation, value string) {
 	if value == "-" {
 		kind = "stdin"
 	}
-	inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: kind, Value: value})
+	inv.Inputs = append(inv.Inputs, RunInput{Kind: kind, Value: value})
 }
 
 func validateLanguageSources(inv *Invocation, multiple bool) bool {
 	if len(inv.Inputs) == 0 {
-		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "stdin"})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "stdin"})
 	}
 	if len(inv.Inputs) > 1 {
 		if !multiple {

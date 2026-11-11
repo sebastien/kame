@@ -1,10 +1,10 @@
 package posix
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"os"
+	"path"
+	"strings"
 )
 
 // ResolveTool returns an owned executable path. A nil environment selects the
@@ -37,9 +37,9 @@ func toolEnvironmentValue(environment []string, name string, windows bool) strin
 func ToolPath(a mem.Allocator, cwd string, name string, windows bool) string {
 	if !windows {
 		if path.IsAbs(name) {
-			return path.Clean(a, name)
+			return path.Clean(name)
 		}
-		return path.Join(a, cwd, name)
+		return path.Join(cwd, name)
 	}
 	base := toolWindowsPath(a, cwd)
 	defer mem.FreeString(a, base)
@@ -56,11 +56,11 @@ func ToolPath(a mem.Allocator, cwd string, name string, windows bool) string {
 		if len(base) < 3 || base[1] != ':' || base[2] != '/' {
 			return ""
 		}
-		result = path.Clean(a, base[:2]+value)
+		result = path.Clean(base[:2] + value)
 	} else if absolute {
-		result = path.Clean(a, value)
+		result = path.Clean(value)
 	} else {
-		result = path.Join(a, base, value)
+		result = path.Join(base, value)
 	}
 	// POSIX path.Clean removes a drive root's slash; C: is drive-relative.
 	if len(result) == 2 && result[1] == ':' {
@@ -85,9 +85,9 @@ func toolWindowsPath(a mem.Allocator, name string) string {
 		if len(name) == 2 {
 			value += "/"
 		}
-		return strings.ReplaceAll(a, value, "\\", "/")
+		return strings.ReplaceAll(value, "\\", "/")
 	}
-	return strings.ReplaceAll(a, name, "\\", "/")
+	return strings.ReplaceAll(name, "\\", "/")
 }
 
 // ResolveToolForPlatform shares native resolution with platform-policy tests.

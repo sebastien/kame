@@ -1,14 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 var dashboardCommand string
@@ -62,13 +61,13 @@ func observeNativeWork(node *core.Node, target string, started bool) {
 	if !started {
 		return
 	}
-	var frame = bytes.NewBuffer(mem.System, nil)
+	var frame = bytes.Buffer{}
 	// Activity changes cannot wait for a timer: dispatch itself may be a long,
 	// synchronous render with no opportunity to refresh until it returns.
 	dashboardLast = presentationNow() - 100000000
 	redrawDashboard(&frame, &invocationCounts)
 	publishDashboard(dashboardOutput, frame.Bytes())
-	frame.Free()
+	frame.Reset()
 	flushCLIOutput(dashboardOutput)
 }
 
@@ -146,11 +145,11 @@ func redrawDashboard(out io.Writer, progress *buildProgress) {
 		return
 	}
 	dashboardLast = now
-	var frame = bytes.NewBuffer(mem.System, nil)
+	var frame = bytes.Buffer{}
 	previousRows := dashboardRows
 	renderDashboard(&frame, progress, width, height, now)
 	paintDashboard(out, frame.String(), previousRows, dashboardRows)
-	frame.Free()
+	frame.Reset()
 }
 
 // Cursor rests below the footer. Only changed rows are overwritten; unchanged
@@ -168,12 +167,12 @@ func publishDashboard(out io.Writer, data []byte) {
 	if dashboardLive && !dashboardUnsafe {
 		// Terminals supporting synchronized updates present the transaction in one
 		// frame. Others still receive a single write, with no timed blank interval.
-		var batch = bytes.NewBuffer(mem.System, nil)
+		var batch = bytes.Buffer{}
 		io.WriteString(&batch, "\x1b[?2026h")
 		batch.Write(data)
 		io.WriteString(&batch, "\x1b[?2026l")
 		out.Write(batch.Bytes())
-		batch.Free()
+		batch.Reset()
 	} else {
 		out.Write(data)
 	}
@@ -189,7 +188,7 @@ func renderDashboard(out io.Writer, progress *buildProgress, width int, height i
 	state := cli.ProgressState{Workers: workers}
 	view.Workers = state.WorkerView(mem.System, now)
 	dashboardRows = cli.WriteDashboard(out, view)
-	slices.Free(mem.System, view.Workers)
+	mem.FreeSlice(nil, view.Workers)
 }
 
 func writeStyledPadded(out io.Writer, text string, width int, token string) {

@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"os"
 )
 
 func TestKameBodyPublishesExactContentAndReusesTrackedInputs(t *testing.T) {
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-value-body-")
+
+	dir, err := os.MkdirTemp("", "kame-value-body-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -47,8 +47,8 @@ func TestKameBodyPublishesExactContentAndReusesTrackedInputs(t *testing.T) {
 
 func TestComputedRootCapturePrerequisiteExecutesAndTracksChanges(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-computed-input-")
+
+	dir, err := os.MkdirTemp("", "kame-computed-input-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -74,8 +74,8 @@ func TestComputedRootCapturePrerequisiteExecutesAndTracksChanges(t *testing.T) {
 
 func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-value-rejection-")
+
+	dir, err := os.MkdirTemp("", "kame-value-rejection-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -117,7 +117,7 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 		}
 		mem.FreeString(a, code)
 	}
-	data, readErr := os.ReadFile(a, dir+"/side")
+	data, readErr := os.ReadFile(dir + "/side")
 	if readErr == nil {
 		t.Error("rejected computation performed an effect")
 	}

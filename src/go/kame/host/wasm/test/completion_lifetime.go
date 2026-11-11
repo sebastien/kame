@@ -1,10 +1,10 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/wasm"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestRuntimeAcceptsOwnedFailureAfterInputReuse(t *testing.T) {

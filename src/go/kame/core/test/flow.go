@@ -1,10 +1,9 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 type sequence struct {
@@ -71,14 +70,14 @@ func free(s *core.Source) {
 	for i := state.Index; i < len(state.Atoms); i++ {
 		state.Atoms[i].Value.Free(state.Alloc)
 	}
-	slices.Free(state.Alloc, state.Atoms)
+	mem.FreeSlice(nil, state.Atoms)
 	mem.Free(state.Alloc, state)
 }
 
 func newSequence(a mem.Allocator, atoms []core.Atom) *core.Source {
 	state := mem.Alloc[sequence](a)
 	state.Alloc = a
-	state.Atoms = slices.Make[core.Atom](a, len(atoms))
+	state.Atoms = make([]core.Atom, len(atoms))
 	copy(state.Atoms, atoms)
 	return core.NewSource(a, poll, free, state)
 }

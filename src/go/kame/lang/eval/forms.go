@@ -3,11 +3,10 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 const defEscapeMessage = "function value escapes its scope; define it with (def name [params] body) instead"
@@ -109,14 +108,14 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 				}
 			}
 		}
-		parameters := slices.Make[expr.Parameter](context.Run, len(values[1].Items))
+		parameters := make([]expr.Parameter, len(values[1].Items))
 		for i := range values[1].Items {
 			parameter := values[1].Items[i]
 			if parameter.Kind != expr.Name || !definition.ValidName(parameter.Text) || (parameter.Rest && i != len(values[1].Items)-1) {
 				for j := 0; j < i; j++ {
 					mem.FreeString(context.Run, parameters[j].Name)
 				}
-				slices.Free(context.Run, parameters)
+				mem.FreeSlice(nil, parameters)
 				return failure(context.Run, "DEF_INVALID", parameter.Span, "invalid function parameter")
 			}
 			for j := 0; j < i; j++ {
@@ -124,7 +123,7 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 					for j := 0; j < i; j++ {
 						mem.FreeString(context.Run, parameters[j].Name)
 					}
-					slices.Free(context.Run, parameters)
+					mem.FreeSlice(nil, parameters)
 					return failure(context.Run, "DEF_INVALID", parameter.Span, "duplicate function parameter")
 				}
 			}
@@ -132,7 +131,7 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 		}
 		function := mem.Alloc[Function](context.Run)
 		for i := 2; i < len(values); i++ {
-			function.Body = slices.Append(context.Run, function.Body, expr.Clone(context.Run, values[i]))
+			function.Body = append(function.Body, expr.Clone(context.Run, values[i]))
 		}
 		function.Kind, function.Parameters, function.Scope, function.ParametersOwned, function.ParameterNamesOwned, function.BodyOwned = FunctionDefinition, parameters, scope, true, true, true
 		scope.setFunction(values[0].Text, function)
@@ -375,11 +374,11 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 			for i := range names {
 				mem.FreeString(context.Run, names[i])
 			}
-			slices.Free(context.Run, names)
+			mem.FreeSlice(nil, names)
 			for i := range captures {
 				mem.FreeString(context.Run, captures[i])
 			}
-			slices.Free(context.Run, captures)
+			mem.FreeSlice(nil, captures)
 			freeCallables(context.Run, &sub.Value)
 			sub.Value.Free(context.Run)
 			return Result{Diagnostic: diag}
@@ -388,11 +387,11 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 			for i := range captures {
 				mem.FreeString(context.Run, captures[i])
 			}
-			slices.Free(context.Run, captures)
+			mem.FreeSlice(nil, captures)
 			for i := range names {
 				mem.FreeString(context.Run, names[i])
 			}
-			slices.Free(context.Run, names)
+			mem.FreeSlice(nil, names)
 			continue
 		}
 		armScope := newScope(context.Run, scope)
@@ -404,11 +403,11 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 					for j := range names {
 						mem.FreeString(context.Run, names[j])
 					}
-					slices.Free(context.Run, names)
+					mem.FreeSlice(nil, names)
 					for j := range captures {
 						mem.FreeString(context.Run, captures[j])
 					}
-					slices.Free(context.Run, captures)
+					mem.FreeSlice(nil, captures)
 					freeCallables(context.Run, &sub.Value)
 					sub.Value.Free(context.Run)
 					armScope.Free()
@@ -420,11 +419,11 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 		for i := range names {
 			mem.FreeString(context.Run, names[i])
 		}
-		slices.Free(context.Run, names)
+		mem.FreeSlice(nil, names)
 		for i := range captures {
 			mem.FreeString(context.Run, captures[i])
 		}
-		slices.Free(context.Run, captures)
+		mem.FreeSlice(nil, captures)
 		freeCallables(context.Run, &sub.Value)
 		sub.Value.Free(context.Run)
 		if len(clause.Items) == 1 {
@@ -470,10 +469,10 @@ func matchPattern(a mem.Allocator, subject string, pattern *core.Value, span sou
 		parsed := expr.ParsePatternText(a, pattern.Text, 0)
 		if len(parsed.Diagnostics) != 0 {
 			parsed.Pattern.Free(a)
-			slices.Free(a, parsed.Diagnostics)
+			mem.FreeSlice(nil, parsed.Diagnostics)
 			return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "invalid match pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
 		}
-		slices.Free(a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		if parsed.Pattern.References != 0 {
 			parsed.Pattern.Free(a)
 			return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "match pattern must not be an expansion pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
@@ -493,15 +492,15 @@ func matchPattern(a mem.Allocator, subject string, pattern *core.Value, span sou
 		res := parsed.Pattern.MatchText(a, subject)
 		var names []string
 		for i := range parsed.Pattern.Names {
-			names = slices.Append(a, names, owned(a, parsed.Pattern.Names[i]))
+			names = append(names, owned(a, parsed.Pattern.Names[i]))
 		}
 		parsed.Pattern.Free(a)
 		if !res.Matched {
-			slices.Free(a, res.Captures)
+			mem.FreeSlice(nil, res.Captures)
 			for i := range names {
 				mem.FreeString(a, names[i])
 			}
-			slices.Free(a, names)
+			mem.FreeSlice(nil, names)
 			if res.Limited {
 				return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneFailureText(a, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
 			}
@@ -509,12 +508,12 @@ func matchPattern(a mem.Allocator, subject string, pattern *core.Value, span sou
 		}
 		var captures []string
 		for i := range res.Captures {
-			captures = slices.Append(a, captures, owned(a, res.Captures[i]))
+			captures = append(captures, owned(a, res.Captures[i]))
 		}
-		slices.Free(a, res.Captures)
+		mem.FreeSlice(nil, res.Captures)
 		// Normalize lengths: anonymous matchers still occupy slots.
 		for len(captures) < len(names) {
-			captures = slices.Append(a, captures, owned(a, ""))
+			captures = append(captures, owned(a, ""))
 		}
 		return matchOutcome{Matched: true, Names: names, Captures: captures}
 	default:

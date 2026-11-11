@@ -19,13 +19,8 @@ jobs:
         with:
           go-version-file: src/go/kame/go.mod
           cache-dependency-path: src/go/kame/go.sum
-      - name: Install Solod compiler
-        shell: bash
-        run: |
-          go install solod.dev/cmd/so@v0.4.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Run native package and host tests
-        run: make test-so
+        run: make test-unit
       - name: Build host-native CLI
         run: make dist-native
       - name: Run host-native CLI

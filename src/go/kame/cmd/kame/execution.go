@@ -1,17 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"kame/cli"
 	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/fmt"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
+	"os"
 )
 
 func materializeTargets(p *program.Program, targets []string, out io.Writer, errOut io.Writer, json bool) int {
@@ -19,7 +18,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 		setDashboardSubject(targets[0])
 	}
 	// Preserve operand indices even when an earlier target fails to start.
-	handles := slices.Make[*program.Handle](mem.System, len(targets))
+	handles := make([]*program.Handle, len(targets))
 	remaining := 0
 	failed := false
 	progress := buildProgress{}
@@ -46,7 +45,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 					handles[i].Free()
 				}
 			}
-			slices.Free(mem.System, handles)
+			mem.FreeSlice(nil, handles)
 			return 128 - signal
 		}
 		if signal > 0 && !cancelling {
@@ -95,7 +94,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 		}
 	}
 	drainEvents(p, out, errOut, json, &progress)
-	slices.Free(mem.System, handles)
+	mem.FreeSlice(nil, handles)
 	// Either signal may arrive during the final tick/drain, even when all
 	// targets completed successfully before shutdown began.
 	signal := posix.TakeSignal()
@@ -114,7 +113,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
 	previousOutput := setNativeOutputDeadline(p, 0)
 	defer restoreNativeOutputDeadline(previousOutput)
-	var messages = bytes.NewBuffer(mem.System, nil)
+	var messages = bytes.Buffer{}
 	destination := errOut
 	if !json && dashboardLive {
 		errOut = &messages
@@ -126,7 +125,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			updateTaskbar(errOut)
 			redrawDashboard(errOut, progress)
 			publishDashboard(destination, messages.Bytes())
-			messages.Free()
+			messages.Reset()
 			// C stdio buffers redirected streams. Publish drained events while the
 			// process or watch session is still alive, including JSON records.
 			flushCLIOutput(out)

@@ -2,7 +2,7 @@ package core
 
 import (
 	"kame/diagnostic"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 type AtomKind int

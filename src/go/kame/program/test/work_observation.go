@@ -1,15 +1,15 @@
-package program_test
+package programcheck
 
 import (
+	"bytes"
+	"io"
 	"kame/core"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 var workTrace *bytes.Buffer
@@ -21,7 +21,7 @@ func traceDispatch(node *core.Node, target string, started bool) {
 }
 
 func freeWorkTrace(a mem.Allocator) {
-	workTrace.Free()
+	workTrace.Reset()
 	mem.Free(a, workTrace)
 	workTrace = nil
 }
@@ -29,7 +29,7 @@ func freeWorkTrace(a mem.Allocator) {
 func dispatchTrace(t *testing.T, prepared bool) string {
 	a := t.Allocator()
 	workTrace = mem.Alloc[bytes.Buffer](a)
-	*workTrace = bytes.NewBuffer(a, nil)
+	*workTrace = bytes.Buffer{}
 	defer freeWorkTrace(a)
 	source := script.Parse(a, "work.kmk", "task root : a b\ntask a :\ntask b :\n")
 	defer source.Free()

@@ -1,11 +1,11 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/wasm"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestStdinRecordWaitIsReleasedOnCancellationAndShutdown(t *testing.T) {

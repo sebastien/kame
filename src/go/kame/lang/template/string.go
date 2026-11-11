@@ -1,11 +1,11 @@
 package template
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type PartKind int
@@ -45,8 +45,8 @@ func (t *String) Free() {
 		}
 		expr.Free(t.Alloc, t.Parts[i].Expr)
 	}
-	slices.Free(t.Alloc, t.Parts)
-	slices.Free(t.Alloc, t.Diagnostics)
+	mem.FreeSlice(nil, t.Parts)
+	mem.FreeSlice(nil, t.Diagnostics)
 	if t.OwnSource {
 		t.Source.Free(t.Alloc)
 	}
@@ -89,20 +89,20 @@ func (p *parser) diagnostic(severity source.Severity, start int, end int, messag
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: severity, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: severity, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) literal(text *strings.Builder, start int, end int) {
 	if text.Len() == 0 {
 		return
 	}
-	p.parts = slices.Append(p.a, p.parts, Part{Kind: Literal, Text: owned(p.a, text.String()), Span: source.Span{Start: start, End: end}})
+	p.parts = append(p.parts, Part{Kind: Literal, Text: owned(p.a, text.String()), Span: source.Span{Start: start, End: end}})
 	text.Reset()
 }
 
 func (p *parser) stringParts() {
 	var literal strings.Builder
-	literal = strings.NewBuilder(p.a)
+	literal = strings.Builder{}
 	literalStart := p.pos
 	for p.pos < p.end {
 		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@{x/" {
@@ -112,7 +112,7 @@ func (p *parser) stringParts() {
 			}
 			if end > p.pos+4 && end < p.end && p.s.Text[end] == '}' {
 				p.literal(&literal, literalStart, p.pos)
-				p.parts = slices.Append(p.a, p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4 : end], Span: source.Span{Start: p.pos, End: end + 1}})
+				p.parts = append(p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4 : end], Span: source.Span{Start: p.pos, End: end + 1}})
 				p.pos, literalStart = end+1, end+1
 				continue
 			}
@@ -138,17 +138,17 @@ func (p *parser) stringParts() {
 			if prefix.Expr == nil && closed {
 				p.literal(&literal, literalStart, start)
 				for i := range prefix.Diagnostics {
-					p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+					p.diags = append(p.diags, prefix.Diagnostics[i])
 				}
-				slices.Free(p.a, prefix.Diagnostics)
+				mem.FreeSlice(nil, prefix.Diagnostics)
 				p.pos = prefix.End
-				p.parts = slices.Append(p.a, p.parts, Part{Kind: Literal, Text: owned(p.a, p.s.Text[start:p.pos]), Span: source.Span{Start: start, End: p.pos}})
+				p.parts = append(p.parts, Part{Kind: Literal, Text: owned(p.a, p.s.Text[start:p.pos]), Span: source.Span{Start: start, End: p.pos}})
 				literalStart = p.pos
 				continue
 			}
 			if prefix.Expr == nil || !closed {
 				expr.Free(p.a, prefix.Expr)
-				slices.Free(p.a, prefix.Diagnostics)
+				mem.FreeSlice(nil, prefix.Diagnostics)
 				message := "unclosed template expression; expected ')'"
 				if close == '}' {
 					message = "unclosed reference expansion; expected '}'"
@@ -160,18 +160,18 @@ func (p *parser) stringParts() {
 			}
 			p.literal(&literal, literalStart, start)
 			for i := range prefix.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+				p.diags = append(p.diags, prefix.Diagnostics[i])
 			}
-			slices.Free(p.a, prefix.Diagnostics)
+			mem.FreeSlice(nil, prefix.Diagnostics)
 			p.pos = prefix.End
-			p.parts = slices.Append(p.a, p.parts, Part{Kind: kind, Expr: prefix.Expr, Span: source.Span{Start: start, End: p.pos}})
+			p.parts = append(p.parts, Part{Kind: kind, Expr: prefix.Expr, Span: source.Span{Start: start, End: p.pos}})
 			literalStart = p.pos
 			continue
 		}
 		end := selectorEnd(p.s.Text, p.pos)
 		if end > p.pos && expr.ValidSelector(p.s.Text[p.pos:end]) {
 			p.literal(&literal, literalStart, p.pos)
-			p.parts = slices.Append(p.a, p.parts, Part{Kind: Selector, Text: p.s.Text[p.pos:end], Span: source.Span{Start: p.pos, End: end}})
+			p.parts = append(p.parts, Part{Kind: Selector, Text: p.s.Text[p.pos:end], Span: source.Span{Start: p.pos, End: end}})
 			p.pos, literalStart = end, end
 			continue
 		}
@@ -179,7 +179,7 @@ func (p *parser) stringParts() {
 		p.pos++
 	}
 	p.literal(&literal, literalStart, p.pos)
-	literal.Free()
+	literal.Reset()
 }
 
 func isToolNameByte(b byte) bool {
@@ -224,7 +224,7 @@ func owned(a mem.Allocator, text string) string {
 
 // FormatString returns allocator-owned canonical standalone template text.
 func FormatString(a mem.Allocator, t *String) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	for i := range t.Parts {
 		part := t.Parts[i]
 		if part.Kind == Literal {
@@ -259,6 +259,6 @@ func FormatString(a mem.Allocator, t *String) string {
 		}
 	}
 	value := owned(a, b.String())
-	b.Free()
+	b.Reset()
 	return value
 }

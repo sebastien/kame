@@ -3,13 +3,13 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
+	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"path"
 )
 
 // SourcePart maps one include-expanded segment back to its authored file.
@@ -20,6 +20,8 @@ type SourcePart struct {
 	Offset    int
 	Directory string
 	Includes  []diagnostic.Frame
+	Signature core.Signature // Original bytes of a file-backed source.
+	Module    bool           // Module spans are outside the combined source.
 }
 
 type Location struct {
@@ -27,8 +29,48 @@ type Location struct {
 	Span   source.Span
 }
 
+func (c *Context) observeDefinitionSource(e *definition.Definition) {
+	if e == nil {
+		return
+	}
+	c.observeExpressionSource(e.Expression)
+}
+
+func (c *Context) observeExpressionSource(e *expr.Expr) {
+	if e == nil || c.Program == nil {
+		return
+	}
+	c.observeSourcePart(e.SourceOrigin)
+}
+
+func (c *Context) observeSourcePart(i int) {
+	if c.Program == nil {
+		return
+	}
+	if i <= 0 || i > len(c.Program.SourceParts) {
+		return
+	}
+	part := c.Program.SourceParts[i-1]
+	if part.Signature.Mode != core.SignatureContent {
+		return
+	}
+	// Rendered values already fingerprint their implementation and consumed data.
+	if !part.Module && c.Phase != EvaluatePhase {
+		return
+	}
+	name := part.Name
+	constructed := part.Directory != ""
+	if part.Directory != "" {
+		name = path.Join(part.Directory, path.Base(part.Name))
+	}
+	c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: name}, core.ObservationContent, part.Signature)
+	if constructed {
+		mem.FreeString(c.Run, name)
+	}
+}
+
 func (p *Program) AddSourcePart(name string, start int, end int, offset int) {
-	p.SourceParts = slices.Append(p.Alloc, p.SourceParts, SourcePart{Name: owned(p.Alloc, name), Start: start, End: end, Offset: offset})
+	p.SourceParts = append(p.SourceParts, SourcePart{Name: owned(p.Alloc, name), Start: start, End: end, Offset: offset})
 }
 
 func (p *Program) SetSourcePartIncludes(includes []diagnostic.Frame) {
@@ -38,7 +80,7 @@ func (p *Program) SetSourcePartIncludes(includes []diagnostic.Frame) {
 	part := &p.SourceParts[len(p.SourceParts)-1]
 	for i := range includes {
 		frame := includes[i]
-		part.Includes = slices.Append(p.Alloc, part.Includes, diagnostic.Frame{Kind: owned(p.Alloc, frame.Kind), Label: owned(p.Alloc, frame.Label), Source: owned(p.Alloc, frame.Source), Span: frame.Span})
+		part.Includes = append(part.Includes, diagnostic.Frame{Kind: owned(p.Alloc, frame.Kind), Label: owned(p.Alloc, frame.Label), Source: owned(p.Alloc, frame.Source), Span: frame.Span})
 	}
 }
 
@@ -48,7 +90,7 @@ func (p *Program) SetSourcePartDirectory(directory string) {
 	if len(p.SourceParts) != 0 && path.IsAbs(directory) {
 		part := &p.SourceParts[len(p.SourceParts)-1]
 		mem.FreeString(p.Alloc, part.Directory)
-		part.Directory = path.Clean(p.Alloc, directory)
+		part.Directory = path.Clean(directory)
 	}
 }
 
@@ -139,6 +181,11 @@ func (p *Program) LocateSource(name string, span source.Span) Location {
 	}
 	for i := len(p.SourceParts) - 1; i >= 0; i-- {
 		part := p.SourceParts[i]
+		if part.Module {
+			// Module spans are in a separate parsed source; only SourceOrigin
+			// may select them, never a combined-script offset lookup.
+			continue
+		}
 		if span.Start < part.Start {
 			continue
 		}
@@ -170,7 +217,7 @@ func (p *Program) freeSourceParts() {
 			mem.FreeString(p.Alloc, frame.Label)
 			mem.FreeString(p.Alloc, frame.Source)
 		}
-		slices.Free(p.Alloc, p.SourceParts[i].Includes)
+		mem.FreeSlice(nil, p.SourceParts[i].Includes)
 	}
-	slices.Free(p.Alloc, p.SourceParts)
+	mem.FreeSlice(nil, p.SourceParts)
 }

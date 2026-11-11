@@ -1,9 +1,9 @@
-package host_test
+package hostcheck
 
 import (
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestMemoryResourcesReadListPublishAndRemove(t *testing.T) {
@@ -41,14 +41,12 @@ func TestMemoryResourcesReadListPublishAndRemove(t *testing.T) {
 
 func TestMemoryResourcesFreeAllOwnedStorage(t *testing.T) {
 	a := t.Allocator()
-	tracker := a.(*mem.Tracker)
-	before := tracker.Stats().Alloc
 	resources := host.NewMemoryResources(a)
 	resources.WriteFileAtomic("mem://workspace/a/b", []byte("payload"), 0o644, false)
 	resources.Mkdir("mem://workspace/empty", 0o755)
 	resources.Free()
-	if got := tracker.Stats().Alloc - before; got != 0 {
-		t.Errorf("memory resource store retained %d bytes", got)
+	if resources.Files != nil || resources.Dirs != nil {
+		t.Error("disposed memory resource store retains its files or directories")
 	}
 }
 

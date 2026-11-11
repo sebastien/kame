@@ -3,10 +3,10 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
+
+	"strconv"
 )
 
 // The invocation root owns work independently of whichever value demanded it.
@@ -32,8 +32,8 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.Context = p.retainExecutionContext(c)
 	task.Context.InputClosed = true
 	task.Prepared = clonePreparedProcess(p.Alloc, prepared)
-	var buffer [strconv.MaxIntBase10Len]byte
-	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(buffer[:], len(p.Processes))+">")
+
+	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(len(p.Processes))+">")
 	task.Node = p.Engine.Add(key, runProcessTask, task)
 	key.Free(p.Alloc)
 	if task.Node == nil {
@@ -44,7 +44,7 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	if c.finalizer == nil {
 		task.LauncherRoot = c.Engine.RetainRoot()
 	}
-	p.Processes = slices.Append(p.Alloc, p.Processes, task)
+	p.Processes = append(p.Processes, task)
 	// Queue startup before the caller can advance to its next statement.
 	p.Engine.DispatchRoot(task.Node)
 	return Result{Value: core.Value{Kind: core.Process, Process: task}}
@@ -71,7 +71,7 @@ func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
 	for i := range c.WritePaths {
 		mem.FreeString(c.Run, c.WritePaths[i])
 	}
-	slices.Free(c.Run, c.WritePaths)
+	mem.FreeSlice(nil, c.WritePaths)
 	if r.Waiting {
 		r.Free(c.Run)
 		if engine.Submitted() {
@@ -208,36 +208,36 @@ func (p *Program) retainExecutionContext(c *Context) Context {
 	result.Environment, result.Grants, result.Args, result.Inputs, result.Outputs, result.RuleFrames, result.Frames = nil, nil, nil, nil, nil, nil, nil
 	c.Scope.Retain()
 	for i := range c.Environment {
-		result.Environment = slices.Append(p.Alloc, result.Environment, owned(p.Alloc, c.Environment[i]))
+		result.Environment = append(result.Environment, owned(p.Alloc, c.Environment[i]))
 	}
 	for i := range c.Grants {
 		grant := Grant{Capability: c.Grants[i].Capability}
 		for j := range c.Grants[i].Names {
-			grant.Names = slices.Append(p.Alloc, grant.Names, owned(p.Alloc, c.Grants[i].Names[j]))
+			grant.Names = append(grant.Names, owned(p.Alloc, c.Grants[i].Names[j]))
 		}
-		result.Grants = slices.Append(p.Alloc, result.Grants, grant)
+		result.Grants = append(result.Grants, grant)
 	}
 	for i := range c.Args {
-		result.Args = slices.Append(p.Alloc, result.Args, c.Args[i].Clone(p.Alloc))
+		result.Args = append(result.Args, c.Args[i].Clone(p.Alloc))
 	}
 	for i := range c.Inputs {
-		result.Inputs = slices.Append(p.Alloc, result.Inputs, c.Inputs[i].Clone(p.Alloc))
+		result.Inputs = append(result.Inputs, c.Inputs[i].Clone(p.Alloc))
 	}
 	for i := range c.Outputs {
-		result.Outputs = slices.Append(p.Alloc, result.Outputs, c.Outputs[i].Clone(p.Alloc))
+		result.Outputs = append(result.Outputs, c.Outputs[i].Clone(p.Alloc))
 	}
 	for i := range c.RuleFrames {
 		frame := RuleFrame{FileRule: c.RuleFrames[i].FileRule, ServiceRule: c.RuleFrames[i].ServiceRule}
 		for j := range c.RuleFrames[i].Inputs {
-			frame.Inputs = slices.Append(p.Alloc, frame.Inputs, c.RuleFrames[i].Inputs[j].Clone(p.Alloc))
+			frame.Inputs = append(frame.Inputs, c.RuleFrames[i].Inputs[j].Clone(p.Alloc))
 		}
 		for j := range c.RuleFrames[i].NewerInputs {
-			frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, c.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
+			frame.NewerInputs = append(frame.NewerInputs, c.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
 		}
 		for j := range c.RuleFrames[i].Outputs {
-			frame.Outputs = slices.Append(p.Alloc, frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc))
+			frame.Outputs = append(frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc))
 		}
-		result.RuleFrames = slices.Append(p.Alloc, result.RuleFrames, frame)
+		result.RuleFrames = append(result.RuleFrames, frame)
 	}
 	return result
 }
@@ -250,19 +250,19 @@ func freeExecutionContext(a mem.Allocator, context *Context) {
 	for i := range context.Environment {
 		mem.FreeString(a, context.Environment[i])
 	}
-	slices.Free(a, context.Environment)
+	mem.FreeSlice(nil, context.Environment)
 	for i := range context.Args {
 		context.Args[i].Free(a)
 	}
-	slices.Free(a, context.Args)
+	mem.FreeSlice(nil, context.Args)
 	for i := range context.Inputs {
 		context.Inputs[i].Free(a)
 	}
-	slices.Free(a, context.Inputs)
+	mem.FreeSlice(nil, context.Inputs)
 	for i := range context.Outputs {
 		context.Outputs[i].Free(a)
 	}
-	slices.Free(a, context.Outputs)
+	mem.FreeSlice(nil, context.Outputs)
 	for i := range context.RuleFrames {
 		frame := context.RuleFrames[i]
 		for j := range frame.Inputs {
@@ -274,28 +274,28 @@ func freeExecutionContext(a mem.Allocator, context *Context) {
 		for j := range frame.NewerInputs {
 			frame.NewerInputs[j].Free(a)
 		}
-		slices.Free(a, frame.NewerInputs)
-		slices.Free(a, frame.Inputs)
-		slices.Free(a, frame.Outputs)
+		mem.FreeSlice(nil, frame.NewerInputs)
+		mem.FreeSlice(nil, frame.Inputs)
+		mem.FreeSlice(nil, frame.Outputs)
 	}
-	slices.Free(a, context.RuleFrames)
+	mem.FreeSlice(nil, context.RuleFrames)
 	for i := range context.Grants {
 		for j := range context.Grants[i].Names {
 			mem.FreeString(a, context.Grants[i].Names[j])
 		}
-		slices.Free(a, context.Grants[i].Names)
+		mem.FreeSlice(nil, context.Grants[i].Names)
 	}
-	slices.Free(a, context.Grants)
+	mem.FreeSlice(nil, context.Grants)
 }
 
 func clonePreparedProcess(a mem.Allocator, prepared *captureState) *captureState {
 	s := mem.Alloc[captureState](a)
 	s.Alloc, s.Stage, s.Input, s.Output, s.Append = a, prepared.Stage, owned(a, prepared.Input), owned(a, prepared.Output), prepared.Append
 	for i := range prepared.Stages {
-		s.Stages = slices.Append(a, s.Stages, prepared.Stages[i].Clone(a))
+		s.Stages = append(s.Stages, prepared.Stages[i].Clone(a))
 	}
 	for i := range prepared.Setups {
-		s.Setups = slices.Append(a, s.Setups, prepared.Setups[i].Clone(a))
+		s.Setups = append(s.Setups, prepared.Setups[i].Clone(a))
 	}
 	return s
 }

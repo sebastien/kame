@@ -1,22 +1,28 @@
-// Package posix runs shell scripts on hosted POSIX systems.
+// Package posix implements the native host with Go's operating system APIs.
 package posix
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"golang.org/x/sys/unix"
+	"io"
 	"kame/host"
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/time"
-	"solod.dev/so/unicode"
-	"solod.dev/so/unicode/utf8"
+	"kame/internal/c"
+	"kame/internal/mem"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+	"unicode"
+	"unicode/utf8"
 )
-
-//so:embed posix.h
-var posix_h string
-
-//so:embed posix.c
-var posix_c string
 
 // These aliases preserve the POSIX package's public API while the portable
 // process contract lives in host.
@@ -40,498 +46,503 @@ const (
 	DiagnosticHostFailure = "HOST_FAIL"
 )
 
-//so:extern km_host
-type nativeHost struct{}
-
-//so:extern km_event
-type nativeEvent struct {
-	kind              c.Int
-	id                int64
-	pid               int64
-	pgid              int64
-	outcome           c.Int
-	status            c.Int
-	signal            c.Int
-	data              *byte
-	dataLen           c.Int
-	diagnosticCode    *byte
-	diagnosticCodeLen c.Int
-	diagnostic        *byte
-	diagnosticLen     c.Int
-	output            *byte
-	stdoutLen         c.Int
-	errorOutput       *byte
-	stderrLen         c.Int
-	stdoutTruncated   bool
-	stderrTruncated   bool
-	retainBytes       c.Int
-	stageData         *c.Int
-	stageCount        c.Int
-	metricData        *int64
-	metricCount       c.Int
-	effectiveStatus   c.Int
-	effectiveSignal   c.Int
+type running struct {
+	snapshot     func() host.ProcessEvent
+	nextSnapshot time.Time
+	termination  sync.Once
+	commandMu    sync.Mutex
+	owned        map[*exec.Cmd]*ownedProcess
+	stopped      chan struct{}
+	halt         sync.Once
+	stopIO       func()
+	cmds         []*exec.Cmd
+	outcome      atomic.Int32
+	done         chan struct{}
 }
-
-//so:extern
-func km_host_new() *nativeHost { return nil }
-
-//so:extern
-func km_event_metric_field(event *nativeEvent, index c.Int, field c.Int) int64 {
-	_, _, _ = event, index, field
-	return 0
+type nativeHost struct {
+	predicates  chan *predicateRequest
+	waitFailure atomic.Bool
+	mu          sync.Mutex
+	processes   map[int64]*running
+	events      chan host.ProcessEvent
+	locks       map[int]*cacheLease
+	closed      chan struct{}
+	once        sync.Once
 }
-
-//so:extern nodecay
-func km_file_modtime(name string, link bool) int64 { _, _ = name, link; return 0 }
-
-//so:extern nodecay
-func km_file_watch_stamp(name string, data []byte) bool { _, _ = name, data; return false }
-
-//so:extern nodecay
-func km_host_start(h *nativeHost, id int64, shell []string, script []byte, directory string, environment []string, timeoutMS int64, retainBytes int, direct bool) c.Int {
-	_, _, _, _, _, _, _, _, _ = h, id, shell, script, directory, environment, timeoutMS, retainBytes, direct
-	return 0
-}
-
-//so:extern nodecay
-func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, errorPaths []string, errorAppends []int, errorModes []int, inputFD int, inputRoot int) c.Int {
-	_, _ = inputFD, inputRoot
-	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, errorPaths, errorAppends, errorModes
-	return 0
-}
-
-//so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, errorPaths []string, errorAppends []int, errorModes []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool, inputFD int, inputRoot int, accepted []int) c.Int {
-	_ = accepted
-	_, _ = inputFD, inputRoot
-	_ = collectFailures
-	_, _ = operandArguments, itemLimits
-	_, _, _ = errorPaths, errorAppends, errorModes
-	_, _ = streamItem, streamContext
-	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
-	return 0
-}
-
-//so:extern
-func km_event_stage_field(event *nativeEvent, index c.Int, field c.Int) c.Int {
-	_, _, _ = event, index, field
-	return 0
-}
-
-//so:extern
-func km_host_pump(h *nativeHost, waitMS c.Int) c.Int { _, _ = h, waitMS; return 0 }
-
-//so:extern
-func km_host_next(h *nativeHost, event *nativeEvent) bool { _, _ = h, event; return false }
-
-//so:extern
-func km_host_cancel(h *nativeHost, id int64, timeout bool) c.Int { _, _, _ = h, id, timeout; return 0 }
-
-//so:extern
-func km_host_stop(h *nativeHost, id int64, graceMS int64) c.Int { _, _, _ = h, id, graceMS; return 0 }
-
-//so:extern
-func km_host_cancel_all(h *nativeHost) { _ = h }
-
-//so:extern
-func km_host_active(h *nativeHost) c.Int { _ = h; return 0 }
-
-//so:extern nodecay
-func km_host_cache_lock(h *nativeHost, path string, stripe c.Int) c.Int {
-	_, _, _ = h, path, stripe
-	return -1
-}
-
-//so:extern
-func km_host_cache_unlock(h *nativeHost, stripe c.Int) { _, _ = h, stripe }
-
-//so:extern
-func km_host_force_waitpid_failure(h *nativeHost) { _ = h }
-
-//so:extern
-func km_event_free(event *nativeEvent) { _ = event }
-
-//so:extern
-func km_host_free(h *nativeHost) { _ = h }
-
-//so:extern
-func km_cli_install_signals() c.Int { return 0 }
-
-//so:extern
-func km_cli_take_signal() c.Int { return 0 }
-
-//so:extern
-func km_cli_stderr_is_terminal() c.Int { return 0 }
-
-//so:extern
-func km_cli_stderr_width() c.Int { return 0 }
-
-//so:extern
-func km_cli_stdout_is_terminal() c.Int { return 0 }
-
-//so:extern
-func km_cli_stdin_is_terminal() c.Int { return 0 }
-
-//so:extern
-func km_cli_stderr_height() c.Int { return 0 }
-
-//so:extern
-func km_cli_environment_size() c.Int { return 0 }
-
-//so:extern
-func km_cli_environment_names_case_insensitive() bool { return false }
-
-//so:extern nodecay
-func km_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
-
-//so:extern nodecay
-func km_pick_select(executable string, argv []string, input string, selection []byte, selected *int) c.Int {
-	_ = executable
-	_ = argv
-	_ = input
-	_ = selection
-	_ = selected
-	return -2
-}
-
-// Pick runs an interactive line filter and stores an owned selection.
-// Status 0 is a selection. 130 is cancel, 127 is not found, 1 is no match,
-// 2 is a picker error, -2 is an unsupported host, -3 is no terminal, and -1
-// is I/O failure.
-func Pick(executable string, args []string, input string, selection *string) int {
-	buffer := mem.AllocSlice[byte](mem.System, 1<<16, 1<<16)
-	defer mem.FreeSlice(mem.System, buffer)
-	var selected int
-	status := km_pick_select(executable, args, input, buffer, &selected)
-	if status != 0 || selected <= 0 || selected > len(buffer) {
-		return int(status)
-	}
-	owned := slices.Make[byte](mem.System, selected)
-	copy(owned, buffer[:selected])
-	*selection = string(owned)
-	return 0
-}
-
 type Host struct {
 	Readers     []recordCursor
 	StdinRecord int64
 	Alloc       mem.Allocator
 	native      *nativeHost
 	Memory      *host.MemoryResources
-	// start anchors the monotonic clock at host creation.
-	start time.Time
+	start       time.Time
+	pending     []host.ProcessEvent
 }
 
 func New(a mem.Allocator) *Host {
-	h := mem.Alloc[Host](a)
-	h.Alloc, h.native = a, km_host_new()
-	h.Memory = host.NewMemoryResources(a)
-	h.start = time.Now()
-	return h
+	return &Host{Alloc: a, Memory: host.NewMemoryResources(a), start: time.Now(), native: &nativeHost{processes: map[int64]*running{}, predicates: make(chan *predicateRequest, 64), events: make(chan host.ProcessEvent, 2), locks: map[int]*cacheLease{}, closed: make(chan struct{})}}
+}
+func (h *Host) SupportsExecutor(n, v string) bool { return n == "" || n == "local" }
+func (h *Host) SupportsStreamOperands() bool      { return true }
+func (h *Host) emit(e host.ProcessEvent) {
+	select {
+	case h.native.events <- e:
+	case <-h.native.closed:
+	}
 }
 
-func (h *Host) SupportsExecutor(name string, version string) bool {
-	_, _ = h, version
-	return name == "" || name == "local"
+type streamWriter struct {
+	onTruncate func()
+	mu         sync.Mutex
+	h          *Host
+	id         int64
+	kind       host.ProcessEventKind
+	capture    bytes.Buffer
+	stopped    <-chan struct{}
+	limit      int
+	truncated  bool
 }
 
-//so:extern
-func km_stream_operands_supported() bool { return false }
-
-func (h *Host) SupportsStreamOperands() bool { _ = h; return km_stream_operands_supported() }
-
-// Start returns false when the request was not admitted; callers must settle
-// failure immediately rather than wait for an event. A failed terminal may also
-// be queued for diagnostics, but nil hosts or an occupied emergency rejection
-// slot cannot queue another one. Only true transfers active process ownership.
-func (h *Host) Start(request host.ProcessRequest) bool {
-	if request.InputMode != "" && request.InputMode != "closed" && request.InputMode != "invocation" {
-		return false
-	}
-	inputFD := -1
-	if request.InputMode == "invocation" {
-		if h != nil && h.StdinRecord != 0 {
-			return false
+func (w *streamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.limit > 0 {
+		n := min(len(p), max(0, w.limit-w.capture.Len()))
+		w.capture.Write(p[:n])
+		firstOverflow := !w.truncated && n < len(p)
+		w.truncated = w.truncated || n < len(p)
+		if firstOverflow && w.onTruncate != nil {
+			w.onTruncate()
 		}
-		if request.InputFD < 0 || request.InputFD > 2147483647 || request.InputRoot < 0 || request.InputRoot >= len(request.Stages) || request.Input != "" || (!request.Topology && request.InputRoot != 0) {
-			return false
-		}
-		if request.Stages[request.InputRoot].Input != "" || request.Stages[request.InputRoot].Kind != "" {
-			return false
-		}
-		for i := range request.Edges {
-			if request.Edges[i].To == request.InputRoot && request.Edges[i].Argument == 0 {
-				return false
-			}
-		}
-		inputFD = request.InputFD
+	} else if len(p) != 0 {
+		w.truncated = true
 	}
-	if request.CollectFailures && !request.Topology {
-		return false
+	event := host.ProcessEvent{Kind: w.kind, ID: w.id, Data: bytes.Clone(p)}
+	select {
+	case w.h.native.events <- event:
+	case <-w.stopped:
+	case <-w.h.native.closed:
 	}
-	if request.Directory == "" {
-		request.Directory = "."
-	}
+	return len(p), nil
+}
+func (h *Host) Start(r host.ProcessRequest) bool {
 	if h == nil || h.native == nil {
 		return false
 	}
-	if request.Topology && host.ProcessTopologyError(h.Alloc, request) != "" {
+	if r.ID <= 0 {
+		h.reject(r.ID, "invalid request")
 		return false
 	}
-	if len(request.Stages) != 0 {
-		var arguments []string
-		var lengths []int
-		var directories, environment []string
-		var environmentLengths []int
-		var timeouts []int64
-		var kinds, edges, appends, operandArguments, itemLimits, errorAppends, errorModes []int
-		var inputs, outputs, errorPaths []string
-		var accepted []int
-		for i := range request.Stages {
-			for status := 1; status < 256; status++ {
-				if request.Stages[i].Accepted[status] {
-					accepted = slices.Append(h.Alloc, accepted, i)
-					accepted = slices.Append(h.Alloc, accepted, status)
-				}
+	if strings.IndexByte(string(r.Script), 0) >= 0 {
+		h.reject(r.ID, "invalid request")
+		return false
+	}
+	if r.InputMode != "" && r.InputMode != "closed" && r.InputMode != "invocation" {
+		return false
+	}
+	if r.Topology && host.ProcessTopologyError(h.Alloc, r) != "" {
+		return false
+	}
+	if r.CollectFailures && !r.Topology {
+		return false
+	}
+	stages := r.Stages
+	if len(stages) == 0 {
+		if r.Topology {
+			return false
+		}
+		args := r.Argv
+		if len(args) == 0 {
+			args = append(append([]string{}, r.Shell...), string(r.Script))
+		}
+		stages = []host.ProcessStage{{Argv: args}}
+	}
+	if r.InputMode == "invocation" && (h.StdinRecord != 0 || r.InputFD < 0 || r.InputRoot < 0 || r.InputRoot >= len(stages) || r.Input != "" || len(r.Stages) == 0) {
+		return false
+	}
+	if r.Topology {
+		return h.startTopology(r)
+	}
+	run := &running{done: make(chan struct{}), stopped: make(chan struct{})}
+	run.stopIO = func() { run.halt.Do(func() { close(run.stopped) }) }
+	h.native.mu.Lock()
+	if _, ok := h.native.processes[r.ID]; ok {
+		h.native.mu.Unlock()
+		h.reject(r.ID, "request ID already active")
+		return false
+	}
+	h.native.processes[r.ID] = run
+	h.native.mu.Unlock()
+	out := &streamWriter{h: h, id: r.ID, kind: host.ProcessStdout, limit: r.RetainBytes, stopped: run.stopped}
+	errout := &streamWriter{h: h, id: r.ID, kind: host.ProcessStderr, limit: r.RetainBytes, stopped: run.stopped}
+	if len(r.Argv) > 0 || len(r.Stages) > 0 {
+		out.onTruncate = func() { h.Stop(r.ID, 100) }
+	}
+	var commands []*exec.Cmd
+	var truncateFiles []*os.File
+	var resources []io.Closer
+	closeAll := func() {
+		for _, f := range resources {
+			f.Close()
+		}
+	}
+	fail := func() bool {
+		run.stopIO()
+		for _, cmd := range run.cmds {
+			if cmd.Process != nil {
+				run.signalCommands(syscall.SIGKILL)
+				run.waitCommand(cmd)
 			}
-			errorPaths = slices.Append(h.Alloc, errorPaths, request.Stages[i].Error)
-			errorAppend := 0
-			if request.Stages[i].ErrorAppend {
-				errorAppend = 1
+		}
+		closeAll()
+		close(run.done)
+		h.native.mu.Lock()
+		delete(h.native.processes, r.ID)
+		h.native.mu.Unlock()
+		h.reject(r.ID, "cannot start process")
+		h.pending[0].StdoutTruncated, h.pending[0].StderrTruncated = out.truncated, errout.truncated
+		h.pending[0].Stages = make([]host.ProcessStageResult, len(stages))
+		for i := range h.pending[0].Stages {
+			h.pending[0].Stages[i] = host.ProcessStageResult{Status: 127, EffectiveStatus: 127, HasEffectiveStatus: true, Outcome: host.ProcessFailed}
+		}
+		return true
+	}
+	var previous *os.File
+	for i, s := range stages {
+		if len(s.Argv) == 0 || s.Kind != "" {
+			return fail()
+		}
+		cmd := stageCommand(r, s)
+		if cmd.Err != nil {
+			return fail()
+		}
+		if cmd.Dir != "" {
+			info, e := os.Stat(cmd.Dir)
+			if e != nil || !info.IsDir() {
+				return fail()
 			}
-			errorAppends = slices.Append(h.Alloc, errorAppends, errorAppend)
-			errorModes = slices.Append(h.Alloc, errorModes, request.Stages[i].ErrorMode)
-			if request.Topology {
-				kind := 0
-				if operator := host.LookupOperatorKind(request.Stages[i].Kind); operator != nil {
-					kind = operator.Code
-				}
-				if request.Stages[i].Framed {
-					kind += 16
-				}
-				kind += request.Stages[i].Overflow * 32
-				kind += request.Stages[i].Order * 128
-				// Low bits retain kind/framing; higher bits carry a <=64 KiB budget.
-				kind += request.Stages[i].BufferBytes * 256
-				kinds = slices.Append(h.Alloc, kinds, kind)
-				itemLimits = slices.Append(h.Alloc, itemLimits, request.Stages[i].BufferItems)
-				inputs = slices.Append(h.Alloc, inputs, request.Stages[i].Input)
-				outputs = slices.Append(h.Alloc, outputs, request.Stages[i].Output)
-				appendOutput := 0
-				if request.Stages[i].Append {
-					appendOutput = 1
-				}
-				appends = slices.Append(h.Alloc, appends, appendOutput)
+		}
+		cmd.Stderr = errout
+		cmd.Stdout = out
+		if previous != nil {
+			cmd.Stdin = previous
+		}
+		input := s.Input
+		if i == 0 && input == "" {
+			input = r.Input
+		}
+		if input != "" {
+			f, e := os.Open(input)
+			if e != nil {
+				return fail()
 			}
-			lengths = slices.Append(h.Alloc, lengths, len(request.Stages[i].Argv))
-			for j := range request.Stages[i].Argv {
-				arguments = slices.Append(h.Alloc, arguments, request.Stages[i].Argv[j])
+			resources = append(resources, f)
+			cmd.Stdin = f
+		}
+		if r.InputMode == "invocation" && i == r.InputRoot {
+			fd, e := syscall.Dup(r.InputFD)
+			if e != nil {
+				return fail()
 			}
-			directory := request.Stages[i].Directory
-			if directory == "" {
-				directory = request.Directory
+			f := os.NewFile(uintptr(fd), "invocation input")
+			resources = append(resources, f)
+			cmd.Stdin = f
+		}
+		previous = nil
+		if i < len(stages)-1 {
+			rd, wr, e := os.Pipe()
+			if e != nil {
+				return fail()
 			}
-			directories = slices.Append(h.Alloc, directories, directory)
-			timeouts = slices.Append(h.Alloc, timeouts, request.Stages[i].TimeoutMS)
-			start := len(environment)
-			for j := range request.Environment {
-				entry := request.Environment[j]
-				entryAt := strings.IndexByte(entry, '=')
-				overridden := false
-				for k := range request.Stages[i].Environment {
-					replacement := request.Stages[i].Environment[k]
-					at := strings.IndexByte(replacement, '=')
-					if at > 0 && entryAt > 0 && EnvironmentNameEqual(entry[:entryAt], replacement[:at]) {
-						overridden = true
+			resources = append(resources, rd, wr)
+			cmd.Stdout = wr
+			previous = rd
+		}
+		output := s.Output
+		app := s.Append
+		if i == len(stages)-1 && output == "" {
+			output, app = r.Output, r.Append
+		}
+		if output != "" {
+			flags := os.O_WRONLY | os.O_CREATE
+			if app {
+				flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+			}
+			f, e := os.OpenFile(output, flags, 0666)
+			if e != nil {
+				return fail()
+			}
+			resources = append(resources, f)
+			if !app {
+				truncateFiles = append(truncateFiles, f)
+			}
+			cmd.Stdout = f
+		}
+		switch s.ErrorMode {
+		case host.StderrStdout:
+			cmd.Stderr = cmd.Stdout
+		case host.StderrPresentation:
+			cmd.Stderr = out
+			if i < len(stages)-1 {
+				cmd.Stderr = cmd.Stdout
+			}
+		case host.StderrFile:
+			flags := os.O_WRONLY | os.O_CREATE
+			if s.ErrorAppend {
+				flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+			}
+			f, e := os.OpenFile(s.Error, flags, 0666)
+			if e != nil {
+				return fail()
+			}
+			resources = append(resources, f)
+			if !s.ErrorAppend {
+				truncateFiles = append(truncateFiles, f)
+			}
+			cmd.Stderr = f
+		}
+		commands = append(commands, cmd)
+	}
+	for _, f := range truncateFiles {
+		info, e := f.Stat()
+		if e != nil || (info.Mode().IsRegular() && f.Truncate(0) != nil) {
+			return fail()
+		}
+	}
+	for i, cmd := range commands {
+		if run.startCommand(cmd) != nil {
+			return fail()
+		}
+		run.stageTimeout(cmd, stages[i].TimeoutMS)
+	}
+	closeAll()
+	h.pending = append(h.pending, host.ProcessEvent{Kind: host.ProcessStarted, ID: r.ID, PID: int64(run.cmds[0].Process.Pid), PGID: int64(run.cmds[0].Process.Pid)})
+	var timer *time.Timer
+	if timeout := processTimeout(r); timeout > 0 {
+		timer = time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() { run.terminate(host.ProcessTimedOut, 100) })
+	}
+	go func() {
+		defer close(run.done)
+		if timer != nil {
+			defer timer.Stop()
+		}
+		errorsByStage := make([]error, len(run.cmds))
+		var waits sync.WaitGroup
+		for index, cmd := range run.cmds {
+			waits.Add(1)
+			go func(index int, cmd *exec.Cmd) {
+				defer waits.Done()
+				errorsByStage[index] = run.waitCommand(cmd)
+			}(index, cmd)
+		}
+		waits.Wait()
+		terminal := host.ProcessEvent{Kind: host.ProcessTerminal, ID: r.ID, PID: int64(run.cmds[0].Process.Pid), PGID: int64(run.cmds[0].Process.Pid), RetainBytes: r.RetainBytes, HasEffectiveStatus: true}
+		for index, cmd := range run.cmds {
+			err := errorsByStage[index]
+			if errors.Is(err, errObserveExit) {
+				terminal.Diagnostic = host.ProcessDiagnostic{Code: DiagnosticHostFailure, Message: err.Error()}
+			}
+			status, sig := 0, 0
+			if err != nil {
+				status = 1
+				if cmd.ProcessState != nil {
+					status = cmd.ProcessState.ExitCode()
+					if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+						sig = int(ws.Signal())
+						status = 128 + sig
 					}
 				}
-				if !overridden {
-					environment = slices.Append(h.Alloc, environment, entry)
-				}
 			}
-			for j := range request.Stages[i].Environment {
-				environment = slices.Append(h.Alloc, environment, request.Stages[i].Environment[j])
+			effective := status
+			if sig == 0 && status > 0 && status < 256 && stages[index].Accepted[status] {
+				effective = 0
 			}
-			environmentLengths = slices.Append(h.Alloc, environmentLengths, len(environment)-start)
-		}
-		ok := false
-		if request.Topology {
-			for i := range request.Edges {
-				edges = slices.Append(h.Alloc, edges, request.Edges[i].From)
-				edges = slices.Append(h.Alloc, edges, request.Edges[i].To)
-				operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument)
+			stage := host.ProcessStageResult{Status: status, Signal: sig, EffectiveStatus: effective, HasEffectiveStatus: true}
+			if effective != 0 {
+				terminal.EffectiveStatus = effective
+				terminal.EffectiveSignal = sig
+			}
+			terminal.Stages = append(terminal.Stages, stage)
+			if status != 0 {
+				terminal.Status, terminal.Signal = status, sig
 			}
 		}
-		ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, errorPaths, errorAppends, errorModes, request.StreamItem, request.StreamContext, request.CollectFailures, inputFD, request.InputRoot, accepted) == 0
-		slices.Free(h.Alloc, kinds)
-		slices.Free(h.Alloc, accepted)
-		slices.Free(h.Alloc, edges)
-		slices.Free(h.Alloc, inputs)
-		slices.Free(h.Alloc, outputs)
-		slices.Free(h.Alloc, appends)
-		slices.Free(h.Alloc, operandArguments)
-		slices.Free(h.Alloc, itemLimits)
-		slices.Free(h.Alloc, errorPaths)
-		slices.Free(h.Alloc, errorAppends)
-		slices.Free(h.Alloc, errorModes)
-		slices.Free(h.Alloc, arguments)
-		slices.Free(h.Alloc, lengths)
-		slices.Free(h.Alloc, directories)
-		slices.Free(h.Alloc, environment)
-		slices.Free(h.Alloc, environmentLengths)
-		slices.Free(h.Alloc, timeouts)
-		return ok
-	}
-	argv, direct := request.Shell, false
-	if len(request.Argv) != 0 {
-		argv, direct = request.Argv, true
-	}
-	return km_host_start(h.native, request.ID, argv, request.Script, request.Directory, request.Environment, request.TimeoutMS, request.RetainBytes, direct) == 0
-}
+		if len(r.Stages) == 0 && len(r.Argv) == 0 {
+			terminal.Stages = nil
+		}
+		terminal.Outcome = host.ProcessOutcome(run.outcome.Load())
+		if terminal.Diagnostic.Code != "" {
+			terminal.Outcome = host.ProcessFailed
+		}
+		if h.native.waitFailure.Swap(false) {
+			terminal.Outcome = host.ProcessFailed
+			terminal.Diagnostic = host.ProcessDiagnostic{Code: DiagnosticHostFailure, Message: "waitpid failed"}
+		}
 
-// Pump waits for at most waitMS milliseconds, reads available process output,
-// and advances timeout and cancellation state. Negative waits are treated as 0.
-func (h *Host) Pump(waitMS int) bool {
-	if h == nil || h.native == nil {
+		terminal.Stdout = bytes.Clone(out.capture.Bytes())
+		terminal.Stderr = bytes.Clone(errout.capture.Bytes())
+		terminal.StdoutTruncated, terminal.StderrTruncated = out.truncated, errout.truncated
+		h.native.mu.Lock()
+		delete(h.native.processes, r.ID)
+		h.native.mu.Unlock()
+		h.emit(terminal)
+	}()
+	return true
+}
+func killGroup(pid int, s syscall.Signal) { syscall.Kill(-pid, s) }
+func (h *Host) reject(id int64, message string) {
+	h.pending = append([]host.ProcessEvent{{Kind: host.ProcessTerminal, ID: id, Outcome: host.ProcessFailed, Diagnostic: host.ProcessDiagnostic{Code: DiagnosticHostFailure, Message: message}}}, h.pending...)
+}
+func (h *Host) Pump(ms int) bool {
+	h.refreshSnapshots()
+	h.drainPredicates()
+	if len(h.pending) > 0 {
+		return true
+	}
+	if ms > 0 {
+		select {
+		case e := <-h.native.events:
+			h.pending = append(h.pending, e)
+		case item := <-h.native.predicates:
+			h.evaluatePredicate(item)
+		case <-time.After(time.Duration(ms) * time.Millisecond):
+		}
+	}
+	n := len(h.native.events)
+	for j := 0; j < n; j++ {
+		h.pending = append(h.pending, <-h.native.events)
+	}
+	return true
+}
+func (h *Host) Next() host.ProcessEventResult {
+	if len(h.pending) == 0 {
+		return host.ProcessEventResult{}
+	}
+	e := h.pending[0]
+	h.pending[0] = host.ProcessEvent{}
+	h.pending = h.pending[1:]
+	return host.ProcessEventResult{OK: true, Event: e}
+}
+func (h *Host) Cancel(id int64) bool      { return h.cancel(id, 100) }
+func (h *Host) Stop(id, grace int64) bool { return h.cancel(id, grace) }
+func (h *Host) cancel(id, grace int64) bool {
+	h.native.mu.Lock()
+	r := h.native.processes[id]
+	h.native.mu.Unlock()
+	if r == nil {
 		return false
 	}
-	if waitMS < 0 {
-		waitMS = 0
-	}
-	return km_host_pump(h.native, c.Int(waitMS)) == 0
+	r.terminate(host.ProcessCancelled, grace)
+	return true
 }
-
-func cloneBytes(a mem.Allocator, ptr *byte, n c.Int) []byte {
-	if ptr == nil || n <= 0 {
-		return nil
-	}
-	return slices.Clone(a, c.Bytes(ptr, int(n)))
-}
-
-func cloneString(a mem.Allocator, ptr *byte, n c.Int) string {
-	if ptr == nil || n <= 0 {
-		return ""
-	}
-	// string wraps the clone backing (zero-copy in Solod): ownership
-	// transfers to the string, so the intermediate slice is never freed.
-	return string(cloneBytes(a, ptr, n))
-}
-
-func cloneDiagnostic(a mem.Allocator, code *byte, codeLen c.Int, message *byte, messageLen c.Int) host.ProcessDiagnostic {
-	if code == nil || codeLen <= 0 {
-		return Diagnostic{}
-	}
-	return Diagnostic{Code: cloneString(a, code, codeLen), Message: cloneString(a, message, messageLen)}
-}
-
-// Next returns the next owned event, if any.
-func (h *Host) Next() host.ProcessEventResult {
-	if h == nil || h.native == nil {
-		return EventResult{}
-	}
-	var raw nativeEvent
-	if !km_host_next(h.native, &raw) {
-		return EventResult{}
-	}
-	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
-	e.HasEffectiveStatus, e.EffectiveStatus = true, int(raw.effectiveStatus)
-	e.EffectiveSignal = int(raw.effectiveSignal)
-	for i := 0; i < int(raw.stageCount); i++ {
-		if e.Kind == host.ProcessSnapshot {
-			e.StageStates = slices.Append(h.Alloc, e.StageStates, int(km_event_stage_field(&raw, c.Int(i), 0)))
-		} else {
-			e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2)), HasEffectiveStatus: true, EffectiveStatus: int(km_event_stage_field(&raw, c.Int(i), 3))})
-		}
-	}
-	for i := 0; i < int(raw.metricCount); i++ {
-		e.EdgeMetrics = slices.Append(h.Alloc, e.EdgeMetrics, host.ProcessEdgeMetrics{Measurement: int(km_event_metric_field(&raw, c.Int(i), 0)), Bytes: km_event_metric_field(&raw, c.Int(i), 1), Items: km_event_metric_field(&raw, c.Int(i), 2), DroppedItems: km_event_metric_field(&raw, c.Int(i), 3), QueueHighWaterBytes: km_event_metric_field(&raw, c.Int(i), 4), QueueHighWaterItems: km_event_metric_field(&raw, c.Int(i), 5), Saturated: km_event_metric_field(&raw, c.Int(i), 6) != 0})
-	}
-	km_event_free(&raw)
-	return host.ProcessEventResult{Event: e, OK: true}
-}
-
-// Cancel requests process-group termination. Repeating it is harmless.
-func (h *Host) Cancel(id int64) bool {
-	return h != nil && h.native != nil && km_host_cancel(h.native, id, false) == 0
-}
-
-// Stop sends SIGTERM and escalates to SIGKILL after graceMS milliseconds.
-func (h *Host) Stop(id int64, graceMS int64) bool {
-	return h != nil && h.native != nil && km_host_stop(h.native, id, graceMS) == 0
-}
-
-// CancelAll requests termination for every active process group.
 func (h *Host) CancelAll() {
-	if h != nil && h.native != nil {
-		km_host_cancel_all(h.native)
+	h.native.mu.Lock()
+	var ids []int64
+	for id := range h.native.processes {
+		ids = append(ids, id)
+	}
+	h.native.mu.Unlock()
+	for _, id := range ids {
+		h.Cancel(id)
+	}
+}
+func (h *Host) Active() int {
+	h.native.mu.Lock()
+	defer h.native.mu.Unlock()
+	return len(h.native.processes)
+}
+func (h *Host) Free() {
+	if h == nil {
+		return
+	}
+	h.native.once.Do(func() {
+		close(h.native.closed)
+		h.CancelAll()
+		h.native.mu.Lock()
+		var runs []*running
+		for _, r := range h.native.processes {
+			runs = append(runs, r)
+		}
+		h.native.mu.Unlock()
+		for _, r := range runs {
+			<-r.done
+		}
+		for _, r := range h.Readers {
+			km_record_close(r.FD)
+		}
+		for stripe := range h.native.locks {
+			km_host_cache_unlock(h.native, c.Int(stripe))
+		}
+		h.Memory.Free()
+	})
+}
+func (h *Host) ForceWaitpidFailureForTest() {
+	h.native.waitFailure.Store(true)
+	h.native.mu.Lock()
+	defer h.native.mu.Unlock()
+	for _, r := range h.native.processes {
+		r.signalCommands(syscall.SIGKILL)
 	}
 }
 
-func (h *Host) Active() int {
-	if h == nil || h.native == nil {
+var signalOnce sync.Once
+var pendingSignal atomic.Int32
+
+func InstallSignals() bool {
+	signalOnce.Do(func() {
+		ch := make(chan os.Signal, 2)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			for sig := range ch {
+				n := int32(sig.(syscall.Signal))
+				if !pendingSignal.CompareAndSwap(0, n) {
+					pendingSignal.Store(-n)
+				}
+			}
+		}()
+	})
+	return true
+}
+func TakeSignal() int             { return int(pendingSignal.Swap(0)) }
+func km_cli_signal_pending() bool { return pendingSignal.Load() != 0 }
+func terminal(f *os.File) bool {
+	_, e := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
+	return e == nil
+}
+func StderrIsTerminal() bool { return terminal(os.Stderr) }
+func StdoutIsTerminal() bool { return terminal(os.Stdout) }
+func StdinIsTerminal() bool  { return terminal(os.Stdin) }
+func StderrWidth() int {
+	size, e := unix.IoctlGetWinsize(2, unix.TIOCGWINSZ)
+	if e != nil {
 		return 0
 	}
-	return int(km_host_active(h.native))
+	return int(size.Col)
 }
-
-// InstallSignals installs async-safe SIGINT and SIGTERM notifications for the
-// command loop. The handler itself never touches Go/Solod state.
-func InstallSignals() bool { return km_cli_install_signals() == 0 }
-
-// TakeSignal returns zero when no signal arrived, a positive signal number for
-// the first signal, or a negative number when a second signal arrived.
-func TakeSignal() int { return int(km_cli_take_signal()) }
-
-// StderrIsTerminal reports whether the diagnostic stream is attached to a TTY.
-func StderrIsTerminal() bool { return km_cli_stderr_is_terminal() != 0 }
-
-// StderrWidth returns terminal columns, or zero when the stream has no known
-// width (including redirected output).
-func StderrWidth() int { return int(km_cli_stderr_width()) }
-
-func StdoutIsTerminal() bool { return km_cli_stdout_is_terminal() != 0 }
-
-func StdinIsTerminal() bool { return km_cli_stdin_is_terminal() != 0 }
-
-func StderrHeight() int { return int(km_cli_stderr_height()) }
-
-// Environment returns a complete owned snapshot of the process environment.
-func Environment(a mem.Allocator) []string {
-	size := int(km_cli_environment_size())
-	if size <= 0 {
-		return nil
+func StderrHeight() int {
+	size, e := unix.IoctlGetWinsize(2, unix.TIOCGWINSZ)
+	if e != nil {
+		return 0
 	}
-	data := mem.AllocSlice[byte](a, size, size)
-	written := int(km_cli_environment_copy(data))
-	if written < 0 {
-		mem.FreeSlice(a, data)
-		return nil
-	}
-	var values []string
-	start := 0
-	for i := 0; i < written; i++ {
-		if data[i] != 0 {
-			continue
+	return int(size.Row)
+}
+func Environment(a mem.Allocator) []string            { return os.Environ() }
+func FreeEnvironment(a mem.Allocator, v []string)     {}
+func km_cli_environment_names_case_insensitive() bool { return runtime.GOOS == "windows" }
+func Pick(executable string, args []string, input string, selection *string) int {
+	cmd := exec.Command(executable, args...)
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Stderr = os.Stderr
+	b, e := cmd.Output()
+	if e != nil {
+		if x, ok := e.(*exec.ExitError); ok {
+			return x.ExitCode()
 		}
-		if i > start {
-			values = slices.Append(a, values, string(slices.Clone(a, data[start:i])))
-		}
-		start = i + 1
+		return 127
 	}
-	mem.FreeSlice(a, data)
-	return values
+	*selection = string(b)
+	return 0
 }
-
-func FreeEnvironment(a mem.Allocator, values []string) {
-	for i := range values {
-		mem.FreeString(a, values[i])
-	}
-	slices.Free(a, values)
-}
-
-// EnvironmentNameEqual uses the active host's environment-name comparison
-// rules. Windows names are case-insensitive; POSIX names are byte-sensitive.
 func EnvironmentNameEqual(left string, right string) bool {
 	return EnvironmentNameEqualForPlatform(left, right, km_cli_environment_names_case_insensitive())
 }
@@ -560,34 +571,82 @@ func EnvironmentNameEqualForPlatform(left string, right string, windows bool) bo
 	return len(left) == 0 && len(right) == 0
 }
 
-// ForceWaitpidFailureForTest makes the next process reaping attempt fail. It is
-// exported because Solod tests are a separate package that can only reach the
-// exported API; it stays the sole test-only seam in this package.
-func (h *Host) ForceWaitpidFailureForTest() {
-	if h != nil && h.native != nil {
-		km_host_force_waitpid_failure(h.native)
+func km_file_watch_stamp(name string, data []byte) bool {
+	if len(data) != 98 {
+		return false
 	}
+	clear(data)
+	for link := 0; link < 2; link++ {
+		var info unix.Stat_t
+		var e error
+		if link == 0 {
+			e = unix.Stat(name, &info)
+		} else {
+			e = unix.Lstat(name, &info)
+		}
+		if e == unix.ENOENT || e == unix.ENOTDIR {
+			continue
+		}
+		if e != nil {
+			return false
+		}
+		offset := link * 49
+		data[offset] = 1
+		fields := []uint64{uint64(info.Dev), info.Ino, uint64(info.Mode), uint64(info.Size), uint64(info.Mtim.Sec*1e9 + info.Mtim.Nsec), uint64(info.Ctim.Sec*1e9 + info.Ctim.Nsec)}
+		for i, v := range fields {
+			binary.LittleEndian.PutUint64(data[offset+1+i*8:], v)
+		}
+	}
+	return true
 }
 
-// Free terminates active process groups and releases the host. Call it exactly
-// once: the handle's own memory is released, so it cannot be reused.
-func (h *Host) Free() {
-	if h == nil {
-		return
+type cacheLease struct {
+	file *os.File
+	path string
+	refs int
+}
+
+var cacheLeasesMu sync.Mutex
+var cacheLeases = map[string]*cacheLease{}
+
+func km_host_cache_lock(h *nativeHost, name string, stripe c.Int) c.Int {
+	cacheLeasesMu.Lock()
+	defer cacheLeasesMu.Unlock()
+	if h.locks[int(stripe)] != nil {
+		return 0
 	}
-	for i := range h.Readers {
-		km_record_close(h.Readers[i].FD)
-		mem.FreeString(h.Alloc, h.Readers[i].Name)
-		slices.Free(h.Alloc, h.Readers[i].Data)
+	if lease := cacheLeases[name]; lease != nil {
+		lease.refs++
+		h.locks[int(stripe)] = lease
+		return 0
 	}
-	slices.Free(h.Alloc, h.Readers)
-	if h.native != nil {
-		km_host_free(h.native)
-		h.native = nil
+	if os.MkdirAll(filepath.Dir(name), 0700) != nil {
+		return -1
 	}
-	if h.Memory != nil {
-		h.Memory.Free()
-		h.Memory = nil
+	f, e := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0666)
+	if e != nil {
+		return -1
 	}
-	mem.Free(h.Alloc, h)
+	status := LockFile(int(f.Fd()), name, "cache", true, false)
+	if status != 0 {
+		f.Close()
+		return c.Int(status)
+	}
+	lease := &cacheLease{file: f, path: name, refs: 1}
+	cacheLeases[name] = lease
+	h.locks[int(stripe)] = lease
+	return 0
+}
+func km_host_cache_unlock(h *nativeHost, stripe c.Int) {
+	cacheLeasesMu.Lock()
+	defer cacheLeasesMu.Unlock()
+	if lease := h.locks[int(stripe)]; lease != nil {
+		delete(h.locks, int(stripe))
+		lease.refs--
+		if lease.refs == 0 {
+			UnlockFile(int(lease.file.Fd()), true)
+			lease.file.Close()
+			delete(cacheLeases, lease.path)
+		}
+	}
 }

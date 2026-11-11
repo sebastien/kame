@@ -2,10 +2,11 @@ package program
 
 import (
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // Apply definition overrides before computed outputs and generators evaluate.
@@ -13,17 +14,17 @@ import (
 func (p *Program) configureParameters(defines, parameters, environment []string) diagnostic.Diagnostic {
 	var effective []string
 	for i := range defines {
-		effective = slices.Append(p.Alloc, effective, defines[i])
+		effective = append(effective, defines[i])
 	}
 	for i := range parameters {
 		equal := strings.IndexByte(parameters[i], '=')
 		if equal > 0 && p.Eval.Definition(parameters[i][:equal]) != nil {
-			effective = slices.Append(p.Alloc, effective, parameters[i])
-			p.ParameterDefinitions = slices.Append(p.Alloc, p.ParameterDefinitions, cloneText(p.Alloc, parameters[i]))
+			effective = append(effective, parameters[i])
+			p.ParameterDefinitions = append(p.ParameterDefinitions, cloneText(p.Alloc, parameters[i]))
 		}
 	}
 	result := p.configureDefinitions(effective, environment)
-	slices.Free(p.Alloc, effective)
+	mem.FreeSlice(nil, effective)
 	return result
 }
 
@@ -108,7 +109,7 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 		if typed {
 			prefix = name + ":="
 		}
-		p.Configuration = slices.Append(p.Alloc, p.Configuration, cloneText(p.Alloc, prefix+value))
+		p.Configuration = append(p.Configuration, cloneText(p.Alloc, prefix+value))
 	}
 	return diagnostic.Diagnostic{}
 }

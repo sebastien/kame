@@ -1,14 +1,14 @@
-package cli_test
+package clicheck
 
 import (
+	"bytes"
 	"kame/cli"
-	"solod.dev/so/bytes"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestPortableDashboard(t *testing.T) {
-	var out = bytes.NewBuffer(t.Allocator(), nil)
-	defer out.Free()
+	var out = bytes.Buffer{}
+	defer out.Reset()
 	workers := []cli.ProgressWorkerView{{Target: "./build/main.o", Program: "cc", ElapsedMS: 1200}}
 	rows := cli.WriteDashboard(&out, cli.ProgressView{Command: "build", Width: 80, Height: 12, ElapsedMS: 1200, Counts: cli.Progress{Completed: 8}, Workers: workers})
 	want := "── build · workers: 1\n  1  [./build/main.o]                  running      cc                    1.2s\n8 complete · 0 failed · 1 running                              1.2s - building\n"
@@ -18,8 +18,8 @@ func TestPortableDashboard(t *testing.T) {
 }
 
 func TestPortableOutcomeAndSummary(t *testing.T) {
-	var out = bytes.NewBuffer(t.Allocator(), nil)
-	defer out.Free()
+	var out = bytes.Buffer{}
+	defer out.Reset()
 	cli.WriteHumanOutcome(&out, "./out.txt", "complete", true, 123, true, 0, false)
 	cli.WriteHumanSummary(&out, "build", 0, 124, cli.Progress{Completed: 1}, true, false, 0, false)
 	if out.String() != "[./out.txt] 0.1s - ✓\n1 complete · 0 failed  0.1s - ✓\n" {
@@ -34,8 +34,8 @@ func TestPortableOutcomeAndSummary(t *testing.T) {
 }
 
 func TestPortableProgressWidthAndGraphemes(t *testing.T) {
-	var out = bytes.NewBuffer(t.Allocator(), nil)
-	defer out.Free()
+	var out = bytes.Buffer{}
+	defer out.Reset()
 	cli.WriteProgressField(&out, "界e\u0301x", 3)
 	if out.String() != "界…" {
 		t.Error("progress split a grapheme or wide cell")
@@ -51,8 +51,8 @@ func TestPortableProgressWidthAndGraphemes(t *testing.T) {
 }
 
 func TestPortableFrameUpdates(t *testing.T) {
-	var out = bytes.NewBuffer(t.Allocator(), nil)
-	defer out.Free()
+	var out = bytes.Buffer{}
+	defer out.Reset()
 	cli.WriteFrameUpdate(&out, "heading\nnew\n", "heading\nold\n", 2, 2)
 	if out.String() != "\x1b[1A\rnew\x1b[K\x1b[1B\r" {
 		t.Error("unchanged dashboard rows were repainted")

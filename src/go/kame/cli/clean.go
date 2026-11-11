@@ -1,10 +1,5 @@
 package cli
 
-import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-)
-
 func parseClean(inv *Invocation, args []string) {
 	inv.OK = true
 	after := false
@@ -51,7 +46,7 @@ func parseClean(inv *Invocation, args []string) {
 			inv.fail("OPT_UNKNOWN", "unknown clean option: "+arg)
 			return
 		}
-		inv.Args = slices.Append(mem.System, inv.Args, arg)
+		inv.Args = append(inv.Args, arg)
 	}
 	if inv.Command == "" && len(inv.Args) != 0 {
 		inv.fail("OPT_VALUE_INVALID", "clean takes no target operands")

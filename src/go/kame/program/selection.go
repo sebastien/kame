@@ -3,11 +3,11 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"path"
+
+	"strings"
 )
 
 func (p *Program) canonicalTarget(target string, file bool) string {
@@ -18,9 +18,9 @@ func (p *Program) canonicalTarget(target string, file bool) string {
 		return cloneText(p.Alloc, target)
 	}
 	if path.IsAbs(target) {
-		return path.Clean(p.Alloc, target)
+		return path.Clean(target)
 	}
-	return path.Join(p.Alloc, p.Options.Directory, target)
+	return path.Join(p.Options.Directory, target)
 }
 
 func (p *Program) selectRule(target string) selection {
@@ -129,7 +129,7 @@ func (p *Program) selectRule(target string) selection {
 					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[k].Output, output)}
 				}
 			}
-			candidates = slices.Append(p.Alloc, candidates, producerCandidate{Rule: r, Output: output, Captures: cloneCaptures(p.Alloc, match.Captures)})
+			candidates = append(candidates, producerCandidate{Rule: r, Output: output, Captures: cloneCaptures(p.Alloc, match.Captures)})
 			match.Free(p.Alloc)
 			if relativeOwned {
 				mem.FreeString(p.Alloc, matchTarget)
@@ -150,13 +150,17 @@ func (p *Program) selectRule(target string) selection {
 				}
 			}
 		}
-		if dominated { continue }
+		if dominated {
+			continue
+		}
 		if winner >= 0 && (candidates[winner].Rule != candidates[i].Rule || !sameCaptures(candidates[winner].Captures, candidates[i].Captures)) {
 			return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[winner].Output, candidates[i].Output)}
 		}
 		winner = i
 	}
-	if winner < 0 { return selection{Target: cloneText(p.Alloc, selectedTarget)} }
+	if winner < 0 {
+		return selection{Target: cloneText(p.Alloc, selectedTarget)}
+	}
 	chosen := selection{Rule: candidates[winner].Rule, Output: candidates[winner].Output, Captures: candidates[winner].Captures, Target: cloneText(p.Alloc, selectedTarget)}
 	candidates[winner].Captures = nil
 	return chosen
@@ -227,7 +231,7 @@ func (p *Program) bindTargetArguments(r *rule.Rule, input string) argumentBindin
 			freeArguments(p.Alloc, bound)
 			return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "missing required target argument: "+r.Arguments[i].Name)}
 		}
-		bound = slices.Append(p.Alloc, bound, ArgumentValue{Name: cloneText(p.Alloc, r.Arguments[i].Name), Value: cloneText(p.Alloc, values[i])})
+		bound = append(bound, ArgumentValue{Name: cloneText(p.Alloc, r.Arguments[i].Name), Value: cloneText(p.Alloc, values[i])})
 	}
 	return argumentBindingResult{Values: bound}
 }
@@ -237,15 +241,15 @@ func freeArguments(a mem.Allocator, arguments []ArgumentValue) {
 		mem.FreeString(a, arguments[i].Name)
 		mem.FreeString(a, arguments[i].Value)
 	}
-	slices.Free(a, arguments)
+	mem.FreeSlice(nil, arguments)
 }
 
 func targetArgumentKey(a mem.Allocator, target string, arguments []ArgumentValue) string {
 	if len(arguments) == 0 {
 		return cloneText(a, target)
 	}
-	b := strings.NewBuilder(a)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	b.WriteString(target)
 	for i := range arguments {
 		b.WriteByte(0)
@@ -270,36 +274,36 @@ func (p *Program) NormalizeTargetOperands(targets []string) []string {
 			}
 		}
 		if !configured {
-			operands = slices.Append(p.Alloc, operands, targets[i])
+			operands = append(operands, targets[i])
 		}
 	}
 	if (len(operands) == 0 || (isTargetAssignment(operands[0]) && !p.HasTarget(operands[0]))) && p.HasTarget("default") {
 		var defaults []string
-		defaults = slices.Append(p.Alloc, defaults, "default")
+		defaults = append(defaults, "default")
 		for i := range operands {
-			defaults = slices.Append(p.Alloc, defaults, operands[i])
+			defaults = append(defaults, operands[i])
 		}
-		slices.Free(p.Alloc, operands)
+		mem.FreeSlice(nil, operands)
 		operands = defaults
 	}
-	defer slices.Free(p.Alloc, operands)
+	defer mem.FreeSlice(nil, operands)
 	targets = operands
 	var joined []string
 	for i := 0; i < len(targets); i++ {
 		name := targets[i]
 		if i+1 == len(targets) || !isTargetAssignment(targets[i+1]) || (!p.hasNamedArgumentTarget(name) && p.HasTarget(targets[i+1])) {
-			joined = slices.Append(p.Alloc, joined, p.cliTarget(name))
+			joined = append(joined, p.cliTarget(name))
 			continue
 		}
-		b := strings.NewBuilder(p.Alloc)
+		b := strings.Builder{}
 		b.WriteString(name)
 		for i+1 < len(targets) && isTargetAssignment(targets[i+1]) {
 			i++
 			b.WriteByte(' ')
 			b.WriteString(targets[i])
 		}
-		joined = slices.Append(p.Alloc, joined, cloneText(p.Alloc, b.String()))
-		b.Free()
+		joined = append(joined, cloneText(p.Alloc, b.String()))
+		b.Reset()
 	}
 	return joined
 }

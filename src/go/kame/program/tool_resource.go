@@ -3,9 +3,9 @@ package program
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+
+	"strings"
 )
 
 func (p *Program) observeToolDependency(key core.ResourceKey) {
@@ -22,7 +22,7 @@ func produceTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	index := p.toolIndex(state.Name)
 	if index < 0 {
-		p.Tools = slices.Append(p.Alloc, p.Tools, Tool{Name: cloneText(p.Alloc, state.Name), Declarative: true})
+		p.Tools = append(p.Tools, Tool{Name: cloneText(p.Alloc, state.Name), Declarative: true})
 		index = len(p.Tools) - 1
 	}
 	p.Tools[index].Declarative = true
@@ -81,7 +81,7 @@ func (p *Program) declareTool(name string) {
 		p.Tools[index].Declarative = true
 		return
 	}
-	p.Tools = slices.Append(p.Alloc, p.Tools, Tool{Name: cloneText(p.Alloc, name), Declarative: true})
+	p.Tools = append(p.Tools, Tool{Name: cloneText(p.Alloc, name), Declarative: true})
 }
 
 func (p *Program) toolRequestName(name string) string {

@@ -1,17 +1,17 @@
 package program
 
 import (
+	"io"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	"path"
+	"slices"
+	"strings"
+	"unicode/utf8"
 )
 
 type listedTarget struct {
@@ -22,8 +22,7 @@ type listedTarget struct {
 	Status string
 }
 
-func compareListedTargets(left any, right any) int {
-	a, b := left.(*listedTarget), right.(*listedTarget)
+func compareListedTargets(a listedTarget, b listedTarget) int {
 	if a.Score != b.Score {
 		return a.Score - b.Score
 	}
@@ -38,10 +37,10 @@ func (p *Program) ListTargets(query string) []string {
 		return nil
 	}
 	candidates := p.listedTargets(query)
-	defer slices.Free(p.Alloc, candidates)
+	defer mem.FreeSlice(nil, candidates)
 	var names []string
 	for i := range candidates {
-		names = slices.Append(p.Alloc, names, cloneText(p.Alloc, candidates[i].Name))
+		names = append(names, cloneText(p.Alloc, candidates[i].Name))
 	}
 	return names
 }
@@ -57,7 +56,7 @@ func (p *Program) listedTargets(query string) []listedTarget {
 			name := r.Outputs[j].Text
 			score := targetMatchScore(p.Alloc, name, query)
 			if score >= 0 {
-				candidates = slices.Append(p.Alloc, candidates, listedTarget{Name: name, Score: score, Rule: r, Output: j})
+				candidates = append(candidates, listedTarget{Name: name, Score: score, Rule: r, Output: j})
 			}
 		}
 	}
@@ -95,7 +94,7 @@ func (p *Program) WriteTargetReport(out io.Writer, query string) {
 	p.InspectionWaiting = false
 	defer p.finishInspection()
 	items := p.listedTargets(query)
-	defer slices.Free(p.Alloc, items)
+	defer mem.FreeSlice(nil, items)
 	for i := range items {
 		if items[i].Rule.Outputs[items[i].Output].Template {
 			continue
@@ -180,10 +179,10 @@ func listedTargetSummary(r *rule.Rule) string {
 func (p *Program) listedTargetPlan(r *rule.Rule, target string, captures []template.CaptureValue) Plan {
 	plan := Plan{Rule: r, Target: cloneText(p.Alloc, target), Captures: cloneCaptures(p.Alloc, captures), Freshness: Unknown}
 	for i := range r.Outputs {
-		plan.Outputs = slices.Append(p.Alloc, plan.Outputs, renderTarget(p.Alloc, r.Outputs[i], captures))
+		plan.Outputs = append(plan.Outputs, renderTarget(p.Alloc, r.Outputs[i], captures))
 	}
 	for i := range r.Arguments {
-		plan.Arguments = slices.Append(p.Alloc, plan.Arguments, ArgumentValue{Name: cloneText(p.Alloc, r.Arguments[i].Name), Value: cloneText(p.Alloc, r.Arguments[i].Default)})
+		plan.Arguments = append(plan.Arguments, ArgumentValue{Name: cloneText(p.Alloc, r.Arguments[i].Name), Value: cloneText(p.Alloc, r.Arguments[i].Default)})
 	}
 	name := p.canonicalTarget(plan.Target, r.Kind == rule.FileRule)
 	if r.Kind != rule.FileRule {
@@ -202,12 +201,12 @@ func (p *Program) listedTargetPlan(r *rule.Rule, target string, captures []templ
 			mem.FreeString(p.Alloc, text)
 			text = renderInput(p.Alloc, input, captures)
 		}
-		plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
+		plan.Inputs = append(plan.Inputs, text)
 		kind := core.ResourceTarget
 		if input.Kind == rule.InputPath {
 			kind = core.ResourceFile
 		}
-		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text), OrderOnly: input.OrderOnly})
+		plan.ResourceInputs = append(plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text), OrderOnly: input.OrderOnly})
 	}
 	return plan
 }
@@ -219,9 +218,9 @@ func (p *Program) inspectTargetListStatus(plan Plan, ancestors []string) inspect
 	if result.Waiting || result.State == nil || !slices.Contains(result.State.Statuses, "built") {
 		return result
 	}
-	seen := slices.Clone(p.Alloc, ancestors)
-	seen = slices.Append(p.Alloc, seen, plan.Key.Name)
-	defer slices.Free(p.Alloc, seen)
+	seen := slices.Clone(ancestors)
+	seen = append(seen, plan.Key.Name)
+	defer mem.FreeSlice(nil, seen)
 	ready := true
 	for i := range result.State.Stored.Inputs {
 		item := result.State.Stored.Inputs[i]
@@ -321,16 +320,16 @@ func targetEditDistance(a mem.Allocator, left string, right string, limit int) i
 	if leftLen-rightLen > limit || rightLen-leftLen > limit {
 		return limit + 1
 	}
-	runes := slices.Make[rune](a, rightLen)
-	defer slices.Free(a, runes)
+	runes := make([]rune, rightLen)
+	defer mem.FreeSlice(nil, runes)
 	index := 0
 	for _, r := range right {
 		runes[index] = r
 		index++
 	}
 	width := rightLen + 1
-	cells := slices.Make[int](a, 3*width)
-	defer slices.Free(a, cells)
+	cells := make([]int, 3*width)
+	defer mem.FreeSlice(nil, cells)
 	for i := range cells {
 		cells[i] = limit + 1
 	}

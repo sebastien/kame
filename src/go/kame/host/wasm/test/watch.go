@@ -1,11 +1,12 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+
+	"strings"
 )
 
 func TestWatchRetainsSharedRootsAndInvalidatesObservedFiles(t *testing.T) {
@@ -46,7 +47,7 @@ func TestWatchRetainsSharedRootsAndInvalidatesObservedFiles(t *testing.T) {
 	for i := range keys {
 		keys[i].Free(a)
 	}
-	slices.Free(a, keys)
+	mem.FreeSlice(nil, keys)
 	for i := 0; i < 32; i++ {
 		queried := r.WatchStateJSON()
 		queried.Free(a)
@@ -193,7 +194,7 @@ func TestWatchFailedReadRecoversAfterMissingFileAppears(t *testing.T) {
 		}
 		resources[i].Free(a)
 	}
-	slices.Free(a, resources)
+	mem.FreeSlice(nil, resources)
 	if !found {
 		t.Fatal("failed read was dropped from retained watch resources")
 		return

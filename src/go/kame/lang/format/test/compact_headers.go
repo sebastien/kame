@@ -1,9 +1,9 @@
-package format_test
+package formatcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/format"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestValueFormatterCanonicalizesCompactHeaders(t *testing.T) {

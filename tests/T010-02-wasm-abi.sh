@@ -9,7 +9,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-02 wasm ABI hardening"
 cd "$CLI_ROOT"
 
-test-step "freestanding module imports nothing"
+test-step "Go reactor imports only its permitted WASI runtime functions"
 make wasm >/dev/null
 export KAME_WASM="${KAME_WASM:-$CLI_ROOT/build/wasm/kame.wasm}"
 cli=(node ./src/js/kame.js do run --lang expr --allow-read)
@@ -49,7 +49,7 @@ test-step "handles are generational and completion is validated"
 if node --input-type=module - <<'NODE'; then
 const { readFile } = await import('node:fs/promises');
 const bytes = await readFile(process.env.KAME_WASM);
-const { instance } = await WebAssembly.instantiate(bytes, {});
+const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports } = instance;
 const alloc = (size, alignment = 1) => {
   const pointer = exports.kame_wasm_alloc(size, alignment);

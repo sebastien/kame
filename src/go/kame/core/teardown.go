@@ -1,6 +1,6 @@
 package core
 
-import "solod.dev/so/slices"
+import "kame/internal/mem"
 
 func (c *EngineContext) SetTeardown(begin func(any, int64, int64) bool, advance Producer, state any) {
 	c.node.BeginTeardown, c.node.Teardown, c.node.TeardownContext = begin, advance, state
@@ -55,7 +55,7 @@ func (e *Engine) Interrupt(n *Node) {
 		return
 	}
 	if n.Submitted {
-		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 	n.Submitted, n.HostRequestID = false, 0
 	if n.HasCompletion {
@@ -71,9 +71,9 @@ func (e *Engine) Interrupt(n *Node) {
 			e.interest(d, -n.Interest)
 		}
 	}
-	slices.Free(e.Alloc, n.Dynamic)
-	slices.Free(e.Alloc, n.Observed)
-	slices.Free(e.Alloc, n.OrderOnly)
+	mem.FreeSlice(nil, n.Dynamic)
+	mem.FreeSlice(nil, n.Observed)
+	mem.FreeSlice(nil, n.OrderOnly)
 	n.Dynamic, n.Observed, n.OrderOnly = nil, nil, nil
 	e.releasePreviousDependencies(n)
 }

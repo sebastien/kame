@@ -1,4 +1,4 @@
-# Freestanding WebAssembly Host
+# Go WebAssembly Host
 
 ## Purpose
 
@@ -8,39 +8,35 @@ pretend that browsers provide POSIX files or processes.
 
 ## Build Boundary
 
-The WebAssembly module targets `wasm32-freestanding`. It includes:
+The module is a standard Go WASI preview-1 reactor built with:
 
-- Core values and engine.
-- Template, expression, and rule parsers and formatters.
-- Program compilation and evaluation.
-- Pure collection, text, and path operations.
-- Host-request operation stubs.
-- Shared portable CLI invocation parsing and command policy (`kame/cli`).
-- Shared CLI presentation state and layout under `036-cli_ansi.md`; the module
-  computes display output but performs no terminal I/O.
-- A hand-written C bridge in `src/c/wasm/`: the ABI contract header, the
-  pointer/length-to-slice adapter, the SjLj landing pad and the freestanding
-  panic hook. It carries no engine policy.
+```sh
+CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared ./cmd/kame-wasm
+```
 
-It excludes POSIX, the native CLI executable/host implementation (`cmd/kame`),
-`os`, `conc`, `sync`, native process code, and direct filesystem access. The
-shared CLI package is included and audited alongside `program` for portability.
+It includes the portable engine, parsers, evaluator, program runtime, operations,
+CLI grammar and presentation state. `cmd/kame-wasm` exports the primitive buffer
+ABI with `//go:wasmexport`; it contains no native host or C implementation.
+`tests/wasm/check-imports.mjs` checks the linked import table against the Go
+runtime's WASI functions. Filesystem path operations, sockets and process launch
+must not appear as module imports.
 
-Translation and link tests must fail if a portable package acquires a hosted
-transitive import.
+Hosts initialize `_initialize` once before calling the Kame exports. The Node
+wrapper supplies an empty WASI environment with no preopened directories, no
+arguments and no environment entries. Runtime clock, random and standard-stream
+support come from WASI. User files, processes and environment effects continue
+through explicit Kame host requests and capability grants. The Node wrapper is
+server-side JavaScript; a browser embedding must provide a compatible WASI shim
+as well as its chosen Kame capabilities.
 
-Both build files compile the module with `-Oz` for size and `-fwrapv` to preserve
-the native Solod build's signed-overflow semantics. The freestanding link uses
-only needed arithmetic helpers from the SDK's compiler-rt builtins archive,
-discovered with its configured Clang's `-print-libgcc-file-name`. Query the SDK's
-default target: the `wasm32-unknown-unknown` runtime path need not exist. Linking
-these helpers must not add WASI libc or any host imports.
+Go defines integer wrapping and garbage collection. There is no Solod
+translation, C compiler, custom unwinder or freestanding libc link step.
 
 ## Execution Model
 
 JavaScript drives the engine synchronously through explicit calls:
 
-1. Create an instance with a fixed or host-provided heap.
+1. Create a logical instance within the Go reactor.
 2. Compile source.
 3. Request one or more targets or expressions, or retain watch roots.
 4. Call `step` until the engine emits an event or needs host work.
@@ -51,7 +47,7 @@ JavaScript drives the engine synchronously through explicit calls:
 The module creates no hidden thread and does not block awaiting JavaScript.
 Watch roots remain retained after settling. The JavaScript host polls external
 resources, sends invalidations, and reloads the program when a build source
-changes; the freestanding module performs no filesystem watching.
+changes; the module performs no filesystem watching.
 
 ## ABI
 
@@ -185,6 +181,14 @@ Host request kinds include:
 - Run process-like operation.
 - Read wall or monotonic time when needed.
 
+Kind 42 loads an evaluator-validated authored Kash module source. Its payload is
+one absolute lexical path string; success completes with the file's raw bytes,
+and failure with a diagnostic. This is source-loading authority, not a read
+grant: ordinary operations cannot submit kind 42, and a host must not treat a
+kind-1 read request as a substitute. Embedders that do not support source loads
+must complete kind 42 with an explicit unsupported diagnostic. The node,
+generation, attempt, and request ID follow the ordinary completion contract.
+
 A browser host may map these to an in-memory filesystem, server API, sandbox,
 or reject them with a capability diagnostic. A process request is semantic, not
 POSIX-specific: the host streams stdout/stderr chunks and terminal status back
@@ -221,29 +225,30 @@ allocate.
 
 ## Memory
 
-The module uses a fixed-size backing buffer allocated on first source compilation
-and returned to the host allocator on instance destruction. The freestanding ABI
-reserves the instance's logical budget (16 MiB by default) per compiled slot on
-demand, rather than reserving memory for every possible slot.
-This accommodates the default 1 MiB Kash capture plus evaluator allocation and
-copy overhead. The module memory maximum still bounds simultaneous compiled
-instances and larger captures; an unavailable buffer reports `NO_MEMORY`.
-The default linear-memory stack is 512 KiB so optimized evaluator frames can
-reach the 32-level evaluation guard and return `EVAL_DEPTH` instead of trapping.
-Within each slot, a coalescing heap reclaims arbitrary freed blocks while the
-compiled program remains alive. The host allocator also splits and coalesces
-freed blocks: `kame_wasm_free(pointer, requestedSize)` returns a caller-owned
-buffer for reuse, rejecting invalid pointers, wrong sizes and double frees with
-`STATE_INVALID`. `(0, 0)` is a no-op. Live ranges survive unrelated allocations
-and frees; views must still be reacquired after memory growth. Linear memory
-cannot shrink, but repeated warm workloads must reuse their high-water capacity.
-The JS host reuses separate geometrically grown scratch buffers for copied
-inputs, requests, results, process chunks and event JSON, freeing replaced slots.
-Async inspection output buffers are operation-local and freed in `finally`.
-`kame_wasm_host_heap_used/peak()` and `kame_wasm_instance_heap_used/peak(handle)`
-report physical live/high-water bytes, including allocator overhead. Instance
-metrics are valid until destruction; the peak remains readable after exhaustion.
-They are separate from system-heap usage and exported linear-memory byte length.
+Go owns evaluator objects and reclaims them with its garbage collector. Logical
+instances share one runtime heap. Freeing an instance drops its retained runtime,
+presentation and request state; memory can be reused after collection. Linear
+memory can grow and cannot shrink. Embedders must bound whole-module resources
+at the execution environment when hard isolation is required.
+
+The former C arena's per-instance 16 MiB budget, recoverable allocator exhaustion
+and `kame_wasm_instance_set_heap_limit` are retired. Go allocation failure may
+terminate or trap the module; it is not a recoverable per-instance diagnostic.
+Language limits, capture bounds and stream queue budgets still apply.
+
+Caller buffers remain explicitly owned. `kame_wasm_alloc` pins their backing
+storage, and `kame_wasm_free(pointer, requestedSize)` releases only an exact live
+allocation. Invalid ranges, wrong sizes and double frees return `STATE_INVALID`;
+`(0, 0)` is a no-op. Reacquire linear-memory views after any allocating call.
+`kame_wasm_host_heap_used/peak` count requested caller-buffer bytes;
+`kame_wasm_system_heap_used` reports process-wide Go live heap bytes, including
+all instances. Per-instance heap metrics are retired. `kame_wasm_collect` requests
+a Go collection, useful before comparing retained-memory measurements.
+
+Tests measure retained heap after collection, with bounds allowing Go allocator
+metadata and runtime caches. Exact arena coalescing or identical linear-memory
+page counts after every operation are not Go guarantees.
+
 `kame_wasm_process_retain_limit(instance, request)` reports
 the portable process retention budget (zero request selects the pinned request;
 `UINT32_MAX` means invalid). Recipe hosts retain that prefix plus at most one
@@ -584,25 +589,11 @@ including scoped grants before custom callbacks. Trusted parent directories and
 stable caller-owned staging are required; this is not crash durability or input
 compare-and-publish. See `046-kash-scripting-and-publication.md`.
 
-Each instance reserves a static emergency diagnostic slot at creation.
-Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
-must not grow memory implicitly unless the embedding contract explicitly
-enables it.
-
-`kame_wasm_instance_set_heap_limit(handle, bytes)` sets a logical allocator
-budget from 1 byte through 16 MiB before compilation; the backing buffer is
-allocated to that budget on compilation. Allocator exhaustion invalidates the affected instance
-runtime: evaluator calls and result copies return `NO_MEMORY`, and `step` returns
-terminal state 2. Its emergency diagnostic remains readable and destruction
-remains valid. Create a new instance to resume work; other instances survive.
-Temporary host-free queries restore their module-heap allocation checkpoint on
-exhaustion. Other panics and out-of-bounds accesses remain traps.
-
-The freestanding module uses native WebAssembly exception handling and LLVM
-WASM SjLj lowering to unwind allocator panics to an ABI checkpoint. It provides
-its own small [compiler helper ABI](https://github.com/emscripten-core/emscripten/blob/main/system/lib/compiler-rt/emscripten_setjmp.c)
-implementation and exception tag, without host imports. Embedders therefore
-need WebAssembly exception-handling support.
+Each instance owns its latest diagnostic. Query failures preserve that report
+until a later query replaces it or the instance is freed. Rich composition
+reports are limited to 65536 bytes; an oversized report returns `NO_MEMORY`
+without invalidating the instance. Invalid caller pointers are rejected before
+access, while actual runtime faults may trap.
 
 The JavaScript host preserves the diagnostic when an ABI process publisher
 fails. On POSIX it uses detached process groups and FIFO-backed pipeline
@@ -615,7 +606,7 @@ must not throw uncaught exceptions or retry an exhausted instance.
 
 ### Role
 
-`dist/kame.js` is the canonical JavaScript entry point to the freestanding
+`dist/kame.js` is the canonical JavaScript entry point to the Go WASI
 module and the WebAssembly counterpart of the native CLI in `009-cli.md`. Its
 source is `src/js/kame.js`; packaging copies it unchanged. It is one ESM file
 that requires only Node 18 or later and an adjacent `kame.wasm`, with no
@@ -670,11 +661,11 @@ The presenter owns deduplication, worker slots, retries, service occupancy, targ
 timing and terminal counts. The wrapper queries counts but does not recompute
 them. Malformed observations fail without mutating established state.
 
-The first valid observation creates a dedicated presentation arena on an otherwise
-unused instance. A rejected first observation retains no arena and does not
+The first valid observation creates a dedicated presentation state on an otherwise
+unused instance. A rejected first observation retains no presentation state and does not
 prevent later source compilation or heap-limit configuration. `reset` releases
 all prior state; `cycle` releases target outcome identities and counts but
-preserves active workers and ready services. Instance free releases the arena.
+preserves active workers and ready services. Instance free releases the presentation state.
 Source compilation and presentation state are mutually
 exclusive on one handle. Rendering with `tracked: true` uses this state instead
 of host-supplied counts/workers. `op: "counts"` returns the four aggregate counts;
@@ -815,7 +806,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 
 ## Acceptance Tests
 
-- Portable packages translate and link for `wasm32-freestanding`.
+- Portable packages build for `GOOS=wasip1 GOARCH=wasm` with the standard Go toolchain.
 - An expression using only pure operations evaluates without host requests.
 - Template and script parse/format results match native fixtures byte-for-byte.
 - An in-memory host services read, stat, glob, and write requests.
@@ -828,7 +819,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
   capacity.
 - An undersized heap produces a diagnostic rather than memory corruption.
 - `tests/wasm/test-memory-reuse.mjs` checks coalescing/alignment, exact frees,
-  repeated arena destruction, a 20 MiB content observation, and 600 watch reads.
+  repeated instance destruction, a 20 MiB content observation, and 600 watch reads.
   Warm host allocations and linear-memory pages remain constant; 64–256 KiB reads
   stay below a 2 MiB instance peak. These are allocation budgets, not RSS or
   garbage-collector timing assertions.

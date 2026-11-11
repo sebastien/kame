@@ -1,13 +1,12 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 // A barrier after each publication lets consumers observe it before the next
@@ -33,22 +32,22 @@ func newLibraryStream(a mem.Allocator, record *libraryStreamRecord, inner bool) 
 	state := mem.Alloc[libraryStreamState](a)
 	state.Alloc, state.Record = a, record
 	if record.Mode == 0 {
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomValue, Value: core.NewString(a, "one")})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomValue, Value: core.NewString(a, "two")})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomValue, Value: core.NewString(a, "one")})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomValue, Value: core.NewString(a, "two")})
 	} else if record.Mode == 2 && !inner {
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomNested, Nested: newLibraryStream(a, record, true)})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 9}})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomEndBatch})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomNested, Nested: newLibraryStream(a, record, true)})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 9}})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomEndBatch})
 	} else {
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 1}})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 2}})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomEndBatch})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomEndBatch})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 3}})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 4}})
-		state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomEndBatch})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 1}})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 2}})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomEndBatch})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomEndBatch})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 3}})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomChunk, Value: core.Value{Kind: core.Int, Int: 4}})
+		state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomEndBatch})
 	}
-	state.Atoms = slices.Append(a, state.Atoms, core.Atom{Kind: core.AtomEndStream})
+	state.Atoms = append(state.Atoms, core.Atom{Kind: core.AtomEndStream})
 	return core.NewSource(a, pollLibraryStream, freeLibraryStream, state)
 }
 
@@ -76,7 +75,7 @@ func freeLibraryStream(source *core.Source) {
 			core.FreeSource(state.Alloc, state.Atoms[i].Nested)
 		}
 	}
-	slices.Free(state.Alloc, state.Atoms)
+	mem.FreeSlice(nil, state.Atoms)
 	mem.Free(state.Alloc, state)
 }
 

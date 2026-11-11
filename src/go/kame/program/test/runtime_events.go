@@ -1,12 +1,12 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestOutAndErrEmitEvents(t *testing.T) {

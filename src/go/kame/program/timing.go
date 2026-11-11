@@ -3,10 +3,10 @@ package program
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"path"
+	"slices"
 )
 
 // Timings are advisory, inclusive wall times: parallel dependencies are already
@@ -22,7 +22,7 @@ func (p *Program) timingNow() int64 {
 
 func (p *Program) timingPath(entry *instance) string {
 	hex := cacheHex(p.Alloc, entry.timingKey[:])
-	name := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/timing", hex)
+	name := path.Join(p.Options.Directory, ".kame/cache/timing", hex)
 	mem.FreeString(p.Alloc, hex)
 	return name
 }
@@ -43,7 +43,7 @@ func (p *Program) timingLoad(c *core.EngineContext, entry *instance) core.Produc
 		}
 		entry.timingPending = false
 		if completion.Diagnostic.Code == "" && completion.Value.Kind == core.Bytes {
-			data = slices.Clone(p.Alloc, completion.Value.Bytes)
+			data = slices.Clone(completion.Value.Bytes)
 		}
 		completion.Value.Free(p.Alloc)
 		completion.Diagnostic.Free(p.Alloc)
@@ -53,7 +53,7 @@ func (p *Program) timingLoad(c *core.EngineContext, entry *instance) core.Produc
 		digest.Text("kame-timing-v1")
 		digest.Write(key)
 		digest.Sum(entry.timingKey[:])
-		slices.Free(p.Alloc, key)
+		mem.FreeSlice(nil, key)
 		if p.Forwarding {
 			entry.timingPending = true
 			p.submitFileContextRequest(c, host.RequestCacheGet, host.CacheGetPayload(p.Alloc, entry.timingKey[:]))
@@ -66,7 +66,7 @@ func (p *Program) timingLoad(c *core.EngineContext, entry *instance) core.Produc
 			if err == nil {
 				data = read
 			} else {
-				slices.Free(p.Alloc, read)
+				mem.FreeSlice(nil, read)
 			}
 		}
 		mem.FreeString(p.Alloc, name)
@@ -78,7 +78,7 @@ func (p *Program) timingLoad(c *core.EngineContext, entry *instance) core.Produc
 		duration := int64(takeU64(data, &at))
 		p.timingObserve(entry, duration)
 	}
-	slices.Free(p.Alloc, data)
+	mem.FreeSlice(nil, data)
 	return core.ProducerCompleted
 }
 
@@ -95,7 +95,7 @@ func (p *Program) timingObserve(entry *instance, duration int64) {
 func (p *Program) timingDidWork(root *core.Node, since int64) bool {
 	var pending []*core.Node
 	var seen []*core.Node
-	pending = slices.Append(p.Alloc, pending, root)
+	pending = append(pending, root)
 	worked := false
 	for len(pending) != 0 {
 		node := pending[len(pending)-1]
@@ -103,20 +103,20 @@ func (p *Program) timingDidWork(root *core.Node, since int64) bool {
 		if node == nil || slices.Contains(seen, node) {
 			continue
 		}
-		seen = slices.Append(p.Alloc, seen, node)
+		seen = append(seen, node)
 		if index := p.instanceIndex(node); index >= 0 && p.Instances[index].timingExecuted && p.Instances[index].timingExecutedAt >= since {
 			worked = true
 			break
 		}
 		for i := range node.Static {
-			pending = slices.Append(p.Alloc, pending, node.Static[i])
+			pending = append(pending, node.Static[i])
 		}
 		for i := range node.Dynamic {
-			pending = slices.Append(p.Alloc, pending, node.Dynamic[i])
+			pending = append(pending, node.Dynamic[i])
 		}
 	}
-	slices.Free(p.Alloc, pending)
-	slices.Free(p.Alloc, seen)
+	mem.FreeSlice(nil, pending)
+	mem.FreeSlice(nil, seen)
 	return worked
 }
 
@@ -134,23 +134,23 @@ func (p *Program) timingSave(entry *instance) {
 	if duration > timingMaxMS {
 		return
 	}
-	data := slices.Make[byte](p.Alloc, 12)
+	data := make([]byte, 12)
 	copy(data[:4], "KTM1")
 	for i := 0; i < 8; i++ {
 		data[4+i] = byte(uint64(duration) >> uint(i*8))
 	}
 	if p.Forwarding {
 		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: host.CachePutPayload(p.Alloc, entry.timingKey[:], data)})
+		p.Outbound = append(p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: host.CachePutPayload(p.Alloc, entry.timingKey[:], data)})
 	} else {
 		name := p.timingPath(entry)
 		if p.mkdirParent(name) {
 			_ = p.Host.WriteFileAtomic(name, data, 0o644, true)
-			directory := path.Dir(p.Alloc, name)
+			directory := path.Dir(name)
 			p.pruneCacheDirectory(directory)
 			mem.FreeString(p.Alloc, directory)
 		}
 		mem.FreeString(p.Alloc, name)
 	}
-	slices.Free(p.Alloc, data)
+	mem.FreeSlice(nil, data)
 }

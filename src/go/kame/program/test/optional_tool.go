@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 var optionalToolMode int

@@ -1,10 +1,10 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
+	"strings"
 )
 
 func TestDeclarationPredicateDescriptorIsTypedAndHostFree(t *testing.T) {

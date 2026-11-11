@@ -3,8 +3,7 @@
 package wasm
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // Handle is a module-global, opaque identifier. Its low 32 bits are a one-based
@@ -69,7 +68,7 @@ func (t *Table) Add(owner uint64, value uint64) Handle {
 			return makeHandle(i, slot.Generation)
 		}
 	}
-	t.slots = slices.Append(t.Alloc, t.slots, handleSlot{Owner: owner, Value: value, Generation: 1, Live: true})
+	t.slots = append(t.slots, handleSlot{Owner: owner, Value: value, Generation: 1, Live: true})
 	return makeHandle(len(t.slots)-1, 1)
 }
 
@@ -139,6 +138,6 @@ func (t *Table) FreeTable() {
 	if t == nil {
 		return
 	}
-	slices.Free(t.Alloc, t.slots)
+	mem.FreeSlice(nil, t.slots)
 	mem.Free(t.Alloc, t)
 }

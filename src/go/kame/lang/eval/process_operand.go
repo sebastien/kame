@@ -1,9 +1,8 @@
 package eval
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Argument ports initially name authored item slots, not expanded argv offsets.
@@ -12,10 +11,10 @@ import (
 func lowerStreamOperandStage(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 	index := len(flat.Items)
 	node := expr.Clone(c.Run, e)
-	flat.Items = slices.Append(c.Run, flat.Items, node)
+	flat.Items = append(flat.Items, node)
 	ports := graphPorts{}
-	ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
-	ports.Outputs = slices.Append(c.Run, ports.Outputs, index)
+	ports.Inputs = append(ports.Inputs, index)
+	ports.Outputs = append(ports.Outputs, index)
 	for i := range e.Items {
 		if flat.Text != "" {
 			break
@@ -36,8 +35,8 @@ func lowerStreamOperandStage(c *Context, e *expr.Expr, flat *expr.Expr) graphPor
 				reader := mem.Alloc[expr.Expr](c.Run)
 				reader.Kind, reader.Text, reader.Span = expr.CommandReader, operand.Text, operand.Span
 				from := len(flat.Items)
-				flat.Items = slices.Append(c.Run, flat.Items, reader)
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: from, To: index, Argument: slot})
+				flat.Items = append(flat.Items, reader)
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: from, To: index, Argument: slot})
 			}
 			continue
 		}
@@ -72,11 +71,11 @@ func lowerStreamOperandStage(c *Context, e *expr.Expr, flat *expr.Expr) graphPor
 			if count != 1 {
 				flat.Text, flat.Span = "KASH_AMBIGUOUS_CAPTURE", operand.Span
 			} else {
-				flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: terminal, To: index, Argument: slot})
+				flat.Edges = append(flat.Edges, expr.CommandEdge{From: terminal, To: index, Argument: slot})
 			}
 		}
-		slices.Free(c.Run, production.Inputs)
-		slices.Free(c.Run, production.Outputs)
+		mem.FreeSlice(nil, production.Inputs)
+		mem.FreeSlice(nil, production.Outputs)
 	}
 	return ports
 }

@@ -1,11 +1,11 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestScopedDefinitionsOwnDistinctRuleFrames(t *testing.T) {

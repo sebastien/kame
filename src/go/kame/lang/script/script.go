@@ -2,13 +2,13 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type ScriptItemKind int
@@ -57,8 +57,8 @@ func (s *Script) Free() {
 		rule.FreeRule(s.Alloc, s.Items[i].Rule)
 		expr.Free(s.Alloc, s.Items[i].Expression)
 	}
-	slices.Free(s.Alloc, s.Items)
-	slices.Free(s.Alloc, s.Diagnostics)
+	mem.FreeSlice(nil, s.Items)
+	mem.FreeSlice(nil, s.Diagnostics)
 	if s.BorrowedSource {
 		mem.Free(s.Alloc, s.Source)
 	} else {
@@ -100,7 +100,7 @@ func parseScript(s *Script, offset int) {
 				lineEnd++
 			}
 			start, end = trim(text, pos, lineEnd)
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Comment, Text: text[start:end], Span: source.Span{Start: start, End: end}})
+			s.Items = append(s.Items, ScriptItem{Kind: Comment, Text: text[start:end], Span: source.Span{Start: start, End: end}})
 			pos = nextLine(text, lineEnd)
 			continue
 		}
@@ -124,7 +124,7 @@ func parseScript(s *Script, offset int) {
 				pos = nextLine(text, lineEnd)
 				continue
 			}
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Generate, GenerateName: generated.Name, Expression: part.Expr, Span: source.Span{Start: start, End: part.End}})
+			s.Items = append(s.Items, ScriptItem{Kind: Generate, GenerateName: generated.Name, Expression: part.Expr, Span: source.Span{Start: start, End: part.End}})
 			pos = nextLine(text, part.End)
 			continue
 		}
@@ -137,7 +137,7 @@ func parseScript(s *Script, offset int) {
 			definitionEnd := multilineDefinitionEnd(a, s.Source, start, end)
 			part := definition.ParseRange(a, s.Source, start, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
+			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
 			pos = nextLine(text, definitionEnd)
 			continue
 		}
@@ -147,7 +147,7 @@ func parseScript(s *Script, offset int) {
 			definitionEnd := multilineDefinitionEnd(a, s.Source, start, source.LogicalLineEnd(text, headerEnd))
 			part := definition.ParseRange(a, s.Source, start, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
+			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
 			pos = nextLine(text, definitionEnd)
 			continue
 		}
@@ -158,7 +158,7 @@ func parseScript(s *Script, offset int) {
 				pos = nextLine(text, lineEnd)
 				continue
 			}
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Rule, Span: part.Rule.Span, Rule: part.Rule})
+			s.Items = append(s.Items, ScriptItem{Kind: Rule, Span: part.Rule.Span, Rule: part.Rule})
 			pos = part.Rule.Span.End
 			if pos <= lineEnd {
 				pos = lineEnd
@@ -175,7 +175,7 @@ func parseScript(s *Script, offset int) {
 		if prefix.End != end {
 			s.error(prefix.End, end, "unexpected top-level input")
 		}
-		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
+		s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
 		pos = nextLine(text, lineEnd)
 	}
 	validateComposition(s)
@@ -228,13 +228,13 @@ func trimStart(text string, start int, end int) int {
 
 func (s *Script) takeDiagnostics(diags []source.Diagnostic) {
 	for i := range diags {
-		s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, diags[i])
+		s.Diagnostics = append(s.Diagnostics, diags[i])
 	}
-	slices.Free(s.Alloc, diags)
+	mem.FreeSlice(nil, diags)
 }
 
 func (s *Script) error(start int, end int, message string) {
-	s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	s.Diagnostics = append(s.Diagnostics, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func nextLine(text string, pos int) int {
@@ -286,7 +286,7 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 	prefix := expr.ParsePrefix(a, s, pos)
 	end := prefix.End
 	expr.Free(a, prefix.Expr)
-	slices.Free(a, prefix.Diagnostics)
+	mem.FreeSlice(nil, prefix.Diagnostics)
 	if end < lineEnd {
 		return lineEnd
 	}
@@ -315,7 +315,7 @@ func Format(a mem.Allocator, s *Script) string {
 // terminal LF and the source's blank-line counts between items and at the
 // script edges.
 func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	text := s.Source.Text
 	previousEnd := 0
 	for i := range s.Items {
@@ -406,6 +406,6 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		b.WriteByte('\n')
 	}
 	value := owned(a, b.String())
-	b.Free()
+	b.Reset()
 	return value
 }

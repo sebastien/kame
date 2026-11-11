@@ -1,10 +1,10 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"slices"
 )
 
 type orderState struct {

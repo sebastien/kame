@@ -1,14 +1,14 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"os"
 )
 
 func TestScopedEnvironmentReadsRebindCachedPrerequisites(t *testing.T) {
@@ -21,8 +21,8 @@ func TestExplicitDefinitionsOverrideScopedEnvironment(t *testing.T) {
 
 func checkScopedDefinitionReads(t *testing.T, defines []string, expected string) {
 	a := t.Allocator()
-	var directoryBuffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(directoryBuffer[:], "", "kame-scoped-read-")
+
+	directory, err := os.MkdirTemp("", "kame-scoped-read-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -47,7 +47,7 @@ func checkScopedDefinitionReads(t *testing.T, defines []string, expected string)
 		}
 		result.Free(a)
 	}
-	data, readErr := os.ReadFile(a, directory+"/runs")
+	data, readErr := os.ReadFile(directory + "/runs")
 	if readErr != nil || string(data) != expected {
 		t.Error("scoped definition bytes: " + string(data) + "; expected: " + expected)
 	}

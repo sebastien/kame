@@ -1,11 +1,11 @@
 package program
 
 import (
+	"io"
 	"kame/diagnostic"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"slices"
 )
 
 type spanNode struct {
@@ -90,7 +90,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		return spanResult{}
 	}
 	var pending []spanNode
-	pending = slices.Append(p.Alloc, pending, spanNode{Target: cloneText(p.Alloc, target)})
+	pending = append(pending, spanNode{Target: cloneText(p.Alloc, target)})
 	var visited []string
 	result := spanResult{}
 	for cursor := 0; cursor < len(pending); cursor++ {
@@ -99,7 +99,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 			mem.FreeString(p.Alloc, node.Target)
 			continue
 		}
-		visited = slices.Append(p.Alloc, visited, node.Target)
+		visited = append(visited, node.Target)
 		planned := p.Plan(node.Target)
 		if planned.Diagnostic.Code != "" {
 			if node.Depth == 0 {
@@ -107,7 +107,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 				freeStrings(p.Alloc, result.Dynamic)
 				freeStrings(p.Alloc, result.Outputs)
 				freeStrings(p.Alloc, visited)
-				slices.Free(p.Alloc, pending)
+				mem.FreeSlice(nil, pending)
 				return spanResult{Diagnostic: planned.Diagnostic}
 			}
 			planned.Diagnostic.Free(p.Alloc)
@@ -124,7 +124,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 				for i := cursor + 1; i < len(pending); i++ {
 					mem.FreeString(p.Alloc, pending[i].Target)
 				}
-				slices.Free(p.Alloc, pending)
+				mem.FreeSlice(nil, pending)
 				return spanResult{Waiting: true}
 			}
 			if planned.Diagnostic.Code != "" {
@@ -133,7 +133,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 					freeStrings(p.Alloc, result.Dynamic)
 					freeStrings(p.Alloc, result.Outputs)
 					freeStrings(p.Alloc, visited)
-					slices.Free(p.Alloc, pending)
+					mem.FreeSlice(nil, pending)
 					return spanResult{Diagnostic: planned.Diagnostic}
 				}
 				planned.Diagnostic.Free(p.Alloc)
@@ -157,12 +157,12 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 				if !p.HasTarget(plan.StaticInputs[i]) || slices.Contains(visited, plan.StaticInputs[i]) {
 					continue
 				}
-				pending = slices.Append(p.Alloc, pending, spanNode{Target: cloneText(p.Alloc, plan.StaticInputs[i]), Depth: node.Depth + 1})
+				pending = append(pending, spanNode{Target: cloneText(p.Alloc, plan.StaticInputs[i]), Depth: node.Depth + 1})
 			}
 		}
 		plan.Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, pending)
+	mem.FreeSlice(nil, pending)
 	freeStrings(p.Alloc, visited)
 	return result
 }

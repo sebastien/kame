@@ -1,12 +1,12 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
+	"strings"
 )
 
 func TestRuntimeFinallyWaitsForCancelledRequestAndDrainsCleanup(t *testing.T) {

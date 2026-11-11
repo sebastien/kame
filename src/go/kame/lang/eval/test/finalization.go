@@ -1,14 +1,13 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 type finalizationHost struct {
@@ -32,7 +31,7 @@ func finalizationOutput(value any, effect eval.Effect) {
 		h.Program.FinalizerOutputCancelled(effect.FinalizationDeadlineNS)
 	}
 	for i := range effect.Data {
-		h.Output = slices.Append(h.Alloc, h.Output, effect.Data[i])
+		h.Output = append(h.Output, effect.Data[i])
 	}
 }
 
@@ -56,7 +55,7 @@ func TestFinallyOutputCancellationCannotBeRecovered(t *testing.T) {
 	p.Free()
 	parsed.Free()
 	r.Free()
-	slices.Free(a, h.Output)
+	mem.FreeSlice(nil, h.Output)
 }
 
 func finalizationAdvanceClock(c *eval.Context, value any, values []core.Value) eval.Result {
@@ -113,7 +112,7 @@ func TestFinallyResultsAndFailures(t *testing.T) {
 		p.Free()
 		parsed.Free()
 		r.Free()
-		slices.Free(a, h.Output)
+		mem.FreeSlice(nil, h.Output)
 	}
 }
 
@@ -147,7 +146,7 @@ func TestFinallyValidationBeforeCallbacks(t *testing.T) {
 		p.Free()
 		parsed.Free()
 		r.Free()
-		slices.Free(a, h.Output)
+		mem.FreeSlice(nil, h.Output)
 	}
 }
 
@@ -248,7 +247,7 @@ func TestFinallySuspensionCancellationAndDeadline(t *testing.T) {
 		p.Free()
 		parsed.Free()
 		r.Free()
-		slices.Free(a, h.Output)
+		mem.FreeSlice(nil, h.Output)
 	}
 }
 
@@ -293,7 +292,7 @@ func TestFinallyNestedSharedDeadline(t *testing.T) {
 		p.Free()
 		parsed.Free()
 		r.Free()
-		slices.Free(a, h.Output)
+		mem.FreeSlice(nil, h.Output)
 	}
 }
 
@@ -353,7 +352,7 @@ func TestFinallyStatementsRetainBindingsAndAcceptedWrites(t *testing.T) {
 	p.Free()
 	parsed.Free()
 	r.Free()
-	slices.Free(a, h.Output)
+	mem.FreeSlice(nil, h.Output)
 }
 
 func TestFinallyHandledFailureDoesNotStartOuterUnwind(t *testing.T) {
@@ -377,5 +376,5 @@ func TestFinallyHandledFailureDoesNotStartOuterUnwind(t *testing.T) {
 	p.Free()
 	parsed.Free()
 	r.Free()
-	slices.Free(a, h.Output)
+	mem.FreeSlice(nil, h.Output)
 }

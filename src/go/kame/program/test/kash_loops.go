@@ -1,13 +1,13 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 type loopOutputState struct{ Count int }
@@ -18,6 +18,35 @@ func loopOutputSink(value any, effect eval.Effect) {
 		state.Count += 100
 	}
 	state.Count++
+}
+
+func TestMixedKashLibraryFragments(t *testing.T) {
+	a := t.Allocator()
+	r := eval.NewRegistry(a)
+	operations.Register(r)
+	sources := []program.CompileSource{
+		{Name: "lib.kash", Lang: "kash", Text: "def helper\n\t(write! \"./proof\" \"ok\")\n"},
+		{Name: "Kamefile", Lang: "kmk", Text: "SHELL = kash\ndefault :\n\t(helper)\n"},
+	}
+	h := wasm.NewMemoryHost(a)
+	compiled := program.CompileMany(a, sources, r, program.Options{Host: h, Directory: ".", Grants: []eval.Grant{{Capability: eval.Write}}})
+	if compiled.Program == nil {
+		t.Fatal("mixed Kash and rule sources failed to compile")
+		compiled.Free(a)
+		r.Free()
+		return
+	}
+	p := compiled.Program
+	result := p.Materialize("default")
+	data, err := h.ReadFile(a, "proof")
+	if result.Diagnostic.Code != "" || err != nil || string(data) != "ok" {
+		t.Error("rule could not call included Kash definition: " + result.Diagnostic.Code)
+	}
+	mem.FreeSlice(a, data)
+	result.Free(a)
+	p.Free()
+	compiled.Free(a)
+	r.Free()
 }
 
 func TestKashLoopsRetainDeferredWritesWithOutputSink(t *testing.T) {

@@ -2,8 +2,8 @@ package cli
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/mem"
 )
 
 type ProgressObservation struct {

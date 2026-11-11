@@ -2,11 +2,10 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/script"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Callable ownership protocol.
@@ -331,7 +330,7 @@ func freeValues(a mem.Allocator, values []core.Value) {
 	for i := range values {
 		values[i].Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 // freeValuesWithCallables releases scopes in addition to storage. Use when
@@ -347,7 +346,7 @@ func freeRecord(a mem.Allocator, values []core.RecordField) {
 	for i := range values {
 		values[i].Value.Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 // freeRecordWithCallables releases scopes in addition to storage. Use only
@@ -387,7 +386,7 @@ func (s *Scope) breakCallableCycle() bool {
 	// first: the recursive frees below release the scope struct itself, so
 	// s.Alloc must not be read after they run.
 	a := s.Alloc
-	values := slices.Make[core.Value](a, count)
+	values := make([]core.Value, count)
 	n := 0
 	for i := range s.Bindings {
 		extractSelfRetained(&s.Bindings[i].Value, s, values, &n)
@@ -396,7 +395,7 @@ func (s *Scope) breakCallableCycle() bool {
 	for i := range values {
 		freeCallables(a, &values[i])
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 	return true
 }
 

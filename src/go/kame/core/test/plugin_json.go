@@ -1,16 +1,15 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
-	"solod.dev/so/math"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"math"
 )
 
 func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 	a := t.Allocator()
-	values := slices.Make[core.Value](a, 14)
+	values := make([]core.Value, 14)
 	values[0] = core.Value{Kind: core.Nil}
 	values[1] = core.Value{Kind: core.Bool, Bool: true}
 	values[2] = core.Value{Kind: core.Int, Int: -42}
@@ -20,18 +19,18 @@ func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 	values[6] = core.NewString(a, "{name:*}")
 	values[6].Kind = core.Pattern
 	values[7] = core.Value{Kind: core.Resource, Resource: core.NewResourceKey(a, core.ResourceFile, "file:///work/input")}
-	items := slices.Make[core.Value](a, 2)
+	items := make([]core.Value, 2)
 	items[0], items[1] = core.NewString(a, "nested"), core.Value{Kind: core.Bool, Bool: false}
 	values[8] = core.NewList(a, items)
 	items[0].Free(a)
 	items[1].Free(a)
-	slices.Free(a, items)
-	fields := slices.Make[core.RecordField](a, 1)
+	mem.FreeSlice(nil, items)
+	fields := make([]core.RecordField, 1)
 	fields[0] = core.RecordField{Key: core.NewString(a, "field").Text, Value: core.NewBytes(a, []byte{255, 0})}
 	values[9] = core.NewRecord(a, fields)
 	mem.FreeString(a, fields[0].Key)
 	fields[0].Value.Free(a)
-	slices.Free(a, fields)
+	mem.FreeSlice(nil, fields)
 	values[10] = core.Value{Kind: core.Resource, Resource: core.NewResourceKey(a, core.ResourceTool, "compiler")}
 	values[11] = core.Value{Kind: core.Float, Float: 0.0}
 	values[12] = core.Value{Kind: core.Float, Float: 1.0}
@@ -57,7 +56,7 @@ func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 		mem.FreeSlice(a, data)
 		values[i].Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 func TestPluginBytesBase64Padding(t *testing.T) {
@@ -98,12 +97,12 @@ func TestPluginValueJSONRejectsEncoderFailures(t *testing.T) {
 		mem.FreeSlice(a, data)
 	}
 	// Borrowed links into one fixture allocation, not individually owned lists.
-	values := slices.Make[core.Value](a, 300)
+	values := make([]core.Value, 300)
 	for i := 0; i < len(values)-1; i++ {
 		values[i] = core.Value{Kind: core.List, List: values[i+1 : i+2]}
 	}
 	data = core.PluginValueJSON(a, values[0])
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 	if data != nil {
 		t.Error("excessive nesting returned partial plugin JSON")
 		mem.FreeSlice(a, data)
@@ -116,7 +115,7 @@ func TestPluginValueJSONRejectsUnsupportedAndMalformedValues(t *testing.T) {
 		t.Error("callable was serialized")
 		mem.FreeSlice(a, data)
 	}
-	invalid := slices.Make[string](a, 5)
+	invalid := make([]string, 5)
 	invalid[0] = `{"kind":"string","data":"x","extra":true}`
 	invalid[1] = `{"kind":"bool","kind":"bool","data":true}`
 	invalid[2] = `{"kind":"bytes","data":"%%%="}`
@@ -129,5 +128,5 @@ func TestPluginValueJSONRejectsUnsupportedAndMalformedValues(t *testing.T) {
 			decoded.Free(a)
 		}
 	}
-	slices.Free(a, invalid)
+	mem.FreeSlice(nil, invalid)
 }

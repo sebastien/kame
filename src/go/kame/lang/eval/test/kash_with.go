@@ -1,12 +1,12 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 )
 
 func TestKashWithSetupRetainsCompletedWorkAcrossSuspension(t *testing.T) {

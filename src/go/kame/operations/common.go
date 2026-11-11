@@ -3,8 +3,8 @@ package operations
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/slices"
 )
 
 func truth(v core.Value) bool { return v.Kind != core.Nil && !(v.Kind == core.Bool && !v.Bool) }
@@ -35,5 +35,5 @@ func freeValues(c *eval.Context, values []core.Value) {
 	for i := range values {
 		values[i].Free(c.Run)
 	}
-	slices.Free(c.Run, values)
+	mem.FreeSlice(nil, values)
 }

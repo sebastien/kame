@@ -4,10 +4,12 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"path"
+	"slices"
+	"strings"
 )
 
 func (p *Program) pump(wait int) {
@@ -116,17 +118,17 @@ func (p *Program) drainRequests() {
 				display := processDisplayFromPayload(p.Alloc, request.Payload, p.Options.Shell)
 				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
 				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
-				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
+				p.Pending = append(p.Pending, pending)
 			}
 			// Ownership transfers to the outbound queue; the embedding host
 			// frees the request when it completes it.
-			p.Outbound = slices.Append(p.Alloc, p.Outbound, request)
+			p.Outbound = append(p.Outbound, request)
 			continue
 		}
 		if request.Kind == host.RequestRecordRead {
 			p.noteRecordReader(request)
 			if !p.tryRecordRequest(request) {
-				p.RecordRequests = slices.Append(p.Alloc, p.RecordRequests, request)
+				p.RecordRequests = append(p.RecordRequests, request)
 			} else {
 				request.Free(p.Alloc)
 			}
@@ -137,7 +139,7 @@ func (p *Program) drainRequests() {
 			values := host.PayloadArgv(request.Payload)
 			var argv []string
 			for i := range values {
-				argv = slices.Append(p.Alloc, argv, values[i].Text)
+				argv = append(argv, values[i].Text)
 			}
 			var stages []host.ProcessStage
 			graphs := host.PayloadStages(request.Payload)
@@ -204,13 +206,13 @@ func (p *Program) drainRequests() {
 					if len(items) == 3 {
 						edge.Argument = int(items[2].Int)
 					}
-					edges = slices.Append(p.Alloc, edges, edge)
+					edges = append(edges, edge)
 				}
 			}
 			for i := range graphs {
 				var arguments []string
 				for j := range graphs[i].List {
-					arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text)
+					arguments = append(arguments, graphs[i].List[j].Text)
 				}
 				stage := host.ProcessStage{Argv: arguments}
 				if i < len(buffers) {
@@ -247,10 +249,10 @@ func (p *Program) drainRequests() {
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
 					for j := range values {
-						stage.Environment = slices.Append(p.Alloc, stage.Environment, values[j].Text)
+						stage.Environment = append(stage.Environment, values[j].Text)
 					}
 				}
-				stages = slices.Append(p.Alloc, stages, stage)
+				stages = append(stages, stage)
 			}
 			// The shell operation returns captured output, so it needs a
 			// retained-byte budget even when no --log-limit was given.
@@ -313,7 +315,7 @@ func (p *Program) drainRequests() {
 				if request.Payload.Record[i].Key == host.FieldEnvironment {
 					values := request.Payload.Record[i].Value.List
 					for j := range values {
-						scopedEnvironment = slices.Append(p.Alloc, scopedEnvironment, values[j].Text)
+						scopedEnvironment = append(scopedEnvironment, values[j].Text)
 					}
 					environment = scopedEnvironment
 				}
@@ -358,16 +360,16 @@ func (p *Program) drainRequests() {
 					pending.StdoutLimit, pending.StderrLimit = host.PayloadInt(typedPolicy, "stdoutLimit"), host.PayloadInt(typedPolicy, "stderrLimit")
 				}
 				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
-				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
+				p.Pending = append(p.Pending, pending)
 			}
-			slices.Free(p.Alloc, scopedEnvironment)
-			slices.Free(p.Alloc, argv)
+			mem.FreeSlice(nil, scopedEnvironment)
+			mem.FreeSlice(nil, argv)
 			for i := range stages {
-				slices.Free(p.Alloc, stages[i].Argv)
-				slices.Free(p.Alloc, stages[i].Environment)
+				mem.FreeSlice(nil, stages[i].Argv)
+				mem.FreeSlice(nil, stages[i].Environment)
 			}
-			slices.Free(p.Alloc, stages)
-			slices.Free(p.Alloc, edges)
+			mem.FreeSlice(nil, stages)
+			mem.FreeSlice(nil, edges)
 		} else {
 			p.completeRequest(request)
 		}
@@ -478,7 +480,7 @@ func (p *Program) requestServiceClock(entry *instance) {
 	p.nextRequest++
 	id := p.nextRequest
 	entry.ServiceClockID = id
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestMonotonicTime})
+	p.Outbound = append(p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestMonotonicTime})
 }
 
 func (p *Program) requestServiceTimer(entry *instance) {
@@ -493,7 +495,7 @@ func (p *Program) requestServiceTimer(entry *instance) {
 		delay = entry.Service.HealthInterval
 	}
 	payload := host.ServiceTimerPayload(p.Alloc, delay)
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestTimer, Payload: payload})
+	p.Outbound = append(p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestTimer, Payload: payload})
 }
 
 func (p *Program) completeServiceClock(entry *instance, now int64) {
@@ -574,7 +576,7 @@ func (p *Program) startServiceProbeAt(entry *instance, now int64, health bool) {
 	argv = cloneStrings(p.Alloc, argv)
 	if p.Forwarding {
 		payload := host.ServiceProbePayload(p.Alloc, argv, p.Options.Directory, timeout, entry.Environment)
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestProcess, Payload: payload})
+		p.Outbound = append(p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestProcess, Payload: payload})
 		entry.ServiceProbeID, entry.ServiceProbeHealth = id, health
 		freeStrings(p.Alloc, argv)
 		return
@@ -873,6 +875,12 @@ func (p *Program) NextOutbound() host.NextResult {
 	request := p.Outbound[0]
 	copy(p.Outbound, p.Outbound[1:])
 	p.Outbound = p.Outbound[:len(p.Outbound)-1]
+	if request.Kind == host.RequestReadFile && host.PayloadText(request.Payload, host.FieldOp) == host.OpFileContent && p.isSourcePath(host.PayloadPath(request.Payload)) {
+		// Revalidate loaded code with source authority, without granting user reads.
+		payload := core.NewString(p.Alloc, host.PayloadPath(request.Payload))
+		request.Payload.Free(p.Alloc)
+		request.Kind, request.Payload = host.RequestLoadSource, payload
+	}
 	return host.NextResult{Request: request, OK: true}
 }
 
@@ -990,12 +998,16 @@ func (p *Program) completeRequest(request host.Request) {
 		} else {
 			completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true
 		}
-	} else if request.Kind == host.RequestReadFile {
-		op := host.PayloadText(request.Payload, host.FieldOp)
-		if op == "" {
-			op = host.OpRead
+	} else if request.Kind == host.RequestReadFile || request.Kind == host.RequestLoadSource {
+		if request.Kind == host.RequestLoadSource && (request.Payload.Kind != core.String || !path.IsAbs(name) || strings.ContainsAny(name, "\x00")) {
+			completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "invalid source-load request payload")
+		} else {
+			op := host.PayloadText(request.Payload, host.FieldOp)
+			if op == "" || request.Kind == host.RequestLoadSource {
+				op = host.OpRead
+			}
+			completion = p.fileCompletion(request, op, name)
 		}
-		completion = p.fileCompletion(request, op, name)
 	} else if request.Kind == host.RequestPublishFile {
 		staged := p.canonicalTarget(host.PayloadText(request.Payload, "staged"), true)
 		destination := p.canonicalTarget(host.PayloadText(request.Payload, "destination"), true)
@@ -1115,7 +1127,7 @@ func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attem
 	p.nextRequest++
 	id := p.nextRequest
 	payload := host.ServiceCancelPayload(p.Alloc, processID, graceMS)
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: host.RequestProcessCancel, Payload: payload})
+	p.Outbound = append(p.Outbound, host.Request{ID: id, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: host.RequestProcessCancel, Payload: payload})
 }
 
 func (p *Program) complete(event host.ProcessEvent) {
@@ -1215,7 +1227,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 			entry.retryCount++
 			node.HostRequestID = retryID
 			display := processDisplayFromHost(p.Alloc, request)
-			p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: retryID, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
+			p.Pending = append(p.Pending, pendingRequest{ID: retryID, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 			d.Free(p.Alloc)
 			return
 		}
@@ -1287,14 +1299,14 @@ func (p *Program) targetStack(entry *instance) []string {
 	var reversed []string
 	current := entry
 	for steps := 0; current != nil && steps <= len(p.Instances); steps++ {
-		reversed = slices.Append(p.Alloc, reversed, cloneText(p.Alloc, current.Plan.Target))
+		reversed = append(reversed, cloneText(p.Alloc, current.Plan.Target))
 		current = p.parentInstance(current.Node, entry.runEpoch)
 	}
-	stack := slices.Make[string](p.Alloc, len(reversed))
+	stack := make([]string, len(reversed))
 	for i := range reversed {
 		stack[len(reversed)-1-i] = reversed[i]
 	}
-	slices.Free(p.Alloc, reversed)
+	mem.FreeSlice(nil, reversed)
 	return stack
 }
 
@@ -1341,8 +1353,8 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 	if event.HasEffectiveStatus {
 		effectiveSignal = event.EffectiveSignal
 	}
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(event.Status, event.Signal, event.EffectiveStatus, event.HasEffectiveStatus))}})
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: int64(effectiveSignal)}})
+	value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(event.Status, event.Signal, event.EffectiveStatus, event.HasEffectiveStatus))}})
+	value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: int64(effectiveSignal)}})
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
@@ -1351,18 +1363,18 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 		for i := range event.Stages {
 			stage := event.Stages[i]
 			parts := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(stage.Status)}}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(stage.Signal)}}, {Key: "outcome", Value: core.Value{Kind: core.Int, Int: int64(stage.Outcome)}}}
-			stages = slices.Append(a, stages, core.NewRecord(a, parts))
+			stages = append(stages, core.NewRecord(a, parts))
 			v := &stages[len(stages)-1]
-			v.Record = slices.Append(a, v.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(stage.Status, stage.Signal, stage.EffectiveStatus, stage.HasEffectiveStatus))}})
+			v.Record = append(v.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(stage.Status, stage.Signal, stage.EffectiveStatus, stage.HasEffectiveStatus))}})
 		}
-		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
+		value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
 		for i := range stages {
 			stages[i].Free(a)
 		}
-		slices.Free(a, stages)
+		mem.FreeSlice(nil, stages)
 	}
 	if len(event.EdgeMetrics) != 0 {
-		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)})
+		value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)})
 	}
 	return value
 }
@@ -1376,7 +1388,7 @@ func (p *Program) captureStderr(pending pendingRequest, data []byte) {
 	if p.Eval.DefinitionEffectSink != nil {
 		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectErr, Data: data, FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	} else {
-		p.emit(Event{Kind: Stderr, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
+		p.emit(Event{Kind: Stderr, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	}
 }
 
@@ -1388,7 +1400,7 @@ func (p *Program) statementStdout(pending pendingRequest, data []byte) {
 	if p.Eval.DefinitionEffectSink != nil {
 		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data, FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	} else {
-		p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
+		p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	}
 }
 
@@ -1498,7 +1510,7 @@ func appendProcessDisplayToken(a mem.Allocator, raw *[]string, value string, tru
 		*truncated = true
 		return
 	}
-	*raw = slices.Append(a, *raw, value)
+	*raw = append(*raw, value)
 }
 
 func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []string) processDisplay {
@@ -1557,7 +1569,7 @@ func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []stri
 	}
 	display := boundedProcessDisplay(a, raw)
 	display.Truncated = display.Truncated || truncated
-	slices.Free(a, raw)
+	mem.FreeSlice(nil, raw)
 	return display
 }
 
@@ -1604,7 +1616,7 @@ func processDisplayFromHost(a mem.Allocator, request host.ProcessRequest) proces
 	}
 	display := boundedProcessDisplay(a, raw)
 	display.Truncated = display.Truncated || truncated
-	slices.Free(a, raw)
+	mem.FreeSlice(nil, raw)
 	return display
 }
 
@@ -1641,7 +1653,7 @@ func boundedProcessDisplay(a mem.Allocator, raw []string) processDisplay {
 		} else {
 			value = cloneText(a, value)
 		}
-		display.Argv = slices.Append(a, display.Argv, value)
+		display.Argv = append(display.Argv, value)
 		used += len(value)
 		if display.Truncated {
 			break

@@ -1,12 +1,11 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
 )
 
 func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
@@ -41,7 +40,7 @@ func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
 	root := expr.Parse(a, "value", "([] (if :false (include ./a.km) :nil))")
 	defer root.Free()
 	diagnostics := script.ValidateValueExpression(a, root.Expr)
-	defer slices.Free(a, diagnostics)
+	defer mem.FreeSlice(nil, diagnostics)
 	if len(diagnostics) != 1 || diagnostics[0].Code != "EXPR_INVALID" {
 		t.Error("shared validation missed an unused lambda")
 	}
@@ -69,7 +68,7 @@ func TestKashLibraryCompositionAndFormatting(t *testing.T) {
 		text := texts[i]
 		invalid := script.ParseKash(a, "invalid.kash", text)
 		script.ValidateKashLibrary(invalid)
-		if len(invalid.Diagnostics) == 0 {
+		if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Error("library accepted top-level work: " + text)
 		}
 		invalid.Free()

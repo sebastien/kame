@@ -1,10 +1,5 @@
 package cli
 
-import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-)
-
 // RunInput retains command-line order and the language selected when an input
 // was encountered. Text and filenames borrow argv; entry arrays belong to inv.
 type RunInput struct {
@@ -44,7 +39,7 @@ func AppendsCommands(args []string) bool {
 func parseRun(args []string, discover bool) Invocation {
 	inv := Invocation{Name: "run", Directory: ".", Jobs: 1, WatchDebounceMS: 100}
 	if discover {
-		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "discover", Lang: "kmk"})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "discover", Lang: "kmk"})
 	}
 	language := ""
 	stdin := false
@@ -54,9 +49,9 @@ func parseRun(args []string, discover bool) Invocation {
 		if arg == "--" {
 			for j := i + 1; j < len(args); j++ {
 				if discover {
-					inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, args[j])
+					inv.Inputs[0].Entries = append(inv.Inputs[0].Entries, args[j])
 				} else {
-					inv.Args = slices.Append(mem.System, inv.Args, args[j])
+					inv.Args = append(inv.Args, args[j])
 				}
 			}
 			break
@@ -103,7 +98,7 @@ func parseRun(args []string, discover bool) Invocation {
 				if lang == "" {
 					lang = "km"
 				}
-				inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "command", Value: value, Lang: lang})
+				inv.Inputs = append(inv.Inputs, RunInput{Kind: "command", Value: value, Lang: lang})
 				continue
 			}
 			if option == "-f" || option == "--file" {
@@ -155,7 +150,7 @@ func parseRun(args []string, discover bool) Invocation {
 			}
 			// Keep task arguments as entries, never reinterpret their value as a file.
 			if discover {
-				inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, arg)
+				inv.Inputs[0].Entries = append(inv.Inputs[0].Entries, arg)
 			} else if !runEntry(&inv, arg) {
 				return inv
 			}
@@ -172,7 +167,7 @@ func parseRun(args []string, discover bool) Invocation {
 			return inv
 		}
 		if discover {
-			inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, arg)
+			inv.Inputs[0].Entries = append(inv.Inputs[0].Entries, arg)
 			continue
 		}
 		if len(inv.Inputs) == 0 {
@@ -325,7 +320,7 @@ func runFile(inv *Invocation, name string, language string, stdin *bool) bool {
 		inv.fail("OPT_VALUE_INVALID", "source requires a recognized suffix or explicit language")
 		return false
 	}
-	inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: kind, Value: name, Lang: language})
+	inv.Inputs = append(inv.Inputs, RunInput{Kind: kind, Value: name, Lang: language})
 	return true
 }
 
@@ -343,7 +338,7 @@ func runEntry(inv *Invocation, name string) bool {
 		inv.fail("OPT_VALUE_INVALID", "entry is invalid for this source language")
 		return false
 	}
-	input.Entries = slices.Append(mem.System, input.Entries, name)
+	input.Entries = append(input.Entries, name)
 	return true
 }
 

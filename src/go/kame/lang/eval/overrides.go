@@ -2,11 +2,11 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // OverrideDefinition installs a literal string before a value definition is
@@ -145,18 +145,18 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	for i := 0; !invalidFrames && i < len(context.RuleFrames); i++ {
 		frame := RuleFrame{FileRule: context.RuleFrames[i].FileRule, ServiceRule: context.RuleFrames[i].ServiceRule}
 		for j := range context.RuleFrames[i].Inputs {
-			frame.Inputs = slices.Append(p.Alloc, frame.Inputs, context.RuleFrames[i].Inputs[j].Clone(p.Alloc))
+			frame.Inputs = append(frame.Inputs, context.RuleFrames[i].Inputs[j].Clone(p.Alloc))
 		}
 		for j := range context.RuleFrames[i].Outputs {
-			frame.Outputs = slices.Append(p.Alloc, frame.Outputs, context.RuleFrames[i].Outputs[j].Clone(p.Alloc))
+			frame.Outputs = append(frame.Outputs, context.RuleFrames[i].Outputs[j].Clone(p.Alloc))
 		}
 		for j := range context.RuleFrames[i].NewerInputs {
-			frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
+			frame.NewerInputs = append(frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
 		}
-		state.RuleFrames = slices.Append(p.Alloc, state.RuleFrames, frame)
+		state.RuleFrames = append(state.RuleFrames, frame)
 	}
 	for i := range context.Environment {
-		state.Environment = slices.Append(p.Alloc, state.Environment, owned(p.Alloc, context.Environment[i]))
+		state.Environment = append(state.Environment, owned(p.Alloc, context.Environment[i]))
 	}
 	prefix := "KAME_" + key.Name + "="
 	text, provided := "", false
@@ -246,9 +246,9 @@ func (p *Program) SetDefinitionOverrides(values []string) {
 	for i := range p.explicitDefinitionOverrides {
 		mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i])
 	}
-	slices.Free(p.Alloc, p.explicitDefinitionOverrides)
+	mem.FreeSlice(nil, p.explicitDefinitionOverrides)
 	p.explicitDefinitionOverrides = nil
 	for i := range values {
-		p.explicitDefinitionOverrides = slices.Append(p.Alloc, p.explicitDefinitionOverrides, owned(p.Alloc, values[i]))
+		p.explicitDefinitionOverrides = append(p.explicitDefinitionOverrides, owned(p.Alloc, values[i]))
 	}
 }

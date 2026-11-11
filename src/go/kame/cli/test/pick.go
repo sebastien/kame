@@ -1,14 +1,14 @@
-package cli_test
+package clicheck
 
 import (
 	"kame/cli"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
+	"strings"
 )
 
 func joined(args []string) string {
-	return strings.Join(mem.System, args, " ")
+	return strings.Join(args, " ")
 }
 
 func TestPickClassifiesEveryCommand(t *testing.T) {
@@ -53,8 +53,8 @@ func TestPickPreviewUsesStableKindsAndOneLineFields(t *testing.T) {
 	if cli.PickActionText(cli.PickInspect) != "choose a target, then run" || cli.PickActionText(cli.PickUsage) != "print usage" {
 		t.Error("preview action labels changed")
 	}
-	b := strings.NewBuilder(mem.System)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	if !cli.WritePickLine(&b, "command", "clean", "do clean", "command", "-", "print usage", "clean outputs", "kame do clean [-C DIR]\nkame do clean --keep PATH...") {
 		t.Error("multi-line usage was rejected")
 	}
@@ -65,8 +65,8 @@ func TestPickPreviewUsesStableKindsAndOneLineFields(t *testing.T) {
 }
 
 func TestPickLineRoundTripsTheExactName(t *testing.T) {
-	b := strings.NewBuilder(mem.System)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	if !cli.WritePickLine(&b, "target", "./my app", "./my app  missing", "artifacts missing") {
 		t.Error("ordinary target row was rejected")
 	}
@@ -93,8 +93,8 @@ func TestPickLineRoundTripsTheExactName(t *testing.T) {
 }
 
 func TestPickRejectsControlBytesWithoutChangingANSIIdentity(t *testing.T) {
-	b := strings.NewBuilder(mem.System)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := 0; i < 33; i++ {
 		control := byte(i)
 		if i == 32 {

@@ -155,13 +155,15 @@ def live_boundaries(binary: str, base: Path) -> None:
 def capture_faults(binary: str, base: Path) -> None:
 	if not sys.platform.startswith("linux"):
 		return
-	shim = base / "cleanup-faults.so"
-	source = Path(__file__).with_name("automatic-clean-faults.c")
-	subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o", str(shim), str(source), "-ldl"], check=True, timeout=20)
+	fault_binary = base / "kame-clean-faults"
+	module = Path(__file__).resolve().parents[1] / "src/go/kame"
+	build_env = {**os.environ, "CGO_ENABLED": "0", "GOCACHE": os.environ.get("GOCACHE", str(base / "go-cache"))}
+	subprocess.run(["go", "build", "-tags=kame_faults", "-o", str(fault_binary), "./cmd/kame"], cwd=module, env=build_env, check=True, timeout=120)
+	binary = str(fault_binary)
 	for mode in ("cancel-capture", "retire-crash", "replace-capture", "replace-occupied", "replace-symlink"):
 		root = base / mode
 		project(root)
-		env = {**os.environ, "LD_PRELOAD": str(shim), "KAME_CLEAN_TEST_FAULT": mode}
+		env = {**os.environ, "KAME_CLEAN_TEST_FAULT": mode}
 		run(binary, root, env=env)
 		state = root / ".kame/outputs"
 		(state / "test-fault").touch()
@@ -207,7 +209,7 @@ def capture_faults(binary: str, base: Path) -> None:
 	# relative destination resolves differently inside the private ledger.
 	root = base / 'symlink-cancel-capture'
 	project(root, 'default : ./build/out\n./build/out : ./input\n\tln -s ../input @>\n')
-	env = {**os.environ, 'LD_PRELOAD': str(shim), 'KAME_CLEAN_TEST_FAULT': 'cancel-capture'}
+	env = {**os.environ, 'KAME_CLEAN_TEST_FAULT': 'cancel-capture'}
 	run(binary, root, env=env)
 	state = root / '.kame/outputs'
 	(state / 'test-fault').touch()

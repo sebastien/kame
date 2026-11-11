@@ -1,19 +1,18 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"unsafe"
 
 	"kame/host/wasm"
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/c"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestHeapReusesUnorderedFreesAndCoalesces(t *testing.T) {
-	a := t.Allocator()
-	buf := slices.Make[byte](a, 4097)
-	defer slices.Free(a, buf)
+	_ = t.Allocator()
+	buf := make([]byte, 4097)
+	defer mem.FreeSlice(nil, buf)
 	h := wasm.NewHeap(buf[1:])
 	for cycle := 0; cycle < 1000; cycle++ {
 		one := mem.AllocSlice[byte](&h, 300, 300)
@@ -35,9 +34,9 @@ func TestHeapReusesUnorderedFreesAndCoalesces(t *testing.T) {
 }
 
 func TestHeapReallocPreservesDataAndFailedAllocation(t *testing.T) {
-	a := t.Allocator()
-	buf := slices.Make[byte](a, 2048)
-	defer slices.Free(a, buf)
+	_ = t.Allocator()
+	buf := make([]byte, 2048)
+	defer mem.FreeSlice(nil, buf)
 	h := wasm.NewHeap(buf)
 	one := mem.AllocSlice[byte](&h, 128, 128)
 	for i := range one {
@@ -77,9 +76,9 @@ func TestHeapReallocPreservesDataAndFailedAllocation(t *testing.T) {
 }
 
 func TestHeapFragmentationPreservesLiveBlocks(t *testing.T) {
-	a := t.Allocator()
-	buf := slices.Make[byte](a, 262145)
-	defer slices.Free(a, buf)
+	_ = t.Allocator()
+	buf := make([]byte, 262145)
+	defer mem.FreeSlice(nil, buf)
 	h := wasm.NewHeap(buf[1:])
 	var pointers [128]any
 	var sizes [128]int

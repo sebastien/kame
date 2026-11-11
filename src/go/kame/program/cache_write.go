@@ -1,7 +1,7 @@
 package program
 
 import (
-	"solod.dev/so/slices"
+	"slices"
 )
 
 func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit int) {
@@ -13,7 +13,7 @@ func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit i
 			*truncated = true
 			return
 		}
-		*dst = slices.Append(p.Alloc, *dst, data[i])
+		*dst = append(*dst, data[i])
 	}
 }
 
@@ -40,7 +40,7 @@ func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, std
 	if started <= 0 || started > completed {
 		started = completed
 	}
-	record := cacheRecord{Identity: identity, Schema: 1, StartedAt: started, CompletedAt: completed, Duration: completed - started, ExitStatus: 0, Manifest: slices.Clone(p.Alloc, entry.CacheManifest), Stdout: slices.Clone(p.Alloc, entry.CacheStdout), Stderr: slices.Clone(p.Alloc, entry.CacheStderr), StdoutTruncated: entry.CacheStdoutTruncated, StderrTruncated: entry.CacheStderrTruncated}
+	record := cacheRecord{Identity: identity, Schema: 1, StartedAt: started, CompletedAt: completed, Duration: completed - started, ExitStatus: 0, Manifest: slices.Clone(entry.CacheManifest), Stdout: slices.Clone(entry.CacheStdout), Stderr: slices.Clone(entry.CacheStderr), StdoutTruncated: entry.CacheStdoutTruncated, StderrTruncated: entry.CacheStderrTruncated}
 	for i := range record.Fingerprint {
 		record.Fingerprint[i] = entry.CacheFingerprint[i]
 	}

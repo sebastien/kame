@@ -1,8 +1,8 @@
 package core
 
 import (
-	"solod.dev/so/math"
-	"solod.dev/so/math/bits"
+	"math"
+	"math/bits"
 )
 
 // SignatureMode is part of identity. Metadata is never mistaken for content,
@@ -206,6 +206,11 @@ func (s *Digest) value(v Value, depth int) bool {
 			return false
 		}
 		s.Write(v.CallableSignature.Digest[:])
+	case Module:
+		if v.ModuleSignature == nil || v.ModuleSignature.Mode != SignatureContent {
+			return false
+		}
+		s.Write(v.ModuleSignature.Digest[:])
 	case List:
 		s.Uint64(uint64(len(v.List)))
 		for i := range v.List {

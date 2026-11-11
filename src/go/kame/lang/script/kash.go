@@ -1,11 +1,11 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // ParseKash composes strict Kame definitions and structured Kash command graphs.
@@ -37,7 +37,7 @@ type kashParser struct {
 func (p *kashParser) sequence(level int) []ScriptItem {
 	s, text := p.Script, p.Script.Source.Text
 	previousChannels := p.Channels
-	p.Channels = slices.Clone(s.Alloc, previousChannels)
+	p.Channels = slices.Clone(previousChannels)
 	var items []ScriptItem
 	for p.Pos < len(text) && len(s.Diagnostics) == 0 {
 		for p.Pos < len(text) && (space(text[p.Pos]) || text[p.Pos] == '\n' || text[p.Pos] == ';') {
@@ -51,7 +51,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			for p.Pos < len(text) && text[p.Pos] != '\n' {
 				p.Pos++
 			}
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Comment, Text: text[start:p.Pos], Span: source.Span{Start: start, End: p.Pos}})
+			items = append(items, ScriptItem{Kind: Comment, Text: text[start:p.Pos], Span: source.Span{Start: start, End: p.Pos}})
 			continue
 		}
 		indent := level
@@ -91,7 +91,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 					s.error(start, p.Pos, "duplicate Kash definition name")
 				}
 			}
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
+			items = append(items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
 			continue
 		}
 		if word == "def" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
@@ -105,7 +105,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 					s.error(start, p.Pos, "duplicate Kash definition name")
 				}
 			}
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
+			items = append(items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
 			continue
 		}
 		if word == "stream" {
@@ -124,8 +124,8 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			declaration := mem.Alloc[expr.Expr](s.Alloc)
 			declaration.Kind, declaration.Text, declaration.Span = expr.CommandStream, name, source.Span{Start: start, End: p.Pos}
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: declaration.Span, Expression: declaration})
-			p.Channels = slices.Append(s.Alloc, p.Channels, name)
+			items = append(items, ScriptItem{Kind: Expression, Span: declaration.Span, Expression: declaration})
+			p.Channels = append(p.Channels, name)
 			for p.Pos < len(text) && space(text[p.Pos]) {
 				p.Pos++
 			}
@@ -166,7 +166,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				e = p.conditionalBlock(level, start)
 			}
 			expr.SetCommandChannels(s.Alloc, e, p.Channels)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 			continue
 		}
 		if headerEnd := definition.KashHeaderEnd(s.Alloc, s.Source, start); headerEnd != 0 {
@@ -208,7 +208,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 					s.error(start, p.Pos, "duplicate Kash definition name")
 				}
 			}
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: part.Definition.Span, Definition: part.Definition})
+			items = append(items, ScriptItem{Kind: Definition, Span: part.Definition.Span, Definition: part.Definition})
 			end := p.Pos
 			for end < len(text) && space(text[end]) {
 				end++
@@ -222,14 +222,14 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				kind = expr.KashContinue
 			}
 			e := p.loopTransferStatement(start, wordEnd, kind)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 		} else if word == "return" || word == "exit" {
 			kind := expr.KashReturn
 			if word == "exit" {
 				kind = expr.KashExit
 			}
 			e := p.transferStatement(start, wordEnd, kind)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 		} else if word == "defer" {
 			p.Pos = wordEnd
 			for p.Pos < len(text) && space(text[p.Pos]) {
@@ -273,9 +273,9 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			e := mem.Alloc[expr.Expr](s.Alloc)
 			e.Kind, e.Span = expr.KashDefer, source.Span{Start: start, End: part.End}
-			e.Items = slices.Append(s.Alloc, e.Items, part.Expr)
+			e.Items = append(e.Items, part.Expr)
 			expr.SetCommandChannels(s.Alloc, e, p.Channels)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 			p.Pos = part.End
 			end := p.Pos
 			for end < len(text) && space(text[end]) {
@@ -287,7 +287,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 		} else if text[start] == '(' && !expr.IsCommandGroup(text, start) {
 			part := expr.ParseKashValuePrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
+			items = append(items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
 			p.Pos = part.End
 			expr.SetCommandChannels(s.Alloc, part.Expr, p.Channels)
 			end := p.Pos
@@ -300,7 +300,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 		} else {
 			part := expr.ParseCommandPrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)
-			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: part.Expr.Span, Expression: part.Expr})
+			items = append(items, ScriptItem{Kind: Command, Span: part.Expr.Span, Expression: part.Expr})
 			p.Pos = part.End
 			expr.SetCommandChannels(s.Alloc, part.Expr, p.Channels)
 		}
@@ -308,7 +308,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			break
 		}
 	}
-	slices.Free(s.Alloc, p.Channels)
+	mem.FreeSlice(nil, p.Channels)
 	p.Channels = previousChannels
 	return items
 }
@@ -368,7 +368,7 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 		}
 		branch := mem.Alloc[expr.Expr](s.Alloc)
 		branch.Kind, branch.Text, branch.Span.Start = expr.KashBranch, keyword, branchStart
-		e.Items = slices.Append(s.Alloc, e.Items, branch)
+		e.Items = append(e.Items, branch)
 		end := wordEnd
 		for end < len(text) && text[end] != '\n' {
 			end++
@@ -413,7 +413,7 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 					}
 				}
 				s.takeDiagnostics(condition.Diagnostics)
-				branch.Items = slices.Append(s.Alloc, branch.Items, condition.Expr)
+				branch.Items = append(branch.Items, condition.Expr)
 				for condition.End < end && space(text[condition.End]) {
 					condition.End++
 				}
@@ -458,7 +458,7 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 	e.Kind, e.Span.Start = expr.KashFor, start
 	branch := mem.Alloc[expr.Expr](s.Alloc)
 	branch.Kind, branch.Span.Start = expr.KashBranch, start
-	e.Items = slices.Append(s.Alloc, e.Items, branch)
+	e.Items = append(e.Items, branch)
 	pos := wordEnd
 	for pos < len(text) && space(text[pos]) {
 		pos++
@@ -496,7 +496,7 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 	}
 	part := expr.ParseKashValuePrefix(s.Alloc, s.Source, pos)
 	s.takeDiagnostics(part.Diagnostics)
-	branch.Items = slices.Append(s.Alloc, branch.Items, part.Expr)
+	branch.Items = append(branch.Items, part.Expr)
 	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
 		s.error(pos, part.End, "loop iterable requires one Kame expression")
 	}
@@ -559,22 +559,39 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 				statement = d.Expression
 				d.Expression = nil
 				definition.Free(s.Alloc, d)
-				branch.Body = slices.Append(s.Alloc, branch.Body, statement)
+				branch.Body = append(branch.Body, statement)
 				hasStatement = true
 				continue
 			}
 			statement = mem.Alloc[expr.Expr](s.Alloc)
 			statement.Kind, statement.Text, statement.Bool, statement.Span = expr.KashDefinition, d.Name, d.Function, d.Span
-			statement.Items = slices.Append(s.Alloc, statement.Items, d.Expression)
+			statement.Items = append(statement.Items, d.Expression)
 			d.Expression = nil
 			for j := range d.Parameters {
 				parameter := d.Parameters[j]
-				statement.Parameters = slices.Append(s.Alloc, statement.Parameters, expr.Parameter{Name: parameter.Name, Span: parameter.Span, Rest: parameter.Rest})
+				statement.Parameters = append(statement.Parameters, expr.Parameter{Name: parameter.Name, Span: parameter.Span, Rest: parameter.Rest})
 			}
 			definition.Free(s.Alloc, d)
 		} else if item.Kind == Comment {
 			statement = mem.Alloc[expr.Expr](s.Alloc)
 			statement.Kind, statement.Text, statement.Span = expr.KashComment, item.Text, item.Span
+			spaces := 0
+			pos := item.Span.Start - 1
+			for ; pos >= 0 && (s.Source.Text[pos] == ' ' || s.Source.Text[pos] == '\t'); pos-- {
+				if s.Source.Text[pos] == '\t' {
+					statement.CommentIndent++
+				} else {
+					spaces++
+				}
+			}
+			unit := 4
+			if p.Style == ' ' && p.Unit > 0 {
+				unit = p.Unit
+			}
+			statement.CommentIndent += spaces / unit
+			if pos >= 0 && s.Source.Text[pos] != '\n' {
+				statement.CommentIndent = level
+			}
 		} else {
 			statement = item.Expression
 		}
@@ -584,9 +601,9 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 		if statement.Kind != expr.KashComment {
 			hasStatement = true
 		}
-		branch.Body = slices.Append(s.Alloc, branch.Body, statement)
+		branch.Body = append(branch.Body, statement)
 	}
-	slices.Free(s.Alloc, body)
+	mem.FreeSlice(nil, body)
 	if !hasStatement {
 		s.error(branch.Span.Start, p.Pos, "empty Kash control body")
 	}
@@ -611,7 +628,7 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 		if text[valueStart] == '(' {
 			value := expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
 			s.takeDiagnostics(value.Diagnostics)
-			e.Body = slices.Append(s.Alloc, e.Body, value.Expr)
+			e.Body = append(e.Body, value.Expr)
 			if value.End > end {
 				end = value.End
 				for end < len(text) && text[end] != '\n' {
@@ -627,7 +644,7 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 			}
 		} else {
 			subject := p.valueHeader(valueStart, end, true)
-			e.Body = slices.Append(s.Alloc, e.Body, subject)
+			e.Body = append(e.Body, subject)
 		}
 	}
 	p.Pos = nextLine(text, end)
@@ -646,7 +663,7 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 			}
 			comment := mem.Alloc[expr.Expr](s.Alloc)
 			comment.Kind, comment.Text, comment.Span = expr.KashComment, text[armStart:p.Pos], source.Span{Start: armStart, End: p.Pos}
-			e.Body = slices.Append(s.Alloc, e.Body, comment)
+			e.Body = append(e.Body, comment)
 			continue
 		}
 		indent := p.indentation(p.Pos)
@@ -672,7 +689,7 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 		}
 		branch := mem.Alloc[expr.Expr](s.Alloc)
 		branch.Kind, branch.Text, branch.Span.Start = expr.KashBranch, keyword, p.Pos
-		e.Items = slices.Append(s.Alloc, e.Items, branch)
+		e.Items = append(e.Items, branch)
 		end = armEnd
 		for end < len(text) && text[end] != '\n' {
 			end++
@@ -689,7 +706,7 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 		} else if valueStart == end || text[valueStart] == '#' {
 			s.error(armEnd, end, "case requires one pattern expression")
 		} else {
-			branch.Items = slices.Append(s.Alloc, branch.Items, p.valueHeader(valueStart, end, false))
+			branch.Items = append(branch.Items, p.valueHeader(valueStart, end, false))
 		}
 		p.Pos = nextLine(text, end)
 		p.branchBody(branch, level+2)

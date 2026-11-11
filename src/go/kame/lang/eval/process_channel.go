@@ -1,9 +1,9 @@
 package eval
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // Resolve endpoints only inside this one simultaneously owned graph. A declared
@@ -42,7 +42,7 @@ func resolveProcessChannels(c *Context, authored *expr.Expr, graph *expr.Expr) R
 			return failure(c.Run, "KASH_CHANNEL_UNBOUND", node.Span, "both channel endpoints must belong to the same constructed graph")
 		}
 		if i == writer {
-			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: writer, To: reader})
+			graph.Edges = append(graph.Edges, expr.CommandEdge{From: writer, To: reader})
 		}
 	}
 	// Named connections are aliases, not worker processes. Splice identity ports
@@ -93,15 +93,15 @@ func resolveProcessChannels(c *Context, authored *expr.Expr, graph *expr.Expr) R
 }
 
 func acyclicProcessGraph(c *Context, graph *expr.Expr) bool {
-	indegree := slices.Make[int](c.Run, len(graph.Items))
-	defer slices.Free(c.Run, indegree)
+	indegree := make([]int, len(graph.Items))
+	defer mem.FreeSlice(nil, indegree)
 	var ready []int
 	for i := range graph.Edges {
 		indegree[graph.Edges[i].To]++
 	}
 	for i := range indegree {
 		if indegree[i] == 0 {
-			ready = slices.Append(c.Run, ready, i)
+			ready = append(ready, i)
 		}
 	}
 	for i := 0; i < len(ready); i++ {
@@ -110,12 +110,12 @@ func acyclicProcessGraph(c *Context, graph *expr.Expr) bool {
 			if edge.From == ready[i] {
 				indegree[edge.To]--
 				if indegree[edge.To] == 0 {
-					ready = slices.Append(c.Run, ready, edge.To)
+					ready = append(ready, edge.To)
 				}
 			}
 		}
 	}
 	ok := len(ready) == len(graph.Items)
-	slices.Free(c.Run, ready)
+	mem.FreeSlice(nil, ready)
 	return ok
 }

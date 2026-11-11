@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/lang/source"
-	"solod.dev/so/slices"
 )
 
 // DefaultCaptureLimit is the fallback byte bound shared by command substitution,
@@ -82,7 +81,7 @@ func typedCapturedResult(c *Context, r Result, completion core.Value, policy cor
 				r.Value.Record[i].Value.Bool = selected
 			}
 		}
-		r.Value.Record = slices.Append(c.Run, r.Value.Record, core.RecordField{Key: owned(c.Run, name), Value: value})
+		r.Value.Record = append(r.Value.Record, core.RecordField{Key: owned(c.Run, name), Value: value})
 	}
 	return r
 }

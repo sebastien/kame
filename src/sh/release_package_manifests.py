@@ -26,16 +26,21 @@ def main():
     formula = f'''class Kame < Formula
   desc "Build tool for projects described with Kame"
   homepage "https://github.com/sebastien/kame"
-  url "{base}/kame.com"
   version "{version}"
-  sha256 "{sha256(root / "kame.com")}"
-
+'''
+    for system, block in (("darwin", "on_macos"), ("linux", "on_linux")):
+        formula += f"\n  {block} do\n"
+        for arch, cpu in (("arm64", "on_arm"), ("x86_64", "on_intel")):
+            asset = f"kame-{system}-{arch}"
+            formula += f'    {cpu} do\n      url "{base}/{asset}"\n      sha256 "{sha256(root / asset)}"\n    end\n'
+        formula += "  end\n"
+    formula += '''
   def install
-    bin.install "kame.com" => "kame"
+    bin.install Dir["kame-*"].first => "kame"
   end
 
   test do
-    assert_match version.to_s, shell_output("#{{bin}}/kame --version")
+    assert_match version.to_s, shell_output("#{bin}/kame --version")
   end
 end
 '''
@@ -45,8 +50,9 @@ end
         "version": version,
         "description": "Build tool for projects described with Kame",
         "homepage": "https://github.com/sebastien/kame",
-        "url": f"{base}/kame.com#/kame.exe",
-        "hash": sha256(root / "kame.com"),
+        "url": f"{base}/kame-windows-x64.zip",
+        "depends": "nodejs",
+        "hash": sha256(root / "kame-windows-x64.zip"),
         "bin": [["kame.exe", "kame"]],
     }
     (output / "kame.json").write_text(

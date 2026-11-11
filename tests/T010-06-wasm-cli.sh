@@ -51,6 +51,54 @@ for args in first last absolute discover plan; do
 	fi
 done
 
+test-step "misplaced typed inspection options cannot run build targets"
+cat >"$work/project/Makefile.kmk" <<'EOF'
+NAME = 0
+do :
+	touch ./misexecuted
+plan :
+	touch ./misexecuted
+EOF
+for option in '--set NAME=1 do plan' '--set=NAME=1 do plan' '--set NAME=1 --set=NAME=2 do plan' '--set NAME=1 do -j 2 plan' 'do plan --set NAME=1' 'do plan --set NAME=1 --'; do
+	read -r -a set_args <<<"$option"
+	for runner in wasm native; do
+		rm -f "$work/project/misexecuted"
+		if [ "$runner" = wasm ]; then run -C "$work/project" "${set_args[@]}"; else
+			set +e
+			"$CLI_BIN" -C "$work/project" "${set_args[@]}" >"$work/out" 2>"$work/err"
+			status=$?
+			set -e
+		fi
+		if [ "$status" = 2 ] && grep -q OPT_CONFLICT "$work/err" && [ ! -e "$work/project/misexecuted" ]; then
+			test-ok "$runner rejects $option before recipes"
+		else
+			test-fail "$runner accepted $option or ran a target (status=$status)"
+		fi
+	done
+done
+
+for runner in wasm native; do
+	for mode in inspection literal; do
+		rm -f "$work/project/misexecuted"
+		if [ "$mode" = inspection ]; then
+			invocation=(do plan -C "$work/project" --set NAME=1 do plan)
+		else
+			invocation=(-C "$work/project" --set NAME=1 -- do plan)
+		fi
+		if [ "$runner" = wasm ]; then run "${invocation[@]}"; else
+			set +e
+			"$CLI_BIN" "${invocation[@]}" >"$work/out" 2>"$work/err"
+			status=$?
+			set -e
+		fi
+		if [ "$status" = 0 ] && { { [ "$mode" = inspection ] && [ ! -e "$work/project/misexecuted" ]; } || { [ "$mode" = literal ] && [ -e "$work/project/misexecuted" ]; }; }; then
+			test-ok "$runner preserves $mode target selection"
+		else
+			test-fail "$runner changed $mode target selection (status=$status)"
+		fi
+	done
+done
+
 test-step "version does not require the module"
 for flag in --version -V; do
 	KAME_WASM="$work/missing.wasm" run "$flag"

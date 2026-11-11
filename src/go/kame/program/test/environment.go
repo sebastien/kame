@@ -1,20 +1,20 @@
-package program_test
+package programcheck
 
 import (
 	"kame/host/posix"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/testing"
+	"os"
 )
 
 func TestRuleEnvironmentsInheritOverrideAndDoNotLeak(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-env-")
+
+	dir, err := os.MkdirTemp("", "kame-env-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -44,9 +44,9 @@ func TestRuleEnvironmentsInheritOverrideAndDoNotLeak(t *testing.T) {
 		t.Error("plain materialization failed")
 	}
 	result.Free(a)
-	child, childErr := os.ReadFile(a, dir+"/child-log")
-	local, localErr := os.ReadFile(a, dir+"/local-log")
-	plain, plainErr := os.ReadFile(a, dir+"/plain-log")
+	child, childErr := os.ReadFile(dir + "/child-log")
+	local, localErr := os.ReadFile(dir + "/local-log")
+	plain, plainErr := os.ReadFile(dir + "/plain-log")
 	if childErr != nil || string(child) != "debugdebugrelease" || localErr != nil || string(local) != "releaserelease" || plainErr != nil || string(plain) != "ambient" {
 		t.Error("inherited overrides or root isolation were incorrect")
 	}
@@ -61,8 +61,8 @@ func TestRuleEnvironmentsInheritOverrideAndDoNotLeak(t *testing.T) {
 
 func TestCachedScopedEnvironmentChangesBetweenRoots(t *testing.T) {
 	a := t.Allocator()
-	dirBuffer := make([]byte, os.MaxPathLen)
-	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-env-")
+
+	dir, err := os.MkdirTemp("", "kame-cache-env-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -83,7 +83,7 @@ func TestCachedScopedEnvironmentChangesBetweenRoots(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	data, readErr := os.ReadFile(a, dir+"/runs")
+	data, readErr := os.ReadFile(dir + "/runs")
 	if readErr != nil || string(data) != "debugreleasedebug" {
 		t.Error("cached prerequisite ignored environment changes or repeated unchanged work")
 	}
@@ -96,8 +96,8 @@ func TestCachedScopedEnvironmentChangesBetweenRoots(t *testing.T) {
 
 func TestSharedDynamicReadPreservesSuspendedKashEnvironment(t *testing.T) {
 	a := t.Allocator()
-	var dirBuffer [os.MaxPathLen]byte
-	dir, err := os.MkdirTemp(dirBuffer[:], "", "kame-kash-env-")
+
+	dir, err := os.MkdirTemp("", "kame-kash-env-")
 	if err != nil {
 		t.Fatal("temporary directory failed")
 		return
@@ -120,7 +120,7 @@ func TestSharedDynamicReadPreservesSuspendedKashEnvironment(t *testing.T) {
 		t.Error("shared Kash environment failed: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
-	data, readErr := os.ReadFile(a, dir+"/value")
+	data, readErr := os.ReadFile(dir + "/value")
 	if readErr != nil || string(data) != "preserved\n" {
 		t.Error("suspended recipe lost its environment")
 	}

@@ -1,9 +1,9 @@
-package host_test
+package hostcheck
 
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestProcessTopologyValidation(t *testing.T) {

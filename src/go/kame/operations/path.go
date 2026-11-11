@@ -2,11 +2,11 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"path"
+
+	"strings"
 )
 
 func opBasename(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -23,7 +23,7 @@ func opDirname(c *eval.Context, s any, v []core.Value) eval.Result {
 	if !ok {
 		return invalidArgument(c, v, 0, "string")
 	}
-	result := path.Dir(c.Run, value)
+	result := path.Dir(value)
 	return eval.Result{Value: core.Value{Kind: core.String, Text: result}}
 }
 func extension(value string) string {
@@ -41,7 +41,7 @@ func opSplitext(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	suffix := extension(value)
 	root := value[:len(value)-len(suffix)]
-	result := slices.Make[core.Value](c.Run, 2)
+	result := make([]core.Value, 2)
 	result[0] = core.NewString(c.Run, root)
 	result[1] = core.NewString(c.Run, suffix)
 	out := core.NewList(c.Run, result)
@@ -61,12 +61,12 @@ func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	var values []string
 	for i := range v {
 		if v[i].Kind != core.String {
-			slices.Free(c.Run, values)
+			mem.FreeSlice(nil, values)
 			return invalidArgument(c, v, i, "string")
 		}
-		values = slices.Append(c.Run, values, v[i].Text)
+		values = append(values, v[i].Text)
 	}
-	joined := path.Join(c.Run, values...)
+	joined := path.Join(values...)
 	// Cleaning must not turn an explicitly relative file into a bare task name.
 	first := 0
 	for first < len(values) && values[first] == "" {
@@ -81,7 +81,7 @@ func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result {
 		mem.FreeString(c.Run, joined)
 		joined = marked
 	}
-	slices.Free(c.Run, values)
+	mem.FreeSlice(nil, values)
 	return eval.Result{Value: core.Value{Kind: core.String, Text: joined}}
 }
 func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -91,9 +91,9 @@ func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
 		return invalidArgument(c, v, 0, "string")
 	}
 	if path.IsAbs(value) {
-		return eval.Result{Value: core.Value{Kind: core.String, Text: path.Clean(c.Run, value)}}
+		return eval.Result{Value: core.Value{Kind: core.String, Text: path.Clean(value)}}
 	}
-	return eval.Result{Value: core.Value{Kind: core.String, Text: path.Join(c.Run, c.Cwd, value)}}
+	return eval.Result{Value: core.Value{Kind: core.String, Text: path.Join(c.Cwd, value)}}
 }
 func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
@@ -104,13 +104,13 @@ func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.String {
 		return invalidArgument(c, v, 0, "string")
 	}
-	base := path.Join(c.Run, c.Cwd, v[0].Text)
-	absolute := path.Join(c.Run, c.Cwd, target)
+	base := path.Join(c.Cwd, v[0].Text)
+	absolute := path.Join(c.Cwd, target)
 	defer mem.FreeString(c.Run, base)
 	defer mem.FreeString(c.Run, absolute)
 	start := commonPathPrefix(base, absolute)
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	for i := start; i < len(base); {
 		for i < len(base) && base[i] == '/' {
 			i++

@@ -1,11 +1,10 @@
-package core_test
+package corecheck
 
 import (
 	"kame/core"
 	"kame/diagnostic"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 type producerState struct {
@@ -197,7 +196,7 @@ func TestLazyDuplicateRequestAndReadyCapacity(t *testing.T) {
 	if e.Step() != nil {
 		t.Error("Step dispatched host-claimed ready work")
 	}
-	slices.Free(a, ready)
+	mem.FreeSlice(nil, ready)
 	if len(e.Ready(2)) != 0 {
 		t.Error("ready node was offered twice before dispatch")
 	}
@@ -296,13 +295,13 @@ func TestSubscriptionCoalescesMetadataUpdates(t *testing.T) {
 func TestLateSubscriberGetsLatestAndCoalesces(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)
-	atoms := slices.Make[core.Atom](a, 12)
+	atoms := make([]core.Atom, 12)
 	for i := 0; i < 11; i++ {
 		atoms[i] = core.Atom{Kind: core.AtomValue, Value: core.NewString(a, "value")}
 	}
 	atoms[11] = core.Atom{Kind: core.AtomEndStream}
 	n := addSource(e, "stream", newSequence(a, atoms))
-	slices.Free(a, atoms)
+	mem.FreeSlice(nil, atoms)
 	e.Request(n)
 	e.Step()
 	e.Step()
@@ -483,13 +482,13 @@ func TestTerminalProducerCannotPublishAgain(t *testing.T) {
 func TestSubscribersOwnCoalescedBatchLists(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)
-	atoms := slices.Make[core.Atom](a, 18)
+	atoms := make([]core.Atom, 18)
 	for i := 0; i < 9; i++ {
 		atoms[i*2] = core.Atom{Kind: core.AtomChunk, Value: core.NewString(a, "value")}
 		atoms[i*2+1] = core.Atom{Kind: core.AtomEndBatch}
 	}
 	n := addSource(e, "batches", newSequence(a, atoms))
-	slices.Free(a, atoms)
+	mem.FreeSlice(nil, atoms)
 	first := e.Subscribe(n)
 	second := e.Subscribe(n)
 	for i := 0; i < 18; i++ {
@@ -997,7 +996,7 @@ func TestDispatchesIndependentJobsAndHandlesReverseCompletions(t *testing.T) {
 	if len(jobs) != 2 || e.Dispatch(jobs[0]) != first || e.Dispatch(jobs[1]) != second {
 		t.Error("claimed ready jobs did not dispatch once")
 	}
-	slices.Free(a, jobs)
+	mem.FreeSlice(nil, jobs)
 	e.Complete(core.Completion{NodeID: second.ID, Generation: second.Generation, Attempt: second.Attempt, RequestID: 1, Value: core.NewString(a, "second"), HasValue: true})
 	e.Complete(core.Completion{NodeID: first.ID, Generation: first.Generation, Attempt: first.Attempt, RequestID: 1, Value: core.NewString(a, "first"), HasValue: true})
 	for i := 0; i < 4; i++ {

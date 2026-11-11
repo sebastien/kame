@@ -43,7 +43,7 @@ import zipfile
 
 archive = pathlib.Path(sys.argv[1])
 with zipfile.ZipFile(archive) as bundle:
-    assert set(bundle.namelist()) == {"kame.exe", "kame.js", "kame.wasm"}
+    assert set(bundle.namelist()) == {"kame.exe", "kame.js", "kame.wasm", "package.json"}
     assert bundle.read("kame.exe").startswith(b"MZ")
     assert len(bundle.read("kame.js")) > 0
     assert len(bundle.read("kame.wasm")) > 8

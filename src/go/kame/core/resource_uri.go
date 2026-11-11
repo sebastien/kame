@@ -1,10 +1,10 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	"kame/internal/mem"
+
+	"strings"
+	"unicode/utf8"
 )
 
 // ResourceURI is a canonical protocol identity. Its strings belong to the
@@ -31,7 +31,7 @@ func (u *ResourceURI) Canonical(a mem.Allocator) string {
 	if u == nil || u.Scheme == "" {
 		return ""
 	}
-	out := strings.NewBuilder(a)
+	out := strings.Builder{}
 	out.WriteString(u.Scheme)
 	out.WriteString("://")
 	out.WriteString(u.Authority)
@@ -49,7 +49,7 @@ func (u *ResourceURI) Canonical(a mem.Allocator) string {
 		}
 	}
 	text := cloneResourceURIText(a, out.String())
-	out.Free()
+	out.Reset()
 	return text
 }
 
@@ -228,17 +228,17 @@ func normalizeURIPath(a mem.Allocator, input string) uriPathResult {
 		segment := input[start:i]
 		if segment == ".." {
 			if len(segments) == 0 {
-				slices.Free(a, segments)
+				mem.FreeSlice(nil, segments)
 				return uriPathResult{ErrorOffset: start}
 			}
 			mem.FreeString(a, segments[len(segments)-1])
 			segments = segments[:len(segments)-1]
 		} else if segment != "" && segment != "." {
-			segments = slices.Append(a, segments, cloneResourceURIText(a, segment))
+			segments = append(segments, cloneResourceURIText(a, segment))
 		}
 		start = i + 1
 	}
-	out := strings.NewBuilder(a)
+	out := strings.Builder{}
 	out.WriteString("/")
 	for i := range segments {
 		if i != 0 {
@@ -247,11 +247,11 @@ func normalizeURIPath(a mem.Allocator, input string) uriPathResult {
 		out.WriteString(segments[i])
 	}
 	canonical := cloneResourceURIText(a, out.String())
-	out.Free()
+	out.Reset()
 	for i := range segments {
 		mem.FreeString(a, segments[i])
 	}
-	slices.Free(a, segments)
+	mem.FreeSlice(nil, segments)
 	return uriPathResult{Text: canonical, OK: true}
 }
 

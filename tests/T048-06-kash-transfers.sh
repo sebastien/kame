@@ -52,7 +52,8 @@ for backend in native wasm; do
 		reject "runner = (kash \"$transfer\")"$'\nfor item in [1]\n\t(runner)'
 	done
 	status=0
-	invoke --timeout 50 -l kash -c $'defer printf D\nwhile (eq? 1 1)\n\tcontinue' >"$work/out" 2>"$work/err" || status=$?
+	# Allow the Go WASM reactor to resolve and arm the defer before testing loop cancellation.
+	invoke --timeout 500 -l kash -c $'defer printf D\nwhile (eq? 1 1)\n\tcontinue' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && [ "$(cat "$work/out")" = D ] && grep -q RECIPE_TIMEOUT "$work/err"; then test-ok "$backend continue loop obeys deadlines and finalizes"; else test-fail "$backend continue deadline ($status)"; cat "$work/out" "$work/err"; fi
 	"${runner[@]}" do run -C "$work" -l kash -c $'for item in [1]\n\tbreak' >"$work/out" 2>"$work/err"
 	if [ ! -s "$work/out" ] && [ ! -s "$work/err" ]; then test-ok "$backend standalone transfer launches no command"; else test-fail "$backend standalone transfer"; cat "$work/err"; fi

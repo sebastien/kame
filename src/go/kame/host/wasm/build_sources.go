@@ -1,12 +1,12 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // SetBuildSources copies host-loaded include fragments. Compilation remains
@@ -55,7 +55,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			return PureResult{Code: pureText(r.Alloc, "NO_MEMORY"), Message: pureText(r.Alloc, "build sources exceed instance capacity")}
 		}
 		total += len(text)
-		r.BuildSources = slices.Append(r.Alloc, r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), SourceDirectory: pureText(r.Alloc, host.PayloadText(inputs[i], "sourceDirectory")), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
+		r.BuildSources = append(r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), Lang: pureText(r.Alloc, host.PayloadText(inputs[i], "lang")), SourceDirectory: pureText(r.Alloc, host.PayloadText(inputs[i], "sourceDirectory")), Signature: descriptorSourceSignature(inputs[i]), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
 	}
 	tools := host.PayloadList(descriptor, "toolOverrides")
 	for i := range tools {
@@ -63,7 +63,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid tool override")}
 		}
-		r.BuildToolOverrides = slices.Append(r.Alloc, r.BuildToolOverrides, pureText(r.Alloc, tools[i].Text))
+		r.BuildToolOverrides = append(r.BuildToolOverrides, pureText(r.Alloc, tools[i].Text))
 	}
 	defines := host.PayloadList(descriptor, "defines")
 	for i := range defines {
@@ -71,7 +71,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid definition override")}
 		}
-		r.BuildDefines = slices.Append(r.Alloc, r.BuildDefines, pureText(r.Alloc, defines[i].Text))
+		r.BuildDefines = append(r.BuildDefines, pureText(r.Alloc, defines[i].Text))
 	}
 	environment := host.PayloadList(descriptor, "environment")
 	parameters := host.PayloadList(descriptor, "parameters")
@@ -80,14 +80,14 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid parameter override")}
 		}
-		r.BuildParameters = slices.Append(r.Alloc, r.BuildParameters, pureText(r.Alloc, parameters[i].Text))
+		r.BuildParameters = append(r.BuildParameters, pureText(r.Alloc, parameters[i].Text))
 	}
 	for i := range environment {
 		if environment[i].Kind != core.String {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build environment")}
 		}
-		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
+		r.BuildEnvironment = append(r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
 	}
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
 	r.BuildTrackTimings = host.PayloadInt(descriptor, "trackTimings") != 0
@@ -107,14 +107,15 @@ func (r *Runtime) freeBuildSources() {
 		freeDescriptorIncludes(r.Alloc, r.BuildSources[i].Includes)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Text)
+		mem.FreeString(r.Alloc, r.BuildSources[i].Lang)
 		mem.FreeString(r.Alloc, r.BuildSources[i].SourceDirectory)
 	}
-	slices.Free(r.Alloc, r.BuildSources)
+	mem.FreeSlice(nil, r.BuildSources)
 	r.BuildSources = nil
 	for i := range r.BuildToolOverrides {
 		mem.FreeString(r.Alloc, r.BuildToolOverrides[i])
 	}
-	slices.Free(r.Alloc, r.BuildToolOverrides)
+	mem.FreeSlice(nil, r.BuildToolOverrides)
 	r.BuildToolOverrides = nil
 	for i := range r.BuildDefines {
 		mem.FreeString(r.Alloc, r.BuildDefines[i])
@@ -122,14 +123,14 @@ func (r *Runtime) freeBuildSources() {
 	for i := range r.BuildParameters {
 		mem.FreeString(r.Alloc, r.BuildParameters[i])
 	}
-	slices.Free(r.Alloc, r.BuildParameters)
+	mem.FreeSlice(nil, r.BuildParameters)
 	r.BuildParameters = nil
 	for i := range r.BuildEnvironment {
 		mem.FreeString(r.Alloc, r.BuildEnvironment[i])
 	}
-	slices.Free(r.Alloc, r.BuildDefines)
+	mem.FreeSlice(nil, r.BuildDefines)
 	r.BuildDefines = nil
-	slices.Free(r.Alloc, r.BuildEnvironment)
+	mem.FreeSlice(nil, r.BuildEnvironment)
 	r.BuildEnvironment = nil
 }
 
@@ -145,13 +146,13 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string
 	for i := range options.Environment {
-		environment = slices.Append(r.Alloc, environment, options.Environment[i])
+		environment = append(environment, options.Environment[i])
 	}
 	for i := range r.BuildEnvironment {
-		environment = slices.Append(r.Alloc, environment, r.BuildEnvironment[i])
+		environment = append(environment, r.BuildEnvironment[i])
 	}
 	options.Environment = environment
-	defer slices.Free(r.Alloc, environment)
+	defer mem.FreeSlice(nil, environment)
 	if len(r.BuildSources) != 0 {
 		return program.CompileMany(r.Alloc, r.BuildSources, r.Registry, options)
 	}
@@ -159,13 +160,13 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 }
 
 func (r *Runtime) buildCompileFailure(compiled *program.CompileResult) PureResult {
-	buffer := bytes.NewBuffer(r.Alloc, nil)
+	buffer := bytes.Buffer{}
 	for i := range compiled.Diagnostics {
 		program.WriteJSONDiagnostic(&buffer, compiled.Diagnostics[i])
 	}
 	r.EventJSONClear()
-	r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
-	buffer.Free()
+	r.EventJSON = slices.Clone([]byte(buffer.String()))
+	buffer.Reset()
 	if len(compiled.Diagnostics) != 0 {
 		d := compiled.Diagnostics[0]
 		return PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message), SpanStart: d.Span.Start, SpanEnd: d.Span.End}

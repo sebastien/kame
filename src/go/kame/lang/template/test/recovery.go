@@ -1,10 +1,10 @@
-package template_test
+package templatecheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
-	"solod.dev/so/testing"
 )
 
 func TestDocumentLetTransfersBranchConditionsAndPatterns(t *testing.T) {

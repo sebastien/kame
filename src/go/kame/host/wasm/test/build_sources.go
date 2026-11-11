@@ -1,11 +1,12 @@
-package wasm_test
+package wasmcheck
 
 import (
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/source"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"slices"
+	"strings"
 )
 
 func TestBuildSourceDescriptorCopiesBytesAndMapsAuthoredSpans(t *testing.T) {
@@ -17,8 +18,8 @@ func TestBuildSourceDescriptorCopiesBytesAndMapsAuthoredSpans(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	data := slices.Clone(a, []byte(`{"sources":[{"name":"main.kmk","text":"","offset":0},{"name":"child.kmk","text":"task child : ; [shell: kash]\n\t(out! \"ok\")\n","offset":42}]}`))
-	defer slices.Free(a, data)
+	data := slices.Clone([]byte(`{"sources":[{"name":"main.kmk","text":"","offset":0},{"name":"child.kmk","text":"task child : ; [shell: kash]\n\t(out! \"ok\")\n","offset":42}]}`))
+	defer mem.FreeSlice(nil, data)
 	configured := r.SetBuildSources(data)
 	if configured.Code != "" {
 		t.Error("configure sources")
@@ -114,7 +115,7 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 		t.Error("overflowing source end accepted")
 	}
 	configured.Free(a)
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	b.WriteString(`{"sources":[{"name":"source.kmk","text":"`)
 	for i := 0; i < 65537; i++ {
 		b.WriteString(" ")
@@ -125,7 +126,7 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 		t.Error("oversize source text accepted")
 	}
 	configured.Free(a)
-	b.Free()
+	b.Reset()
 }
 
 func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
@@ -166,12 +167,12 @@ func TestBuildSourceConfigurationCopiesOverrideAndEnvironment(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	data := slices.Clone(a, []byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
+	data := slices.Clone([]byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
 	configured := r.SetBuildSources(data)
 	for i := range data {
 		data[i] = 0
 	}
-	slices.Free(a, data)
+	mem.FreeSlice(nil, data)
 	if configured.Code != "" {
 		t.Error("configure overrides")
 		configured.Free(a)

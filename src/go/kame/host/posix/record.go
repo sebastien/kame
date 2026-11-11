@@ -3,9 +3,9 @@ package posix
 import (
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/c"
+	"kame/internal/mem"
+	"syscall"
 )
 
 type recordCursor struct {
@@ -21,23 +21,60 @@ type recordCursor struct {
 	Ended     bool
 }
 
-//so:extern nodecay
-func km_record_open(name string) c.Int { _ = name; return -1 }
-
-//so:extern nodecay
-func km_record_next(fd int, offset *int64, delimiter int, buffer []byte) c.Int {
-	_, _, _, _ = fd, offset, delimiter, buffer
-	return -1
+func km_record_open(name string) c.Int {
+	fd, e := syscall.Open(name, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
+	if e != nil {
+		return -1
+	}
+	return c.Int(fd)
 }
-
-//so:extern
-func km_record_close(fd int) { _ = fd }
-
-//so:extern
-func km_record_borrow(fd int) c.Int { _ = fd; return -1 }
-
-//so:extern
-func km_record_byte(fd int) c.Int { _ = fd; return -2 }
+func km_record_next(fd int, offset *int64, delimiter int, buffer []byte) c.Int {
+	n, e := syscall.Pread(fd, buffer, *offset)
+	if e != nil {
+		return -1
+	}
+	for i, b := range buffer[:n] {
+		if int(b) == delimiter {
+			n = i + 1
+			*offset += int64(n)
+			return c.Int(n)
+		}
+	}
+	if n == len(buffer) {
+		return -2
+	}
+	*offset += int64(n)
+	return c.Int(n)
+}
+func km_record_close(fd int) { syscall.Close(fd) }
+func km_record_borrow(fd int) c.Int {
+	n, e := syscall.Dup(fd)
+	if e != nil {
+		return -1
+	}
+	return c.Int(n)
+}
+func km_record_byte(fd int) c.Int {
+	ready, e := waitDescriptor(fd, false, 0)
+	if e == syscall.EINTR {
+		return -1
+	}
+	if e != nil {
+		return -2
+	}
+	if !ready {
+		return -1
+	}
+	var b [1]byte
+	n, e := syscall.Read(fd, b[:])
+	if e != nil {
+		return -2
+	}
+	if n == 0 {
+		return 0
+	}
+	return c.Int(b[0]) + 1
+}
 
 func (h *Host) ReadRecord(a mem.Allocator, id int64, name string, delimiter int, inputFD int) host.RecordResult {
 	if id <= 0 || (delimiter != 0 && delimiter != 10) {
@@ -75,10 +112,10 @@ func (h *Host) ReadRecord(a mem.Allocator, id int64, name string, delimiter int,
 		}
 		cursor := recordCursor{ID: id, FD: fd, Name: cloneText(h.Alloc, name), Delimiter: delimiter, Stdin: stdin, InputFD: inputFD}
 		if stdin {
-			cursor.Data = slices.Make[byte](h.Alloc, host.RecordLimit)
+			cursor.Data = make([]byte, host.RecordLimit)
 			h.StdinRecord = id
 		}
-		h.Readers = slices.Append(h.Alloc, h.Readers, cursor)
+		h.Readers = append(h.Readers, cursor)
 		index = len(h.Readers) - 1
 	}
 	cursor := &h.Readers[index]
@@ -88,8 +125,8 @@ func (h *Host) ReadRecord(a mem.Allocator, id int64, name string, delimiter int,
 	if stdin {
 		return h.readStdinRecord(a, cursor)
 	}
-	buffer := slices.Make[byte](a, host.RecordLimit+1)
-	defer slices.Free(a, buffer)
+	buffer := make([]byte, host.RecordLimit+1)
+	defer mem.FreeSlice(nil, buffer)
 	size := int(km_record_next(cursor.FD, &cursor.Offset, delimiter, buffer))
 	if size < 0 {
 		code := "FS_ERR"
@@ -146,7 +183,7 @@ func (h *Host) CloseRecord(id int64) {
 		if h.Readers[i].ID == id {
 			km_record_close(h.Readers[i].FD)
 			mem.FreeString(h.Alloc, h.Readers[i].Name)
-			slices.Free(h.Alloc, h.Readers[i].Data)
+			mem.FreeSlice(nil, h.Readers[i].Data)
 			if h.StdinRecord == id {
 				h.StdinRecord = 0
 			}

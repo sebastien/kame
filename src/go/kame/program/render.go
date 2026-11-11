@@ -3,11 +3,11 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 type renderResult struct {
@@ -27,7 +27,7 @@ type renderDependencyState struct {
 
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
 	if entry.Kash {
-		b := strings.NewBuilder(p.Alloc)
+		b := strings.Builder{}
 		var spans []diagnostic.Span
 		for i := range entry.Rule.Body {
 			line := entry.Rule.Body[i]
@@ -35,10 +35,10 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 				b.WriteByte('\n')
 			}
 			b.WriteString(line.Text)
-			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: line.Span.Start, End: line.Span.End})
+			spans = append(spans, diagnostic.Span{Start: line.Span.Start, End: line.Span.End})
 		}
 		result := renderResult{Commands: cloneText(p.Alloc, b.String()), LineSpans: spans}
-		b.Free()
+		b.Reset()
 		return result
 	}
 	body := entry.Rule.Body
@@ -68,8 +68,8 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	if entry.Rule.BodyDoc != nil {
 		return p.renderDocument(entry, context)
 	}
-	b := strings.NewBuilder(p.Alloc)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	var spans []diagnostic.Span
 	deferred := false
 	for i := range body {
@@ -78,7 +78,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		}
 		result := p.Eval.Render(p.Alloc, body[i].Template, scope, context)
 		if result.Waiting {
-			slices.Free(p.Alloc, spans)
+			mem.FreeSlice(nil, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)
@@ -90,7 +90,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 				deferred = true
 				continue
 			}
-			slices.Free(p.Alloc, spans)
+			mem.FreeSlice(nil, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)
@@ -98,7 +98,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		}
 		if result.Value.Kind != core.String && result.Value.Kind != core.Pattern {
 			result.Value.Free(p.Alloc)
-			slices.Free(p.Alloc, spans)
+			mem.FreeSlice(nil, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)
@@ -109,21 +109,21 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 				b.WriteByte('\n')
 			}
 			b.WriteString(result.Value.Text)
-			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: body[i].Span.Start, End: body[i].Span.End})
+			spans = append(spans, diagnostic.Span{Start: body[i].Span.Start, End: body[i].Span.End})
 		}
 		result.Value.Free(p.Alloc)
 	}
 	var effects []eval.Effect
 	for i := range context.Effects {
-		effects = slices.Append(p.Alloc, effects, eval.Effect{Kind: context.Effects[i].Kind, Data: slices.Clone(p.Alloc, context.Effects[i].Data), Span: context.Effects[i].Span})
+		effects = append(effects, eval.Effect{Kind: context.Effects[i].Kind, Data: slices.Clone(context.Effects[i].Data), Span: context.Effects[i].Span})
 	}
 	eval.FreeEffects(p.Alloc, context.Effects)
 	var writePaths []string
 	for i := range context.WritePaths {
-		writePaths = slices.Append(p.Alloc, writePaths, cloneText(p.Alloc, context.WritePaths[i]))
+		writePaths = append(writePaths, cloneText(p.Alloc, context.WritePaths[i]))
 		mem.FreeString(p.Alloc, context.WritePaths[i])
 	}
-	slices.Free(p.Alloc, context.WritePaths)
+	mem.FreeSlice(nil, context.WritePaths)
 	result := renderResult{Commands: cloneText(p.Alloc, b.String()), Effects: effects, WritePaths: writePaths, LineSpans: spans, Deferred: deferred}
 	mem.Free(p.Alloc, context)
 	return result
@@ -162,8 +162,8 @@ func (p *Program) renderKame(entry *instance, context *eval.Context) renderResul
 		return renderResult{Diagnostic: failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "a Kame body must return text or bytes; use json for structured content")}
 	}
 	// Reuse the rule's atomic publication and forwarding machinery, including empty data.
-	effects := slices.Make[eval.Effect](p.Alloc, 1)
-	effects[0] = eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(p.Alloc, data), Span: span}
+	effects := make([]eval.Effect, 1)
+	effects[0] = eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(data), Span: span}
 	return renderResult{Effects: effects}
 }
 
@@ -220,19 +220,19 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		// Single authored span covering the recipe body.
 		first := body[0].Span
 		last := body[len(body)-1].Span
-		spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: first.Start, End: last.End})
+		spans = append(spans, diagnostic.Span{Start: first.Start, End: last.End})
 	}
 	var effects []eval.Effect
 	for i := range context.Effects {
-		effects = slices.Append(p.Alloc, effects, eval.Effect{Kind: context.Effects[i].Kind, Data: slices.Clone(p.Alloc, context.Effects[i].Data), Span: context.Effects[i].Span})
+		effects = append(effects, eval.Effect{Kind: context.Effects[i].Kind, Data: slices.Clone(context.Effects[i].Data), Span: context.Effects[i].Span})
 	}
 	eval.FreeEffects(p.Alloc, context.Effects)
 	var writePaths []string
 	for i := range context.WritePaths {
-		writePaths = slices.Append(p.Alloc, writePaths, cloneText(p.Alloc, context.WritePaths[i]))
+		writePaths = append(writePaths, cloneText(p.Alloc, context.WritePaths[i]))
 		mem.FreeString(p.Alloc, context.WritePaths[i])
 	}
-	slices.Free(p.Alloc, context.WritePaths)
+	mem.FreeSlice(nil, context.WritePaths)
 	out := renderResult{Commands: cloneText(p.Alloc, script), Effects: effects, WritePaths: writePaths, LineSpans: spans}
 	result.Value.Free(p.Alloc)
 	mem.Free(p.Alloc, context)
@@ -379,7 +379,7 @@ func observeRenderOperation(value any, name string, version string) {
 			return
 		}
 	}
-	entry.Operations = slices.Append(state.Program.Alloc, entry.Operations, cloneText(state.Program.Alloc, identity))
+	entry.Operations = append(entry.Operations, cloneText(state.Program.Alloc, identity))
 }
 
 // Lazy definition reads can discover produced files just as recipe expressions

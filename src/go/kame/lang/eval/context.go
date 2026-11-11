@@ -4,13 +4,13 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
 )
 
 type Context struct {
@@ -95,16 +95,18 @@ type Context struct {
 }
 
 type operationState struct {
-	CallPath   string
-	NodeID     int64
-	Generation int64
-	Start      int
-	End        int
-	Value      any
-	Free       ContextFree
+	CallPath     string
+	SourceOrigin int
+	NodeID       int64
+	Generation   int64
+	Start        int
+	End          int
+	Value        any
+	Free         ContextFree
 }
 
 // OperationState survives a suspended application on one engine generation.
+// Independently parsed sources can reuse spans, so source origin is part of its key.
 // Operations use it only for progress that must not be replayed after a wait.
 func (c *Context) OperationState() any {
 	if c == nil || c.Program == nil || c.Engine == nil {
@@ -112,7 +114,7 @@ func (c *Context) OperationState() any {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Generation == c.Engine.Generation() {
 				return state.Value
 			}
@@ -131,12 +133,12 @@ func (c *Context) SetOperationState(value any, free ContextFree) {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			state.Value, state.Free, state.Generation = value, free, c.Engine.Generation()
 			return
 		}
 	}
-	c.Program.OperationStates = slices.Append(c.Program.Alloc, c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
+	c.Program.OperationStates = append(c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), SourceOrigin: c.SourceOrigin, NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
 }
 func (c *Context) ClearOperationState() {
 	if c == nil || c.Program == nil || c.Engine == nil {
@@ -144,7 +146,7 @@ func (c *Context) ClearOperationState() {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Free != nil {
 				state.Free(c.Program.Alloc, state.Value)
 			}
@@ -199,14 +201,14 @@ type Effect struct {
 }
 
 func (e *Effect) Free(a mem.Allocator) {
-	slices.Free(a, e.Data)
+	mem.FreeSlice(nil, e.Data)
 	*e = Effect{}
 }
 func FreeEffects(a mem.Allocator, effects []Effect) {
 	for i := range effects {
 		effects[i].Free(a)
 	}
-	slices.Free(a, effects)
+	mem.FreeSlice(nil, effects)
 }
 
 func (c *Context) Emit(kind EffectKind, data []byte) {
@@ -221,15 +223,15 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 	if c.Program != nil && c.Program.DryRun && (kind == EffectOut || kind == EffectErr) {
 		return
 	}
-	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span, FinalizationDeadlineNS: c.CleanupDeadlineNS})
+	c.Effects = append(c.Effects, Effect{Kind: kind, Data: slices.Clone(data), Span: c.Span, FinalizationDeadlineNS: c.CleanupDeadlineNS})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
 	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.Phase == RenderingPhase {
 		c.phaseInvalid = true
 		return
 	}
-	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: EffectWrite, Data: slices.Clone(c.Run, data), Span: c.Span})
-	c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, name))
+	c.Effects = append(c.Effects, Effect{Kind: EffectWrite, Data: slices.Clone(data), Span: c.Span})
+	c.WritePaths = append(c.WritePaths, owned(c.Run, name))
 }
 
 func (c *Context) PhaseInvalid() bool { return c.phaseInvalid }
@@ -298,7 +300,7 @@ func canonicalGrantName(a mem.Allocator, cwd string, name string) string {
 		parsed := core.ParseResourceURI(a, name)
 		if parsed.Error == "" {
 			if parsed.URI.Scheme == "file" {
-				canonical := path.Clean(a, parsed.URI.Path)
+				canonical := path.Clean(parsed.URI.Path)
 				parsed.URI.Free()
 				return canonical
 			}
@@ -327,12 +329,12 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 		return owned(a, name)
 	}
 	if path.IsAbs(name) {
-		return path.Clean(a, name)
+		return path.Clean(name)
 	}
 	if cwd == "" {
-		return path.Clean(a, name)
+		return path.Clean(name)
 	}
-	return path.Join(a, cwd, name)
+	return path.Join(cwd, name)
 }
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
@@ -444,7 +446,25 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 	return id
 }
 
+// submitSource is evaluator-only: no public operation or read grant can issue
+// an authored source load. The host still decides whether it supports the kind.
+func (c *Context) submitSource(name string) int64 {
+	if c == nil || c.PurePredicate || c.Engine == nil || c.Requests == nil || !path.IsAbs(name) || strings.ContainsAny(name, "\x00") {
+		return 0
+	}
+	request := core.NewString(c.Run, name)
+	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), host.RequestLoadSource, request)
+	request.Free(c.Run)
+	if id != 0 {
+		c.Engine.Submit(id)
+	}
+	return id
+}
+
 func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool {
+	if kind == host.RequestLoadSource {
+		return false
+	}
 	if kind == host.RequestRecordRead {
 		if host.PayloadBool(payload, "stdin") {
 			return c.Program != nil && c.Program.InputSupplied && !c.InputClosed && host.PayloadPath(payload) == ""
@@ -521,7 +541,7 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		if a == nil {
 			a = mem.System
 		}
-		decoded := slices.Clone(a, []byte(name))
+		decoded := slices.Clone([]byte(name))
 		n := 0
 		for i := 0; i < len(name); i++ {
 			if name[i] == '\\' && i+1 < len(name) {
@@ -531,7 +551,7 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 			n++
 		}
 		allowed := c.Allows(capability, string(decoded[:n]))
-		slices.Free(a, decoded)
+		mem.FreeSlice(nil, decoded)
 		return allowed
 	}
 	return c.Allows(capability, name)
@@ -573,7 +593,7 @@ func (c *Context) Call(callable core.Value, values []core.Value) Result {
 			return failure(c.Run, "EXPR_INVALID", c.Span, "argument nesting must be below 256; cyclic values are unsupported")
 		}
 	}
-	owned := slices.Make[core.Value](c.Run, len(values))
+	owned := make([]core.Value, len(values))
 	for i := range values {
 		owned[i] = borrowValue(c.Run, values[i])
 	}
@@ -611,8 +631,8 @@ func (c *Context) CallAt(callable core.Value, values []core.Value, index int) Re
 }
 
 func invocationPath(a mem.Allocator, parent string, start int, end int) string {
-	var first, second [strconv.MaxIntBase10Len]byte
-	return owned(a, parent+"/"+strconv.FormatInt(first[:], int64(start), 10)+":"+strconv.FormatInt(second[:], int64(end), 10))
+
+	return owned(a, parent+"/"+strconv.FormatInt(int64(start), 10)+":"+strconv.FormatInt(int64(end), 10))
 }
 
 // FreeCallable releases a temporary function after an operation has finished

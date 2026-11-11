@@ -2,10 +2,11 @@ package operations
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+
+	"strconv"
+	"strings"
 )
 
 func optionLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
@@ -75,11 +76,11 @@ func validArgumentSchema(schema core.Value) bool {
 
 // Report location and schema identity, never user-supplied values.
 func argumentFailure(c *eval.Context, index int, field string, message string) eval.Result {
-	b := strings.NewBuilder(c.Run)
-	defer b.Free()
+	b := strings.Builder{}
+	defer b.Reset()
 	b.WriteString("argument ")
-	var number [strconv.MaxIntBase10Len]byte
-	b.WriteString(strconv.Itoa(number[:], index))
+
+	b.WriteString(strconv.Itoa(index))
 	if field != "" {
 		b.WriteString(" (option ")
 		b.WriteString(field)
@@ -108,9 +109,9 @@ func opParseArgs(c *eval.Context, state any, values []core.Value) eval.Result {
 		}
 	}
 	schema, argv := values[0], values[1].List
-	fields := slices.Make[core.RecordField](c.Run, len(schema.Record))
-	seen := slices.Make[bool](c.Run, len(fields))
-	defer slices.Free(c.Run, seen)
+	fields := make([]core.RecordField, len(schema.Record))
+	seen := make([]bool, len(fields))
+	defer mem.FreeSlice(nil, seen)
 	for i := range fields {
 		fields[i].Key = schema.Record[i].Key
 		fields[i].Value.Kind = core.List
@@ -128,7 +129,7 @@ func opParseArgs(c *eval.Context, state any, values []core.Value) eval.Result {
 			continue
 		}
 		if ended || !optionLike(token) {
-			operands = slices.Append(c.Run, operands, argv[i].Clone(c.Run))
+			operands = append(operands, argv[i].Clone(c.Run))
 			continue
 		}
 		alias, attached, hasAttached := token, "", false
@@ -163,12 +164,12 @@ func opParseArgs(c *eval.Context, state any, values []core.Value) eval.Result {
 		}
 		start, count := i, 0
 		if hasAttached {
-			fields[index].Value.List = slices.Append(c.Run, fields[index].Value.List, core.NewString(c.Run, attached))
+			fields[index].Value.List = append(fields[index].Value.List, core.NewString(c.Run, attached))
 			count++
 		}
 		for i+1 < len(argv) && !optionLike(argv[i+1].Text) && (arity.Text == "many" || count == 0) {
 			i++
-			fields[index].Value.List = slices.Append(c.Run, fields[index].Value.List, argv[i].Clone(c.Run))
+			fields[index].Value.List = append(fields[index].Value.List, argv[i].Clone(c.Run))
 			count++
 		}
 		if count == 0 {
@@ -186,7 +187,7 @@ func opParseArgs(c *eval.Context, state any, values []core.Value) eval.Result {
 	for i := range fields {
 		fields[i].Value.Free(c.Run)
 	}
-	slices.Free(c.Run, fields)
+	mem.FreeSlice(nil, fields)
 	freeValues(c, operands)
 	if failed.Diagnostic.Code != "" {
 		return failed

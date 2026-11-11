@@ -1,14 +1,14 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/core"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // RequestWatch retains all roots in one program. Validate the entire descriptor
@@ -42,7 +42,7 @@ func (r *Runtime) RequestWatch(data []byte) PureResult {
 			r.Handle = nil
 			return result
 		}
-		r.WatchHandles = slices.Append(r.Alloc, r.WatchHandles, next.Handle)
+		r.WatchHandles = append(r.WatchHandles, next.Handle)
 	}
 	r.Watching = true
 	r.Program.Options.Watch = true
@@ -62,7 +62,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	if !r.Watching || r.Program == nil || r.Handle == nil {
 		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no active watch session")}
 	}
-	buffer := bytes.NewBuffer(r.Alloc, nil)
+	buffer := bytes.Buffer{}
 	e := json.NewEncoder(&buffer)
 	e.BeginObject()
 	busy := false
@@ -85,11 +85,11 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		e.Str("generation")
 		e.Int(int64(h.Node.Generation))
 		if polled.Done && polled.Result.Diagnostic.Code != "" {
-			diagnostic := bytes.NewBuffer(r.Alloc, nil)
+			diagnostic := bytes.Buffer{}
 			program.WriteJSONDiagnostic(&diagnostic, polled.Result.Diagnostic)
 			e.Str("diagnosticJSON")
 			e.Str(diagnostic.String())
-			diagnostic.Free()
+			diagnostic.Reset()
 		} else if polled.Done && h.Definition {
 			text := eval.Display(r.Alloc, polled.Result.Value)
 			e.Str("value")
@@ -148,7 +148,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		e.EndObject()
 		keys[i].Free(r.Alloc)
 	}
-	slices.Free(r.Alloc, keys)
+	mem.FreeSlice(nil, keys)
 	e.EndArray()
 	e.Str("changedInputs")
 	e.BeginArray()
@@ -164,7 +164,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	e.EndObject()
 	e.Flush()
 	text := pureText(r.Alloc, buffer.String())
-	buffer.Free()
+	buffer.Reset()
 	return PureResult{Text: text}
 }
 
@@ -172,7 +172,7 @@ func freeWatchKeys(a mem.Allocator, keys []core.ResourceKey) {
 	for i := range keys {
 		keys[i].Free(a)
 	}
-	slices.Free(a, keys)
+	mem.FreeSlice(nil, keys)
 }
 
 type watchBatch struct {
@@ -208,7 +208,7 @@ func (r *Runtime) parseWatchBatch(data []byte, withObserved bool) watchBatch {
 				if item.Record[j].Key == "observedOnly" {
 					if item.Record[j].Value.Kind != core.Bool {
 						freeWatchKeys(r.Alloc, keys)
-						slices.Free(r.Alloc, observedOnly)
+						mem.FreeSlice(nil, observedOnly)
 						return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "observedOnly must be a boolean")}}
 					}
 					observed = item.Record[j].Value.Bool
@@ -217,7 +217,7 @@ func (r *Runtime) parseWatchBatch(data []byte, withObserved bool) watchBatch {
 		}
 		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob" && kind.Text != "tool") || name.Kind != core.String || name.Text == "" || strings.IndexByte(name.Text, 0) >= 0 {
 			freeWatchKeys(r.Alloc, keys)
-			slices.Free(r.Alloc, observedOnly)
+			mem.FreeSlice(nil, observedOnly)
 			return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch resource key")}}
 		}
 		resourceKind := core.ResourceFile
@@ -227,9 +227,9 @@ func (r *Runtime) parseWatchBatch(data []byte, withObserved bool) watchBatch {
 		if kind.Text == "tool" {
 			resourceKind = core.ResourceTool
 		}
-		keys = slices.Append(r.Alloc, keys, core.NewResourceKey(r.Alloc, resourceKind, name.Text))
+		keys = append(keys, core.NewResourceKey(r.Alloc, resourceKind, name.Text))
 		if withObserved {
-			observedOnly = slices.Append(r.Alloc, observedOnly, observed)
+			observedOnly = append(observedOnly, observed)
 		}
 	}
 	return watchBatch{Keys: keys, Observed: observedOnly}
@@ -245,7 +245,7 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 		return batch.Result
 	}
 	defer freeWatchKeys(r.Alloc, batch.Keys)
-	defer slices.Free(r.Alloc, batch.Observed)
+	defer mem.FreeSlice(nil, batch.Observed)
 	for i := range batch.Keys {
 		if batch.Observed[i] {
 			r.Program.NoteProductionInputChange(batch.Keys[i])
@@ -275,7 +275,7 @@ func (r *Runtime) freeWatchHandles() {
 	for i := range r.WatchHandles {
 		r.WatchHandles[i].Free()
 	}
-	slices.Free(r.Alloc, r.WatchHandles)
+	mem.FreeSlice(nil, r.WatchHandles)
 	r.WatchHandles = nil
 	r.Watching = false
 }

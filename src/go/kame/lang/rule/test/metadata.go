@@ -1,10 +1,10 @@
-package rule_test
+package rulecheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestRuleMetadataUsesKameRecordExpressions(t *testing.T) {

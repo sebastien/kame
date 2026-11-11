@@ -2,11 +2,11 @@
 package definition
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 type Parameter struct {
@@ -47,7 +47,7 @@ func (p *Part) Free(a mem.Allocator) {
 		return
 	}
 	Free(a, p.Definition)
-	slices.Free(a, p.Diagnostics)
+	mem.FreeSlice(nil, p.Diagnostics)
 	*p = Part{}
 }
 
@@ -57,7 +57,7 @@ func (r *Result) Free() {
 	}
 	a := r.Alloc
 	Free(a, r.Definition)
-	slices.Free(a, r.Diagnostics)
+	mem.FreeSlice(nil, r.Diagnostics)
 	r.Source.Free(a)
 	*r = Result{}
 	mem.Free(a, r)
@@ -82,7 +82,7 @@ func Free(a mem.Allocator, d *Definition) {
 		return
 	}
 	expr.Free(a, d.Expression)
-	slices.Free(a, d.Parameters)
+	mem.FreeSlice(nil, d.Parameters)
 	mem.Free(a, d)
 }
 
@@ -125,8 +125,8 @@ func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int 
 		d := Definition{}
 		p.functionLHS(&d, start, end)
 		valid := len(p.diags) == 0
-		slices.Free(a, d.Parameters)
-		slices.Free(a, p.diags)
+		mem.FreeSlice(nil, d.Parameters)
+		mem.FreeSlice(nil, p.diags)
 		if !valid {
 			return 0
 		}
@@ -166,7 +166,7 @@ func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) definition() *Definition {
@@ -224,9 +224,9 @@ func (p *parser) definition() *Definition {
 		prefix := expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
 		d.Expression, d.Span.End = prefix.Expr, prefix.End
 		for i := range prefix.Diagnostics {
-			p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+			p.diags = append(p.diags, prefix.Diagnostics[i])
 		}
-		slices.Free(p.a, prefix.Diagnostics)
+		mem.FreeSlice(nil, prefix.Diagnostics)
 		return d
 	}
 	if rhsStart == rhsEnd {
@@ -241,9 +241,9 @@ func (p *parser) definition() *Definition {
 	prefix := expr.ParsePrefix(p.a, &bounded, rhsStart)
 	d.Expression = prefix.Expr
 	for i := range prefix.Diagnostics {
-		p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+		p.diags = append(p.diags, prefix.Diagnostics[i])
 	}
-	slices.Free(p.a, prefix.Diagnostics)
+	mem.FreeSlice(nil, prefix.Diagnostics)
 	end := prefix.End
 	for end < rhsEnd {
 		next := source.ContinuationEnd(p.s.Text, end, rhsEnd)
@@ -301,7 +301,7 @@ func (p *parser) functionLHS(d *Definition, start int, end int) {
 			pos += 3
 			rest = true
 		}
-		d.Parameters = slices.Append(p.a, d.Parameters, Parameter{Name: parameter.Text, Span: source.Span{Start: paramStart, End: pos}, Rest: rest})
+		d.Parameters = append(d.Parameters, Parameter{Name: parameter.Text, Span: source.Span{Start: paramStart, End: pos}, Rest: rest})
 		if rest && pos < end-1 {
 			p.error(pos, end-1, "rest parameter must be last")
 			return
@@ -374,7 +374,7 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	if d.Expression != nil && d.Expression.Kind == expr.KashFunction {
 		return expr.FormatKashControl(a, d.Expression, "\t")
 	}
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	headerWidth := expr.Columns(d.Name, 1) + 1
 	for i := range d.Parameters {
 		headerWidth = expr.Columns(d.Parameters[i].Name, headerWidth+1)
@@ -412,7 +412,7 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	} else {
 		b.WriteString(" =")
 	}
-	v := strings.NewBuilder(a)
+	v := strings.Builder{}
 	value := expr.Compact(a, d.Expression)
 	v.WriteString(value)
 	mem.FreeString(a, value)
@@ -426,8 +426,8 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 		b.WriteString(formatted)
 		mem.FreeString(a, formatted)
 	}
-	v.Free()
+	v.Reset()
 	value = owned(a, b.String())
-	b.Free()
+	b.Reset()
 	return value
 }

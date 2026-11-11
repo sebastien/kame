@@ -1,15 +1,15 @@
-package ast_test
+package astcheck
 
 import (
+	"bytes"
+	"kame/internal/testing"
 	"kame/lang/ast"
-	"solod.dev/so/bytes"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func TestComputedPatternASTOwnsInterpolationExpressions(t *testing.T) {
-	b := bytes.NewBuffer(t.Allocator(), nil)
-	defer b.Free()
+	b := bytes.Buffer{}
+	defer b.Reset()
 	if ast.WriteAST(&b, "expr", "computed", `@{ROOT}/{name:*}.@{EXT}`) != 0 {
 		t.Error("computed AST failed")
 		return

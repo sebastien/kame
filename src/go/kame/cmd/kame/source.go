@@ -1,17 +1,17 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
+	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"os"
+	"path"
 )
 
 // languageSourcePath preserves authored spelling and returns an exactly sized
@@ -53,14 +53,14 @@ func freeBuildSource(source *buildSource) {
 	}
 	for i := range source.Files {
 		mem.FreeString(mem.System, source.Files[i].SourceDirectory)
-		slices.Free(mem.System, source.Files[i].Includes)
+		mem.FreeSlice(nil, source.Files[i].Includes)
 		mem.FreeSlice(mem.System, source.Files[i].Data)
 		if source.Files[i].OwnedName {
 			mem.FreeString(mem.System, source.Files[i].Name)
 		}
 	}
-	slices.Free(mem.System, source.Files)
-	slices.Free(mem.System, source.Parts)
+	mem.FreeSlice(nil, source.Files)
+	mem.FreeSlice(nil, source.Parts)
 	posix.FreeEnvironment(mem.System, source.SelectionEnvironment)
 	*source = buildSource{}
 }
@@ -72,7 +72,7 @@ func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing boo
 
 func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportMissing bool, prefix []program.CompileSource) buildSource {
 	defines := selectionOverrides(options.Defines, options.Parameters)
-	defer slices.Free(mem.System, defines)
+	defer mem.FreeSlice(nil, defines)
 	if options.Command != "" {
 		return inlineRunSource("<command>", options.Command, "kmk", options.JSON, defines, options.Environment, errOut, prefix, options.Directory)
 	}
@@ -81,14 +81,14 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 		if path.IsAbs(name) {
 			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
 		}
-		name = path.Join(mem.System, options.Directory, name)
+		name = path.Join(options.Directory, name)
 		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
 		mem.FreeString(mem.System, name)
 		return result
 	}
 	candidates := cli.BuildSourceCandidates()
 	for i := range candidates {
-		candidate := path.Join(mem.System, options.Directory, candidates[i])
+		candidate := path.Join(options.Directory, candidates[i])
 		_, statErr := os.Stat(candidate)
 		if statErr == nil {
 			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
@@ -136,7 +136,7 @@ func mergeEnvironment(current []string, overrides []string) []string {
 			break
 		}
 		if !replaced {
-			current = slices.Append(mem.System, current, cloneCommandText(entry))
+			current = append(current, cloneCommandText(entry))
 		}
 	}
 	return current
@@ -151,19 +151,17 @@ func sourceError(out io.Writer, code string, message string, json bool) {
 }
 
 func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bool, defines []string, environment []string, prefix []program.CompileSource, directory string) buildSource {
-	canonical := path.Clean(mem.System, name)
-	data, readErr := os.ReadFile(mem.System, canonical)
+	canonical := path.Clean(name)
+	data, readErr := os.ReadFile(canonical)
 	if readErr != nil {
 		sourceError(errOut, "FS_ERR", "cannot read source: "+canonical, json)
 		mem.FreeString(mem.System, canonical)
 		return buildSource{Status: 1}
 	}
 	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
-	// Text wraps Data backing (zero-copy string conversion in Solod):
-	// freeBuildSource frees Data only, Text never outlives it.
-	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), SourceDirectory: fileSourceDirectory(canonical), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
+	result.Files = append(result.Files, sourceFile{Name: canonical, Text: string(data), SourceDirectory: fileSourceDirectory(canonical), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
 	if lang == "template" {
-		result.Parts = slices.Append(mem.System, result.Parts, program.CompileSource{Name: canonical, Text: string(data), SourceDirectory: result.Files[0].SourceDirectory})
+		result.Parts = append(result.Parts, program.CompileSource{Name: canonical, Text: string(data), Lang: lang, SourceDirectory: result.Files[0].SourceDirectory})
 	} else if !expandIncludesLanguage(&result, 0, errOut, lang) {
 		result.Status = 1
 	}
@@ -174,6 +172,10 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 
 func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lang string) bool {
 	file := s.Files[fileIndex]
+	var signature core.Signature
+	if file.FileBacked {
+		signature = core.ContentSignature(file.Data)
+	}
 	rememberDiagnosticSource(file.Name, file.Text)
 	authored := source.New(mem.System, file.Name, file.Text)
 	defer authored.Free(mem.System)
@@ -195,7 +197,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 		if item.Kind != script.Include && item.Kind != script.Composition {
 			continue
 		}
-		s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})
+		s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Lang: lang, Signature: signature, SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})
 		start = item.Span.End
 		if item.Kind == script.Include {
 			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
@@ -205,21 +207,21 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			return false
 		}
 	}
-	s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:], SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})
+	s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:], Lang: lang, Signature: signature, SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})
 	return true
 }
 
 func fileSourceDirectory(name string) string {
 	if path.IsAbs(name) {
-		return path.Dir(mem.System, name)
+		return path.Dir(name)
 	}
-	buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
+	buffer := mem.AllocSlice[byte](mem.System, 4096, 4096)
 	defer mem.FreeSlice(mem.System, buffer)
-	cwd, err := os.Getwd(buffer)
+	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
-	absolute := path.Join(mem.System, cwd, name)
+	absolute := path.Join(cwd, name)
 	defer mem.FreeString(mem.System, absolute)
-	return path.Dir(mem.System, absolute)
+	return path.Dir(absolute)
 }

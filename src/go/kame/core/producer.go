@@ -2,8 +2,8 @@ package core
 
 import (
 	"kame/diagnostic"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
+	"slices"
 )
 
 type ProducerResult int
@@ -119,7 +119,7 @@ func (c *EngineContext) OrderDependency(key ResourceKey) bool {
 	ready := c.dependency(key, false)
 	dep = c.engine.find(key)
 	if dep != nil && (!existed || ordered) && slices.Contains(c.node.Dynamic, dep) {
-		c.node.OrderOnly = slices.Append(c.engine.Alloc, c.node.OrderOnly, dep)
+		c.node.OrderOnly = append(c.node.OrderOnly, dep)
 	}
 	return ready
 }
@@ -152,7 +152,7 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 			return true
 		}
 		if c.node.Key.Kind == ResourceDefinition {
-			d.Frames = slices.Append(c.engine.Alloc, d.Frames, diagnostic.Frame{Label: "definition"})
+			d.Frames = append(d.Frames, diagnostic.Frame{Label: "definition"})
 		}
 		c.node.complete(c.engine, d)
 		return false
@@ -161,11 +161,11 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 		c.engine.Invalidate(dep)
 	}
 	if !slices.Contains(c.node.Dynamic, dep) {
-		c.node.Dynamic = slices.Append(c.engine.Alloc, c.node.Dynamic, dep)
+		c.node.Dynamic = append(c.node.Dynamic, dep)
 		if observed {
-			c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep)
+			c.node.Observed = append(c.node.Observed, dep)
 		}
-		dep.Dependents = slices.Append(c.engine.Alloc, dep.Dependents, c.node)
+		dep.Dependents = append(dep.Dependents, c.node)
 		c.engine.emit(c.node, Event{Kind: UpdateDependency, DependencyID: dep.ID})
 		held := false
 		for i := range c.node.previousDynamic {

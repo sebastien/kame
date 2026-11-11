@@ -3,7 +3,7 @@ package operations
 import (
 	"kame/core"
 	"kame/lang/eval"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 func opEq(c *eval.Context, s any, v []core.Value) eval.Result {

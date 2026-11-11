@@ -1,10 +1,9 @@
 package script
 
 import (
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 // Reuse the definition RHS parser, but retain a reached runtime statement.
@@ -39,7 +38,7 @@ func (p *kashParser) eagerBinding(start int, wordEnd int) *definition.Definition
 	d.Eager, d.Span.Start = true, start
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Text, e.Span, e.Kash = expr.KashLet, d.Name, d.Span, true
-	e.Items = slices.Append(s.Alloc, e.Items, d.Expression)
+	e.Items = append(e.Items, d.Expression)
 	d.Expression = e
 	expr.SetCommandChannels(s.Alloc, e, p.Channels)
 	p.Pos = d.Span.End

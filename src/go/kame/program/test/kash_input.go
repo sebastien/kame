@@ -1,9 +1,9 @@
-package program_test
+package programcheck
 
 import (
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestSuppliedInvocationInputDisablesExecutionReuse(t *testing.T) {

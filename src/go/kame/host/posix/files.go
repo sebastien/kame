@@ -1,17 +1,17 @@
 package posix
 
 import (
+	"errors"
+	"io"
 	"kame/core"
 	"kame/host"
-	"solod.dev/so/c"
-	"solod.dev/so/errors"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
-	"solod.dev/so/time"
-	"solod.dev/so/unicode/utf8"
+	"kame/internal/c"
+	"kame/internal/mem"
+	"os"
+
+	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 var errInvalidFileResourceURI = errors.New("invalid file resource URI")
@@ -47,7 +47,7 @@ func cloneText(a mem.Allocator, text string) string {
 	if text == "" {
 		return ""
 	}
-	buffer := slices.Make[byte](a, len(text))
+	buffer := make([]byte, len(text))
 	copy(buffer, text)
 	return string(buffer)
 }
@@ -74,13 +74,9 @@ func (h *Host) Stat(name string) host.StatResult {
 	}
 	info, err := os.Stat(path.Path)
 	if err != nil {
-		return host.StatResult{Failed: err != os.ErrNotExist}
+		return host.StatResult{Failed: !os.IsNotExist(err)}
 	}
 	result := portableFileInfo(info)
-	// Solod 0.4.0 drops stat nanoseconds. Preserve them for same-second builds.
-	if stamp := km_file_modtime(path.Path, false); stamp != 0 {
-		result.ModTime = stamp
-	}
 	return host.StatResult{Info: result, Exists: true}
 }
 
@@ -95,12 +91,9 @@ func (h *Host) Lstat(name string) host.StatResult {
 	}
 	info, err := os.Lstat(path.Path)
 	if err != nil {
-		return host.StatResult{Failed: err != os.ErrNotExist}
+		return host.StatResult{Failed: !os.IsNotExist(err)}
 	}
 	result := portableFileInfo(info)
-	if stamp := km_file_modtime(path.Path, true); stamp != 0 {
-		result.ModTime = stamp
-	}
 	return host.StatResult{Info: result, Exists: true}
 }
 
@@ -115,9 +108,9 @@ func (h *Host) WatchStamp(name string) string {
 	if path.Error != nil {
 		return ""
 	}
-	data := slices.Make[byte](h.Alloc, 98)
+	data := make([]byte, 98)
 	if !km_file_watch_stamp(path.Path, data) {
-		slices.Free(h.Alloc, data)
+		mem.FreeSlice(nil, data)
 		return ""
 	}
 	return string(data)
@@ -132,7 +125,7 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	if path.Error != nil {
 		return nil, path.Error
 	}
-	return os.ReadFile(a, path.Path)
+	return os.ReadFile(path.Path)
 }
 
 func (h *Host) FileSignature(name string) core.Signature {
@@ -174,27 +167,11 @@ func (h *Host) Readlink(a mem.Allocator, name string) host.LinkResult {
 	if path.Error != nil {
 		return host.LinkResult{Failed: true}
 	}
-	// Solod Readlink silently truncates a full buffer. Grow until completeness is
-	// proven, never return a truncated target as an ownership check.
-	for size := 256; size <= 65536; size *= 2 {
-		buffer := slices.Make[byte](a, size)
-		text, err := os.Readlink(buffer, path.Path)
-		if err != nil {
-			slices.Free(a, buffer)
-			return host.LinkResult{Failed: true}
-		}
-		if len(text) < size {
-			if !utf8.ValidString(text) {
-				slices.Free(a, buffer)
-				return host.LinkResult{Failed: true}
-			}
-			result := host.LinkResult{Target: cloneText(a, text)}
-			slices.Free(a, buffer)
-			return result
-		}
-		slices.Free(a, buffer)
+	text, err := os.Readlink(path.Path)
+	if err != nil || !utf8.ValidString(text) {
+		return host.LinkResult{Failed: true}
 	}
-	return host.LinkResult{Failed: true}
+	return host.LinkResult{Target: cloneText(a, text)}
 }
 
 func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
@@ -206,16 +183,16 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 	if path.Error != nil {
 		return nil, path.Error
 	}
-	entries, err := os.ReadDir(a, path.Path)
+	entries, err := os.ReadDir(path.Path)
 	if err != nil {
 		return nil, err
 	}
-	defer os.FreeDirEntry(a, entries)
-	out := slices.Make[host.DirEntry](a, len(entries))
+
+	out := make([]host.DirEntry, len(entries))
 	for i := range entries {
 		// os.ReadDir names are views into the entry allocation, so clone them
 		// for a caller that outlives the freed entry list.
-		out[i] = host.DirEntry{Name: cloneText(a, entries[i].Name), IsDir: entries[i].IsDir}
+		out[i] = host.DirEntry{Name: cloneText(a, entries[i].Name()), IsDir: entries[i].IsDir()}
 	}
 	return out, nil
 }
@@ -243,8 +220,8 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 	if separator == 0 {
 		directory = "/"
 	}
-	buffer := make([]byte, len(directory)+len("/.kame-tmp-")+7)
-	f, err := os.CreateTemp(buffer, directory, ".kame-tmp-")
+
+	f, err := os.CreateTemp(directory, ".kame-tmp-")
 	if err != nil {
 		return err
 	}
@@ -258,7 +235,7 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 		err = os.Chmod(temporary, os.FileMode(perm))
 	}
 	if err == nil && durable {
-		if syncStorage(&f) != 0 {
+		if syncStorage(f) != 0 {
 			err = errStorageSync
 		}
 	}

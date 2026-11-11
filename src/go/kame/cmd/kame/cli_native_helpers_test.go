@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// Go is only a subprocess driver here: parser, evaluator, allocator and host
-// code execute in the compiled Solod binary, never in compatibility stubs.
+// CLI conformance checks exercise the compiled Go executable as a subprocess.
 func runNativeCLI(t *testing.T, args []string, in io.Reader, out, errOut io.Writer) int {
 	t.Helper()
 	return runNativeCLIIn(t, "", args, in, out, errOut)

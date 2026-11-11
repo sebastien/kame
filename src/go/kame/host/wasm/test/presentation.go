@@ -1,12 +1,11 @@
-package wasm_test
+package wasmcheck
 
 import (
+	"bytes"
 	"kame/cli"
 	"kame/host/wasm"
-	"solod.dev/so/bytes"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/internal/mem"
+	"kame/internal/testing"
 )
 
 func TestWasmPresentationUsesNativeLayout(t *testing.T) {
@@ -14,8 +13,8 @@ func TestWasmPresentationUsesNativeLayout(t *testing.T) {
 	snapshot := `{"op":"frame","command":"build","subject":"dist","width":80,"height":12,"elapsedMS":1200,"counts":{"completed":8},"workers":[{"target":"./build/main.o","program":"cc","elapsedMS":1200}]}`
 	result := wasm.RenderPresentation(a, snapshot)
 	defer result.Free(a)
-	var direct = bytes.NewBuffer(a, nil)
-	defer direct.Free()
+	var direct = bytes.Buffer{}
+	defer direct.Reset()
 	workers := []cli.ProgressWorkerView{{Target: "./build/main.o", Program: "cc", ElapsedMS: 1200}}
 	cli.WriteDashboard(&direct, cli.ProgressView{Command: "build", Subject: "dist", Width: 80, Height: 12, ElapsedMS: 1200, Counts: cli.Progress{Completed: 8}, Workers: workers})
 	if result.Code != "" || result.Text != direct.String() {
@@ -24,9 +23,9 @@ func TestWasmPresentationUsesNativeLayout(t *testing.T) {
 }
 
 func TestWasmPresentationOwnsInvocationState(t *testing.T) {
-	a := t.Allocator()
-	buffer := slices.Make[byte](a, 64*1024)
-	defer slices.Free(a, buffer)
+	_ = t.Allocator()
+	buffer := make([]byte, 64*1024)
+	defer mem.FreeSlice(nil, buffer)
 	heap := wasm.NewHeap(buffer)
 	p := wasm.NewPresentation(&heap)
 	started := `{"type":"target-started","node":7,"generation":1,"target":"root","resource":{"kind":"task","name":"root"}}`

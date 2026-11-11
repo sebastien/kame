@@ -1,10 +1,10 @@
-package script_test
+package scriptcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/script"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/testing"
 )
 
 func TestConditionalDeclarationsKeepPredicatesRulesAndIncludes(t *testing.T) {

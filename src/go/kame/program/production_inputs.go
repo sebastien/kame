@@ -4,10 +4,10 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/rule"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"slices"
+	"strings"
 )
 
 type productionObservation struct {
@@ -34,16 +34,16 @@ func clearProductionValidation(a mem.Allocator, state *productionValidationState
 	for i := range state.Inputs {
 		state.Inputs[i].Observation.Key.Free(a)
 	}
-	slices.Free(a, state.Inputs)
+	mem.FreeSlice(nil, state.Inputs)
 	for i := range state.Changed {
 		state.Changed[i].Free(a)
 	}
 	for i := range state.Unknown {
 		state.Unknown[i].Free(a)
 	}
-	slices.Free(a, state.Changed)
-	slices.Free(a, state.Unknown)
-	slices.Free(a, state.Suspect)
+	mem.FreeSlice(nil, state.Changed)
+	mem.FreeSlice(nil, state.Unknown)
+	mem.FreeSlice(nil, state.Suspect)
 	state.Inputs, state.Changed, state.Unknown, state.Suspect = nil, nil, nil, nil
 	state.Index, state.Pending, state.Saving, state.Probing = 0, false, false, false
 }
@@ -73,7 +73,7 @@ func (p *Program) ChangedProductionInputs() []core.ResourceKey {
 // A new root or invalidation starts a new cycle: previously reported changes
 // are no longer evidence for the work that is about to run.
 func (p *Program) clearChangedProductionInputs() {
-	slices.Free(p.Alloc, p.deferredTerminal)
+	mem.FreeSlice(nil, p.deferredTerminal)
 	p.deferredTerminal = nil
 	state := p.validationState()
 	if state == nil || state.Root != nil || p.productionDirty {
@@ -82,7 +82,7 @@ func (p *Program) clearChangedProductionInputs() {
 	for i := range state.Changed {
 		state.Changed[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, state.Changed)
+	mem.FreeSlice(nil, state.Changed)
 	state.Changed = nil
 }
 
@@ -92,7 +92,7 @@ func appendProductionKey(a mem.Allocator, keys []core.ResourceKey, key core.Reso
 			return keys
 		}
 	}
-	return slices.Append(a, keys, key.Clone(a))
+	return append(keys, key.Clone(a))
 }
 
 func (p *Program) clearProductionChanges() {
@@ -102,7 +102,7 @@ func (p *Program) clearProductionChanges() {
 	for i := range p.productionChanges {
 		p.productionChanges[i].Free(p.Alloc)
 	}
-	slices.Free(p.Alloc, p.productionChanges)
+	mem.FreeSlice(nil, p.productionChanges)
 	p.productionChanges = nil
 }
 
@@ -170,12 +170,12 @@ func (p *Program) advanceProductionValidation() {
 		inputs := p.acceptedInputs(entry)
 		for n := range inputs {
 			if inputs[n].Key.Kind == core.ResourceFile || inputs[n].Key.Kind == core.ResourceGlob {
-				state.Inputs = slices.Append(p.Alloc, state.Inputs, productionObservation{Observation: inputs[n], Consumer: i})
+				state.Inputs = append(state.Inputs, productionObservation{Observation: inputs[n], Consumer: i})
 			} else {
 				inputs[n].Key.Free(p.Alloc)
 			}
 		}
-		slices.Free(p.Alloc, inputs)
+		mem.FreeSlice(nil, inputs)
 	}
 	state.Revision = p.productionRevision
 	state.Root = p.Engine.RequestRoot(state.Node)
@@ -228,7 +228,7 @@ func acceptProductionInput(c *core.EngineContext, state *productionValidationSta
 			state.Unknown = appendProductionKey(p.Alloc, state.Unknown, input.Observation.Key)
 		}
 		if !slices.Contains(state.Suspect, input.Consumer) {
-			state.Suspect = slices.Append(p.Alloc, state.Suspect, input.Consumer)
+			state.Suspect = append(state.Suspect, input.Consumer)
 		}
 		state.Index++
 		return false
@@ -266,7 +266,7 @@ func acceptProductionInput(c *core.EngineContext, state *productionValidationSta
 		return false
 	}
 	if !slices.Contains(state.Suspect, input.Consumer) {
-		state.Suspect = slices.Append(p.Alloc, state.Suspect, input.Consumer)
+		state.Suspect = append(state.Suspect, input.Consumer)
 	}
 	state.Index++
 	return false
@@ -313,7 +313,7 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 		// artifact aliases, without treating an order-only prerequisite as data.
 		var consumers []*core.Node
 		for n := range state.Suspect {
-			consumers = slices.Append(p.Alloc, consumers, p.Instances[state.Suspect[n]].Node)
+			consumers = append(consumers, p.Instances[state.Suspect[n]].Node)
 		}
 		for j := 0; j < len(consumers); j++ {
 			for _, dependent := range consumers[j].Dependents {
@@ -322,14 +322,14 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 				}
 				index := p.instanceIndex(dependent)
 				if index >= 0 && !p.Instances[index].Inspection && !slices.Contains(state.Suspect, index) {
-					state.Suspect = slices.Append(p.Alloc, state.Suspect, index)
+					state.Suspect = append(state.Suspect, index)
 				}
 				if !slices.Contains(consumers, dependent) {
-					consumers = slices.Append(p.Alloc, consumers, dependent)
+					consumers = append(consumers, dependent)
 				}
 			}
 		}
-		slices.Free(p.Alloc, consumers)
+		mem.FreeSlice(nil, consumers)
 		state.Saving, state.Index = true, 0
 	}
 	for state.Index < len(state.Suspect) {
@@ -347,7 +347,7 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 			}
 			payload := host.CacheGetPayload(p.Alloc, key)
 			if entry.Rule.Kind == rule.CachedTaskRule {
-				slices.Free(p.Alloc, key)
+				mem.FreeSlice(nil, key)
 			}
 			state.Pending = true
 			p.submitFileContextRequest(c, host.RequestCacheDelete, payload)
@@ -366,7 +366,7 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 		state.Index++
 	}
 	if len(state.Changed) != 0 || len(state.Unknown) != 0 {
-		message := strings.NewBuilder(p.Alloc)
+		message := strings.Builder{}
 		message.WriteString("inputs changed or could not be verified during this build; outputs may be inconsistent")
 		for i := range state.Changed {
 			p.appendProductionPath(&message, "\n  changed: ", state.Changed[i].Name)
@@ -386,7 +386,7 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 			message.WriteString("\nrun the build again to ensure consistent outputs")
 		}
 		p.productionWarning("INPUT_UNSTABLE", message.String())
-		message.Free()
+		message.Reset()
 	}
 	p.productionDirty = state.Revision != p.productionRevision
 	if !p.productionDirty {
@@ -409,7 +409,7 @@ func (p *Program) productionWarning(code string, message string) {
 
 // ProductionCancellationMessage is caller-owned and must be freed.
 func (p *Program) ProductionCancellationMessage(keys []core.ResourceKey) string {
-	message := strings.NewBuilder(p.Alloc)
+	message := strings.Builder{}
 	message.WriteString("cancelling active build; restart queued for changed inputs:")
 	for i := range keys {
 		duplicate := false
@@ -421,7 +421,7 @@ func (p *Program) ProductionCancellationMessage(keys []core.ResourceKey) string 
 		}
 	}
 	text := cloneText(p.Alloc, message.String())
-	message.Free()
+	message.Reset()
 	return text
 }
 

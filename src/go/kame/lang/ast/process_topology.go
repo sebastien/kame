@@ -1,9 +1,9 @@
 package ast
 
 import (
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
 )
 
 // Additive parse inspection, using exactly the runtime's static graph lowering.

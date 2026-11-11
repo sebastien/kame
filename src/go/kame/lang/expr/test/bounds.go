@@ -1,10 +1,32 @@
-package expr_test
+package exprcheck
 
 import (
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/expr"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"kame/lang/source"
 )
+
+func TestCommandSetupValuePrefixAtEOF(t *testing.T) {
+	a := t.Allocator()
+	keys := []string{"env", "accept-exit"}
+	texts := []string{"", "setup "}
+	for i := range keys {
+		for j := range texts {
+			s := source.New(a, "setup.kash", texts[j])
+			end := len(s.Text)
+			parsed := expr.ParseCommandSetupValuePrefix(a, s, end, keys[i])
+			if parsed.Expr != nil || parsed.End != end || len(parsed.Diagnostics) != 1 {
+				t.Error("missing setup value did not return a diagnostic at EOF")
+			} else if parsed.Diagnostics[0].Message != "expected Kash stage setup value" || parsed.Diagnostics[0].Span.Start != end || parsed.Diagnostics[0].Span.End != end {
+				t.Error("missing setup value diagnostic changed")
+			}
+			expr.Free(a, parsed.Expr)
+			mem.FreeSlice(nil, parsed.Diagnostics)
+			s.Free(a)
+		}
+	}
+}
 
 func TestRemediation3PatternBudgets(t *testing.T) {
 	a := t.Allocator()
@@ -16,17 +38,17 @@ func TestRemediation3PatternBudgets(t *testing.T) {
 		if result.Matched || !result.Limited || len(result.Captures) != 0 {
 			t.Error("zero budget did not fail closed")
 		}
-		slices.Free(a, result.Captures)
+		mem.FreeSlice(nil, result.Captures)
 		if i != 0 {
 			budget = 20
 			result = parsed.Pattern.MatchTextBudget(a, "aaaaaaaaaaaa", &budget)
 			if result.Matched || !result.Limited || len(result.Captures) != 0 {
 				t.Error("candidate/backtracking work escaped the shared bound")
 			}
-			slices.Free(a, result.Captures)
+			mem.FreeSlice(nil, result.Captures)
 		}
 		parsed.Pattern.Free(a)
-		slices.Free(a, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 	}
 	budget := 20
 	matched, limited := expr.MatchGlobBudget("*", "a", &budget)
@@ -73,5 +95,5 @@ func TestRemediation3SectionAndPatternPositions(t *testing.T) {
 		t.Error("overflowing pattern position accepted")
 	}
 	parsed.Pattern.Free(a)
-	slices.Free(a, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 }

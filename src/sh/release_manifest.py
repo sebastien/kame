@@ -6,6 +6,7 @@ import hashlib
 import json
 import pathlib
 import subprocess
+import shutil
 import sys
 from datetime import datetime, timezone
 
@@ -14,16 +15,28 @@ def run(*args):
     return subprocess.check_output(args, text=False)
 
 
+ASSETS = ["VERSION", "kame-linux-x86_64", "kame-linux-arm64", "kame-darwin-x86_64", "kame-darwin-arm64", "kame-windows-x64.zip", "kame.js", "kame.wasm"]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True, type=pathlib.Path)
+    parser.add_argument("--source-directory", type=pathlib.Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--public-key", required=True, type=pathlib.Path)
     parser.add_argument("--signing-key", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    assets = ["VERSION", "kame.com", "kame.js", "kame.wasm"]
+    assets = ASSETS
+    if args.source_directory:
+        for name in assets:
+            source = args.source_directory / name
+            if not source.is_file() or source.is_symlink():
+                parser.error(f"missing release asset: {name}")
+        args.directory.mkdir(parents=True, exist_ok=True)
+        for name in assets:
+            shutil.copy2(args.source_directory / name, args.directory / name)
     allowed = {*assets, "PROVENANCE.json", "SHA256SUMS", "SHA256SUMS.sig"}
     for path in args.directory.iterdir():
         if path.name not in allowed or path.is_symlink() or not path.is_file():

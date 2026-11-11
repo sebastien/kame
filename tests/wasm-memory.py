@@ -1,4 +1,4 @@
-"""Drive real CLI process publishers with an undersized logical heap."""
+"""Verify child cleanup when the host publisher rejects an output chunk."""
 import os
 from pathlib import Path
 import signal
@@ -8,12 +8,11 @@ import tempfile
 
 root = Path(sys.argv[1])
 source = (root / 'src/js/kame.js').read_text()
-creation = 'const instance = this.exports.kame_wasm_instance_create();'
-assert creation in source
-# Use the public ABI budget setter in a private copy of the canonical host;
-# production has no test environment variable or altered default heap budget.
-source = source.replace(creation, creation + '\n'
-    'if (instance !== 0n) this.exports.kame_wasm_instance_set_heap_limit(instance, 262144);')
+# Inject a publisher failure in a private wrapper, after an actual child chunk.
+# Production uses Go's GC and has no recoverable per-instance OOM budget.
+marker = "  processStream(instance, stderrStream, chunk, request) {"
+assert marker in source
+source = source.replace(marker, marker + "\n    throw Object.assign(new Error('publisher allocation failed'), { code: 'NO_MEMORY' });")
 with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
     host = project / 'kame.mjs'
@@ -34,7 +33,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 result = subprocess.run(['node', str(host), *arguments], env=environment,
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
                 assert result.returncode == 1, (backend, channel, result.returncode)
-                assert b'error[NO_MEMORY]:' in result.stderr and b'instance heap exhausted\n' in result.stderr, result.stderr[-1000:]
+                assert b'error[NO_MEMORY]:' in result.stderr and b'publisher allocation failed' in result.stderr, result.stderr[-1000:]
                 assert b'file://' not in result.stderr and b'RuntimeError' not in result.stderr, result.stderr[-1000:]
                 assert pid_file.exists(), 'exhaustion happened before launching the process'
                 pid, group = map(int, pid_file.read_text().split())

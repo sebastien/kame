@@ -1,11 +1,11 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestSessionKashEagerBindingsFollowFragmentOrderAndExecutionPolicy(t *testing.T) {

@@ -2,8 +2,7 @@ package wasm
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // AppendCapturedBytes keeps binary payloads out of the JSON metadata parser.
@@ -16,7 +15,7 @@ func AppendCapturedBytes(a mem.Allocator, value *core.Value, stdout []byte, stde
 			return false
 		}
 	}
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: pureText(a, "stdout"), Value: core.NewBytes(a, stdout)})
-	value.Record = slices.Append(a, value.Record, core.RecordField{Key: pureText(a, "stderr"), Value: core.NewBytes(a, stderr)})
+	value.Record = append(value.Record, core.RecordField{Key: pureText(a, "stdout"), Value: core.NewBytes(a, stdout)})
+	value.Record = append(value.Record, core.RecordField{Key: pureText(a, "stderr"), Value: core.NewBytes(a, stderr)})
 	return true
 }

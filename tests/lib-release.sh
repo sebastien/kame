@@ -11,6 +11,10 @@ release_test_keys() {
 
 release_test_sign() {
 	local directory="$1" version="$2" revision="$3" keys="$4"
+	# Shell fixtures model a platform binary; fill the other mandatory assets.
+	for asset in kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip; do
+		if [ ! -e "$directory/$asset" ] && [ -f "$directory/kame-linux-x86_64" ]; then cp "$directory/kame-linux-x86_64" "$directory/$asset"; fi
+	done
 	python3 "$CLI_ROOT/src/sh/release_manifest.py" --directory "$directory" \
 		--version "$version" --revision "$revision" \
 		--public-key "$keys/verification.pem" --signing-key "$keys/signing.pem"

@@ -1,12 +1,13 @@
 package wasm
 
 import (
+	"bytes"
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/program"
-	"solod.dev/so/bytes"
-	"solod.dev/so/slices"
+	"slices"
 )
 
 // PrepareSession consumes a host-loaded descriptor. Parsing/registration and
@@ -35,48 +36,48 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		var defines []string
 		fields := host.PayloadList(inputs[i], "defines")
 		for j := range fields {
-			defines = slices.Append(r.Alloc, defines, fields[j].Text)
+			defines = append(defines, fields[j].Text)
 		}
 		items := host.PayloadList(inputs[i], "entries")
 		for j := range items {
-			entries = slices.Append(r.Alloc, entries, items[j].Text)
+			entries = append(entries, items[j].Text)
 		}
-		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), SourceDirectory: host.PayloadText(inputs[i], "sourceDirectory"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
+		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), SourceDirectory: host.PayloadText(inputs[i], "sourceDirectory"), Signature: descriptorSourceSignature(inputs[i]), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
 		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
 			for j := range fragments {
 				freeDescriptorIncludes(r.Alloc, fragments[j].Includes)
-				slices.Free(r.Alloc, fragments[j].Entries)
-				slices.Free(r.Alloc, fragments[j].Defines)
+				mem.FreeSlice(nil, fragments[j].Entries)
+				mem.FreeSlice(nil, fragments[j].Defines)
 			}
-			slices.Free(r.Alloc, defines)
+			mem.FreeSlice(nil, defines)
 			freeDescriptorIncludes(r.Alloc, f.Includes)
-			slices.Free(r.Alloc, entries)
-			slices.Free(r.Alloc, fragments)
+			mem.FreeSlice(nil, entries)
+			mem.FreeSlice(nil, fragments)
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid session language")}
 		}
-		fragments = slices.Append(r.Alloc, fragments, f)
+		fragments = append(fragments, f)
 	}
 	if len(fragments) == 0 {
-		slices.Free(r.Alloc, fragments)
+		mem.FreeSlice(nil, fragments)
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "empty session descriptor")}
 	}
 	grants := r.InspectionGrants
 	var overrides, environment []string
 	fields := host.PayloadList(value, "buildDefines")
 	for i := range fields {
-		overrides = slices.Append(r.Alloc, overrides, fields[i].Text)
+		overrides = append(overrides, fields[i].Text)
 	}
 	for i := range r.Environment {
-		environment = slices.Append(r.Alloc, environment, r.Environment[i])
+		environment = append(environment, r.Environment[i])
 	}
 	fields = host.PayloadList(value, "environment")
 	for i := range fields {
-		environment = slices.Append(r.Alloc, environment, fields[i].Text)
+		environment = append(environment, fields[i].Text)
 	}
 	var tools []string
 	fields = host.PayloadList(value, "toolOverrides")
 	for i := range fields {
-		tools = slices.Append(r.Alloc, tools, fields[i].Text)
+		tools = append(tools, fields[i].Text)
 	}
 	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
 	options.HasInput = host.PayloadInt(value, "dataInput") == 1
@@ -87,29 +88,29 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	var parameters []string
 	fields = host.PayloadList(value, "parameters")
 	for i := range fields {
-		parameters = slices.Append(r.Alloc, parameters, fields[i].Text)
+		parameters = append(parameters, fields[i].Text)
 	}
 	options.Parameters = parameters
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
-	slices.Free(r.Alloc, parameters)
-	slices.Free(r.Alloc, tools)
-	slices.Free(r.Alloc, overrides)
-	slices.Free(r.Alloc, environment)
+	mem.FreeSlice(nil, parameters)
+	mem.FreeSlice(nil, tools)
+	mem.FreeSlice(nil, overrides)
+	mem.FreeSlice(nil, environment)
 	r.Host = nil
 	for i := range fragments {
 		freeDescriptorIncludes(r.Alloc, fragments[i].Includes)
-		slices.Free(r.Alloc, fragments[i].Entries)
-		slices.Free(r.Alloc, fragments[i].Defines)
+		mem.FreeSlice(nil, fragments[i].Entries)
+		mem.FreeSlice(nil, fragments[i].Defines)
 	}
-	slices.Free(r.Alloc, fragments)
+	mem.FreeSlice(nil, fragments)
 	if compiled.Session == nil {
-		buffer := bytes.NewBuffer(r.Alloc, nil)
+		buffer := bytes.Buffer{}
 		for i := range compiled.Diagnostics {
 			program.WriteJSONDiagnostic(&buffer, compiled.Diagnostics[i])
 		}
 		r.EventJSONClear()
-		r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
-		buffer.Free()
+		r.EventJSON = slices.Clone([]byte(buffer.String()))
+		buffer.Reset()
 		out := PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "cannot compile session")}
 		if len(compiled.Diagnostics) != 0 {
 			out.Free(r.Alloc)
@@ -131,7 +132,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 
 func sessionEffect(value any, effect eval.Effect) {
 	r := value.(*Runtime)
-	r.Effects = slices.Append(r.Alloc, r.Effects, eval.Effect{Kind: effect.Kind, Data: slices.Clone(r.Alloc, effect.Data)})
+	r.Effects = append(r.Effects, eval.Effect{Kind: effect.Kind, Data: slices.Clone(effect.Data)})
 }
 
 func (r *Runtime) SessionWorkCount() int {

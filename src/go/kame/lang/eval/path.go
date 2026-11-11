@@ -2,10 +2,10 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 func appendPathText(b *strings.Builder, text string) {
@@ -21,11 +21,11 @@ func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context
 	result := Result{Value: core.NewString(c.Run, expression.Text)}
 	glob := expr.PathHasGlob(expression.Text)
 	if len(expression.Parts) == 0 && !expression.LiteralPath && strings.IndexByte(expression.Text, '\\') >= 0 {
-		b := strings.NewBuilder(c.Run)
+		b := strings.Builder{}
 		appendPathText(&b, expression.Text)
 		result.Value.Free(c.Run)
 		result.Value = core.NewString(c.Run, b.String())
-		b.Free()
+		b.Reset()
 		result.Value.GlobPattern = owned(c.Run, expression.Text)
 	}
 	if len(expression.Parts) != 0 {
@@ -55,7 +55,7 @@ func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context
 		result.Free(c.Run)
 		return ready
 	}
-	values := slices.Make[core.Value](c.Run, 1)
+	values := make([]core.Value, 1)
 	values[0] = result.Value
 	output := p.invokeOperation(operation, values, nil, c, expression.Span)
 	freeValues(c.Run, values)
@@ -66,18 +66,18 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 	var children []*expr.Expr
 	for i := range expression.Parts {
 		if expression.Parts[i].Expr != nil {
-			children = slices.Append(c.Run, children, expression.Parts[i].Expr)
+			children = append(children, expression.Parts[i].Expr)
 		}
 	}
 	operands := p.argumentValues(scope, children, c, expression.Span)
-	slices.Free(c.Run, children)
+	mem.FreeSlice(nil, children)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	defer freeValuesWithCallables(c.Run, operands.Values)
-	text, pattern := strings.NewBuilder(c.Run), strings.NewBuilder(c.Run)
-	defer text.Free()
-	defer pattern.Free()
+	text, pattern := strings.Builder{}, strings.Builder{}
+	defer text.Reset()
+	defer pattern.Reset()
 	var instantiated *expr.Pattern
 	defer instantiated.Free(c.Run)
 	next := 0

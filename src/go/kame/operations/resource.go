@@ -3,8 +3,8 @@ package operations
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
 )
 
 func opResource(c *eval.Context, state any, values []core.Value) eval.Result {

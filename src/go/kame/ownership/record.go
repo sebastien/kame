@@ -2,10 +2,10 @@ package ownership
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"kame/internal/mem"
+	"path"
+
+	"strings"
 )
 
 // Records have a bounded binary envelope and a SHA-256 checksum. Paths and
@@ -29,16 +29,16 @@ func (r *record) free(a mem.Allocator) {
 
 func putText(a mem.Allocator, data []byte, text string) []byte {
 	for i := 0; i < 8; i++ {
-		data = slices.Append(a, data, byte(uint64(len(text))>>uint(i*8)))
+		data = append(data, byte(uint64(len(text))>>uint(i*8)))
 	}
 	for i := range text {
-		data = slices.Append(a, data, text[i])
+		data = append(data, text[i])
 	}
 	return data
 }
 
 func (s *Store) encode(r *record) []byte {
-	data := slices.Make[byte](s.Alloc, 133)
+	data := make([]byte, 133)
 	copy(data, "KO01")
 	copy(data[4:20], r.Root[:])
 	copy(data[20:52], r.Context[:])
@@ -52,7 +52,7 @@ func (s *Store) encode(r *record) []byte {
 	data = putText(s.Alloc, data, r.Batch)
 	checksum := hash(data)
 	for i := range checksum.Digest {
-		data = slices.Append(s.Alloc, data, checksum.Digest[i])
+		data = append(data, checksum.Digest[i])
 	}
 	return data
 }
@@ -172,9 +172,9 @@ func (s *Store) recordPath(name string) string {
 		return result
 	}
 	if path.IsAbs(name) {
-		return path.Clean(s.Alloc, name)
+		return path.Clean(name)
 	}
-	physical := path.Join(s.Alloc, s.Root, name)
+	physical := path.Join(s.Root, name)
 	if !safeRecordPath(physical) {
 		mem.FreeString(s.Alloc, physical)
 		return ""
@@ -202,9 +202,9 @@ func (s *Store) Member(name string) string {
 	}
 	var cleaned string
 	if path.IsAbs(name) {
-		cleaned = path.Clean(s.Alloc, name)
+		cleaned = path.Clean(name)
 	} else {
-		cleaned = path.Join(s.Alloc, s.Root, name)
+		cleaned = path.Join(s.Root, name)
 	}
 	defer mem.FreeString(s.Alloc, cleaned)
 	if len(cleaned) <= len(s.Root)+1 || !strings.HasPrefix(cleaned, s.Root) || cleaned[len(s.Root)] != '/' {
@@ -222,7 +222,7 @@ func (s *Store) writeRecord(r *record) bool {
 	name := key(s.Alloc, r.Path)
 	s.Status = int(km_own_write(s.native, name+".record", data))
 	mem.FreeString(s.Alloc, name)
-	slices.Free(s.Alloc, data)
+	mem.FreeSlice(nil, data)
 	return s.Status == 0
 }
 
@@ -230,7 +230,7 @@ func (s *Store) Begin(paths []string, producer string, context [32]byte) bool {
 	if !s.Acquire() {
 		return false
 	}
-	joined := strings.Join(s.Alloc, paths, "\x00")
+	joined := strings.Join(paths, "\x00")
 	batch := key(s.Alloc, joined)
 	mem.FreeString(s.Alloc, joined)
 	defer mem.FreeString(s.Alloc, batch)
@@ -246,7 +246,7 @@ func (s *Store) Begin(paths []string, producer string, context [32]byte) bool {
 		}
 		name := key(s.Alloc, member)
 		pending := s.read(name + ".recovery")
-		slices.Free(s.Alloc, pending)
+		mem.FreeSlice(nil, pending)
 		mem.FreeString(s.Alloc, name)
 		if s.Status != 1 {
 			mem.FreeString(s.Alloc, member)
@@ -265,7 +265,7 @@ func (s *Store) Begin(paths []string, producer string, context [32]byte) bool {
 }
 
 func (s *Store) Commit(paths []string, producer string, context [32]byte) bool {
-	joined := strings.Join(s.Alloc, paths, "\x00")
+	joined := strings.Join(paths, "\x00")
 	batch := key(s.Alloc, joined)
 	mem.FreeString(s.Alloc, joined)
 	defer mem.FreeString(s.Alloc, batch)
@@ -277,9 +277,9 @@ func (s *Store) Commit(paths []string, producer string, context [32]byte) bool {
 			item = s.observe(member, true)
 		}
 		mem.FreeString(s.Alloc, member)
-		observations = slices.Append(s.Alloc, observations, item)
+		observations = append(observations, item)
 		if item.Status != 0 && item.Status != 1 {
-			slices.Free(s.Alloc, observations)
+			mem.FreeSlice(nil, observations)
 			// A directory or other unsupported output can satisfy publication, but
 			// cannot establish cleanup ownership. Leave its attempt uncertain.
 			s.Status = item.Status
@@ -295,7 +295,7 @@ func (s *Store) Commit(paths []string, producer string, context [32]byte) bool {
 			missing := member != ""
 			mem.FreeString(s.Alloc, member)
 			if missing {
-				slices.Free(s.Alloc, observations)
+				mem.FreeSlice(nil, observations)
 				s.Status = -1
 				return false
 			}
@@ -314,11 +314,11 @@ func (s *Store) Commit(paths []string, producer string, context [32]byte) bool {
 		ok := s.writeRecord(&r)
 		mem.FreeString(s.Alloc, member)
 		if !ok {
-			slices.Free(s.Alloc, observations)
+			mem.FreeSlice(nil, observations)
 			return false
 		}
 	}
-	slices.Free(s.Alloc, observations)
+	mem.FreeSlice(nil, observations)
 	s.Status = int(km_own_remove(s.native, batch+".batch"))
 	return s.Status == 0
 }

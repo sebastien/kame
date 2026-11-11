@@ -2,8 +2,8 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) list(scope *Scope, expression *expr.Expr, context *Context) Result {
@@ -16,14 +16,14 @@ func (p *Program) list(scope *Scope, expression *expr.Expr, context *Context) Re
 	for i := range values {
 		if expression.Items[i].Kind == expr.ListSpread {
 			for j := range values[i].List {
-				flattened = slices.Append(context.Run, flattened, values[i].List[j])
+				flattened = append(flattened, values[i].List[j])
 			}
 		} else {
-			flattened = slices.Append(context.Run, flattened, values[i])
+			flattened = append(flattened, values[i])
 		}
 	}
 	result := Result{Value: core.NewList(context.Run, flattened)}
-	slices.Free(context.Run, flattened)
+	mem.FreeSlice(nil, flattened)
 	// Transfer: NewList shallow-cloned callables into the result; release
 	// only storage so scopes are freed once by Result.Free.
 	freeValues(context.Run, values)
@@ -31,7 +31,7 @@ func (p *Program) list(scope *Scope, expression *expr.Expr, context *Context) Re
 }
 
 func (p *Program) record(scope *Scope, fields []expr.Field, context *Context) Result {
-	values := slices.Make[core.RecordField](context.Run, len(fields))
+	values := make([]core.RecordField, len(fields))
 	for i := range fields {
 		r := p.evaluate(context.Engine, scope, fields[i].Value, context)
 		if r.Waiting || r.Diagnostic.Code != "" {

@@ -2,8 +2,8 @@
 # Spec: docs/spec/015-distribution.md — published release self-build
 #
 # Build this checkout's dist/kame with a kame obtained from a published
-# channel: the npm/WASM CLI through bunx/npx, then the latest GitHub APE.
-# Network access, git and the Solod toolchain are required. This is an opt-in
+# channel: the npm/WASM CLI through bunx/npx, then the latest GitHub native.
+# Network access, git and the Go toolchain are required. This is an opt-in
 # release check, not part of the hermetic tests/harness.sh suite.
 set -euo pipefail
 
@@ -33,7 +33,7 @@ Usage:
   tests/platform/test-release-build.sh [OPTIONS]
 
 Options:
-  --channel auto|wasm|ape   auto tries WASM, then the APE (default: auto)
+  --channel auto|wasm|native   auto tries WASM, then the native (default: auto)
   --version VERSION         published version to use (default: latest)
   --source DIR              kame checkout to build (default: this repository)
   --keep                    keep temporary trees and logs
@@ -51,8 +51,8 @@ Environment:
   KAME_RELEASE_URL           release asset base URL override
   KAME_RELEASE_PUBLIC_KEY    optional Ed25519 PEM for the release signature
 
-Requires git, curl, tar, a C toolchain and the Solod compiler (so). The WASM
-channel also needs bun or npm; the APE runs on Cosmopolitan hosts.
+Requires git, curl, tar, Python 3 and Go. The WASM channel also needs bun or npm;
+the native channel supports Linux and macOS on x86-64 and ARM64.
 USAGE
 }
 
@@ -114,7 +114,7 @@ while [ $# -gt 0 ]; do
 done
 
 case $channel in
-auto | wasm | ape) ;;
+auto | wasm | native) ;;
 *) usage_error "invalid channel: $channel" ;;
 esac
 
@@ -130,7 +130,7 @@ source=$(CDPATH='' cd -- "$source" && pwd) || die "source directory does not exi
 [ -f "$source/VERSION" ] || die "$source is not a kame checkout (missing VERSION)"
 command -v git >/dev/null 2>&1 || die 'git is required to copy the checkout'
 command -v tar >/dev/null 2>&1 || die 'tar is required to copy the checkout'
-command -v so >/dev/null 2>&1 || die 'the Solod compiler (so) is required to build kame'
+command -v go >/dev/null 2>&1 || die 'Go is required to build kame'
 
 top=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) || die "$source is not a git checkout"
 [ "$(CDPATH='' cd -- "$top" && pwd -P)" = "$(CDPATH='' cd -- "$source" && pwd -P)" ] ||
@@ -214,7 +214,7 @@ resolve_wasm_version() {
 	github_latest
 }
 
-resolve_ape_version() {
+resolve_native_version() {
 	local version
 	if [ -n "$explicit_version" ]; then
 		normalize_version "$explicit_version"
@@ -324,7 +324,7 @@ assert_built() {
 
 verify_checksum() {
 	local directory=$1 line
-	line=$(grep '  kame\.com$' "$directory/SHA256SUMS" 2>/dev/null || true)
+	line=$(awk -v name="$asset" '$2 == name {print}' "$directory/SHA256SUMS")
 	[ -n "$line" ] || return 1
 	if command -v sha256sum >/dev/null 2>&1; then
 		(cd "$directory" && printf '%s\n' "$line" | sha256sum -c -)
@@ -361,7 +361,7 @@ dump_log() {
 }
 
 wasm_built_version=''
-ape_built_version=''
+native_built_version=''
 
 try_wasm() {
 	local version runner tree log
@@ -391,51 +391,52 @@ try_wasm() {
 	return 0
 }
 
-try_ape() {
-	local version base directory tree log
-	log=$tmp/ape.log
+try_native() {
+	local version base directory tree log asset
+	asset=kame-$(python3 "$root/src/sh/platform_id.py") || return 1
+	log=$tmp/native.log
 	: >"$log"
-	version=$(resolve_ape_version) || {
-		printf 'cannot resolve a published APE version\n' >>"$log"
+	version=$(resolve_native_version) || {
+		printf 'cannot resolve a published native version\n' >>"$log"
 		return 1
 	}
 	command -v curl >/dev/null 2>&1 || {
-		printf 'curl is required to download the APE release\n' >>"$log"
+		printf 'curl is required to download the native release\n' >>"$log"
 		return 1
 	}
-	note "APE channel: kame $version"
+	note "native channel: kame $version"
 	base=$(release_base "$version")
-	directory=$tmp/ape-$version
+	directory=$tmp/native-$version
 	mkdir -p "$directory" >>"$log" 2>&1 || return 1
 
-	run_limited curl -fsSL "$base/kame.com" -o "$directory/kame.com" >>"$log" 2>&1 || return 1
+	run_limited curl -fsSL "$base/$asset" -o "$directory/$asset" >>"$log" 2>&1 || return 1
 	run_limited curl -fsSL "$base/SHA256SUMS" -o "$directory/SHA256SUMS" >>"$log" 2>&1 || return 1
 	if [ -n "$public_key" ]; then
 		run_limited curl -fsSL "$base/SHA256SUMS.sig" -o "$directory/SHA256SUMS.sig" >>"$log" 2>&1 || return 1
 	else
-		note "APE channel: signature verification skipped (KAME_RELEASE_PUBLIC_KEY is not set)"
+		note "native channel: signature verification skipped (KAME_RELEASE_PUBLIC_KEY is not set)"
 	fi
 
 	verify_checksum "$directory" >>"$log" 2>&1 || {
-		printf 'kame.com checksum verification failed\n' >>"$log"
+		printf '$asset checksum verification failed\n' >>"$log"
 		return 1
 	}
 	verify_signature "$directory" >>"$log" 2>&1 || {
 		printf 'SHA256SUMS signature verification failed\n' >>"$log"
 		return 1
 	}
-	chmod +x "$directory/kame.com" >>"$log" 2>&1 || return 1
+	chmod +x "$directory/$asset" >>"$log" 2>&1 || return 1
 
-	run_limited "$directory/kame.com" --version >"$tmp/ape-version.out" 2>>"$log" || return 1
-	assert_dist_version "$tmp/ape-version.out" "$version" 2>>"$log" || return 1
+	run_limited "$directory/$asset" --version >"$tmp/native-version.out" 2>>"$log" || return 1
+	assert_dist_version "$tmp/native-version.out" "$version" 2>>"$log" || return 1
 
-	tree=$tmp/tree-ape
+	tree=$tmp/tree-native
 	copy_tree "$tree" >>"$log" 2>&1 || return 1
-	note "APE channel: self-building dist/kame"
-	run_limited "$directory/kame.com" -C "$tree" dist/kame >>"$log" 2>&1 || return 1
+	note "native channel: self-building dist/kame"
+	run_limited "$directory/$asset" -C "$tree" dist/kame >>"$log" 2>&1 || return 1
 	assert_built "$tree" "$source_version" >>"$log" 2>&1 || return 1
-	ape_built_version=$version
-	note "APE channel: built kame $source_version"
+	native_built_version=$version
+	note "native channel: built kame $source_version"
 	return 0
 }
 
@@ -456,14 +457,14 @@ if [ "$channel" = auto ] || [ "$channel" = wasm ]; then
 	fi
 fi
 
-if [ -z "$winner" ] && { [ "$channel" = auto ] || [ "$channel" = ape ]; }; then
-	if try_ape; then
-		winner=ape
-		winner_version=$ape_built_version
+if [ -z "$winner" ] && { [ "$channel" = auto ] || [ "$channel" = native ]; }; then
+	if try_native; then
+		winner=native
+		winner_version=$native_built_version
 	else
-		reason=$(failure_reason "$tmp/ape.log")
-		dump_log APE "$tmp/ape.log"
-		die "APE self-build failed: $reason"
+		reason=$(failure_reason "$tmp/native.log")
+		dump_log native "$tmp/native.log"
+		die "native self-build failed: $reason"
 	fi
 fi
 

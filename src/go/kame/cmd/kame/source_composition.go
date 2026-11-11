@@ -2,38 +2,39 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"os"
+	"path"
+	"slices"
+	"strings"
 )
 
-func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, lang string, includes []diagnostic.Frame) program.PredicateResult {
-	sources := slices.Clone(mem.System, s.SelectionPrefix)
+func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, includes []diagnostic.Frame) program.PredicateResult {
+	sources := slices.Clone(s.SelectionPrefix)
 	for i := range s.Parts {
-		sources = selectionDefinitions(sources, s.Parts[i], lang)
+		sources = selectionDefinitions(sources, s.Parts[i], s.Parts[i].Lang)
 	}
-	defer slices.Free(mem.System, sources)
+	defer mem.FreeSlice(nil, sources)
 	directory := s.SelectionDirectory
 	ownedDirectory := false
-	buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
+	buffer := mem.AllocSlice[byte](mem.System, 4096, 4096)
 	defer mem.FreeSlice(mem.System, buffer)
 	if !path.IsAbs(directory) {
-		cwd, err := os.Getwd(buffer)
+		cwd, err := os.Getwd()
 		if err != nil || cwd == "" {
 			sourceError(out, "FS_ERR", "cannot resolve configuration evaluation directory", s.JSON)
 			s.Status = 1
 			return program.PredicateResult{Diagnostic: diagnostic.Diagnostic{Code: "FS_ERR"}}
 		}
-		directory = path.Join(mem.System, cwd, directory)
+		directory = path.Join(cwd, directory)
 		ownedDirectory = true
 	}
 	result := program.CompositionConditionSources(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory)
@@ -62,7 +63,7 @@ func (s *buildSource) expandSourceComposition(fileIndex int, expression *expr.Ex
 		return false
 	}
 	for i := 1; i+1 < len(expression.Items); i += 2 {
-		result := s.compositionCondition(expression.Items[i], out, authored, lang, s.Files[fileIndex].Includes)
+		result := s.compositionCondition(expression.Items[i], out, authored, s.Files[fileIndex].Includes)
 		selected := result.Selected
 		failed := result.Diagnostic.Code != ""
 		result.Diagnostic.Free(mem.System)
@@ -92,13 +93,13 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	}
 	includeName := cloneCommandText(name)
 	if !path.IsAbs(includeName) {
-		parent := path.Dir(mem.System, file.Name)
-		resolved := path.Join(mem.System, parent, includeName)
+		parent := path.Dir(file.Name)
+		resolved := path.Join(parent, includeName)
 		mem.FreeString(mem.System, parent)
 		mem.FreeString(mem.System, includeName)
 		includeName = resolved
 	}
-	canonical := path.Clean(mem.System, includeName)
+	canonical := path.Clean(includeName)
 	mem.FreeString(mem.System, includeName)
 	includeName = canonical
 	for j := fileIndex; j >= 0; j = s.Files[j].Parent {
@@ -108,25 +109,28 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 			return false
 		}
 	}
-	data, readErr := os.ReadFile(mem.System, includeName)
+	data, readErr := os.ReadFile(includeName)
 	if readErr != nil {
 		// Both missing optional and failed required paths stay watch dependencies.
-		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, OwnedName: true, FileBacked: true, Parent: fileIndex})
-		if optional && readErr == os.ErrNotExist {
+		s.Files = append(s.Files, sourceFile{Name: includeName, OwnedName: true, FileBacked: true, Parent: fileIndex})
+		if optional && os.IsNotExist(readErr) {
 			return true
 		}
 		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FS_ERR", Severity: diagnostic.Error, Message: "cannot read included source: " + includeName, Span: diagnostic.Span{Start: span.Start, End: span.End}}, s.JSON, authored)
 		return false
 	}
-	includes := slices.Clone(mem.System, file.Includes)
-	includes = slices.Append(mem.System, includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
-	s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
+	includes := slices.Clone(file.Includes)
+	includes = append(includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	s.Files = append(s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
+	if lang != "kash" && (strings.HasSuffix(includeName, ".kash") || strings.HasSuffix(includeName, ".ksh")) {
+		lang = "kash"
+	}
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)
 }
 
 func inlineRunSource(name string, text string, lang string, json bool, defines []string, environment []string, out io.Writer, prefix []program.CompileSource, directory string) buildSource {
 	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
-	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: name, Text: text, Parent: -1})
+	result.Files = append(result.Files, sourceFile{Name: name, Text: text, Parent: -1})
 	if !expandIncludesLanguage(&result, 0, out, lang) {
 		result.Status = 1
 	}
@@ -138,7 +142,7 @@ func inlineRunSource(name string, text string, lang string, json bool, defines [
 func selectionPrefix(fragments []program.Fragment) []program.CompileSource {
 	var sources []program.CompileSource
 	for i := range fragments {
-		if fragments[i].Lang == "km" || fragments[i].Lang == "kmk" {
+		if fragments[i].Lang == "km" || fragments[i].Lang == "kmk" || (fragments[i].Lang == "kash" && len(fragments[i].Includes) != 0) {
 			f := fragments[i]
 			sources = selectionDefinitions(sources, program.CompileSource{Name: f.Name, Text: f.Text, Offset: f.Offset, Includes: f.Includes}, f.Lang)
 		}
@@ -149,18 +153,18 @@ func selectionPrefix(fragments []program.Fragment) []program.CompileSource {
 // selectionOverrides returns an owned slice of borrowed declaration-selection
 // operands. Definitions and ambiguous shorthand remain distinct in Invocation.
 func selectionOverrides(defines []string, parameters []string) []string {
-	values := slices.Clone(mem.System, defines)
+	values := slices.Clone(defines)
 	for i := range parameters {
-		values = slices.Append(mem.System, values, parameters[i])
+		values = append(values, parameters[i])
 	}
 	return values
 }
 
 func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []program.Fragment, out io.Writer) buildSource {
 	defines := selectionOverrides(inv.Defines, inv.Parameters)
-	defer slices.Free(mem.System, defines)
+	defer mem.FreeSlice(nil, defines)
 	prefix := selectionPrefix(fragments)
-	defer slices.Free(mem.System, prefix)
+	defer mem.FreeSlice(nil, prefix)
 	if input.Kind == "discover" {
 		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment}, out, true, prefix)
 	}
@@ -168,16 +172,16 @@ func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []prog
 	if path.IsAbs(name) {
 		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
 	}
-	resolved := path.Join(mem.System, inv.Directory, name)
+	resolved := path.Join(inv.Directory, name)
 	defer mem.FreeString(mem.System, resolved)
 	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
 }
 
 func inlineRunSourceInput(inv cli.Invocation, name string, text string, lang string, fragments []program.Fragment, out io.Writer) buildSource {
 	defines := selectionOverrides(inv.Defines, inv.Parameters)
-	defer slices.Free(mem.System, defines)
+	defer mem.FreeSlice(nil, defines)
 	prefix := selectionPrefix(fragments)
-	defer slices.Free(mem.System, prefix)
+	defer mem.FreeSlice(nil, prefix)
 	return inlineRunSource(name, text, lang, inv.JSON, defines, inv.Environment, out, prefix, inv.Directory)
 }
 
@@ -191,7 +195,7 @@ func selectionDefinitions(sources []program.CompileSource, part program.CompileS
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.Definition {
-			sources = slices.Append(mem.System, sources, program.CompileSource{Name: part.Name, Text: part.Text[item.Span.Start:item.Span.End], Offset: part.Offset + item.Span.Start, Includes: part.Includes})
+			sources = append(sources, program.CompileSource{Name: part.Name, Text: part.Text[item.Span.Start:item.Span.End], Lang: lang, Offset: part.Offset + item.Span.Start, Includes: part.Includes})
 		}
 	}
 	return sources

@@ -4,9 +4,9 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	"strings"
 )
 
 type publicationState struct {

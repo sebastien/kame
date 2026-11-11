@@ -1,8 +1,8 @@
-package diagnostic_test
+package diagnosticcheck
 
 import (
 	"kame/diagnostic"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
 )
 
 func TestFreeAcceptsBorrowedDiagnostic(t *testing.T) {

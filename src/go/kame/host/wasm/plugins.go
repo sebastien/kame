@@ -1,8 +1,8 @@
 package wasm
 
 import (
+	"kame/internal/mem"
 	"kame/plugins"
-	"solod.dev/so/mem"
 )
 
 // RegisterPluginsJSON installs explicit operation declarations before the

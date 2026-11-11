@@ -2,7 +2,7 @@ package wasm
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 func CompletionValueFromJSON(a mem.Allocator, data []byte, out *core.Value) bool {

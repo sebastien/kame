@@ -1,19 +1,19 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
+	"kame/internal/mem"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/time"
+	"os"
+	"time"
 )
 
 // Invocation policy and lifecycle shared by the native command handlers.
 var selectedOutput = "ansi"
-var invocationCounts buildProgress
+
 var invocationHadDiagnostic bool
-var stdoutColor bool
+
 var formatHasResults bool
 var presentationClock time.Time
 
@@ -111,3 +111,9 @@ func freeInvocationPresentation(out io.Writer) {
 	mem.FreeString(mem.System, dashboardSubject)
 	dashboardSubject = ""
 }
+
+var (
+	invocationCounts buildProgress
+
+	stdoutColor bool
+)

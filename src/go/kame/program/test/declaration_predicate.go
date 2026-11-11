@@ -1,8 +1,8 @@
-package program_test
+package programcheck
 
 import (
+	"kame/internal/testing"
 	"kame/program"
-	"solod.dev/so/testing"
 )
 
 func TestDeclarationPredicateUsesLiteralOverridesAndLazyDefinitions(t *testing.T) {

@@ -3,12 +3,12 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
+	"path"
+	"slices"
 )
 
 type inputsResult struct {
@@ -67,7 +67,7 @@ func (p *Program) emitCachedLog(entry *instance, kind EventKind, data []byte, tr
 	}
 	event := Event{Kind: kind, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Cached: true, Truncated: truncated}
 	if len(data) != 0 {
-		event.Data = slices.Clone(p.Alloc, data)
+		event.Data = slices.Clone(data)
 	}
 	p.emit(event)
 }
@@ -101,7 +101,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 	hasYielded := false
 	for i := range effects {
 		effect := effects[i]
-		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, Data: slices.Clone(p.Alloc, effect.Data), Effect: effectName(effect.Kind)})
+		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, Data: slices.Clone(effect.Data), Effect: effectName(effect.Kind)})
 		if effect.Kind == eval.EffectOut {
 			p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
 			if entry.Rule.Kind == rule.CachedTaskRule {
@@ -115,12 +115,12 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		} else if effect.Kind == eval.EffectYield {
 			hasYielded = true
 			for j := range effect.Data {
-				yielded = slices.Append(p.Alloc, yielded, effect.Data[j])
+				yielded = append(yielded, effect.Data[j])
 			}
 		}
 		if effect.Kind == eval.EffectWrite {
 			if writeIndex >= len(writePaths) {
-				slices.Free(p.Alloc, yielded)
+				mem.FreeSlice(nil, yielded)
 				return failure(p.Alloc, "FS_ERR", "missing write path")
 			}
 			if !dryRun {
@@ -128,7 +128,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 				ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, effect.Data, 0o644, false) == nil
 				if !ok {
 					mem.FreeString(p.Alloc, name)
-					slices.Free(p.Alloc, yielded)
+					mem.FreeSlice(nil, yielded)
 					return failure(p.Alloc, "FS_ERR", "cannot write file")
 				}
 				mem.FreeString(p.Alloc, name)
@@ -140,17 +140,17 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		return diagnostic.Diagnostic{}
 	}
 	if dryRun {
-		slices.Free(p.Alloc, yielded)
+		mem.FreeSlice(nil, yielded)
 		return diagnostic.Diagnostic{}
 	}
 	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 {
-		slices.Free(p.Alloc, yielded)
+		mem.FreeSlice(nil, yielded)
 		return failure(p.Alloc, "EXPR_INVALID", "yield requires one file output")
 	}
 	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 	ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, yielded, 0o644, false) == nil
 	mem.FreeString(p.Alloc, name)
-	slices.Free(p.Alloc, yielded)
+	mem.FreeSlice(nil, yielded)
 	if !ok {
 		return failure(p.Alloc, "FS_ERR", "cannot write yielded output")
 	}
@@ -201,16 +201,16 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		input := authored.Inputs[i]
 		if input.Kind != rule.InputExpression && input.Kind != rule.InputString && input.Kind != rule.InputWildcard {
 			if input.Kind == rule.InputTemplate {
-				inputs = slices.Append(p.Alloc, inputs, renderInput(p.Alloc, input, entry.Captures))
+				inputs = append(inputs, renderInput(p.Alloc, input, entry.Captures))
 			} else {
-				inputs = slices.Append(p.Alloc, inputs, cloneText(p.Alloc, input.Text))
+				inputs = append(inputs, cloneText(p.Alloc, input.Text))
 			}
 			text := inputs[len(inputs)-1]
 			kind := core.ResourceTarget
 			if input.Kind == rule.InputPath {
 				kind = core.ResourceFile
 			}
-			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: group, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+			resourceInputs = append(resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: group, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
 		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || (input.Template.Parts[0].Kind != template.Expression && input.Template.Parts[0].Kind != template.Reference) || input.Template.Parts[0].Expr == nil)) {
@@ -275,7 +275,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			resourceInputs[len(resourceInputs)-1].SequenceEnd = true
 		}
 		for j := before; j < len(inputs); j++ {
-			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
+			dynamicInputs = append(dynamicInputs, cloneText(p.Alloc, inputs[j]))
 		}
 	}
 	// Dependency discovery can append rule instances, invalidating the entry
@@ -301,14 +301,14 @@ func appendInputValue(a mem.Allocator, inputs *[]string, resourceInputs *[]PlanI
 	}
 	if value.Kind == core.String || value.Kind == core.Pattern {
 		text := cloneText(a, value.Text)
-		*inputs = slices.Append(a, *inputs, text)
-		*resourceInputs = slices.Append(a, *resourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})
+		*inputs = append(*inputs, text)
+		*resourceInputs = append(*resourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})
 		return true
 	}
 	if value.Kind == core.Resource {
 		text := cloneText(a, value.Resource.Name)
-		*inputs = slices.Append(a, *inputs, text)
-		*resourceInputs = slices.Append(a, *resourceInputs, PlanInput{Display: cloneText(a, text), Key: value.Resource.Clone(a)})
+		*inputs = append(*inputs, text)
+		*resourceInputs = append(*resourceInputs, PlanInput{Display: cloneText(a, text), Key: value.Resource.Clone(a)})
 		return true
 	}
 	if value.Kind != core.List {
@@ -325,14 +325,14 @@ func appendInputValue(a mem.Allocator, inputs *[]string, resourceInputs *[]PlanI
 func cloneStrings(a mem.Allocator, values []string) []string {
 	var out []string
 	for i := range values {
-		out = slices.Append(a, out, cloneText(a, values[i]))
+		out = append(out, cloneText(a, values[i]))
 	}
 	return out
 }
 func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 	var out []PlanInput
 	for i := range values {
-		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Group: values[i].Group, Computed: values[i].Computed, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
+		out = append(out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Group: values[i].Group, Computed: values[i].Computed, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
 	}
 	return out
 }
@@ -340,7 +340,7 @@ func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 func makeValues(a mem.Allocator, names []string) []core.Value {
 	var out []core.Value
 	for i := range names {
-		out = slices.Append(a, out, core.NewString(a, names[i]))
+		out = append(out, core.NewString(a, names[i]))
 	}
 	return out
 }
@@ -348,13 +348,13 @@ func freeValues(a mem.Allocator, values []core.Value) {
 	for i := range values {
 		values[i].Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 func freeStrings(a mem.Allocator, values []string) {
 	for i := range values {
 		mem.FreeString(a, values[i])
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 func freeOwnedStrings(a mem.Allocator, values []string, owned bool) {
 	if owned {
@@ -369,7 +369,7 @@ func freePlanInputs(a mem.Allocator, values []PlanInput, owned bool) {
 		mem.FreeString(a, values[i].Display)
 		values[i].Key.Free(a)
 	}
-	slices.Free(a, values)
+	mem.FreeSlice(nil, values)
 }
 
 func (p *Program) mkdirParent(name string) bool {
@@ -386,7 +386,7 @@ func (p *Program) mkdirParent(name string) bool {
 		}
 		// Traverse decoded path segments, then retain URI identity for the host.
 		// path.Dir on the whole URI collapses :// and creates local "file:" trees.
-		directory := path.Dir(mem.System, parsed.URI.Path)
+		directory := path.Dir(parsed.URI.Path)
 		mem.FreeString(mem.System, parsed.URI.Path)
 		parsed.URI.Path = directory
 		if directory == "/" {
@@ -396,7 +396,7 @@ func (p *Program) mkdirParent(name string) bool {
 		parent = parsed.URI.Canonical(mem.System)
 		parsed.URI.Free()
 	} else {
-		parent = path.Dir(mem.System, name)
+		parent = path.Dir(name)
 	}
 	defer mem.FreeString(mem.System, parent)
 	if parent == "." || parent == "/" {
@@ -425,7 +425,7 @@ func makeRuleInputValues(a mem.Allocator, names []string, resources []PlanInput)
 		if i < len(resources) && resources[i].OrderOnly {
 			continue
 		}
-		out = slices.Append(a, out, core.NewString(a, names[i]))
+		out = append(out, core.NewString(a, names[i]))
 	}
 	return out
 }

@@ -424,9 +424,8 @@ func TestDiagnosticPresentationEnvironmentAndJSONEarlyErrors(t *testing.T) {
 	}
 }
 
-// Repeated black-box calls preserve command-result coverage. The compiled
-// native lifecycle gate separately repeats Run in one process with allocation
-// tracking and sanitizers; no Solod code executes in this Go driver.
+// Repeated subprocess calls preserve command-result coverage. TestRunLifecycle
+// separately exercises the same entry point within one Go process.
 func TestRepeatedNativeCLICommandResults(t *testing.T) {
 	tests := []struct {
 		args   []string

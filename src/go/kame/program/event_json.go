@@ -1,11 +1,11 @@
 package program
 
 import (
+	"io"
 	"kame/core"
 	"kame/diagnostic"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
 )
 
 func WriteJSONEvent(out io.Writer, event Event) {

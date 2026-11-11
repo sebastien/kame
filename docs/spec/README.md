@@ -53,3 +53,5 @@ host-specific boundaries remain explicit.
 | [041 Pattern predicates and substitution](041-pattern-predicates-and-substitution.md) | Boolean matching, nonmatch-preserving substitution, deprecated replace alias and migration |
 | [042 Kash streaming](042-kash-streaming.md) | Process topology, framing, channels, multiplexing, stream operands and bounded buffering |
 | [043 Kame finalization](043-kame-finalization.md) | Execution-only finally! callbacks, effect ordering, bounded cleanup, shared unwind deadlines and error precedence |
+| [050 Kash libraries](050-kash-libraries.md) | Kash library includes, module values, source identity and freshness |
+| [051 Kash session authority](051-kash-session-authority.md) | Named child-environment authority, scope overlay, and foreground terminal handoff |

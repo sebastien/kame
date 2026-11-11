@@ -1,10 +1,10 @@
 package cli
 
 import (
+	"io"
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/eval"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
 )
 
 // Style is the hardcoded semantic theme. Exact command data never passes here.

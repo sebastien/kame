@@ -1,22 +1,22 @@
 package template
 
 import (
+	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+
+	"strings"
 )
 
 // DocumentFormatResult carries canonical document text or the first source
 // diagnostic. Its strings are owned by Alloc.
 type DocumentFormatResult struct {
-	Alloc     mem.Allocator
-	Text      string
-	Code      string
-	Message   string
-	Span      source.Span
-	OK        bool
+	Alloc   mem.Allocator
+	Text    string
+	Code    string
+	Message string
+	Span    source.Span
+	OK      bool
 }
 
 func (r *DocumentFormatResult) Free() {
@@ -63,8 +63,8 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 
 	sourceText := source.New(a, name, text)
 	p := docParser{a: a, s: sourceText, style: style}
-	out := strings.NewBuilder(a)
-	defer out.Free()
+	out := strings.Builder{}
+	defer out.Reset()
 	var blocks []int
 	cur := 0
 	for cur < len(text) {
@@ -146,7 +146,7 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 		out.WriteString(text[cur:line.LineEnd])
 		cur = line.LineEnd
 	}
-	slices.Free(a, blocks)
+	mem.FreeSlice(nil, blocks)
 	sourceText.Free(a)
 	result := mem.Alloc[DocumentFormatResult](a)
 	result.Alloc, result.Text, result.OK = a, cloneDocumentFormatText(a, out.String()), true
@@ -198,7 +198,7 @@ func canonicalDirective(a mem.Allocator, d dirOut, blocks *[]int) string {
 	default:
 		return ""
 	}
-	out := strings.NewBuilder(a)
+	out := strings.Builder{}
 	out.WriteString("@")
 	if d.TrimLeft {
 		out.WriteString("-")
@@ -232,9 +232,9 @@ func canonicalDirective(a mem.Allocator, d dirOut, blocks *[]int) string {
 		out.WriteString("-")
 	}
 	text := cloneDocumentFormatText(a, out.String())
-	out.Free()
+	out.Reset()
 	if d.Kind == dirIf || d.Kind == dirFor || d.Kind == dirWith || d.Kind == dirMatch || d.Kind == dirRaw {
-		*blocks = slices.Append(a, *blocks, d.Kind)
+		*blocks = append(*blocks, d.Kind)
 	} else if d.Kind == dirEnd && len(*blocks) != 0 {
 		*blocks = (*blocks)[:len(*blocks)-1]
 	}
@@ -259,7 +259,7 @@ func blockName(kind int) string {
 }
 
 func canonicalComment(a mem.Allocator, style string, directive string) string {
-	out := strings.NewBuilder(a)
+	out := strings.Builder{}
 	switch style {
 	case "html":
 		out.WriteString("<!-- ")
@@ -288,6 +288,6 @@ func canonicalComment(a mem.Allocator, style string, directive string) string {
 		out.WriteString(" #>")
 	}
 	result := cloneDocumentFormatText(a, out.String())
-	out.Free()
+	out.Reset()
 	return result
 }

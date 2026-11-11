@@ -2,13 +2,11 @@ package host
 
 import (
 	"kame/core"
-	"solod.dev/so/encoding/json"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
+	json "kame/internal/jsonstream"
+	"kame/internal/mem"
+	"strings"
 )
 
-// Keep this file ahead of programhost.go: Solod emits interface wrappers in
-// source order, and ProgramHost.ReadRecord returns RecordResult.
 const RecordLimit = 65536
 
 // A string is one raw record including its delimiter, nil is EOF. Errors are
@@ -20,7 +18,7 @@ type RecordResult struct {
 }
 
 func RecordPayload(a mem.Allocator, id int64, path string, delimiter int, stdin bool) core.Value {
-	b := strings.NewBuilder(a)
+	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("reader")
@@ -40,6 +38,6 @@ func RecordPayload(a mem.Allocator, id int64, path string, delimiter int, stdin 
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
-	b.Free()
+	b.Reset()
 	return r
 }

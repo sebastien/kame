@@ -1,13 +1,13 @@
-package eval_test
+package evalcheck
 
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"slices"
 )
 
 type memoCountState struct {
@@ -19,7 +19,7 @@ func memoCountOperation(c *eval.Context, value any, args []core.Value) eval.Resu
 	_ = args
 	state := value.(*memoCountState)
 	state.Calls++
-	c.Effects = slices.Append(c.Run, c.Effects, eval.Effect{Kind: eval.EffectOut, Data: slices.Clone(c.Run, []byte("once"))})
+	c.Effects = append(c.Effects, eval.Effect{Kind: eval.EffectOut, Data: slices.Clone([]byte("once"))})
 	return eval.Result{Value: core.Value{Kind: core.Int, Int: int64(state.Calls)}}
 }
 

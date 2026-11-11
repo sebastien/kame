@@ -66,8 +66,8 @@ cli_run --dir "$CLI_ROOT" -- do inputs --json ./build/kame.debug
 cli_expect_status 0
 cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.key.kind == "file") | .display] | contains([
   "./src/go/kame/cmd/kame/main.go",
-  "./src/go/kame/host/posix/posix.c",
-  "./src/go/kame/host/posix/posix.h",
+  "./src/go/kame/host/posix/posix.go",
+  "./src/go/kame/host/posix/topology.go",
   "./src/go/kame/cmd/kame/version_generated.go",
   "./VERSION",
   "./src/sh/generate-version.sh"

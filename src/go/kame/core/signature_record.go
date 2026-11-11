@@ -1,8 +1,7 @@
 package core
 
 import (
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 // Accepted records are bounded, versioned and self-checking. Malformed,
@@ -92,7 +91,7 @@ func (c *signatureRecordCodec) readObservations(a mem.Allocator) []Observation {
 		}
 		key := NewResourceKey(a, kind, string(c.Data[c.At:c.At+int(length)]))
 		c.At += int(length)
-		out = slices.Append(a, out, Observation{Key: key, Aspect: aspect, Signature: s})
+		out = append(out, Observation{Key: key, Aspect: aspect, Signature: s})
 	}
 	return out
 }
@@ -116,7 +115,7 @@ func EncodeSignatureRecord(a mem.Allocator, record *SignatureRecord) []byte {
 		}
 		n += 39 + length
 	}
-	c := signatureRecordCodec{Data: slices.Make[byte](a, n), At: 4}
+	c := signatureRecordCodec{Data: make([]byte, n), At: 4}
 	copy(c.Data[:4], "KSR2")
 	c.writeSignature(record.Implementation)
 	c.writeSignature(record.Guard)

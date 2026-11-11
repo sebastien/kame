@@ -3,10 +3,10 @@ package eval
 import (
 	"kame/core"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
+	"strings"
+	"unicode/utf8"
 )
 
 func closeKashReader(state *kashLoopState) {

@@ -3,12 +3,12 @@ package operations
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+
+	"strconv"
+	"strings"
 )
 
 // opPattern explicitly constructs a pattern value from validated runtime text.
@@ -20,7 +20,7 @@ func opPattern(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
 	defer parsed.Pattern.Free(c.Run)
-	defer slices.Free(c.Run, parsed.Diagnostics)
+	defer mem.FreeSlice(nil, parsed.Diagnostics)
 	if len(parsed.Diagnostics) != 0 || (parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0) {
 		return ownedFailure(c.Run, "PAT_INVALID", "invalid runtime pattern")
 	}
@@ -55,11 +55,11 @@ func cloneText(a mem.Allocator, text string) string {
 // satisfied. It takes ownership of name.
 func missingReferenceFailure(run mem.Allocator, name string) eval.Result {
 	var b strings.Builder
-	b = strings.NewBuilder(run)
+	b = strings.Builder{}
 	b.WriteString("pattern reference is missing: ")
 	b.WriteString(name)
 	message := cloneText(run, b.String())
-	b.Free()
+	b.Reset()
 	mem.FreeString(run, name)
 	return eval.Result{Diagnostic: core.Diagnostic{Code: cloneText(run, "PAT_INVALID"), Severity: diagnostic.Error, Message: message, Owned: true}}
 }
@@ -71,13 +71,13 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 	parsed := expr.ParsePatternText(c.Run, match.Text, 0)
 	if len(parsed.Diagnostics) != 0 || !expr.HasGroups(parsed.Pattern) || parsed.Pattern.Matchers == 0 {
 		parsed.Pattern.Free(c.Run)
-		slices.Free(c.Run, parsed.Diagnostics)
+		mem.FreeSlice(nil, parsed.Diagnostics)
 		return ownedFailure(c.Run, "PAT_INVALID", "match pattern needs a matcher group")
 	}
 	state := mem.Alloc[replaceState](c.Run)
 	state.match = parsed.Pattern
 	state.constant = core.Value{Kind: core.Nil}
-	slices.Free(c.Run, parsed.Diagnostics)
+	mem.FreeSlice(nil, parsed.Diagnostics)
 	if expansion.Kind == core.Callable {
 		function := expansion.Callable.(*eval.Function)
 		if function.DeferredReplacement {
@@ -104,12 +104,12 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 		expanded := expr.ParsePatternText(c.Run, expansion.Text, 0)
 		if len(expanded.Diagnostics) != 0 || expanded.Pattern.Matchers != 0 || expanded.Pattern.References == 0 {
 			expanded.Pattern.Free(c.Run)
-			slices.Free(c.Run, expanded.Diagnostics)
+			mem.FreeSlice(nil, expanded.Diagnostics)
 			freeReplaceState(c.Run, state)
 			return ownedFailure(c.Run, "PAT_INVALID", "expansion pattern needs reference groups")
 		}
 		state.expand = expanded.Pattern
-		slices.Free(c.Run, expanded.Diagnostics)
+		mem.FreeSlice(nil, expanded.Diagnostics)
 		*out = state
 		return eval.Result{}
 	}
@@ -175,8 +175,8 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 				return c.InvalidOperation("replace subject list must contain only strings; got " + core.KindName(subject.List[i].Kind))
 			}
 			previous := c.CallPath
-			var digits [32]byte
-			identity := core.NewString(c.Run, previous+"/replace-item:"+strconv.Itoa(digits[:], i))
+
+			identity := core.NewString(c.Run, previous+"/replace-item:"+strconv.Itoa(i))
 			c.CallPath = identity.Text
 			effects, paths := len(c.Effects), len(c.WritePaths)
 			one := replaceOne(c, state, subject.List[i].Text)
@@ -191,7 +191,7 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 				c.DiscardCallables(&subject)
 				return one
 			}
-			progress.Values = slices.Append(c.Run, progress.Values, one.Value)
+			progress.Values = append(progress.Values, one.Value)
 			rememberCallbackEffects(c, progress, effects, paths)
 			progress.Index++
 		}
@@ -206,11 +206,11 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Result {
 	matched := state.match.MatchText(c.Run, subject)
 	if matched.Limited {
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")
 	}
 	if !matched.Matched {
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		if state.preserveNonmatches {
 			return eval.Result{Value: core.NewString(c.Run, subject)}
 		}
@@ -220,13 +220,13 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 		var fields []core.RecordField
 		for i := range state.match.Names {
 			if state.match.Names[i] != "" {
-				fields = slices.Append(c.Run, fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])})
+				fields = append(fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])})
 			}
 		}
 		var positional []string
 		for i := range matched.Captures {
-			var buffer [32]byte
-			key := "_" + strconv.Itoa(buffer[:], i)
+
+			key := "_" + strconv.Itoa(i)
 			duplicate := false
 			for j := range fields {
 				if fields[j].Key == key {
@@ -238,43 +238,43 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 				continue
 			}
 			key = core.NewString(c.Run, key).Text
-			positional = slices.Append(c.Run, positional, key)
-			fields = slices.Append(c.Run, fields, core.RecordField{Key: key, Value: core.NewString(c.Run, matched.Captures[i])})
+			positional = append(positional, key)
+			fields = append(fields, core.RecordField{Key: key, Value: core.NewString(c.Run, matched.Captures[i])})
 		}
 		captures := core.NewRecord(c.Run, fields)
 		for i := range positional {
 			mem.FreeString(c.Run, positional[i])
 		}
-		slices.Free(c.Run, positional)
+		mem.FreeSlice(nil, positional)
 		for i := range fields {
 			fields[i].Value.Free(c.Run)
 		}
-		slices.Free(c.Run, fields)
+		mem.FreeSlice(nil, fields)
 		result := c.EvaluateReplacement(state.replacement, captures, state.scope)
 		captures.Free(c.Run)
 		if result.Waiting || result.Diagnostic.Code != "" {
-			slices.Free(c.Run, matched.Captures)
+			mem.FreeSlice(nil, matched.Captures)
 			return result
 		}
 		if result.Value.Kind == core.Pattern {
 			expansion := expr.ParsePatternText(c.Run, result.Value.Text, 0)
 			result.Free(c.Run)
 			invalid := len(expansion.Diagnostics) != 0 || expansion.Pattern.Matchers != 0 || expansion.Pattern.References == 0
-			slices.Free(c.Run, expansion.Diagnostics)
+			mem.FreeSlice(nil, expansion.Diagnostics)
 			if invalid {
 				expansion.Pattern.Free(c.Run)
-				slices.Free(c.Run, matched.Captures)
+				mem.FreeSlice(nil, matched.Captures)
 				return ownedFailure(c.Run, "PAT_INVALID", "expansion pattern needs reference groups")
 			}
 			expanded := expansion.Pattern.ExpandText(c.Run, state.match, matched.Captures)
 			expansion.Pattern.Free(c.Run)
-			slices.Free(c.Run, matched.Captures)
+			mem.FreeSlice(nil, matched.Captures)
 			if expanded.Missing != "" {
 				return missingReferenceFailure(c.Run, expanded.Missing)
 			}
 			return eval.Result{Value: core.Value{Kind: core.String, Text: expanded.Text}}
 		}
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		if result.Value.Kind != core.String && result.Value.Kind != core.Int && result.Value.Kind != core.Float && result.Value.Kind != core.Bool {
 			result.Free(c.Run)
 			return ownedFailure(c.Run, "PAT_INVALID", "expansion must be a string, number, bool, or expansion pattern")
@@ -287,11 +287,11 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 		return eval.Result{Value: core.Value{Kind: core.String, Text: text}}
 	}
 	if state.expand == nil {
-		slices.Free(c.Run, matched.Captures)
+		mem.FreeSlice(nil, matched.Captures)
 		return eval.Result{Value: state.constant.Clone(c.Run)}
 	}
 	expanded := state.expand.ExpandText(c.Run, state.match, matched.Captures)
-	slices.Free(c.Run, matched.Captures)
+	mem.FreeSlice(nil, matched.Captures)
 	if expanded.Missing != "" {
 		return missingReferenceFailure(c.Run, expanded.Missing)
 	}

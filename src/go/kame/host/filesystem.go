@@ -1,7 +1,7 @@
 package host
 
 import (
-	"solod.dev/so/mem"
+	"kame/internal/mem"
 )
 
 // FileInfo is a portable snapshot of one path. ModTime is unix nanoseconds so
@@ -16,15 +16,13 @@ type FileInfo struct {
 }
 
 // PublishResult preserves the commit outcome even if staging cleanup fails.
-// Declared before ProgramHost: Solod emits interface wrappers in source order.
 type PublishResult struct {
 	Code          string
 	Published     bool
 	StagedRemoved bool
 }
 
-// StatResult is a single-return stat outcome. Solod cannot wrap a struct and an
-// error in one multi-return, so absence and failure are explicit flags:
+// StatResult distinguishes absence from a failed filesystem query.
 // Exists is true for a present path, Failed is true for any error other than
 // not-found, and both false means the path is simply absent.
 type StatResult struct {

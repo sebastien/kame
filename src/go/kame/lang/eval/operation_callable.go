@@ -2,8 +2,7 @@ package eval
 
 import (
 	"kame/core"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
+	"kame/internal/mem"
 )
 
 func (p *Program) newOperationCallable(name string) core.Value {
@@ -19,7 +18,7 @@ func (p *Program) newOperationCallable(name string) core.Value {
 	if operation != nil && operation.MinArity == operation.MaxArity {
 		f.Arity = operation.MinArity
 	}
-	p.OperationFunctions = slices.Append(p.Alloc, p.OperationFunctions, f)
+	p.OperationFunctions = append(p.OperationFunctions, f)
 	return core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: f.OperationName}
 }
 

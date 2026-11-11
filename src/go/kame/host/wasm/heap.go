@@ -3,8 +3,8 @@ package wasm
 import (
 	"unsafe"
 
-	"solod.dev/so/c"
-	"solod.dev/so/mem"
+	"kame/internal/c"
+	"kame/internal/mem"
 )
 
 // Heap owns no memory outside its supplied buffer. Physical blocks keep their
@@ -213,3 +213,6 @@ func (h *Heap) Realloc(ptr any, oldSize int, newSize int, align int) (any, error
 	h.Free(ptr, oldSize, align)
 	return next, nil
 }
+
+// RawBuffers marks this allocator as suitable for pointer-free byte buffers only.
+func (h *Heap) RawBuffers() {}

@@ -1,16 +1,15 @@
-package program_test
+package programcheck
 
 import (
 	"kame/core"
 	"kame/host/wasm"
+	"kame/internal/mem"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
-	"solod.dev/so/mem"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/testing"
+	"path"
 )
 
 type timingClock struct{ Now int64 }
@@ -50,12 +49,12 @@ func TestTimingHistoryDoesNotChangeFreshnessOrCountPastWatchWork(t *testing.T) {
 	}
 	var signatures []core.Signature
 	for i := range entries {
-		name := path.Join(a, ".kame/cache/timing", entries[i].Name)
+		name := path.Join(".kame/cache/timing", entries[i].Name)
 		data, readErr := memory.ReadFile(a, name)
 		if readErr != nil || len(data) != 12 || string(data[:4]) != "KTM1" {
 			t.Error("invalid timing record")
 		}
-		signatures = slices.Append(a, signatures, core.ContentSignature(data))
+		signatures = append(signatures, core.ContentSignature(data))
 		mem.FreeSlice(a, data)
 		mem.FreeString(a, name)
 	}
@@ -65,7 +64,7 @@ func TestTimingHistoryDoesNotChangeFreshnessOrCountPastWatchWork(t *testing.T) {
 	}
 	second.Free(a)
 	for i := range entries {
-		name := path.Join(a, ".kame/cache/timing", entries[i].Name)
+		name := path.Join(".kame/cache/timing", entries[i].Name)
 		data, readErr := memory.ReadFile(a, name)
 		if readErr != nil || !core.ContentSignature(data).Equal(signatures[i]) {
 			t.Error("cache-only aggregate replaced history with old-generation work")
@@ -75,5 +74,5 @@ func TestTimingHistoryDoesNotChangeFreshnessOrCountPastWatchWork(t *testing.T) {
 		mem.FreeString(a, entries[i].Name)
 	}
 	mem.FreeSlice(a, entries)
-	slices.Free(a, signatures)
+	mem.FreeSlice(nil, signatures)
 }

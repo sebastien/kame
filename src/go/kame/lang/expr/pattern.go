@@ -2,11 +2,11 @@
 package expr
 
 import (
+	"kame/internal/mem"
 	"kame/lang/source"
-	"solod.dev/so/mem"
-	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
-	"solod.dev/so/strings"
+
+	"strconv"
+	"strings"
 )
 
 // PatternPartKind classifies one segment of a pattern literal.
@@ -55,8 +55,8 @@ func (p *Pattern) Free(a mem.Allocator) {
 	for i := range p.Names {
 		mem.FreeString(a, p.Names[i])
 	}
-	slices.Free(a, p.Parts)
-	slices.Free(a, p.Names)
+	mem.FreeSlice(nil, p.Parts)
+	mem.FreeSlice(nil, p.Names)
 	mem.Free(a, p)
 }
 
@@ -71,10 +71,10 @@ func (p *Pattern) Clone(a mem.Allocator) *Pattern {
 		part := p.Parts[i]
 		part.Text = ownedText(a, part.Text)
 		part.Pattern = ownedText(a, part.Pattern)
-		copy.Parts = slices.Append(a, copy.Parts, part)
+		copy.Parts = append(copy.Parts, part)
 	}
 	for i := range p.Names {
-		copy.Names = slices.Append(a, copy.Names, ownedText(a, p.Names[i]))
+		copy.Names = append(copy.Names, ownedText(a, p.Names[i]))
 	}
 	copy.Matchers, copy.References = p.Matchers, p.References
 	return copy
@@ -124,7 +124,7 @@ func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
 	for i := range parts {
 		part := parts[i]
 		if part.Expr != nil {
-			pattern.Parts = slices.Append(a, pattern.Parts, PatternPart{Kind: PatternInterpolation, Index: next, Span: part.Span})
+			pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternInterpolation, Index: next, Span: part.Span})
 			next++
 			continue
 		}
@@ -139,7 +139,7 @@ func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
 }
 
 func (p *patternParser) fail(start int, end int, message string) {
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: p.offset + start, End: p.offset + end}, Message: message})
+	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: p.offset + start, End: p.offset + end}, Message: message})
 }
 
 func countGroups(pattern *Pattern) (int, int) {
@@ -157,7 +157,7 @@ func countGroups(pattern *Pattern) (int, int) {
 
 func (p *patternParser) parse(pattern *Pattern) {
 	var literal strings.Builder
-	literal = strings.NewBuilder(p.a)
+	literal = strings.Builder{}
 	literalStart := p.pos
 	for p.pos < len(p.text) {
 		b := p.text[p.pos]
@@ -173,7 +173,7 @@ func (p *patternParser) parse(pattern *Pattern) {
 		if b == '{' {
 			p.flushLiteral(pattern, &literal, literalStart, p.pos)
 			if !p.group(pattern) {
-				literal.Free()
+				literal.Reset()
 				return
 			}
 			literalStart = p.pos
@@ -183,14 +183,14 @@ func (p *patternParser) parse(pattern *Pattern) {
 		p.pos++
 	}
 	p.flushLiteral(pattern, &literal, literalStart, p.pos)
-	literal.Free()
+	literal.Reset()
 }
 
 func (p *patternParser) flushLiteral(pattern *Pattern, literal *strings.Builder, start int, end int) {
 	if literal.Len() == 0 && start == end {
 		return
 	}
-	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternLiteral, Text: ownedText(p.a, literal.String()), Span: source.Span{Start: p.offset + start, End: p.offset + end}})
+	pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternLiteral, Text: ownedText(p.a, literal.String()), Span: source.Span{Start: p.offset + start, End: p.offset + end}})
 	literal.Reset()
 }
 
@@ -215,8 +215,8 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		if cross {
 			patternStr = "**"
 		}
-		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Pattern: ownedText(p.a, patternStr), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end + 1}})
-		pattern.Names = slices.Append(p.a, pattern.Names, "")
+		pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternMatcher, Pattern: ownedText(p.a, patternStr), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end + 1}})
+		pattern.Names = append(pattern.Names, "")
 		pattern.Matchers++
 		p.pos = end + 1
 		return true
@@ -241,7 +241,7 @@ func (p *patternParser) group(pattern *Pattern) bool {
 			p.pos = digitsEnd
 			return false
 		}
-		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternReference, Index: index, Span: source.Span{Start: p.offset + start, End: p.offset + digitsEnd + 1}})
+		pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternReference, Index: index, Span: source.Span{Start: p.offset + start, End: p.offset + digitsEnd + 1}})
 		pattern.References++
 		p.pos = digitsEnd + 1
 		return true
@@ -281,8 +281,8 @@ func (p *patternParser) group(pattern *Pattern) bool {
 			p.fail(patternStart, p.pos, "invalid capture pattern")
 			return false
 		}
-		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, glob), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
-		pattern.Names = slices.Append(p.a, pattern.Names, ownedText(p.a, name))
+		pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, glob), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
+		pattern.Names = append(pattern.Names, ownedText(p.a, name))
 		pattern.Matchers++
 		p.pos++
 		return true
@@ -295,7 +295,7 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		p.fail(nameStart, p.pos, "invalid reference name")
 		return false
 	}
-	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternReference, Text: ownedText(p.a, name), Index: -1, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
+	pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternReference, Text: ownedText(p.a, name), Index: -1, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
 	pattern.References++
 	p.pos++
 	return true
@@ -331,8 +331,8 @@ func (p *patternParser) regexMatcher(pattern *Pattern, name string, start int) b
 	}
 	compiled.Program.Free(p.a)
 	end := p.pos + 1
-	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, regex), Regex: true, Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end}})
-	pattern.Names = slices.Append(p.a, pattern.Names, ownedText(p.a, name))
+	pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, regex), Regex: true, Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end}})
+	pattern.Names = append(pattern.Names, ownedText(p.a, name))
 	pattern.Matchers++
 	p.pos = end
 	return true
@@ -371,8 +371,8 @@ func validPatternName(name string) bool {
 // placeholders must first be instantiated as PatternLiteral parts.
 func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 	var b strings.Builder
-	b = strings.NewBuilder(a)
-	defer b.Free()
+	b = strings.Builder{}
+	defer b.Reset()
 	for i := range pattern.Parts {
 		part := pattern.Parts[i]
 		if part.Kind == PatternLiteral {
@@ -398,8 +398,8 @@ func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 			b.WriteString(part.Text)
 		} else {
 			b.WriteByte('_')
-			var buffer [strconv.MaxIntBase10Len]byte
-			b.WriteString(strconv.FormatInt(buffer[:], int64(part.Index), 10))
+
+			b.WriteString(strconv.FormatInt(int64(part.Index), 10))
 		}
 		b.WriteByte('}')
 	}
@@ -432,7 +432,7 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 		return MatchResult{Limited: true}
 	}
 	var slots []string
-	programs := slices.Make[*regexProgram](a, p.Matchers)
+	programs := make([]*regexProgram, p.Matchers)
 	for i := range p.Parts {
 		part := p.Parts[i]
 		if part.Kind != PatternMatcher || !part.Regex {
@@ -445,7 +445,7 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 					programs[j].Free(a)
 				}
 			}
-			slices.Free(a, programs)
+			mem.FreeSlice(nil, programs)
 			return MatchResult{}
 		}
 		programs[part.Index] = compiled.Program
@@ -456,9 +456,9 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 			programs[i].Free(a)
 		}
 	}
-	slices.Free(a, programs)
+	mem.FreeSlice(nil, programs)
 	if !matched {
-		slices.Free(a, slots)
+		mem.FreeSlice(nil, slots)
 		return MatchResult{Limited: limited}
 	}
 	return MatchResult{Captures: slots, Matched: true}
@@ -514,7 +514,7 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 			}
 		}
 		for len(*slots) <= current.Index {
-			*slots = slices.Append(a, *slots, "")
+			*slots = append(*slots, "")
 		}
 		(*slots)[current.Index] = value
 		matched, limited := p.match(a, subject, part+1, end, slots, programs, budget)
@@ -543,8 +543,8 @@ type Expansion struct {
 // every reference resolved). Text and Missing are owned by the allocator.
 func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Expansion {
 	var b strings.Builder
-	b = strings.NewBuilder(a)
-	defer b.Free()
+	b = strings.Builder{}
+	defer b.Reset()
 	for i := range p.Parts {
 		part := p.Parts[i]
 		if part.Kind != PatternReference {
@@ -564,8 +564,8 @@ func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Ex
 		if index < 0 || index >= len(slots) {
 			name := part.Text
 			if name == "" {
-				var buffer [strconv.MaxIntBase10Len]byte
-				name = "_" + strconv.FormatInt(buffer[:], int64(part.Index), 10)
+
+				name = "_" + strconv.FormatInt(int64(part.Index), 10)
 			}
 			return Expansion{Missing: ownedText(a, name)}
 		}

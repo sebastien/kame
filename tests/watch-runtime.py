@@ -33,6 +33,50 @@ def stop(process):
         process.wait()
         raise
 
+for nested in (False, True):
+    for malformed in (False, True):
+        with tempfile.TemporaryDirectory(prefix='kame-watch-module-repair-') as directory:
+            project = Path(directory)
+            (project / 'Makefile.kmk').write_text('SHELL = kash\nmodule = (kash ./main.kash)\nchosen :\n\t(write! ./output module.value)\n')
+            if nested:
+                (project / 'main.kash').write_text('(include ./helper.kmk)\nvalue = helper\n')
+            broken = project / ('helper.kmk' if nested else 'main.kash')
+            if malformed:
+                broken.write_text('value = (\n')
+            error = project / 'stderr'
+            with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+                process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+                try:
+                    code = 'PARSE_ERR' if malformed else 'FS_ERR'
+                    wait_for(process, lambda: code in error.read_text() and 'waiting for changes' in error.read_text(), error, 'failed module source watch readiness')
+                    broken.write_text(('helper' if nested else 'value') + ' = "recovered"\n')
+                    wait_for(process, lambda: read(project / 'output') == 'recovered', error, 'module source repair without build source edit')
+                    cases += 1
+                finally:
+                    stop(process)
+            assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-module-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('input')
+    (project / 'Makefile.kmk').write_text('SHELL = kash\nmodule = (kash ./main.kash)\n./output : ./input\n\t(write! ./output module.value)\n')
+    (project / 'main.kash').write_text('(include ./helper.kmk)\nvalue = helper\n')
+    helper = project / 'helper.kmk'
+    helper.write_text('helper = "alpha"\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
+        try:
+            output = project / 'output'
+            wait_for(process, lambda: read(output) == 'alpha', error, 'module watch initial build')
+            stamp = helper.stat()
+            helper.write_text('helper = "bravo"\n')
+            os.utime(helper, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+            wait_for(process, lambda: read(output) == 'bravo', error, 'module watch reached helper edit')
+            cases += 1
+        finally:
+            stop(process)
+
 if os.name != 'nt':  # Angle brackets are valid POSIX filename bytes, not Windows names.
     with tempfile.TemporaryDirectory(prefix='kame-watch-source-kind-') as directory:
         project = Path(directory)

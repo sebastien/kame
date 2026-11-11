@@ -1,13 +1,13 @@
-package operations_test
+package operationscheck
 
 import (
 	"kame/core"
+	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/strings"
-	"solod.dev/so/testing"
+	"strings"
 )
 
 func contractNoop(c *eval.Context, state any, values []core.Value) eval.Result {

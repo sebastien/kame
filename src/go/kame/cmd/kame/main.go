@@ -1,9 +1,11 @@
 package main
 
 import (
+	"io"
 	"kame/cli"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/internal/mem"
 	"kame/lang/ast"
 	"kame/lang/eval"
 	"kame/lang/script"
@@ -11,12 +13,10 @@ import (
 	"kame/operations"
 	"kame/ownership"
 	"kame/program"
-	"solod.dev/so/io"
-	"solod.dev/so/mem"
-	"solod.dev/so/os"
-	"solod.dev/so/path"
-	"solod.dev/so/slices"
-	"solod.dev/so/strings"
+	"os"
+	"path"
+	"slices"
+	"strings"
 )
 
 // buildArguments is the shared, portable CLI grammar. The native CLI and the
@@ -47,15 +47,15 @@ func runBuild(args []string, out io.Writer, errOut io.Writer) int {
 	if len(parsed.Targets) == 1 && parsed.Targets[0] == "clean" && !session.Program.HasTarget("clean") {
 		cleanArgs := []string{"-C", parsed.Directory}
 		if parsed.DryRun {
-			cleanArgs = slices.Append(mem.System, slices.Clone(mem.System, cleanArgs), "--dry-run")
+			cleanArgs = append(slices.Clone(cleanArgs), "--dry-run")
 		} else {
-			cleanArgs = slices.Clone(mem.System, cleanArgs)
+			cleanArgs = slices.Clone(cleanArgs)
 		}
 		if parsed.JSON {
-			cleanArgs = slices.Append(mem.System, cleanArgs, "--json")
+			cleanArgs = append(cleanArgs, "--json")
 		}
 		status := runClean(cleanArgs, out, errOut)
-		slices.Free(mem.System, cleanArgs)
+		mem.FreeSlice(nil, cleanArgs)
 		return status
 	}
 	targets := selectTargets(session.Program, parsed.Targets)
@@ -71,7 +71,7 @@ func runBuild(args []string, out io.Writer, errOut io.Writer) int {
 // after shared assignment normalization and implicit default selection.
 func selectTargets(p *program.Program, targets []string) []string {
 	joined := p.NormalizeTargetOperands(targets)
-	slices.Free(mem.System, targets)
+	mem.FreeSlice(nil, targets)
 	return joined
 }
 
@@ -81,7 +81,7 @@ func selectTargets(p *program.Program, targets []string) []string {
 func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json bool) int {
 	note := "available targets: (none)"
 	if names := p.NamedTargets(); len(names) != 0 {
-		joined := strings.Join(mem.System, names, ", ")
+		joined := strings.Join(names, ", ")
 		note = "available targets: " + joined
 		mem.FreeString(mem.System, joined)
 		program.FreeStrings(mem.System, names)
@@ -92,8 +92,8 @@ func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json b
 		Message:  cloneCommandText("no target was requested and no default target is defined"),
 		Owned:    true,
 	}
-	d.Notes = slices.Append(mem.System, d.Notes, cloneCommandText(note))
-	d.Tips = slices.Append(mem.System, d.Tips, cloneCommandText("define a default target or name a target explicitly"))
+	d.Notes = append(d.Notes, cloneCommandText(note))
+	d.Tips = append(d.Tips, cloneCommandText("define a default target or name a target explicitly"))
 	emitDiagnostic(diagnosticWriter(out, errOut, json), d, json, nil)
 	d.Free(mem.System)
 	return 1
@@ -123,10 +123,10 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	// working directory; discovery above already resolved source names.
 	directoryOwned := false
 	if !path.IsAbs(options.Directory) {
-		buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
-		working, workingErr := os.Getwd(buffer)
+		buffer := mem.AllocSlice[byte](mem.System, 4096, 4096)
+		working, workingErr := os.Getwd()
 		if workingErr == nil && working != "" {
-			options.Directory = path.Join(mem.System, working, options.Directory)
+			options.Directory = path.Join(working, options.Directory)
 			directoryOwned = true
 		}
 		mem.FreeSlice(mem.System, buffer)

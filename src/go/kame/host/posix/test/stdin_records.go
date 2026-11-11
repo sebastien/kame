@@ -1,32 +1,46 @@
-package posix_test
+//go:build linux
+
+package posixcheck
 
 import (
 	"kame/host/posix"
-	"solod.dev/so/c"
-	"solod.dev/so/testing"
+	"kame/internal/testing"
+	"syscall"
 )
 
-//so:include <unistd.h>
-//so:include <fcntl.h>
-//so:include <poll.h>
-
 func stdinRecordPipe(reader *int, writer *int) bool {
-	c.Raw("int descriptors[2]; if (pipe(descriptors)) return false; *reader = descriptors[0]; *writer = descriptors[1]; return true;")
-	return false
+	var fds [2]int
+	if syscall.Pipe(fds[:]) != nil {
+		return false
+	}
+	*reader, *writer = fds[0], fds[1]
+	return true
 }
-
-func stdinRecordClose(fd int) { c.Raw("if (fd >= 0) close((int)fd);") }
-
-func stdinRecordFlags(fd int) int { c.Raw("return fcntl((int)fd, F_GETFL);"); return -1 }
-
+func stdinRecordClose(fd int) { syscall.Close(fd) }
+func stdinRecordFlags(fd int) int {
+	v, _, e := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFL, 0)
+	if e != 0 {
+		return -1
+	}
+	return int(v)
+}
 func stdinRecordWrite(fd int, data string) bool {
-	c.Raw("return write((int)fd, data.ptr, data.len) == data.len;")
-	return false
+	n, e := syscall.Write(fd, []byte(data))
+	return e == nil && n == len(data)
 }
-
 func stdinRecordRead(fd int, data []byte) int {
-	c.Raw("struct pollfd ready = {.fd = (int)fd, .events = POLLIN}; if (poll(&ready, 1, 0) <= 0) return -1; return read((int)fd, data.ptr, data.len);")
-	return -1
+	var fds syscall.FdSet
+	fds.Bits[fd/64] |= 1 << uint(fd%64)
+	tv := syscall.Timeval{}
+	n, e := syscall.Select(fd+1, &fds, nil, nil, &tv)
+	if e != nil || n == 0 {
+		return -1
+	}
+	n, e = syscall.Read(fd, data)
+	if e != nil {
+		return -1
+	}
+	return n
 }
 
 func TestStdinRecordClaimWaitAndRemainingBytes(t *testing.T) {
