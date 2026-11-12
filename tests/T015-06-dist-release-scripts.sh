@@ -14,7 +14,7 @@ cd "$CLI_ROOT"
 release="$CLI_ROOT/src/sh/release.sh"
 
 test-step "the curated WASM gate retains topology and Kame recipe coverage"
-wasm_tests=$(sed -n '/^TEST_WASM =/,/^$/p' Makefile.kmk)
+wasm_tests=$(sed -n '/^TEST_WASM =/,/^$/p' Kamefile)
 for script in tests/T042-*.sh tests/T044-01-*.sh; do
 	if grep -Fq "./$script" <<<"$wasm_tests"; then
 		test-ok "$script is in TEST_WASM"
@@ -76,9 +76,9 @@ for option in --repo --notes-file; do
 done
 
 test-step "kame release delegates to the publication wrapper"
-if grep -Eq '^release \{repo=\} \{notes=\} : release-assets' Makefile.kmk &&
-	grep -Fq ':KAME_RELEASE_PREBUILT "1" ./src/sh/release.sh $flags' Makefile.kmk; then
-	test-ok "release target prebuilds assets and forwards repo and notes"
+if grep -Eq '^release \{repo=\} \{notes=\} : release-assets' Kamefile &&
+	grep -Fq ':KAME_RELEASE_PREBUILT "1" :KAME (abspath ./dist/kame) ./src/sh/release.sh $flags' Kamefile; then
+	test-ok "release target prebuilds assets and forwards repo, notes and its Kame"
 else
 	test-fail "release target is missing or not wired to release.sh"
 fi
@@ -89,7 +89,7 @@ fixture="$TMPDIR/repository"
 mock_bin="$TMPDIR/mock-bin"
 mkdir -p "$fixture/src/sh" "$mock_bin"
 cp "$release" "$fixture/src/sh/release.sh"
-cp VERSION package.json Makefile "$fixture/"
+cp VERSION package.json "$fixture/"
 git -C "$fixture" init -q
 git -C "$fixture" add .
 git -C "$fixture" -c user.name=ReleaseTest -c user.email=release@example.invalid commit -qm fixture
@@ -106,8 +106,7 @@ export DISPLAY=:test
 unset WAYLAND_DISPLAY
 export LITTLESECRETS_LOG="$TMPDIR/secrets.log" MOCK_MODE=ok
 REAL_GIT=$(command -v git)
-REAL_MAKE=$(command -v make)
-export REAL_GIT REAL_MAKE
+export REAL_GIT
 cat >"$mock_bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -429,7 +428,7 @@ test-step "headless interactive publication reaches npm's terminal"
 : >"$MOCK_LOG"
 rm -f "$MOCK_NPM_MARKER"
 status=0
-env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$TMPDIR/captured-out" "$REAL_MAKE" -C "$fixture" release KAME=/bin/true repo=owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
+env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$TMPDIR/captured-out" "$release" --repo owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
 import errno, os, pty, sys
 pid, fd = pty.fork()
 if pid == 0:
@@ -448,7 +447,7 @@ PY
 if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG" &&
 	grep -q 'https://example.invalid/approve' "$TMPDIR/captured-out" &&
 	grep -q '^gh repo view owner/repo ' "$MOCK_LOG" && ! grep -q '^make ' "$MOCK_LOG"; then
-	test-ok "make release retries npm without building or obscuring terminal approval"
+	test-ok "release retries npm without building or obscuring terminal approval"
 else
 	test-fail "interactive npm: status=$status output=$(cat "$TMPDIR/tty-out") log=$(cat "$MOCK_LOG")"
 fi
@@ -515,13 +514,13 @@ test-step "prebuilt release staging signs without re-entering Kame"
 # can wait on the same output locks.
 cp VERSION package.json "$fixture/"
 git -C "$fixture" tag -d "v$MOCK_VERSION" >/dev/null 2>&1 || true
-mkdir -p "$fixture/dist" "$fixture/src/sh"
-cp src/sh/release_manifest.py "$fixture/src/sh/"
+mkdir -p "$fixture/dist" "$fixture/src"
+cp -R src/kash "$fixture/src/kash"
 for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
 	printf 'prebuilt %s\n' "$name" >"$fixture/dist/$name"
 done
 release_test_keys "$TMPDIR/prebuilt-keys"
-MOCK_MODE=ok MOCK_NPM_STATE=present KAME_RELEASE_PREBUILT=1 \
+MOCK_MODE=ok MOCK_NPM_STATE=present KAME_RELEASE_PREBUILT=1 KAME="$CLI_BIN" \
 	KAME_RELEASE_PUBLIC_KEY="$TMPDIR/prebuilt-keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$TMPDIR/prebuilt-keys/signing.pem" \
 	run_release --repo "$MOCK_REPO"

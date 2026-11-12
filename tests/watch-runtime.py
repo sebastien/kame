@@ -24,6 +24,11 @@ def wait_for(process, predicate, error, label):
 def read(path):
     return path.read_text() if path.exists() else ''
 
+def read_live_events(path):
+    # A running CLI may be partway through a record (or a UTF-8 character).
+    # Only newline-terminated records are ready; malformed complete lines fail.
+    return [json.loads(line) for line in path.read_bytes().split(b'\n')[:-1] if line]
+
 def stop(process):
     process.send_signal(signal.SIGINT)
     try:
@@ -238,12 +243,12 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-change-') as director
             def replacement_finished():
                 if read(project / 'output') != 'after' or read(project / 'runs') != 'xx':
                     return False
-                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                events = read_live_events(project / 'stdout')
                 statuses = [event['status'] for event in events if event.get('type') == 'watch-cycle-finished']
                 return statuses == ['cancelled', 'success']
 
             wait_for(process, replacement_finished, error, 'cancelled recipe restarted with latest input')
-            events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+            events = read_live_events(project / 'stdout')
             warnings = [event for event in events if event.get('type') == 'input-warning']
             assert len(warnings) == 1 and warnings[0]['diagnostic']['code'] == 'INPUT_CHANGE_CANCELLED', warnings
             assert 'input' in warnings[0]['diagnostic']['message'], warnings
@@ -280,7 +285,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-async-') as directory
             def async_restarted():
                 if read(project / 'output') != 'after' or read(project / 'runs') != 'xx':
                     return False
-                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                events = read_live_events(project / 'stdout')
                 return [event['status'] for event in events if event.get('type') == 'watch-cycle-finished'] == ['cancelled', 'success']
 
             wait_for(process, async_restarted, error, 'cancelled async recipe restarted with latest input')
@@ -312,7 +317,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-definitions-') as dir
             def definitions_restarted():
                 if read(project / 'observed') != 'after' or read(project / 'runs') != 'xx':
                     return False
-                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                events = read_live_events(project / 'stdout')
                 return [event['status'] for event in events if event.get('type') == 'watch-cycle-finished'] == ['cancelled', 'success']
 
             wait_for(process, definitions_restarted, error, 'cancelled definitions restart with fresh inputs')

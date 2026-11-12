@@ -18,9 +18,7 @@ cp VERSION "$staging/dist/"
 for artifact in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
 	cp "dist/$artifact" "$staging/dist/"
 done
-python3 src/sh/release_manifest.py --directory "$staging/dist/release" --source-directory "$staging/dist" \
-	--version "$(cat VERSION)" --revision test-fixture \
-	--public-key "$root/keys/verification.pem" --signing-key "$root/keys/signing.pem"
+release_manifest "$staging/dist/release" "$(cat VERSION)" test-fixture "$root/keys" "$staging/dist"
 release="$staging/dist/release"
 if python3 - "$release" <<'PY'; then test-ok "all platform runtime assets and verification metadata"; else test-fail "unexpected release contents or provenance"; fi
 import hashlib, json, pathlib, sys
@@ -67,8 +65,8 @@ else
 fi
 
 test-step "package definitions select matching Go binaries and the Windows bundle"
-python3 src/sh/release_package_manifests.py --directory "$release" \
-	--output-directory "$staging/etc" --version "$(cat VERSION)"
+"$CLI_BIN" do run --allow-read --allow-run --allow-write="$staging/etc" src/kash/package-manifests.kash -- \
+	directory="$release" output="$staging/etc" version="$(cat VERSION)"
 if python3 - "$staging" <<'PY'; then test-ok "Homebrew and Scoop select versioned platform assets"; else test-fail "invalid package definitions"; fi
 import hashlib, json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -90,8 +88,7 @@ PY
 test-step "signing refuses unexpected or missing assets"
 printf 'placeholder\n' >"$release/kame-unknown"
 sign_release() {
-	python3 src/sh/release_manifest.py --directory "$release" --version "$(cat VERSION)" \
-		--revision test-fixture --public-key "$root/keys/verification.pem" --signing-key "$root/keys/signing.pem"
+	release_manifest "$release" "$(cat VERSION)" test-fixture "$root/keys"
 }
 if sign_release >"$root/out" 2>&1; then
 	test-fail "unexpected native artifact accepted"

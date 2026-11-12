@@ -1,0 +1,14 @@
+{
+  "bin": [
+    [
+      "kame.exe",
+      "kame"
+    ]
+  ],
+  "depends": "nodejs",
+  "description": "Build tool for projects described with Kame",
+  "hash": "@{windows_x64}",
+  "homepage": "https://github.com/sebastien/kame",
+  "url": "@{base}/kame-windows-x64.zip",
+  "version": "@{version}"
+}

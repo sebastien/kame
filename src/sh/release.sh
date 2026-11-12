@@ -254,9 +254,10 @@ if [ -n "${KAME_RELEASE_PREBUILT:-}" ]; then
 		cp "$root/dist/$name" "$release_dir/$name"
 	done
 	cp "$root/VERSION" "$release_dir/VERSION"
-	python3 "$root/src/sh/release_manifest.py" \
-		--directory "$release_dir" --version "$version" --revision "$revision" \
-		--public-key "$public_key" --signing-key "$signing_key"
+	# The Kame release task supplies KAME; signing is a Kash script.
+	"${KAME:-kame}" do run --allow-read --allow-run --allow-write="$release_dir" \
+		"$root/src/kash/release-manifest.kash" -- directory="$release_dir" version="$version" \
+		revision="$revision" public-key="$public_key" signing-key="$signing_key"
 else
 	make -C "$root" dist-release \
 		KAME_RELEASE_PUBLIC_KEY="$public_key" \

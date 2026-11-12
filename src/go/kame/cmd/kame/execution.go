@@ -40,6 +40,9 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	for remaining != 0 || (p.Host != nil && p.Host.Active() != 0) {
 		signal := posix.TakeSignal()
 		if signal < 0 {
+			if p.Host != nil {
+				p.Host.CancelAll()
+			}
 			for i := range handles {
 				if handles[i] != nil {
 					handles[i].Free()

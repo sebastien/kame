@@ -265,7 +265,7 @@ func TestHelpAndVersion(t *testing.T) {
 	if err := json.Unmarshal(metadata.Bytes(), &record); err != nil || record.Schema != 1 || record.Type != "version" || record.Version != version || record.BuildID != buildID || record.BuildTime != buildTime {
 		t.Fatalf("compiled metadata disagrees with generated version: %s (%v)", metadata.String(), err)
 	}
-	if (record.BuildMode != "debug" && record.BuildMode != "sanitize" && record.BuildMode != "release") || (record.Runtime != "C" && record.Runtime != "APE") {
+	if (record.BuildMode != "debug" && record.BuildMode != "sanitize" && record.BuildMode != "release") || record.Runtime != "Go" {
 		t.Fatalf("unexpected compiled build/runtime: %s", metadata.String())
 	}
 	wantVersion := fmt.Sprintf("kame %s (%s; %s; %s; %s)\n", record.Version, record.BuildID, record.BuildTime, record.BuildMode, record.Runtime)

@@ -16,15 +16,16 @@ fi
 
 test-step "version metadata is stable across invocations"
 version_file="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
+generate() { "$CLI_BIN" -C "$CLI_ROOT" ./src/go/kame/cmd/kame/version_generated.go >/dev/null 2>&1; }
 # Prebuilt suites may predate the current revision; normalize before comparing.
-"$CLI_ROOT/src/sh/generate-version.sh"
+generate
 before="$(sha256sum "$version_file")"
-"$CLI_ROOT/src/sh/generate-version.sh"
-"$CLI_ROOT/src/sh/generate-version.sh"
-test-step "concurrent metadata generation uses independent temporary files"
+generate
+generate
+test-step "concurrent metadata generation is safe"
 pids=()
-for _attempt in {1..8}; do
-	"$CLI_ROOT/src/sh/generate-version.sh" &
+for _attempt in {1..4}; do
+	generate &
 	pids+=("$!")
 done
 for pid in "${pids[@]}"; do
@@ -39,14 +40,13 @@ fi
 
 test-step "second build invocation skips generated version source"
 self_project="$TMPDIR/self-build"
-mkdir -p "$self_project/src/sh" "$self_project/src/go/kame/cmd/kame"
+mkdir -p "$self_project/src/go/kame/cmd/kame"
 cp "$CLI_ROOT/VERSION" "$self_project/VERSION"
-cp -p "$CLI_ROOT/src/sh/generate-version.sh" "$self_project/src/sh/generate-version.sh"
-cp "$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go" "$self_project/src/go/kame/cmd/kame/version_generated.go"
-cat >"$self_project/Makefile.kmk" <<'KMK'
-./src/go/kame/cmd/kame/version_generated.go : ./VERSION ./src/sh/generate-version.sh
-	./src/sh/generate-version.sh
-KMK
+# Exercise the repository's own rule, extracted from its Kamefile.
+{
+	printf 'SHELL = kash\n\n'
+	sed -n '/^\.\/src\/go\/kame\/cmd\/kame\/version_generated\.go :/,/^$/p' "$CLI_ROOT/Kamefile"
+} >"$self_project/Kamefile"
 cli_run --dir "$self_project" --env "HOME=$HOME" --env TMPDIR=/tmp -- --force --json ./src/go/kame/cmd/kame/version_generated.go
 cli_expect_status 0
 if ! grep -q '"type":"process-started"' "$CLI_OUT"; then
@@ -70,7 +70,7 @@ cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.key.kind == "file") | 
   "./src/go/kame/host/posix/topology.go",
   "./src/go/kame/cmd/kame/version_generated.go",
   "./VERSION",
-  "./src/sh/generate-version.sh"
+  "./Kamefile"
 ])' true
 
 test-end

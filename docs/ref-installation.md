@@ -109,8 +109,10 @@ assets offline. `KAME_VERSION=latest` requires a selector download on each
 invocation, even with a populated cache. A lone `--version` does not verify or
 provision runtime assets; use `--help` to test installation.
 
-`kame init` is retired. Copy `Makefile` from a checkout. It installs the
-author's GitHub release when missing and forwards goals to it; Kame reads
-`Makefile.kmk`. No verification key is required. Forwarding limits and the
-operator publication procedure are defined in the
+`kame init` is retired. Copy `Makefile` from a checkout next to your
+`Kamefile`: `make GOAL...` uses `KAME`, a matching `kame` on `PATH`, or installs
+the pinned native GitHub release into `.kame/bootstrap/`, then forwards goals to
+it. Pin with `KAME_VERSION` or a `VERSION` file. No verification key is
+required; set `KAME_RELEASE_PUBLIC_KEY` to also check the signature. Forwarding
+limits and the operator publication procedure are defined in the
 [distribution specification](spec/015-distribution.md).

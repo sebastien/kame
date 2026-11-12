@@ -2,7 +2,7 @@
 # kame -- Kame build file
 # =============================================================================
 #
-# Kame discovers Makefile.kmk. GNU Make can also build directly with Go.
+# Kame discovers Kamefile. `make GOAL` bootstraps Kame and forwards to it.
 # File artifacts use content freshness instead of Make's timestamps;
 # repeated native or wasm builds are skipped when declared inputs are unchanged.
 # `kame --force TARGET` rebuilds anyway.
@@ -23,6 +23,10 @@
 # =============================================================================
 
 SHELL = kash
+
+# Release staging/signing and Go test-suite generation are Kash libraries.
+(include ./src/kash/release.kash)
+(include ./src/kash/go-tests.kash)
 
 # --- Paths ------------------------------------------------------------------
 
@@ -58,7 +62,7 @@ KAME_INPUTS =
       ./src/go/kame/cmd/kame/version_generated.go
       ./src/go/kame/go.mod
       ./src/go/kame/go.sum
-      ./Makefile.kmk]
+      ./Kamefile]
     (filter-out ./src/go/kame/cmd/kame/version_generated.go KAME_SOURCES))
 
 # The WASI reactor and its runtime are built by the standard Go toolchain.
@@ -206,10 +210,16 @@ dist : ./build/kame.debug ./dist/kame
 
 # --- Version metadata -------------------------------------------------------
 #
-# generate-version.sh rewrites the file only when its content changes.
+# The Makefile bootstrap generates the same file before Kame exists; keep the
+# two in sync. The build ID is the checkout's revision, or "unknown".
 
-./src/go/kame/cmd/kame/version_generated.go : ./VERSION ./src/sh/generate-version.sh
-	./src/sh/generate-version.sh
+./src/go/kame/cmd/kame/version_generated.go : ./VERSION
+	version = (strip (text (read ./VERSION)))
+	if (not (match? "{~[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?}" version))
+		(fail! "invalid version in VERSION: @{version}")
+	git = (capture! [stdout: :true stderr: :true] :accept-exit [1 128] "git" "rev-parse" "--short=12" "HEAD") ?? [status: 1]
+	build_id = (if (success? git) (strip (text git.stdout)) "unknown")
+	(yield! "// Code generated from repository/build metadata; DO NOT EDIT.\npackage main\n\nconst version = \"@{version}\"\nconst buildID = \"@{build_id}\"\nconst buildTime = \"development\"\n")
 
 version-source : ./src/go/kame/cmd/kame/version_generated.go
 
@@ -227,6 +237,30 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 	mkdir -p ./dist
 	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath ./dist/kame) ./cmd/kame
 
+# Cross-compiled release binaries: kame-{linux,darwin}-{x86_64,arm64}.
+
+RELEASE_SYSTEMS =
+  [
+    Linux: "linux"
+    Darwin: "darwin"
+    FreeBSD: "freebsd"
+    NetBSD: "netbsd"
+    OpenBSD: "openbsd"]
+RELEASE_ARCHES =
+  [x86_64: "x86_64" amd64: "x86_64" aarch64: "arm64" arm64: "arm64"]
+GO_ARCHES = [x86_64: "amd64" arm64: "arm64"]
+
+RELEASE_BINARIES =
+  [
+    ./dist/kame-linux-x86_64
+    ./dist/kame-linux-arm64
+    ./dist/kame-darwin-x86_64
+    ./dist/kame-darwin-arm64]
+
+./dist/kame-{system:~linux|darwin}-{arch:~x86_64|arm64} : @{KAME_INPUTS}
+	mkdir -p ./dist
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS $system :GOARCH (get arch GO_ARCHES) :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath (first outputs)) ./cmd/kame
+
 # Preserve a host-native CLI under a stable release platform identifier.
 # The pattern rule is incremental; `dist-native` picks the host platform.
 # Detect it only at runtime, then request the pattern producer via stat.
@@ -236,22 +270,41 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 	cp (first inputs) (first outputs)
 	chmod +x (first outputs)
 
-dist-native : ./dist/kame ./src/sh/platform_id.py
-	platform = (if (blank? (configured KAME_PLATFORM PLATFORM)) (strip $(python3 ./src/sh/platform_id.py)) (configured KAME_PLATFORM PLATFORM))
+dist-native : ./dist/kame
+	system = (get (line $(uname -s)) RELEASE_SYSTEMS)
+	arch = (get (lowercase (line $(uname -m))) RELEASE_ARCHES)
+	detected = (if (and system arch) "@{system}-@{arch}" (fail! "unsupported native release platform: @(line $(uname -s)) @(line $(uname -m))"))
+	platform = (if (blank? (configured KAME_PLATFORM PLATFORM)) detected (configured KAME_PLATFORM PLATFORM))
 	dest = (joinpath "./dist/native" platform "kame")
 	(stat dest)
 
 # --- WebAssembly ------------------------------------------------------------
 
-./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./Makefile.kmk ./src/sh/build-wasm.sh
-	bash ./src/sh/build-wasm.sh
+# Build beside the output, then rename: other CLI processes may be loading it.
+
+./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./Kamefile
+	mkdir -p ./build/wasm
+	let staged = (line $(mktemp ./build/wasm/.kame.wasm.XXXXXX))
+	defer rm -f $staged
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS wasip1 :GOARCH wasm :GOCACHE (abspath ./build/go-cache) go build -buildmode=c-shared -o (abspath staged) ./cmd/kame-wasm
+	mv $staged ./build/wasm/kame.wasm
 
 wasm : ./build/wasm/kame.wasm
 
 dist-wasm : ./dist/kame.wasm ./dist/kame.js
 
-./dist/kame.wasm ./dist/kame.js : ./build/wasm/kame.wasm ./src/js/kame.js ./src/sh/stage-wasm.py
-	python3 ./src/sh/stage-wasm.py
+# Publish the pair by atomic renames, as other CLI processes may be loading it.
+
+./dist/kame.wasm ./dist/kame.js : ./build/wasm/kame.wasm ./src/js/kame.js
+	mkdir -p ./dist
+	let wasm = (line $(mktemp ./dist/.kame.wasm.XXXXXX))
+	let js = (line $(mktemp ./dist/.kame.js.XXXXXX))
+	defer rm -f $wasm $js
+	cp ./build/wasm/kame.wasm $wasm
+	cp ./src/js/kame.js $js
+	chmod 644 $wasm $js
+	mv $wasm ./dist/kame.wasm
+	mv $js ./dist/kame.js
 
 # --- Release staging --------------------------------------------------------
 #
@@ -259,10 +312,9 @@ dist-wasm : ./dist/kame.wasm ./dist/kame.js
 # Provenance includes a timestamp, so this stays a task rather than a file rule.
 # It does not collect native platform artifacts or rewrite package definitions.
 
-release-assets : dist-wasm ./src/go/kame/cmd/kame/version_generated.go ./src/sh/build-release-assets.py
-	python3 ./src/sh/build-release-assets.py
+release-assets : dist-wasm @{RELEASE_BINARIES} ./dist/kame-windows-x64.zip
 
-dist-release : release-assets ./VERSION ./src/sh/release_manifest.py
+dist-release : release-assets ./VERSION ./src/kash/release.kash
 	public_key = (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)
 	signing_key = (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)
 	git_revision = $(git rev-parse HEAD) ?? "unknown"
@@ -273,15 +325,14 @@ dist-release : release-assets ./VERSION ./src/sh/release_manifest.py
 	if (blank? signing_key)
 		(fail! "set KAME_RELEASE_SIGNING_KEY to the release signing key")
 	cp ./VERSION ./dist/VERSION
-	python3 ./src/sh/release_manifest.py --directory ./dist/release --source-directory ./dist --version $version --revision $revision --public-key $public_key --signing-key $signing_key
+	(release-manifest "./dist/release" version revision public_key signing_key "./dist")
 
 # Explicitly refresh checked-in package definitions before committing a release.
 # Not a file rule: the outputs are tracked source, and release staging must not
 # claim them.
 
-package-manifests : release-assets ./VERSION ./src/sh/release_package_manifests.py
-	version = (strip (text (read ./VERSION)))
-	python3 ./src/sh/release_package_manifests.py --directory ./dist --output-directory ./etc --version $version
+package-manifests : release-assets ./VERSION ./src/kash/release.kash ./src/kash/templates/kame.rb ./src/kash/templates/kame.json
+	(package-manifests "./dist" "./etc" (strip (text (read ./VERSION))))
 
 # --- Release publication ----------------------------------------------------
 #
@@ -293,11 +344,11 @@ package-manifests : release-assets ./VERSION ./src/sh/release_package_manifests.
 # project lock, so the script is told the assets are prebuilt and stages them
 # without re-entering Kame.
 
-release {repo=} {notes=} : release-assets ./VERSION ./src/sh/release.sh ./src/sh/release_manifest.py
+release {repo=} {notes=} : release-assets ./dist/kame ./VERSION ./src/sh/release.sh ./src/kash/release.kash ./src/kash/release-manifest.kash
 	flags = (concat
 		(if (blank? repo) [] ["--repo" repo])
 		(if (blank? notes) [] ["--notes-file" notes]))
-	:KAME_RELEASE_PREBUILT "1" ./src/sh/release.sh $flags
+	:KAME_RELEASE_PREBUILT "1" :KAME (abspath ./dist/kame) ./src/sh/release.sh $flags
 
 # --- Windows launcher -------------------------------------------------------
 #
@@ -305,16 +356,17 @@ release {repo=} {notes=} : release-assets ./VERSION ./src/sh/release.sh ./src/sh
 # .exe; declaring the siblings keeps a deleted kame.js or kame.wasm from looking
 # fresh. The Windows release bundles the launcher with the WASM pair.
 
-./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json : @{LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./src/go/kame/go.mod ./src/go/kame/go.sum
+./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION : @{LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./VERSION ./src/go/kame/go.mod ./src/go/kame/go.sum
 	mkdir -p ./dist/windows
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS windows :GOARCH amd64 go build -trimpath -o (abspath ./dist/windows/kame.exe) ./cmd/kame-launcher
+	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS windows :GOARCH amd64 :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w" -o (abspath ./dist/windows/kame.exe) ./cmd/kame-launcher
 	cp ./dist/kame.js ./dist/windows/kame.js
 	cp ./dist/kame.wasm ./dist/windows/kame.wasm
+	cp ./VERSION ./dist/windows/VERSION
 	printf '{"type":"module"}\n' > ./dist/windows/package.json
 
-./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json
+./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION
 	rm -f (first outputs)
-	:cwd ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm package.json
+	:cwd ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm package.json VERSION
 
 dist-windows : ./dist/kame-windows-x64.zip
 
@@ -324,6 +376,8 @@ dist-windows : ./dist/kame-windows-x64.zip
 # skip a test, and an input list would not cover the compiler or the host.
 
 test : test-toolchain test-unit test-examples test-go test-cli
+
+check : test-unit
 
 test-toolchain : ./build/kame.debug ./tests/native/test-toolchain.sh
 	:KAME_TOOLCHAIN_TEST_BINARY (abspath ./build/kame.debug) bash ./tests/native/test-toolchain.sh
@@ -381,19 +435,27 @@ test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64
 
 wasm-portable : wasm
 
-wasm-check : wasm ./tests/wasm/go-reactor.mjs
+wasm-check : wasm ./tests/wasm/go-reactor.mjs ./tests/wasm/check-imports.mjs
+	node ./tests/wasm/check-imports.mjs ./build/wasm/kame.wasm
 	node ./tests/wasm/go-reactor.mjs ./build/wasm/kame.wasm
 
 # map/run! streams each script and fails the recipe on the first nonzero status.
 test-wasm : wasm-check ./build/kame.debug dist-wasm @{TEST_WASM}
 	(map ([script] (run! :env [KAME_TEST_PREBUILT: (abspath ".")] script)) TEST_WASM)
 
+# --- Generated sources ------------------------------------------------------
+#
+# Regenerate the committed go_tests_*_test.go wrappers after adding tests.
+
+go-tests : ./src/kash/go-tests.kash
+	(go-tests ./src/go/kame)
+
 # --- Formatting and cleanup -------------------------------------------------
 
 fmt : ./build/kame.debug
 	git ls-files -z -- "*.go" | xargs -0r gofmt -w
 	git ls-files -z -- "*.sh" | xargs -0r shfmt -w
-	./build/kame.debug do fmt -i Makefile.kmk
+	./build/kame.debug do fmt -i Kamefile
 
 clean :
 	rm -rf ./build ./dist

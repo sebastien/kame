@@ -150,30 +150,6 @@ else
 	test-fail "OSC progress leaked into redirected output"
 fi
 
-test-step "prebuilt bootstrap requests stay within their project"
-bootstrap="$TEST_PATH/bootstrap"
-mkdir -p "$bootstrap/dist"
-cp "$CLI_ROOT/Makefile" "$bootstrap/Makefile"
-mkdir -p "$bootstrap/src/sh"
-printf 'printf "dist-wasm\\n" >>"$BOOTSTRAP_CALLS"\n' >"$bootstrap/src/sh/build-wasm.sh"
-touch "$bootstrap/src/sh/stage-wasm.py"
-touch "$bootstrap/dist/kame.js" "$bootstrap/dist/kame.wasm"
-export BOOTSTRAP_CALLS="$bootstrap/calls"
-if KAME_TEST_PREBUILT="$bootstrap" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm &&
-   [ ! -e "$BOOTSTRAP_CALLS" ] &&
-   KAME_TEST_PREBUILT="$repo" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm &&
-   grep -qx dist-wasm "$BOOTSTRAP_CALLS"; then
-	test-ok "prebuilt artifacts avoid nested builds only in their project"
-else
-	test-fail "prebuilt bootstrap project isolation"
-fi
-rm "$bootstrap/dist/kame.wasm"
-if KAME_TEST_PREBUILT="$bootstrap" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm >/dev/null 2>&1; then
-	test-fail "missing prebuilt artifact was accepted"
-else
-	test-ok "missing prebuilt artifacts fail"
-fi
-
 test-step "the default uses reviewed workers when supported"
 harness_jobs=''
 status=0

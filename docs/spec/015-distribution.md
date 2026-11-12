@@ -4,8 +4,9 @@
 
 Kame ships standalone Go native binaries and a Node/WebAssembly backend. The
 source-tree `bin/kame` launcher selects, verifies and caches a pinned release.
-The repository `Makefile` builds directly with Go; `Makefile.kmk` supports
-self-builds with Kame. Neither build requires Solod or a C compiler.
+`Kamefile` describes the build. The repository `Makefile` is only a portable
+make bootstrap that provisions Kame and forwards goals to it. Neither requires Solod
+or a C compiler.
 
 ## Release Artifacts
 
@@ -19,7 +20,7 @@ assets are published under
 | `kame-linux-arm64` | Linux ARM64 native CLI |
 | `kame-darwin-x86_64` | macOS Intel native CLI |
 | `kame-darwin-arm64` | macOS Apple Silicon native CLI |
-| `kame-windows-x64.zip` | Windows Go launcher, JS/WASM pair and ESM package metadata |
+| `kame-windows-x64.zip` | Windows Go launcher, JS/WASM pair, ESM package metadata and `VERSION` |
 | `kame.js`, `kame.wasm` | Node CLI and Go WASI preview-1 reactor |
 | `VERSION` | Pinned release version |
 | `PROVENANCE.json` | Version, source revision, creation time and asset digests |
@@ -33,12 +34,13 @@ Node and the required host capabilities are available.
 
 The Windows archive must be extracted together. Its `kame.exe` launcher invokes
 Node with the adjacent `kame.js`; Node 18+ is required. `package.json` identifies
-that wrapper as an ES module. The standalone JS/WASM downloads must also stay
-adjacent; rename the wrapper to `kame.mjs`, or use a directory with ESM package
+that wrapper as an ES module, and `VERSION` supplies its release version. The
+standalone JS/WASM downloads must also stay adjacent; rename the wrapper to
+`kame.mjs`, or use a directory with ESM package
 metadata. npm ships the same JS/WASM runtime pair.
 
 `make release-assets` cross-builds all four native binaries and the Windows
-archive, and builds the WASM pair. `make dist-native` stages the current host
+archive through incremental Kamefile rules, and builds the WASM pair. `make dist-native` stages the current host
 binary under `dist/native/OS-ARCH/kame`. Those development directories are not
 release attachments. `make dist-release` stages exactly the required flat assets
 and signs them; missing files, symlinks or unexpected release assets are errors.
@@ -95,10 +97,45 @@ native binary or Node wrapper, preserving arguments, streams and exit status.
 It never downloads or executes a replacement shell launcher. `init` and launcher
 self-update are retired.
 
+## Make bootstrap
+
+The repository `Makefile` is self-contained POSIX make and sh, so it can be
+copied into any project with a `Kamefile` and run by GNU or BSD make. Its sh
+script is embedded in `#| ` comment lines, extracted with `sed` and run via
+`sh -c`, which keeps make's stdin for Kame and makes `make -n` echo one line.
+
+It selects the first of: `KAME=PATH`; a source build at
+`.kame/bootstrap/source/kame` when `./src/go/kame/go.mod` and Go are present;
+an installed `.kame/bootstrap/VERSION/kame`; a `kame` on `PATH` whose
+`--version` reports `KAME_VERSION`; otherwise it installs the native release.
+`KAME_VERSION` defaults to `./VERSION`. The source build is rebuilt whenever a
+Go source, module file or `VERSION` is newer, so a checkout never builds itself
+with a different Kame.
+
+Installation supports Linux and Darwin on x86-64 and ARM64. It downloads the
+platform asset and `SHA256SUMS` from `KAME_RELEASE_URL` (default: the
+`vKAME_VERSION` GitHub release of `KAME_REPOSITORY`) and installs only on a
+digest match. Without a trusted key this establishes integrity, not authorship;
+`KAME_RELEASE_PUBLIC_KEY` (a PEM path) additionally requires a valid
+`SHA256SUMS.sig`. Other platforms fail with a message pointing to npm or `KAME`.
+
+GNU Make (`MAKECMDGOALS`) and BSD make (`.TARGETS`) expose the goal list: the
+first goal's recipe runs Kame once with every goal and the others are no-ops.
+Other makes reach each goal through `.DEFAULT`, run Kame per goal, and cannot
+select a goal naming an existing file. Make's `-n` and `-jN` become `-n` and
+`--jobs=N`, and the recipe runs under `-n` so Kame performs the dry run.
+Command-line assignments, read from `MAKEFLAGS`, are forwarded except the
+bootstrap settings (`KAME`, `KAME_VERSION`, `KAME_REPOSITORY`,
+`KAME_RELEASE_URL`, `KAME_BOOTSTRAP`, `GO`, `KAME_MAKEFILE`). A goal containing
+`/` is prefixed with `./` so it names a file. GNU Make normalizes away a
+leading `./`, so a top-level file goal without another `/` reaches Kame as a
+bare task; invoke Kame directly for those. Kame's exit status is make's.
+
 ## Package manifests
 
 `make package-manifests` updates `etc/kame.rb` and `etc/kame.json` separately from
-release staging. Homebrew selects the OS and CPU-specific native binary and its
+release staging, rendering `src/kash/templates/`. For a downloaded published
+release, run `src/kash/package-manifests.kash` with `kame do run` instead. Homebrew selects the OS and CPU-specific native binary and its
 checksum. Scoop installs the Windows archive and declares its Node dependency.
 Both definitions pin the release version and asset digest. They are source
 artifacts, not signed release attachments.
@@ -118,8 +155,11 @@ GitHub release can be resumed solely to finish missing npm publication; that
 recovery neither rebuilds nor replaces release artifacts. Registry errors are
 not treated as proof that an npm version is missing.
 
-`Makefile.kmk`'s release task prebuilds assets while holding its project lease
-and passes `KAME_RELEASE_PREBUILT=1`, so staging does not recursively enter Kame.
+`Kamefile`'s release task prebuilds assets while holding its project lease
+and passes `KAME_RELEASE_PREBUILT=1` and its `KAME`, so staging signs through
+`src/kash/release-manifest.kash` without rebuilding. Staging, validation and
+signing live in the Kash library `src/kash/release.kash`, shared by the
+Kamefile's `dist-release` task, the operator script and the tests.
 Release notes describe platform downloads, Node requirements and signature
 verification. No build or test target publishes a release automatically.
 

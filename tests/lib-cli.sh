@@ -92,7 +92,6 @@ function cli_build {
 		test-fail "the 'go' toolchain is not available"
 		exit 1
 	fi
-	"$CLI_ROOT/src/sh/generate-version.sh"
 	if [ -x "$CLI_BIN" ] && ! cli_sources_newer "$CLI_BIN"; then
 		test_log_message "CLI binary is current: $(test-relpath "$CLI_BIN")"
 		return 0
@@ -114,6 +113,8 @@ function cli_build {
 		if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.debug" ]; then
 			make -C "$CLI_ROOT" build/kame.debug >&2 || exit 1
 		else
+			# Kame owns version_generated.go; the debug build above refreshes it itself.
+			make -s -C "$CLI_ROOT" version-source >&2 || exit 1
 			cd "$CLI_ROOT/src/go/kame" || exit 1
 			if [[ "$CLI_BIN" == *.sanitize ]]; then
 				CGO_ENABLED=0 go build -gcflags=all=-d=checkptr=2 -o "$CLI_BIN" ./cmd/kame >&2 || exit 1

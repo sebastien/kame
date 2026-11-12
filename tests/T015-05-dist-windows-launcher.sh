@@ -43,7 +43,7 @@ import zipfile
 
 archive = pathlib.Path(sys.argv[1])
 with zipfile.ZipFile(archive) as bundle:
-    assert set(bundle.namelist()) == {"kame.exe", "kame.js", "kame.wasm", "package.json"}
+    assert set(bundle.namelist()) == {"kame.exe", "kame.js", "kame.wasm", "package.json", "VERSION"}
     assert bundle.read("kame.exe").startswith(b"MZ")
     assert len(bundle.read("kame.js")) > 0
     assert len(bundle.read("kame.wasm")) > 8
@@ -52,6 +52,24 @@ then
 	test-ok "Windows x64 bundle contains a PE launcher and adjacent Node/WASM assets"
 else
 	test-fail "Windows launcher bundle is incomplete"
+fi
+
+test-step "the extracted runtime reports its bundled version without repository metadata"
+bundle_dir="$TMPDIR/windows-bundle"
+python3 - "$bundle_dir" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+with zipfile.ZipFile('dist/kame-windows-x64.zip') as bundle:
+    assert bundle.read('VERSION') == pathlib.Path('VERSION').read_bytes()
+    bundle.extractall(sys.argv[1])
+PY
+if env -u KAME_VERSION node "$bundle_dir/kame.js" --json --version >"$TMPDIR/bundle-version" &&
+    jq -e --arg version "$(cat VERSION)" '.version == $version and .runtime == "WASM"' "$TMPDIR/bundle-version" >/dev/null; then
+	test-ok "standalone Windows runtime reports the release version"
+else
+	test-fail "standalone Windows runtime has no release version"
 fi
 
 test-end

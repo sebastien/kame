@@ -443,7 +443,7 @@ func (h *Host) CancelAll() {
 	}
 	h.native.mu.Unlock()
 	for _, id := range ids {
-		h.Cancel(id)
+		h.cancel(id, 0)
 	}
 }
 func (h *Host) Active() int {
@@ -487,6 +487,7 @@ func (h *Host) ForceWaitpidFailureForTest() {
 
 var signalOnce sync.Once
 var pendingSignal atomic.Int32
+var receivedSignal atomic.Bool
 
 func InstallSignals() bool {
 	signalOnce.Do(func() {
@@ -495,9 +496,12 @@ func InstallSignals() bool {
 		go func() {
 			for sig := range ch {
 				n := int32(sig.(syscall.Signal))
-				if !pendingSignal.CompareAndSwap(0, n) {
-					pendingSignal.Store(-n)
+				// Taking the pending signal must not reset escalation: a later
+				// signal still forces shutdown after graceful cancellation began.
+				if receivedSignal.Swap(true) {
+					n = -n
 				}
+				pendingSignal.Store(n)
 			}
 		}()
 	})
@@ -533,7 +537,22 @@ func Pick(executable string, args []string, input string, selection *string) int
 	cmd := exec.Command(executable, args...)
 	cmd.Stdin = strings.NewReader(input)
 	cmd.Stderr = os.Stderr
-	b, e := cmd.Output()
+	stdout, e := cmd.StdoutPipe()
+	if e != nil {
+		return 126
+	}
+	if e = cmd.Start(); e != nil {
+		return 127
+	}
+	// Bound retained output, but drain the pipe so an oversized selection
+	// cannot leave the picker blocked while we wait for it to exit.
+	const selectionLimit = 65536
+	b, readErr := io.ReadAll(io.LimitReader(stdout, selectionLimit+1))
+	_, drainErr := io.Copy(io.Discard, stdout)
+	e = cmd.Wait()
+	if readErr != nil || drainErr != nil || len(b) > selectionLimit {
+		return 126
+	}
 	if e != nil {
 		if x, ok := e.(*exec.ExitError); ok {
 			return x.ExitCode()

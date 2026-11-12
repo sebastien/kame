@@ -126,7 +126,7 @@ auto | bun | npm) ;;
 esac
 
 source=$(CDPATH='' cd -- "$source" && pwd) || die "source directory does not exist"
-[ -f "$source/Makefile.kmk" ] || die "$source is not a kame checkout (missing Makefile.kmk)"
+[ -f "$source/Kamefile" ] || die "$source is not a kame checkout (missing Kamefile)"
 [ -f "$source/VERSION" ] || die "$source is not a kame checkout (missing VERSION)"
 command -v git >/dev/null 2>&1 || die 'git is required to copy the checkout'
 command -v tar >/dev/null 2>&1 || die 'tar is required to copy the checkout'
@@ -391,9 +391,17 @@ try_wasm() {
 	return 0
 }
 
+# Stable OS/architecture key used for native release artifacts.
+native_platform() {
+	local system machine
+	case "$(uname -s)" in Linux) system=linux ;; Darwin) system=darwin ;; *) return 1 ;; esac
+	case "$(uname -m)" in x86_64 | amd64) machine=x86_64 ;; aarch64 | arm64) machine=arm64 ;; *) return 1 ;; esac
+	printf '%s-%s\n' "$system" "$machine"
+}
+
 try_native() {
 	local version base directory tree log asset
-	asset=kame-$(python3 "$root/src/sh/platform_id.py") || return 1
+	asset=kame-$(native_platform) || return 1
 	log=$tmp/native.log
 	: >"$log"
 	version=$(resolve_native_version) || {

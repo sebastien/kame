@@ -22,16 +22,14 @@ if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.sanitize" ]; then
  if rg -q '; sanitize; Go\)$' "$TMPDIR/sanitize-version"; then test-ok "sanitizer artifact reports sanitize"; else test-fail "sanitizer artifact mode"; fi
 fi
 
-test-step "switching mode does not rewrite shared generated metadata"
+test-step "regenerating shared metadata leaves it untouched"
 metadata="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
-# Prebuilt suites skip cli_build's generation. Normalize first so the mode
-# switch, not a stale checkout revision, is what the comparison measures.
-"$CLI_ROOT/src/sh/generate-version.sh"
+# Kame owns the generated source; artifact modes are link-time flags only.
+"$CLI_BIN" -C "$CLI_ROOT" ./src/go/kame/cmd/kame/version_generated.go >/dev/null 2>&1
 before="$(stat -c %y "$metadata")"
 cp "$metadata" "$TMPDIR/version-before"
-KAME_BUILD_MODE=debug "$CLI_ROOT/src/sh/generate-version.sh"
-KAME_BUILD_MODE=release "$CLI_ROOT/src/sh/generate-version.sh"
-if cmp -s "$metadata" "$TMPDIR/version-before" && [ "$(stat -c %y "$metadata")" = "$before" ] && ! rg -q 'const buildMode' "$metadata"; then test-ok "shared version source is independent of artifact mode"; else test-fail "mode switch rewrote generated source"; fi
+"$CLI_BIN" -C "$CLI_ROOT" ./src/go/kame/cmd/kame/version_generated.go >/dev/null 2>&1
+if cmp -s "$metadata" "$TMPDIR/version-before" && [ "$(stat -c %y "$metadata")" = "$before" ] && ! rg -q 'buildMode|artifactMode' "$metadata"; then test-ok "shared version source is independent of artifact mode"; else test-fail "regeneration rewrote generated source"; fi
 
 test-step "establish successful artifact execution contexts"
 # The test task holds the repository output lock, so exercise incremental reuse

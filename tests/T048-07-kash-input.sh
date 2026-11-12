@@ -72,7 +72,10 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env
 }
 async function deadlines() {
   for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env.CLI_ROOT, 'dist/kame.js')]]) {
-    const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', '100', '-l', 'kash', '-c', 'defer printf D\ncat'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    // Leave time for WASM's first engine steps to register the defer. The
+    // readiness byte checks execution passed registration before timing out;
+    // expiring before the defer is registered would not exercise cleanup.
+    const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', '1000', '-l', 'kash', '-c', 'defer printf D\nprintf R\ncat'], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '', error = '';
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => { error += chunk; });
@@ -80,7 +83,8 @@ async function deadlines() {
     const timer = setTimeout(() => child.kill('SIGKILL'), 6000);
     const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
     clearTimeout(timer); child.stdin.destroy();
-    assert.equal(status, 1, error); assert.equal(output, 'D'); assert.match(error, /RECIPE_TIMEOUT/); checks++;
+    const label = `${runner.join(' ')}: ${error}`;
+    assert.equal(status, 1, label); assert.equal(output, 'RD', label); assert.match(error, /RECIPE_TIMEOUT/); checks++;
   }
   console.log(`${checks} native/Node invocation input checks passed`);
 }

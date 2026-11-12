@@ -15,7 +15,15 @@ release_test_sign() {
 	for asset in kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip; do
 		if [ ! -e "$directory/$asset" ] && [ -f "$directory/kame-linux-x86_64" ]; then cp "$directory/kame-linux-x86_64" "$directory/$asset"; fi
 	done
-	python3 "$CLI_ROOT/src/sh/release_manifest.py" --directory "$directory" \
-		--version "$version" --revision "$revision" \
-		--public-key "$keys/verification.pem" --signing-key "$keys/signing.pem"
+	release_manifest "$directory" "$version" "$revision" "$keys"
+}
+
+# Function: release_manifest DIRECTORY VERSION REVISION KEYS [SOURCE_DIRECTORY]
+# Stages (optionally), validates and signs DIRECTORY with the Kash release script.
+release_manifest() {
+	local directory="$1" version="$2" revision="$3" keys="$4" source="${5:-}"
+	"$CLI_BIN" do run --allow-read --allow-run --allow-write="$directory" \
+		"$CLI_ROOT/src/kash/release-manifest.kash" -- directory="$directory" version="$version" \
+		revision="$revision" public-key="$keys/verification.pem" signing-key="$keys/signing.pem" \
+		${source:+source-directory="$source"}
 }

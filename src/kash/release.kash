@@ -1,0 +1,62 @@
+# Release staging, signing and package-manifest generation.
+#
+# Definition-only library: the Kamefile includes it for its release tasks, and
+# release-manifest.kash exposes `release-manifest` to the operator script and
+# tests. Writes use redirections, which take effect immediately; `write!` would
+# be deferred to the end of a recipe, after later steps read the files back.
+
+RELEASE_ASSETS = ["VERSION" "kame-linux-x86_64" "kame-linux-arm64" "kame-darwin-x86_64" "kame-darwin-arm64" "kame-windows-x64.zip" "kame.js" "kame.wasm"]
+
+RELEASE_METADATA = ["PROVENANCE.json" "SHA256SUMS" "SHA256SUMS.sig"]
+
+# Stage (from SOURCE_DIRECTORY, unless blank), validate, describe and sign
+# exactly the flat release assets in DIRECTORY. Keys are only read by openssl.
+def release-manifest directory version revision public_key signing_key source_directory
+	if (not (blank? source_directory))
+		for name in RELEASE_ASSETS
+			if (not (regular-file? (joinpath source_directory name)))
+				(fail! "missing release asset: @{name}")
+		mkdir -p $directory
+		for name in RELEASE_ASSETS
+			cp -p (joinpath source_directory name) (joinpath directory name)
+	for path in (wildcard (joinpath directory "*"))
+		if (not (and (in? (basename path) (concat RELEASE_ASSETS RELEASE_METADATA)) (regular-file? path)))
+			(fail! "unexpected release asset: @(basename path)")
+	for name in RELEASE_ASSETS
+		if (not (regular-file? (joinpath directory name)))
+			(fail! "missing release asset: @{name}")
+	let public_der = (capture! [stdout: :true] "openssl" "pkey" "-pubin" "-in" public_key "-outform" "DER")
+	let signing_der = (capture! [stdout: :true] "openssl" "pkey" "-in" signing_key "-pubout" "-outform" "DER")
+	if (ne? public_der.stdout signing_der.stdout)
+		(fail! "release public key does not match the signing key")
+	let created = (line $(date -u +%Y-%m-%dT%H:%M:%S+00:00))
+	let provenance = [schema: 1 version: version sourceRevision: revision created: created subjects: (map ([name] [name: name sha256: (file-sha256 (joinpath directory name))]) RELEASE_ASSETS)]
+	printf "%s\n" (json provenance) > (joinpath directory "PROVENANCE.json")
+	let sums = (map ([name] "@(file-sha256 (joinpath directory name))  @{name}\n") (sorted (concat RELEASE_ASSETS ["PROVENANCE.json"])))
+	printf "%s" (join "" sums) > (joinpath directory "SHA256SUMS")
+	openssl pkeyutl -sign -inkey $signing_key -rawin -in (joinpath directory "SHA256SUMS") -out (joinpath directory "SHA256SUMS.sig")
+
+# Render the version-pinned Homebrew formula and Scoop manifest into OUTPUT
+# from the release binaries in DIRECTORY.
+def package-manifests directory output version
+	let payload = [
+		version: version
+		base: "https://github.com/sebastien/kame/releases/download/v@{version}"
+		darwin_arm64: (file-sha256 (joinpath directory "kame-darwin-arm64"))
+		darwin_x86_64: (file-sha256 (joinpath directory "kame-darwin-x86_64"))
+		linux_arm64: (file-sha256 (joinpath directory "kame-linux-arm64"))
+		linux_x86_64: (file-sha256 (joinpath directory "kame-linux-x86_64"))
+		windows_x64: (file-sha256 (joinpath directory "kame-windows-x64.zip"))]
+	mkdir -p $output
+	printf "%s" (render payload (text (read (joinpath (source-dir) "templates/kame.rb")))) > (joinpath output "kame.rb")
+	printf "%s" (render payload (text (read (joinpath (source-dir) "templates/kame.json")))) > (joinpath output "kame.json")
+
+(file-sha256 path) = (digest "sha256" (read path))
+
+(regular-file? path) = (and (exists? path) (get "regular" (lstat path)))
+
+# Entry-script operands: NAME=VALUE strings to a record. Required names fail
+# with a usage hint; optional ones default.
+(operand-record operands) = (reduce ([record operand] (let [parts (split "=" operand)] (set (first parts) (join "=" (slice 1 (count parts) parts)) record))) (parse-json "{}") operands)
+
+(required-operand name record) = (or (get name record) (fail! "missing operand: @{name}=VALUE"))

@@ -1,0 +1,14 @@
+# Render the Homebrew formula and Scoop manifest for a release.
+#
+#   kame do run --allow-read --allow-run --allow-write=OUTPUT \
+#     src/kash/package-manifests.kash -- directory=RELEASE_ASSETS \
+#     output=OUTPUT version=VERSION
+#
+# DIRECTORY holds the platform binaries and Windows archive, for example a
+# downloaded published release. See `package-manifests` in release.kash.
+
+(include ./release.kash)
+
+options = (operand-record args)
+
+(package-manifests (required-operand "directory" options) (required-operand "output" options) (required-operand "version" options))

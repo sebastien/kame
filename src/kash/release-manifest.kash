@@ -1,0 +1,13 @@
+# Stage, validate and sign a Kame release directory.
+#
+#   kame do run --allow-read --allow-run --allow-write=DIRECTORY \
+#     src/kash/release-manifest.kash -- directory=DIRECTORY version=VERSION \
+#     revision=REVISION public-key=PEM signing-key=PEM [source-directory=DIR]
+#
+# See `release-manifest` in release.kash.
+
+(include ./release.kash)
+
+options = (operand-record args)
+
+(release-manifest (required-operand "directory" options) (required-operand "version" options) (required-operand "revision" options) (required-operand "public-key" options) (required-operand "signing-key" options) (get "source-directory" "" options))

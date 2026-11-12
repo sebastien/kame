@@ -215,3 +215,4 @@ tests/T048-11-kash-loop-reuse.sh	048	kash	Loop and callable recipe reuse and dep
 tests/T049-01-kash-process-inspection.sh	049	kash	Native/Node typed byte capture, independent bounds, stream isolation, failures/cancellation, optional tool lookup and overrides
 tests/T050-01-kash-rule-includes.sh	050	kash	Native/Node Kash rule includes and source resolution
 tests/T050-02-kash-modules.sh	050	kash	Native/Node Kash module loading and reuse
+tests/T015-08-dist-make-bootstrap.sh	015	dist	POSIX make bootstrap under GNU and BSD make: single-invocation goal, flag, assignment and stdin forwarding, explicit KAME, version-matched PATH kame, checksum-verified pinned release install and offline reuse

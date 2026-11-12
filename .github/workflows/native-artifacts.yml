@@ -25,7 +25,7 @@ jobs:
         run: make dist-native
       - name: Run host-native CLI
         shell: bash
-        run: '"./dist/native/$(python3 src/sh/platform_id.py)/kame" --version'
+        run: 'for kame in ./dist/native/*/kame; do "$kame" --version; done'
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ runner.os }}-${{ runner.arch }}

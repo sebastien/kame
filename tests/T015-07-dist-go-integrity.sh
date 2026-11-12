@@ -21,7 +21,7 @@ test-step "the Windows launcher bundle carries an adjacent ESM WASM runtime"
 if python3 - <<'PY'
 import json, zipfile
 with zipfile.ZipFile('dist/kame-windows-x64.zip') as archive:
-    assert set(archive.namelist()) == {'kame.exe', 'kame.js', 'kame.wasm', 'package.json'}
+    assert set(archive.namelist()) == {'kame.exe', 'kame.js', 'kame.wasm', 'package.json', 'VERSION'}
     assert archive.read('kame.exe').startswith(b'MZ')
     assert archive.read('kame.wasm').startswith(b'\0asm')
     assert json.loads(archive.read('package.json'))['type'] == 'module'

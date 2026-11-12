@@ -99,6 +99,10 @@ func (r *running) terminate(outcome host.ProcessOutcome, grace int64) {
 			}()
 		}
 	})
+	// An unconditional shutdown also escalates a previous graceful stop.
+	if grace <= 0 {
+		r.signalCommands(syscall.SIGKILL)
+	}
 }
 func processTimeout(r host.ProcessRequest) int64 { return r.TimeoutMS }
 
