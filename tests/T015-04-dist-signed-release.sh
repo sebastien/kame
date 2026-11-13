@@ -74,6 +74,7 @@ version = (root / "VERSION").read_text().strip()
 formula = (root / "etc/kame.rb").read_text()
 scoop = json.loads((root / "etc/kame.json").read_text())
 assert f'version "{version}"' in formula
+assert 'bin.install_symlink "kame" => "kash"' in formula
 for platform in ("linux-x86_64", "linux-arm64", "darwin-x86_64", "darwin-arm64"):
     name = f"kame-{platform}"
     digest = hashlib.sha256((root / f"dist/release/{name}").read_bytes()).hexdigest()

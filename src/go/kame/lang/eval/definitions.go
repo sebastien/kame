@@ -84,6 +84,9 @@ type Program struct {
 	DefinitionArgsSet  bool
 	DefinitionCwd      string
 	InputSupplied      bool // Boundary supplied borrowed data stdin; never a reusable input identity.
+	// Terminal marks an interactive session on a terminal: foreground statement
+	// graphs receive the terminal instead of piped standard streams.
+	Terminal           bool
 	NextRecordReader   int64
 	RecordReaderCloser RecordReaderCloser // ID zero releases all body readers on shutdown.
 	Valid              bool
@@ -214,20 +217,28 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			continue
 		}
 		if d.Function {
-			function := mem.Alloc[Function](a)
-			function.Kind, function.Parameters, function.Expression, function.Scope, function.ParametersOwned, function.Definition = FunctionDefinition, convertParameters(a, d.Parameters), d.Expression, p.Scope, true, d
-			p.Scope.setFunction(d.Name, function)
+			p.registerFunction(d)
 			continue
 		}
-		p.Scope.setDefinition(d.Name)
-		p.Definitions = append(p.Definitions, d)
-		context := mem.Alloc[definitionState](a)
-		context.Program, context.Definition = p, d
-		node := engine.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: d.Name}, evaluateDefinition, context, freeDefinitionState)
-		node.Restartable = true
-		p.Nodes = append(p.Nodes, definitionNode{Name: owned(a, d.Name), Node: node})
+		p.registerLazy(d)
 	}
 	return p
+}
+
+func (p *Program) registerFunction(d *definition.Definition) {
+	function := mem.Alloc[Function](p.Alloc)
+	function.Kind, function.Parameters, function.Expression, function.Scope, function.ParametersOwned, function.Definition = FunctionDefinition, convertParameters(p.Alloc, d.Parameters), d.Expression, p.Scope, true, d
+	p.Scope.setFunction(d.Name, function)
+}
+
+func (p *Program) registerLazy(d *definition.Definition) {
+	p.Scope.setDefinition(d.Name)
+	p.Definitions = append(p.Definitions, d)
+	context := mem.Alloc[definitionState](p.Alloc)
+	context.Program, context.Definition = p, d
+	node := p.Engine.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: d.Name}, evaluateDefinition, context, freeDefinitionState)
+	node.Restartable = true
+	p.Nodes = append(p.Nodes, definitionNode{Name: owned(p.Alloc, d.Name), Node: node})
 }
 
 func duplicateDefinition(a mem.Allocator, parsed *script.Script, previous, current *definition.Definition) diagnostic.Diagnostic {

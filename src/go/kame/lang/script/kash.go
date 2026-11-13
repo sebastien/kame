@@ -605,7 +605,7 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 	}
 	mem.FreeSlice(nil, body)
 	if !hasStatement {
-		s.error(branch.Span.Start, p.Pos, "empty Kash control body")
+		s.error(branch.Span.Start, p.Pos, emptyKashBody)
 	}
 	branch.Span.End = p.Pos
 }

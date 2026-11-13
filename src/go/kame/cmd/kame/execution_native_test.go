@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -343,5 +344,87 @@ func TestNativeMaterializeDiagnosticsKeepOperandIdentity(t *testing.T) {
 		if !seen[target] {
 			t.Errorf("missing diagnostic for %s:\n%s", target, nativeCLIRead(stdout))
 		}
+	}
+}
+
+// Interactive Kash keeps one session across entries: failures end only their
+// entry, eager bindings and functions persist and may be rebound, rejected
+// entries leave the session unchanged, and exit ends the session.
+func TestNativeInteractiveKashSession(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "lib.kash"), "let greeting = \"hello\"\n")
+	entries := strings.Join([]string{
+		"echo $greeting",
+		"ls ./missing-entry",
+		"echo after-failure",
+		"def shout name",
+		"\techo (uppercase name)",
+		"",
+		"(shout \"bob\")",
+		"let greeting = \"rebound\"",
+		"echo $greeting",
+		"lazy = 1",
+		"lazy = 2",
+		"(nop lazy)",
+		"echo (map",
+		"  uppercase [\"a\" \"b\"])",
+		"exit 3",
+		"echo unreachable",
+	}, "\n") + "\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i", "lib.kash"}, strings.NewReader(entries), &out, &errOut)
+	want := "hello\nafter-failure\nBOB\nrebound\n1\nA B\n"
+	if status != 3 || out.String() != want {
+		t.Fatalf("interactive session: status=%d out=%q err=%q", status, out.String(), errOut.String())
+	}
+	for _, fragment := range []string{"<kash:2>:1:1", "lazy definition already exists in this session: lazy", "<kash:9>:1:1"} {
+		if !strings.Contains(errOut.String(), fragment) {
+			t.Fatalf("interactive diagnostics lack %q: %q", fragment, errOut.String())
+		}
+	}
+	if strings.Contains(errOut.String(), "unreachable") {
+		t.Fatal("entries after exit ran")
+	}
+}
+
+// Interactive cd and export change the session directory and child
+// environment for later entries; default grants follow the directory.
+func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directory, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries := strings.Join([]string{
+		"cd sub",
+		"echo written > ./note.txt",
+		"pwd",
+		"cd -",
+		"export GREETING=\"hi $KASH_TEST_NAME\" RAW='$KASH_TEST_NAME'",
+		"printenv GREETING RAW",
+		"unset GREETING",
+		"printenv GREETING ?",
+		"cd ./missing",
+		"export KEPT=no 1bad=x",
+		"printenv KEPT ?",
+	}, "\n") + "\n"
+	var out, errOut bytes.Buffer
+	command := exec.Command(nativeCLIBinary(t), "do", "run", "-i")
+	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash")
+	command.Stdin, command.Stdout, command.Stderr = strings.NewReader(entries), &out, &errOut
+	err := command.Run()
+	status := 0
+	if exit, ok := err.(*exec.ExitError); ok {
+		status = exit.ExitCode()
+	}
+	resolved, _ := filepath.EvalSymlinks(filepath.Join(directory, "sub"))
+	want := resolved + "\nhi kash\n$KASH_TEST_NAME\n"
+	if status != 0 || out.String() != want {
+		t.Fatalf("session state: status=%d out=%q err=%q", status, out.String(), errOut.String())
+	}
+	if data, err := os.ReadFile(filepath.Join(directory, "sub", "note.txt")); err != nil || string(data) != "written\n" {
+		t.Fatalf("redirection did not follow cd: %q %v", data, err)
+	}
+	if !strings.Contains(errOut.String(), "cd: not a directory") || !strings.Contains(errOut.String(), "export: expected NAME=VALUE: 1bad=x") {
+		t.Fatalf("builtin errors: %q", errOut.String())
 	}
 }

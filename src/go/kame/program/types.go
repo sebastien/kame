@@ -456,12 +456,14 @@ type instance struct {
 	ExecutionOutputs       []string
 	ExecutionKey           [32]byte
 	MetadataEnvironment    []string
-	SettingsDependencies   []string
-	SettingsDiagnostic     diagnostic.Diagnostic
-	KashRunning            bool
-	KashContext            *eval.Context
-	KashPrepared           bool
-	KashPreparing          bool
+	// Terminal is the rule metadata's terminal-handoff grant (051).
+	Terminal             eval.TerminalAuthority
+	SettingsDependencies []string
+	SettingsDiagnostic   diagnostic.Diagnostic
+	KashRunning          bool
+	KashContext          *eval.Context
+	KashPrepared         bool
+	KashPreparing        bool
 	// Environment owns the resolved child-process assignments.
 	Environment         []string
 	EnvironmentClaimed  bool

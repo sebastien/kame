@@ -96,7 +96,8 @@ func setDashboardSubject(subject string) {
 
 func dashboardCanDraw() bool {
 	width, height := dashboardDimensions()
-	return dashboardLive && !dashboardUnsafe && !dashboardPending && width >= 40 && height >= 4
+	// A child holding the terminal owns the screen until it returns it.
+	return dashboardLive && !dashboardUnsafe && !dashboardPending && width >= 40 && height >= 4 && !posix.TerminalHandoffActive()
 }
 
 func observeWorker(event program.Event) {

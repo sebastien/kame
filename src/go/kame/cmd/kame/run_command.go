@@ -14,8 +14,10 @@ import (
 	"kame/program"
 	"os"
 	"path"
+	"slices"
 
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -67,6 +69,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	defer freeRunSources(&loaded)
 	for i := range inv.Inputs {
 		input := inv.Inputs[i]
+		if input.Kind == "interactive" {
+			continue
+		}
 		name, text := input.Value, input.Value
 		if input.Kind == "file" || input.Kind == "discover" {
 			file := loadRunSourceInput(inv, input, fragments, diagnosticWriter(out, errOut, inv.JSON))
@@ -157,7 +162,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	}
 	// ponytail: data pipes/files only; interactive TTY input needs foreground
 	// process-group handoff rather than the host's isolated cancellation groups.
-	if posix.StdinIsTerminal() {
+	if posix.StdinIsTerminal() || inv.Interactive {
 		programOptions.HasInput = false
 	}
 	var ledger *outputLedger
@@ -202,7 +207,14 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	} else {
 		p.Eval.SetDefinitionEffectSink(writeExprEffect, &output)
 	}
-	status := runSessionWork(session, inv, out, errOut, fragments, loaded)
+	var status int
+	if inv.Interactive {
+		run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: time.Now().UnixNano()}
+		status = runInteractive(&run, in)
+		run.Last.Free(mem.System)
+	} else {
+		status = runSessionWork(session, inv, out, errOut, fragments, loaded)
+	}
 	p.Eval.BeginFinalization()
 	progress := buildProgress{}
 	for !p.Eval.AdvanceFinalization() {
@@ -252,129 +264,17 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 		}
 		workStart = len(session.Work) // Recipes ran already; only owned async joins remain.
 	}
-	var last core.Value
-	hasLast := false
-	defer last.Free(mem.System)
-	progress := buildProgress{}
+	run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: startedAt}
+	defer run.Last.Free(mem.System)
 	for i := workStart; i <= len(session.Work); i++ {
-		if i == len(session.Work) && len(p.Eval.Processes) == 0 && len(session.Deferred.Actions) == 0 {
+		if i == len(session.Work) && !run.joinNeeded() {
 			break
 		}
-		started := session.Start(i)
-		if started.Diagnostic.Code != "" {
-			emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), started.Diagnostic, inv.JSON, fragments, loaded)
-			status := processExitStatus(started.Diagnostic, inv.Name == "run")
-			started.Diagnostic.Free(mem.System)
+		if status, stop := run.step(i); stop {
 			return status
 		}
-		h := started.Handle
-		for {
-			signal := posix.TakeSignal()
-			if signal != 0 {
-				h.Cancel()
-				p.Eval.BeginFinalization()
-				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
-				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
-					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
-				}
-				h.Free()
-				if signal < 0 {
-					return 128 - signal
-				}
-				return 128 + signal
-			}
-			if inv.TimeoutMS > 0 && (time.Now().UnixNano()-startedAt)/1000000 >= inv.TimeoutMS {
-				p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: "RECIPE_TIMEOUT", Severity: diagnostic.Error, Message: "invocation timed out"})
-				h.Cancel()
-				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
-				if !inv.JSON && h.Node.Diagnostic.Code == "RECIPE_TIMEOUT" {
-					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
-				} else if !inv.JSON || h.Node.Diagnostic.Code != "RECIPE_TIMEOUT" {
-					sourceError(diagnosticWriter(out, errOut, inv.JSON), "RECIPE_TIMEOUT", "invocation timed out", inv.JSON)
-				}
-				h.Free()
-				return 1
-			}
-			tickCLIProgram(p, 10, errOut, inv.JSON)
-			if inv.JSON {
-				session.Observe(h)
-			}
-			drainEvents(p, out, errOut, inv.JSON, &progress)
-			if signal := nativeOutputSignal(); signal != 0 {
-				p.Eval.BeginFinalization()
-				h.Cancel()
-				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
-				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
-					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
-				}
-				h.Free()
-				if signal < 0 {
-					return 128 - signal
-				}
-				return 128 + signal
-			}
-			if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
-				p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: "cleanup output delivery failed"})
-				h.Cancel()
-				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
-				if h.Node.Diagnostic.Code != "" {
-					if !inv.JSON {
-						emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
-					}
-				} else {
-					sourceError(diagnosticWriter(out, errOut, inv.JSON), code, "cleanup output delivery failed", inv.JSON)
-				}
-				h.Free()
-				return 1
-			}
-			if h.Definition && h.Node.Current {
-				if inv.Name == "render" {
-					last.Free(mem.System)
-					last = h.Node.Latest.Clone(mem.System)
-					hasLast = true
-					break
-				}
-				if i < len(session.Work) && !inv.JSON && !inv.DryRun && session.Work[i].Selected && session.Work[i].Display {
-					writeValue(out, h.Node.Latest)
-				} else if i < len(session.Work) && !inv.JSON && !inv.DryRun && session.Work[i].Value && session.Work[i].Display {
-					last.Free(mem.System)
-					last = h.Node.Latest.Clone(mem.System)
-					hasLast = true
-				}
-				break
-			}
-			polled := h.Poll()
-			if !polled.Done {
-				continue
-			}
-			if polled.Result.Exit.Requested {
-				if polled.Result.Diagnostic.Code != "" && !inv.JSON {
-					emitRunDiagnostic(errOut, polled.Result.Diagnostic, false, fragments, loaded)
-				}
-				status := polled.Result.Exit.Status
-				polled.Result.Free(mem.System)
-				h.Free()
-				return status
-			}
-			if polled.Result.Diagnostic.Code != "" {
-				if !inv.JSON || inv.Name == "render" {
-					emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), polled.Result.Diagnostic, inv.JSON, fragments, loaded)
-				}
-				status := processExitStatus(polled.Result.Diagnostic, inv.Name == "run")
-				polled.Result.Free(mem.System)
-				h.Free()
-				return status
-			}
-			if i < len(session.Work) && session.Work[i].Value && session.Work[i].Display {
-				last.Free(mem.System)
-				last = polled.Result.Value.Clone(mem.System)
-				hasLast = true
-			}
-			polled.Result.Free(mem.System)
-			break
-		}
-		h.Free()
 	}
+	last, hasLast := run.Last, run.HasLast
 	if inv.Name == "render" {
 		name := "<stdin>"
 		if len(fragments) != 0 {
@@ -400,6 +300,212 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 		writeValue(out, last)
 	}
 	return 0
+}
+
+// sessionRun drives work items of one session. Batch runs stop at the first
+// failure; interactive runs report it and keep the session for the next entry.
+type sessionRun struct {
+	Session     *program.Session
+	Inv         cli.Invocation
+	Out, Err    io.Writer
+	Fragments   []program.Fragment
+	Loaded      []buildSource
+	StartedAt   int64
+	Progress    buildProgress
+	Last        core.Value
+	HasLast     bool
+	Interactive bool
+}
+
+func (r *sessionRun) emit(out io.Writer, d diagnostic.Diagnostic, json bool) {
+	emitRunDiagnostic(out, d, json, r.Fragments, r.Loaded)
+}
+
+// joinNeeded reports whether the invocation join has owned work to settle.
+func (r *sessionRun) joinNeeded() bool {
+	p := r.Session.Program
+	return len(p.Eval.Processes) != 0 || len(r.Session.Deferred.Actions) != 0
+}
+
+// step runs work item i, or the invocation join when i == len(Work). It
+// returns the item status and whether the session must stop.
+func (r *sessionRun) step(i int) (int, bool) {
+	p := r.Session.Program
+	started := r.Session.Start(i)
+	if started.Diagnostic.Code != "" {
+		r.emit(diagnosticWriter(r.Out, r.Err, r.Inv.JSON), started.Diagnostic, r.Inv.JSON)
+		status := processExitStatus(started.Diagnostic, r.Inv.Name == "run")
+		started.Diagnostic.Free(mem.System)
+		return status, !r.Interactive || r.Session.Exit.Requested
+	}
+	h := started.Handle
+	var pending []int64
+	if r.Interactive {
+		pending = p.PendingNodes()
+	}
+	for {
+		signal := posix.TakeSignal()
+		if signal == int(syscall.SIGINT) && r.Interactive {
+			return r.interrupt(h, pending, signal), false
+		}
+		if signal != 0 {
+			h.Cancel()
+			p.Eval.BeginFinalization()
+			finishSessionFinalizers(r.Session, h, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+			if !r.Inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
+				r.emit(r.Err, h.Node.Diagnostic, false)
+			}
+			h.Free()
+			if signal < 0 {
+				return 128 - signal, true
+			}
+			return 128 + signal, true
+		}
+		if r.Inv.TimeoutMS > 0 && (time.Now().UnixNano()-r.StartedAt)/1000000 >= r.Inv.TimeoutMS {
+			p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: "RECIPE_TIMEOUT", Severity: diagnostic.Error, Message: "invocation timed out"})
+			h.Cancel()
+			finishSessionFinalizers(r.Session, h, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+			if !r.Inv.JSON && h.Node.Diagnostic.Code == "RECIPE_TIMEOUT" {
+				r.emit(r.Err, h.Node.Diagnostic, false)
+			} else if !r.Inv.JSON || h.Node.Diagnostic.Code != "RECIPE_TIMEOUT" {
+				sourceError(diagnosticWriter(r.Out, r.Err, r.Inv.JSON), "RECIPE_TIMEOUT", "invocation timed out", r.Inv.JSON)
+			}
+			h.Free()
+			return 1, true
+		}
+		tickCLIProgram(p, 10, r.Err, r.Inv.JSON)
+		if r.Inv.JSON {
+			r.Session.Observe(h)
+		}
+		drainEvents(p, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+		if signal := nativeOutputSignal(); signal != 0 {
+			p.Eval.BeginFinalization()
+			h.Cancel()
+			finishSessionFinalizers(r.Session, h, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+			if !r.Inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
+				r.emit(r.Err, h.Node.Diagnostic, false)
+			}
+			h.Free()
+			if signal < 0 {
+				return 128 - signal, true
+			}
+			return 128 + signal, true
+		}
+		if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
+			p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: "cleanup output delivery failed"})
+			h.Cancel()
+			finishSessionFinalizers(r.Session, h, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+			if h.Node.Diagnostic.Code != "" {
+				if !r.Inv.JSON {
+					r.emit(r.Err, h.Node.Diagnostic, false)
+				}
+			} else {
+				sourceError(diagnosticWriter(r.Out, r.Err, r.Inv.JSON), code, "cleanup output delivery failed", r.Inv.JSON)
+			}
+			h.Free()
+			return 1, true
+		}
+		if h.Definition && h.Node.Current {
+			if r.Interactive {
+				r.display(i, h.Node.Latest)
+			}
+			if r.Inv.Name == "render" {
+				r.Last.Free(mem.System)
+				r.Last = h.Node.Latest.Clone(mem.System)
+				r.HasLast = true
+				break
+			}
+			if i < len(r.Session.Work) && !r.Inv.JSON && !r.Inv.DryRun && r.Session.Work[i].Selected && r.Session.Work[i].Display {
+				writeValue(r.Out, h.Node.Latest)
+			} else if i < len(r.Session.Work) && !r.Inv.JSON && !r.Inv.DryRun && r.Session.Work[i].Value && r.Session.Work[i].Display {
+				r.Last.Free(mem.System)
+				r.Last = h.Node.Latest.Clone(mem.System)
+				r.HasLast = true
+			}
+			break
+		}
+		polled := h.Poll()
+		if !polled.Done {
+			continue
+		}
+		if polled.Result.Exit.Requested {
+			if polled.Result.Diagnostic.Code != "" && !r.Inv.JSON {
+				r.emit(r.Err, polled.Result.Diagnostic, false)
+			}
+			status := polled.Result.Exit.Status
+			polled.Result.Free(mem.System)
+			h.Free()
+			return status, true
+		}
+		if polled.Result.Diagnostic.Code != "" && r.Interactive && p.Eval.Terminal && polled.Result.Diagnostic.Cause.HasSignal && polled.Result.Diagnostic.Cause.Signal == int(syscall.SIGINT) {
+			// Ctrl-C reached the foreground command directly; like a shell,
+			// report only the interrupted status.
+			io.WriteString(r.Err, "\n")
+			polled.Result.Free(mem.System)
+			h.Free()
+			return 130, false
+		}
+		if polled.Result.Diagnostic.Code != "" {
+			if !r.Inv.JSON || r.Inv.Name == "render" {
+				r.emit(diagnosticWriter(r.Out, r.Err, r.Inv.JSON), polled.Result.Diagnostic, r.Inv.JSON)
+			}
+			status := processExitStatus(polled.Result.Diagnostic, r.Inv.Name == "run")
+			polled.Result.Free(mem.System)
+			h.Free()
+			return status, !r.Interactive
+		}
+		if r.Interactive {
+			r.display(i, polled.Result.Value)
+		}
+		if i < len(r.Session.Work) && r.Session.Work[i].Value && r.Session.Work[i].Display {
+			r.Last.Free(mem.System)
+			r.Last = polled.Result.Value.Clone(mem.System)
+			r.HasLast = true
+		}
+		polled.Result.Free(mem.System)
+		break
+	}
+	h.Free()
+	h.Free()
+	return 0, false
+}
+
+// display echoes the value of an interactive statement-leading expression.
+func (r *sessionRun) display(i int, value core.Value) {
+	// Command results were already shown as output; echo only data values.
+	if i < len(r.Session.Work) && r.Session.Work[i].Display && value.Kind != core.Nil && !eval.IsProcessResult(value) && !r.Inv.DryRun {
+		writeValue(r.Out, value)
+		io.WriteString(r.Out, "\n")
+	}
+}
+
+// interrupt cancels one interactive entry and waits for its own host work to
+// settle, leaving work started by earlier entries running. A second interrupt
+// while settling escalates to the ordinary forced shutdown.
+func (r *sessionRun) interrupt(h *program.Handle, before []int64, signal int) int {
+	p := r.Session.Program
+	h.Cancel()
+	for {
+		tickCLIProgram(p, 10, r.Err, r.Inv.JSON)
+		drainEvents(p, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+		if posix.TakeSignal() < 0 {
+			break
+		}
+		settled := true
+		for _, node := range p.PendingNodes() {
+			if !slices.Contains(before, node) {
+				settled = false
+				break
+			}
+		}
+		if settled {
+			break
+		}
+	}
+	h.Free()
+	posix.ResetSignals()
+	io.WriteString(r.Err, "\n") // The terminal echoed ^C on the prompt line.
+	return 128 + signal
 }
 
 func finishSessionFinalizers(session *program.Session, h *program.Handle, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {

@@ -142,24 +142,31 @@ artifacts, not signed release attachments.
 
 ## Publication
 
-`src/sh/release.sh` is an explicit operator action. It validates arguments,
-version agreement, repository state and remote release state before loading keys
-or staging. Dirty tracked sources, conflicting tags, existing drafts and API
-failures stop publication. Key paths can be provided directly or retrieved from
-the configured secrets tool after preflight.
+`kame release [repo=OWNER/REPO] [notes=FILE]` is an explicit operator action.
+It builds the release assets, then runs `release-publish` from the Kash library
+`src/kash/release.kash`. Publication validates version agreement, repository
+state and remote release state before loading keys or staging. Dirty tracked
+sources, conflicting tags, existing drafts and API failures stop publication.
+Key paths can be provided directly (`KAME_RELEASE_PUBLIC_KEY`,
+`KAME_RELEASE_SIGNING_KEY`) or retrieved from the configured secrets tool after
+preflight. Relative note and key paths resolve against the project.
 
-The script stages and verifies signed assets, creates a draft GitHub release,
-uploads every staged file, then publishes it. It also publishes the npm runtime
-package from immutable tagged metadata and uploaded WASM assets. A published
-GitHub release can be resumed solely to finish missing npm publication; that
-recovery neither rebuilds nor replaces release artifacts. Registry errors are
-not treated as proof that an npm version is missing.
+It stages and signs the built assets with `release-manifest`, verifies them,
+creates a draft GitHub release, uploads every staged file, then publishes it. It
+also publishes the npm runtime package from immutable tagged metadata and
+uploaded WASM assets. A published GitHub release can be resumed solely to finish
+missing npm publication; that recovery neither rebuilds nor replaces release
+artifacts. Registry errors are not treated as proof that an npm version is
+missing. Exit status 3 means npm accepted the upload but has not finished
+processing it; do not republish.
 
-`Kamefile`'s release task prebuilds assets while holding its project lease
-and passes `KAME_RELEASE_PREBUILT=1` and its `KAME`, so staging signs through
-`src/kash/release-manifest.kash` without rebuilding. Staging, validation and
-signing live in the Kash library `src/kash/release.kash`, shared by the
-Kamefile's `dist-release` task, the operator script and the tests.
+The `release` rule declares `[tty: :true foreground: :true]`
+(`051-kash-session-authority.md`), so its foreground commands, notably
+`npm publish` prompting for authentication, receive the terminal even when Kame
+itself runs in a background process group. Publication therefore requires a
+controlling terminal. `src/kash/release-publish.kash` runs the same function as
+a direct Kash session (`--repo`, `--notes-file`) against assets already built in
+`dist/`; it keeps ordinary pipes, as direct sessions cannot grant the terminal.
 Release notes describe platform downloads, Node requirements and signature
 verification. No build or test target publishes a release automatically.
 

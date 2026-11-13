@@ -41,9 +41,11 @@ type Invocation struct {
 	HelpTopic       string
 	// HelpResult owns the rendered response of the internal @help query.
 	// Command and ordinary option strings continue to borrow argv.
-	HelpResult       string
-	Verbose          bool
-	PrintResult      bool
+	HelpResult  string
+	Verbose     bool
+	PrintResult bool
+	// Interactive reads Kash entries from stdin after preloaded sources run.
+	Interactive      bool
 	Color            string
 	DiagnosticFormat string
 	Grants           []eval.Grant

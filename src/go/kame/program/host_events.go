@@ -247,6 +247,7 @@ func (p *Program) drainRequests() {
 					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
 					stage.Error, stage.ErrorAppend, stage.ErrorMode = host.PayloadText(setups[i], host.FieldError), host.PayloadBool(setups[i], host.FieldErrorAppend), int(host.PayloadInt(setups[i], host.FieldErrorMode))
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
+					stage.Terminal, stage.Foreground = host.PayloadBool(setups[i], "terminalAttach"), host.PayloadBool(setups[i], "terminalForeground")
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
 					for j := range values {
 						stage.Environment = append(stage.Environment, values[j].Text)
@@ -333,6 +334,9 @@ func (p *Program) drainRequests() {
 				validDescriptor = false
 				descriptorCode, descriptorMessage = "FEATURE_UNSUP", "invocation input was not supplied"
 			}
+			processRequest.Terminal = host.PayloadBool(request.Payload, "terminal")
+			processRequest.TerminalRequired = host.PayloadBool(request.Payload, "terminalRequired")
+			processRequest.ForegroundAuto = host.PayloadBool(request.Payload, "foregroundAuto")
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
 				validDescriptor = false

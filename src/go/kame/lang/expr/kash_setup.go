@@ -12,6 +12,10 @@ const (
 	SetupTimeout
 	SetupAsync
 	SetupAcceptExit
+	// SetupTTY and SetupForeground request a terminal handoff for one stage
+	// (051-kash-session-authority.md); rule metadata must authorize them.
+	SetupTTY
+	SetupForeground
 )
 
 // ClassifySetupKey is the single stage-setup vocabulary shared by the parser,
@@ -29,6 +33,10 @@ func ClassifySetupKey(key string) (SetupKey, bool) {
 		return SetupAsync, true
 	case "accept-exit":
 		return SetupAcceptExit, true
+	case "tty":
+		return SetupTTY, true
+	case "foreground":
+		return SetupForeground, true
 	}
 	if !ValidEnvironmentName(key) {
 		return SetupInvalid, false
@@ -50,4 +58,36 @@ func ValidEnvironmentName(name string) bool {
 		return false
 	}
 	return true
+}
+
+// UsesSetup reports whether any process stage within e names setup key. Rule
+// metadata uses it to decide whether stages select the terminal explicitly.
+func UsesSetup(e *Expr, key string) bool {
+	if e == nil {
+		return false
+	}
+	if e.Kind == CommandSetup && e.Text == key {
+		return true
+	}
+	for _, child := range e.Items {
+		if UsesSetup(child, key) {
+			return true
+		}
+	}
+	for _, child := range e.Body {
+		if UsesSetup(child, key) {
+			return true
+		}
+	}
+	for i := range e.Fields {
+		if UsesSetup(e.Fields[i].Value, key) {
+			return true
+		}
+	}
+	for i := range e.Parts {
+		if UsesSetup(e.Parts[i].Expr, key) {
+			return true
+		}
+	}
+	return UsesSetup(e.CapturePolicy, key)
 }

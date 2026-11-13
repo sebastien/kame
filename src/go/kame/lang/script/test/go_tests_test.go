@@ -33,6 +33,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("KashFunctionsRejectMalformedDefinitionsAndReturns", func(t *testing.T) { TestKashFunctionsRejectMalformedDefinitionsAndReturns(legacy.Wrap(t)) })
 	t.Run("KashFunctionsUseNativeIndentedBodies", func(t *testing.T) { TestKashFunctionsUseNativeIndentedBodies(legacy.Wrap(t)) })
 	t.Run("KashIfRetainsNestedBodiesAndLocalDefinitions", func(t *testing.T) { TestKashIfRetainsNestedBodiesAndLocalDefinitions(legacy.Wrap(t)) })
+	t.Run("KashInteractiveInputClassification", func(t *testing.T) { TestKashInteractiveInputClassification(legacy.Wrap(t)) })
 	t.Run("KashLeadingValuePathsKeepExpressionBoundaries", func(t *testing.T) { TestKashLeadingValuePathsKeepExpressionBoundaries(legacy.Wrap(t)) })
 	t.Run("KashLibraryCompositionAndFormatting", func(t *testing.T) { TestKashLibraryCompositionAndFormatting(legacy.Wrap(t)) })
 	t.Run("KashListSpreadPreservesReferenceAndFormat", func(t *testing.T) { TestKashListSpreadPreservesReferenceAndFormat(legacy.Wrap(t)) })

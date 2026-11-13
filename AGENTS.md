@@ -21,5 +21,9 @@ and destructive operations require explicit authorization. Never directly edit
 stored learning material or publish it without authorization.
 Refresh installed skills and subagent definitions explicitly.
 
+This project's agent is `agent-kame/agent:Developer` (observation log
+`agent-kame/observations:Log`). Pass `--agent agent-kame/agent:Developer` to
+`wake`, `prompt`, `bindings`, and `due`, and use it as the REF for `observe`.
+
 Rules:
 - DO NOT touch README.md unless asked to

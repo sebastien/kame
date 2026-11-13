@@ -19,9 +19,9 @@ def release-manifest directory version revision public_key signing_key source_di
 		mkdir -p $directory
 		for name in RELEASE_ASSETS
 			cp -p (joinpath source_directory name) (joinpath directory name)
-	for path in (wildcard (joinpath directory "*"))
-		if (not (and (in? (basename path) (concat RELEASE_ASSETS RELEASE_METADATA)) (regular-file? path)))
-			(fail! "unexpected release asset: @(basename path)")
+	for name in (release-entries directory)
+		if (not (and (in? name (concat RELEASE_ASSETS RELEASE_METADATA)) (regular-file? (joinpath directory name))))
+			(fail! "unexpected release asset: @{name}")
 	for name in RELEASE_ASSETS
 		if (not (regular-file? (joinpath directory name)))
 			(fail! "missing release asset: @{name}")
@@ -33,23 +33,18 @@ def release-manifest directory version revision public_key signing_key source_di
 	let provenance = [schema: 1 version: version sourceRevision: revision created: created subjects: (map ([name] [name: name sha256: (file-sha256 (joinpath directory name))]) RELEASE_ASSETS)]
 	printf "%s\n" (json provenance) > (joinpath directory "PROVENANCE.json")
 	let sums = (map ([name] "@(file-sha256 (joinpath directory name))  @{name}\n") (sorted (concat RELEASE_ASSETS ["PROVENANCE.json"])))
-	printf "%s" (join "" sums) > (joinpath directory "SHA256SUMS")
+	printf %s (join "" sums) > (joinpath directory "SHA256SUMS")
 	openssl pkeyutl -sign -inkey $signing_key -rawin -in (joinpath directory "SHA256SUMS") -out (joinpath directory "SHA256SUMS.sig")
-
 # Render the version-pinned Homebrew formula and Scoop manifest into OUTPUT
 # from the release binaries in DIRECTORY.
 def package-manifests directory output version
-	let payload = [
-		version: version
-		base: "https://github.com/sebastien/kame/releases/download/v@{version}"
-		darwin_arm64: (file-sha256 (joinpath directory "kame-darwin-arm64"))
-		darwin_x86_64: (file-sha256 (joinpath directory "kame-darwin-x86_64"))
-		linux_arm64: (file-sha256 (joinpath directory "kame-linux-arm64"))
-		linux_x86_64: (file-sha256 (joinpath directory "kame-linux-x86_64"))
-		windows_x64: (file-sha256 (joinpath directory "kame-windows-x64.zip"))]
+	let payload = [version: version base: "https://github.com/sebastien/kame/releases/download/v@{version}" darwin_arm64: (file-sha256 (joinpath directory "kame-darwin-arm64")) darwin_x86_64: (file-sha256 (joinpath directory "kame-darwin-x86_64")) linux_arm64: (file-sha256 (joinpath directory "kame-linux-arm64")) linux_x86_64: (file-sha256 (joinpath directory "kame-linux-x86_64")) windows_x64: (file-sha256 (joinpath directory "kame-windows-x64.zip"))]
 	mkdir -p $output
-	printf "%s" (render payload (text (read (joinpath (source-dir) "templates/kame.rb")))) > (joinpath output "kame.rb")
-	printf "%s" (render payload (text (read (joinpath (source-dir) "templates/kame.json")))) > (joinpath output "kame.json")
+	printf %s (render payload (text (read (joinpath (source-dir) "templates/kame.rb")))) > (joinpath output "kame.rb")
+	printf %s (render payload (text (read (joinpath (source-dir) "templates/kame.json")))) > (joinpath output "kame.json")
+# Entry names of DIRECTORY. `wildcard` may relativize paths against the session
+# directory, which differs from a `with :cwd` scope, so keep only names.
+(release-entries directory) = (map basename (wildcard (joinpath directory "*")))
 
 (file-sha256 path) = (digest "sha256" (read path))
 
@@ -60,3 +55,206 @@ def package-manifests directory output version
 (operand-record operands) = (reduce ([record operand] (let [parts (split "=" operand)] (set (first parts) (join "=" (slice 1 (count parts) parts)) record))) (parse-json "{}") operands)
 
 (required-operand name record) = (or (get name record) (fail! "missing operand: @{name}=VALUE"))
+
+# --- Publication -------------------------------------------------------------
+#
+# Publish the release for ROOT/VERSION as GitHub release vVERSION and the npm
+# runtime package (manual operator step, never run by a build or test).
+# Preflight checks the remote release, local tags, uncommitted tracked sources
+# and the release commit before keys are loaded. The prebuilt assets in
+# ROOT/dist are staged and signed, uploaded to a draft, verified against the
+# signed manifest, and only then published. A published GitHub release is never
+# replaced; rerunning only finishes a missing npm publication. REPO may be
+# blank for the checkout's repository; blank key paths come from littlesecrets.
+# NOTES_FILE and key paths must already be absolute. Exit statuses: 1 failure,
+# 3 npm accepted the upload but has not finished processing it.
+#
+# Kash functions return statuses, so values come from expression functions
+# below; progress goes to live stdout/stderr rather than deferred effects.
+def release-publish root repo notes_file public_key signing_key
+	with :cwd $root
+		let version = (strip (text (read (joinpath root "VERSION"))))
+		let tag = "v@{version}"
+		let package = (parse-json (text (read (joinpath root "package.json"))))
+		let name = (get "name" "" package)
+		let package_version = (get "version" "" package)
+		if (not (release-tool? "gh"))
+			(release-fail 1 "the GitHub CLI (gh) is required to publish")
+		if (not (release-tool? "npm"))
+			(release-fail 1 "npm is required to publish the runtime package")
+		if (ne? package_version version)
+			(release-fail 1 "package.json version (@{package_version}) does not match VERSION (@{version})")
+		# Resolve once so the repo operand, GH_REPO and the checkout agree.
+		let slug = (release-slug repo)
+		let existing = (strip (release-text (capture! [stdout: :true] "gh" "api" "--paginate" "repos/@{slug}/releases" "--jq" ".[] | select(.tag_name == \"@{tag}\") | if .draft then \"draft\" else \"published\" end")))
+		if (eq? existing "published")
+			(release-say "GitHub release @{tag} is already published; checking npm only")
+			(release-npm tag version name slug)
+			exit 0
+		if (not (blank? existing))
+			(release-fail 1 "release @{tag} already exists as a draft; refusing to overwrite")
+		if (not (release-tool? "openssl"))
+			(release-fail 1 "openssl is required to sign the manifest")
+		if (success? (capture! [stdout: :true] :accept-exit [1] "git" "-C" root "rev-parse" "-q" "--verify" "refs/tags/@{tag}"))
+			(release-fail 1 "tag @{tag} already exists; bump VERSION instead of re-releasing")
+		# Signed artifacts must correspond to the committed, tagged tree.
+		if (not (release-clean? root))
+			(release-fail 1 "working tree has uncommitted tracked changes; commit or stash first")
+		let revision = (line $(git -C $root rev-parse HEAD))
+		if (not (release-remote-commit? slug revision))
+			(release-publish-branch root slug tag revision)
+		let remote = (strip (release-text (capture! [stdout: :true] "gh" "api" "repos/@{slug}/commits/@{revision}" "--jq" ".sha")))
+		if (ne? remote revision)
+			(release-fail 1 "GitHub returned a different release revision")
+		let remote_tag = (strip (release-text (capture! [stdout: :true] "gh" "api" "repos/@{slug}/git/matching-refs/tags/@{tag}" "--jq" ".[] | select(.ref == \"refs/tags/@{tag}\") | .ref")))
+		if (not (blank? remote_tag))
+			(release-fail 1 "remote tag @{tag} already exists; refusing to overwrite")
+		let keys = (line $(mktemp -d -t kame-release-keys.XXXXXX))
+		defer rm -rf $keys
+		let verification = (release-key-path public_key keys "verification.pem")
+		let signing = (release-key-path signing_key keys "signing.pem")
+		(release-fetch-key public_key verification "package.verification.pem")
+		(release-fetch-key signing_key signing "package.signing.pem")
+		if (not (release-file? verification))
+			(release-fail 1 "verification key file is missing")
+		if (not (release-file? signing))
+			(release-fail 1 "signing key file is missing")
+		(release-say "staging @{tag} (revision @{revision})")
+		let release_dir = (joinpath root "dist/release")
+		rm -rf $release_dir
+		cp (joinpath root "VERSION") (joinpath root "dist/VERSION")
+		(release-manifest release_dir version revision verification signing (joinpath root "dist"))
+		if (not (and (release-file? (joinpath release_dir "SHA256SUMS")) (release-file? (joinpath release_dir "SHA256SUMS.sig"))))
+			(release-fail 1 "staging did not produce a signed manifest")
+		(release-say "creating draft release @{tag}")
+		let notes = (join "" [(if (blank? notes_file) "" (join "" [(text (read notes_file)) "\n\n"])) (release-usage name version slug tag)])
+		let generated = (if (blank? notes_file) ["--generate-notes"] [])
+		gh release create $tag --draft --target $revision --title "Kame ${version}" --notes $notes $...generated --repo $slug
+		let assets = (map ([asset] (joinpath release_dir asset)) (sorted (release-entries release_dir)))
+		gh release upload $tag $...assets --repo $slug
+		# Every signed manifest asset must be attached before publishing.
+		let attached = (split "\n" (strip (release-text (capture! [stdout: :true] "gh" "release" "view" tag "--json" "assets" "--jq" ".assets[].name" "--repo" slug))))
+		let signed = (map ([entry] (last (split " " entry))) (filter ([entry] (not (blank? entry))) (split "\n" (text (read (joinpath release_dir "SHA256SUMS"))))))
+		let missing = (filter ([asset] (not (in? asset attached))) signed)
+		for asset in missing
+			(release-warn "manifest asset missing from release: @{asset}")
+		if (not (empty? missing))
+			(release-fail 1 "refusing to publish @{tag} with missing assets")
+		(release-say "publishing @{tag}")
+		gh release edit $tag --draft=false --latest --repo $slug
+		(release-say "published @{tag}; checking npm publication")
+		(release-npm tag version name slug)
+# Publish the npm runtime package from the immutable GitHub release, unless the
+# registry already has VERSION. Only a definite E404 permits publication.
+def release-npm tag version name slug
+	let registry = "https://registry.npmjs.org/"
+	let whoami = (capture! [stdout: :true stderr: :true] :accept-exit [1] "npm" "whoami" "--registry" registry)
+	if (not (success? whoami))
+		printf %s (release-text-of whoami.stderr) >&err
+		(release-fail 1 "npm authentication is missing or expired; run npm login --registry @{registry} and rerun kame release")
+	let view = (release-npm-view name version registry)
+	if (success? view)
+		if (ne? (parse-json (release-text-of view.stdout)) version)
+			(release-fail 1 "npm returned an unexpected version")
+		(release-say "@{name}@@{version} is already published on npm")
+		return 0
+	if (not (release-npm-missing? view))
+		printf %s (release-text-of view.stderr) >&err
+		(release-fail 1 "cannot check npm publication; refusing to publish")
+	(release-say "publishing missing npm package @{name}@@{version} from @{tag}")
+	# Use the immutable release, never possibly newer local dist/package files.
+	let npm_dir = (line $(mktemp -d -t kame-npm-release.XXXXXX))
+	defer rm -rf $npm_dir
+	gh release download $tag --pattern kame.js --pattern kame.wasm --dir (joinpath npm_dir "dist") --repo $slug
+	for file in ["package.json" "VERSION" "README.md" "LICENSE.md"]
+		sh -c "gh api -H 'Accept: application/vnd.github.raw+json' \"repos/\$1/contents/\$2?ref=\$3\" > \"\$4\"" release-npm $slug $file $tag (joinpath npm_dir file)
+	let tagged = (parse-json $(cat (joinpath npm_dir "package.json")))
+	if (or (ne? (get "name" "" tagged) name) (ne? (get "version" "" tagged) version))
+		(release-fail 1 "tagged npm package metadata does not match @{name}@@{version}")
+	# Without a display, npm prints its authentication URL instead of opening it.
+	let browser = (if (release-display?) [] ["--browser=false"])
+	if :cwd $npm_dir npm publish --access public --registry $registry $...browser
+		(nop :nil)
+	else
+		(release-fail 1 "GitHub release @{tag} is unchanged; fix npm authentication and rerun kame release to retry npm only")
+	# npm can accept the upload before its processing makes the version readable.
+	for attempt in (split " " "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30")
+		let check = (release-npm-view name version registry)
+		if (success? check)
+			if (ne? (parse-json (release-text-of check.stdout)) version)
+				(release-fail 1 "npm returned an unexpected version after accepting the upload")
+			(release-say "verified @{name}@@{version} on npm")
+			return 0
+		if (not (release-npm-missing? check))
+			printf %s (release-text-of check.stderr) >&err
+			(release-fail 1 "npm accepted the upload, but registry verification failed; do not republish")
+		if (eq? attempt "1")
+			(release-say "npm accepted the upload; waiting up to five minutes for processing")
+		if (ne? attempt "30")
+			sleep 10
+	(release-warn "npm accepted @{name}@@{version} but it is still processing; do not republish")
+	(release-fail 3 "check later with npm view @{name}@@{version} version --registry @{registry}")
+# Publish a release commit unknown to GitHub, e.g. a detached jj/git HEAD, on
+# release-TAG instead of requiring the operator to move a branch first.
+def release-publish-branch root slug tag revision
+	let branch = "release-@{tag}"
+	let protocol = (capture! [stdout: :true stderr: :true] :accept-exit [1] "gh" "config" "get" "git_protocol")
+	let field = (if (and (success? protocol) (eq? (strip (release-text-of protocol.stdout)) "ssh")) "sshUrl" "url")
+	let url = (strip (release-text (capture! [stdout: :true] "gh" "repo" "view" slug "--json" field "--jq" ".@{field}")))
+	(release-warn "commit @{revision} is not on @{slug}; publishing @{branch}")
+	if git -C $root -c credential.helper= -c "credential.helper=!gh auth git-credential" push $url ${revision}:refs/heads/${branch}
+		(nop :nil)
+	else
+		(release-fail 1 "cannot publish @{branch} to @{slug}; push it manually and retry")
+	for attempt in ["1" "2" "3" "4" "5"]
+		if (release-remote-commit? slug revision)
+			(release-warn "published @{branch} at @{revision}")
+			return 0
+		sleep 1
+	(release-fail 1 "published @{branch} but GitHub still cannot resolve @{revision}; retry later")
+# Fetch a key that the operator did not supply from littlesecrets.
+def release-fetch-key supplied path secret
+	if (blank? supplied)
+		if (not (release-tool? "littlesecrets"))
+			(release-fail 1 "set both key paths or install littlesecrets to retrieve package signing keys")
+		sh -c "littlesecrets -q get \"\$1\" > \"\$2\"" release-key $secret $path
+def release-say message
+	printf "release: %s\n" $message
+def release-warn message
+	printf "release: %s\n" $message >&err
+def release-fail status message
+	(release-warn message)
+	exit $status
+# An operator path made absolute against the current directory; blank stays blank.
+(release-path value) = (if (blank? value) "" (abspath value))
+
+(release-key-path supplied keys file) = (if (blank? supplied) (joinpath keys file) supplied)
+
+(release-slug repo) = (strip (release-text (if (blank? repo) (capture! [stdout: :true] "gh" "repo" "view" "--json" "nameWithOwner" "--jq" ".nameWithOwner") (capture! [stdout: :true] "gh" "repo" "view" repo "--json" "nameWithOwner" "--jq" ".nameWithOwner"))))
+
+(release-remote-commit? slug revision) = (success? (capture! [stdout: :true stderr: :true] :accept-exit [1] "gh" "api" "repos/@{slug}/commits/@{revision}" "--jq" ".sha"))
+
+(release-clean? root) = (and (success? (capture! [stdout: :true] :accept-exit [1] "git" "-C" root "diff" "--quiet")) (success? (capture! [stdout: :true] :accept-exit [1] "git" "-C" root "diff" "--cached" "--quiet")))
+
+(release-npm-view name version registry) = (capture! [stdout: :true stderr: :true] :accept-exit [1] "npm" "view" "@{name}@@{version}" "version" "--json" "--registry" registry)
+
+# npm reports an absent version as a JSON E404 error; anything else, including
+# unparseable output, is an outage or authentication problem.
+(release-npm-missing? view) = (eq? "E404" (get "code" "" (get "error" (parse-json "{}") (release-json-record (release-text-of view.stdout)))))
+
+(release-json-record text) = (if (starts? "{" (strip text)) (parse-json text) (parse-json "{}"))
+
+(release-text result) = (release-text-of result.stdout)
+
+(release-text-of bytes) = (if (nil? bytes) "" (text bytes))
+
+(release-file? path) = (success? (capture! [stdout: :true] :accept-exit [1] "test" "-f" path))
+
+(release-tool? name) = (success? (capture! [stdout: :true stderr: :true] :accept-exit [1 127] "sh" "-c" "command -v \"$1\"" "sh" name))
+
+(release-display?) = (success? (capture! [stdout: :true stderr: :true] :accept-exit [1] "sh" "-c" "[ -n \"${DISPLAY:-}${WAYLAND_DISPLAY:-}\" ]"))
+
+(last items) = (reduce ([previous item] item) "" items)
+
+# Release notes: platform downloads, verification and npm usage.
+(release-usage name version slug tag) = (join "\n" ["## Downloads and usage" "" "- **kame-linux-{x86_64,arm64}** and **kame-darwin-{x86_64,arm64}** — standalone Go CLI." "  Download the binary for your OS and architecture, rename it to `kame`," "  then `chmod +x kame` and `./kame --help`." "- **kame-windows-x64.zip** — Windows launcher and WASM runtime. Extract all" "  files into one directory and run `kame.exe --help` with Node.js 18+ installed." "- **kame.js + kame.wasm** — JavaScript CLI and its WebAssembly runtime." "  Download **both into the same directory**. For Node.js 18+, rename" "  `kame.js` to `kame.mjs`, then run `node ./kame.mjs --help`." "  It is an ES module: in a directory with `\"type\": \"module\"` in package.json," "  `node ./kame.js --help` also works without renaming. The JS file loads the" "  adjacent WASM module; neither file is a standalone native executable." "- **VERSION** — release version; **PROVENANCE.json** — source revision and" "  asset digests; **SHA256SUMS** — checksums; **SHA256SUMS.sig** — Ed25519" "  signature of the checksum file. Verify the signature with a trusted release" "  public key before trusting the checksums, then run `sha256sum -c SHA256SUMS`." "" "### Run the WASM CLI through npm" "" "`npm x --yes @{name}@@{version} -- --help`" "" "npm fetches both the JavaScript wrapper and WASM runtime. Replace `--help`" "with your Kame arguments. For a permanent install:" "`npm install --global @{name}@@{version}`, then `kame --help`." "" "Native Go binaries are available for Linux and macOS on x86_64 and arm64." "The Windows archive includes a launcher and the JavaScript/WASM runtime and" "requires Node.js. Other hosts can use the Node/WASM pair." "Homebrew and Scoop definitions live in [etc/](https://github.com/@{slug}/tree/@{tag}/etc)," "not in release attachments." ""])

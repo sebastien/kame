@@ -185,6 +185,31 @@ that cannot open a controlling terminal and move its foreground group, reports
 `FEATURE_UNSUP` before spawn. Environment authority does not depend on that
 primitive and remains available.
 
+### Implementation notes
+
+The native host implements the terminal clause; environment authority is not
+yet implemented. Where this specification leaves a choice open:
+
+- "Any stage in the recipe sets `:tty`" (or `:foreground`) is decided from the
+  recipe's own Kash text. Stages inside library functions it calls are covered
+  by the metadata default and their explicit settings, not by that scan.
+- Stages keep separate process groups, as the existing containment contract
+  kills a group when its leader is reaped. At most one stage per graph takes the
+  foreground: the stage setting `:foreground :true`, otherwise the last attached
+  stage writing to the terminal, otherwise the first attached stage reading it.
+  Only that stage reads the terminal. Two `:foreground :true` stages in one
+  graph, or a foreground stage without effective tty, are `EXPR_INVALID`.
+- An explicit `:tty :true` or `:foreground :true` on a capture, background
+  graph, cleanup, or record-fed graph is `EXPR_INVALID`.
+- The previous foreground group is the terminal's foreground group when the
+  handoff opens, which need not be Kame's own group. Terminal modes saved at
+  that point are also restored, beyond this contract.
+- A non-Kash recipe body (shell text or a Kame expression) authorizing `tty` is
+  `FEATURE_UNSUP` at planning; a rule without a body ignores it.
+- The interactive session of `052-kash-interactive.md` lends the terminal to
+  foreground statements without metadata, keeps pipes when no terminal exists,
+  and accepts stage `:tty`/`:foreground` without metadata.
+
 ## Freshness
 
 Authority name lists are source. Evaluating them records no environment value.

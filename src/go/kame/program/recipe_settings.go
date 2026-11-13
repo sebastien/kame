@@ -196,6 +196,39 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	if c.PhaseInvalid() || len(c.Effects) != 0 {
 		return failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "recipe settings cannot perform effects")
 	}
+	return p.terminalSettings(entry, metadata, kame)
+}
+
+// terminalSettings validates the tty and foreground metadata of 051. Only
+// :true and :false are valid; absence is false, and foreground needs tty.
+// Kash recipes receive the grant; other recipe bodies cannot apply it.
+func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bool) diagnostic.Diagnostic {
+	entry.Terminal = eval.TerminalAuthority{}
+	span := diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}
+	if entry.Rule.Metadata != nil {
+		span = diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End}
+	}
+	for i := range metadata.Record {
+		field := metadata.Record[i]
+		if field.Key != "tty" && field.Key != "foreground" {
+			continue
+		}
+		if field.Value.Kind != core.Bool {
+			return failureAt(p.Alloc, "EXPR_INVALID", span, field.Key+" metadata requires :true or :false")
+		}
+		if field.Key == "tty" {
+			entry.Terminal.TTY = field.Value.Bool
+		} else {
+			entry.Terminal.Foreground = field.Value.Bool
+		}
+	}
+	if entry.Terminal.Foreground && !entry.Terminal.TTY {
+		return failureAt(p.Alloc, "EXPR_INVALID", span, "foreground metadata requires tty: :true")
+	}
+	// A rule that launches no process ignores the grant.
+	if entry.Terminal.TTY && len(entry.Rule.Body) != 0 && (!entry.Kash || kame) {
+		return failureAt(p.Alloc, "FEATURE_UNSUP", span, "terminal handoff requires a Kash recipe")
+	}
 	return diagnostic.Diagnostic{}
 }
 
@@ -290,7 +323,23 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	p.bindDefinitionEnvironment(context)
 	context.Scope = p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
 	context.RecipeNode = entry.Node.ID
+	context.Terminal = entry.Terminal
+	if context.Terminal.TTY {
+		context.Terminal.StageTTY, context.Terminal.StageForeground = kashUsesSetup(p.Alloc, entry.Script, "tty"), kashUsesSetup(p.Alloc, entry.Script, "foreground")
+	}
 	return context
+}
+
+// kashUsesSetup reports whether any stage of a recipe's own Kash text sets key.
+func kashUsesSetup(a mem.Allocator, text string, key string) bool {
+	parsed := script.ParseKash(a, "<recipe>", text)
+	defer parsed.Free()
+	for _, item := range parsed.Items {
+		if expr.UsesSetup(item.Expression, key) || (item.Definition != nil && expr.UsesSetup(item.Definition.Expression, key)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Program) freeKashContext(context *eval.Context) {

@@ -28,6 +28,8 @@ func TestKashInterpreterArgs(t *testing.T) {
 		{"missing language", []string{"--lang"}, []string{"--lang"}},
 		{"missing source", []string{"-f"}, []string{"--lang=kash", "-f"}},
 		{"missing option value", []string{"-C"}, []string{"-C"}},
+		{"interactive", []string{"-i"}, []string{"-i", "--lang=kash"}},
+		{"interactive after preload", []string{"--interactive", "lib.kash", "arg"}, []string{"--interactive", "--lang=kash", "lib.kash", "--", "arg"}},
 	}
 	for i := range cases {
 		got := cli.KashInterpreterArgs(cases[i].Args)

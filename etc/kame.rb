@@ -27,9 +27,12 @@ class Kame < Formula
 
   def install
     bin.install Dir["kame-*"].first => "kame"
+    # The same binary as `kash` runs Kash scripts and, on a terminal, the REPL.
+    bin.install_symlink "kame" => "kash"
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/kame --version")
+    assert_equal "kash\n", pipe_output("#{bin}/kash", "echo kash\n")
   end
 end

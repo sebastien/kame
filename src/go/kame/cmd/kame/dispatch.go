@@ -18,6 +18,10 @@ func main() {
 	kash := len(os.Args) != 0 && path.Base(os.Args[0]) == "kash"
 	if kash {
 		args = cli.KashInterpreterArgs(args)
+		// Bare kash on a terminal is the REPL; piped stdin remains source.
+		if len(args) != 0 && args[len(args)-1] == "-" && posix.StdinIsTerminal() {
+			args[len(args)-1] = "--interactive"
+		}
 	}
 	status := Run(args, os.Stdin, os.Stdout, os.Stderr)
 	if kash {

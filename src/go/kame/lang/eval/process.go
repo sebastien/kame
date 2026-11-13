@@ -39,6 +39,8 @@ type captureState struct {
 	Environment    []core.Value
 	Cwd            string
 	Timeout        int64
+	TTY            setupFlag // this stage's explicit :tty
+	Foreground     setupFlag // this stage's explicit :foreground
 	ID             int64
 	Done           bool
 	Async          bool
@@ -417,6 +419,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					r.Free(c.Run)
 					state.Index++
 					continue
+				case expr.SetupTTY, expr.SetupForeground:
+					d := p.terminalSetup(state, kind, r.Value, word.Span, c)
+					r.Free(c.Run)
+					if d.Diagnostic.Code != "" {
+						return d
+					}
+					state.Index++
+					continue
 				case expr.SetupAsync:
 					if r.Value.Kind != core.Bool {
 						r.Free(c.Run)
@@ -638,6 +648,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			timeout = c.TimeoutMS
 		}
 		state.Setups = append(state.Setups, host.StageSetupPayload(state.Alloc, cwd, timeout, environment))
+		terminalStageSetup(state, &state.Setups[len(state.Setups)-1])
 		if state.Accepted.Kind == core.List {
 			setup := &state.Setups[len(state.Setups)-1]
 			setup.Record = append(setup.Record, core.RecordField{Key: owned(state.Alloc, "acceptExit"), Value: state.Accepted})
@@ -847,6 +858,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	if e.AcceptExit {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
+	}
+	// Capture, background, cleanup and record-fed graphs keep their pipes; the
+	// same boundaries that close invocation input exclude the terminal.
+	eligible := !c.InputClosed && !c.RecordBody && !state.Async && !e.Async && len(e.Body) == 0 && (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult)
+	if r := p.terminalPayload(state, &payload, eligible, e.Span, c); r.Diagnostic.Code != "" {
+		payload.Free(c.Run)
+		return r
 	}
 	captureLimit := p.CaptureLimit
 	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {

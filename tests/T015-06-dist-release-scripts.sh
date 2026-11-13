@@ -11,7 +11,19 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-release.sh"
 test-start "T015-06 release preflight, publication and Go asset staging"
 cd "$CLI_ROOT"
 
-release="$CLI_ROOT/src/sh/release.sh"
+# The operator entry is a Kash script; drive it the way `kame do run` would.
+release_entry() {
+	local root="$1"
+	release="$TMPDIR/release-$2"
+	cat >"$release" <<SH
+#!/bin/sh
+exec "$CLI_BIN" do run --allow-read --allow-run --allow-write="$root" \\
+	--allow-env=KAME_RELEASE_PUBLIC_KEY --allow-env=KAME_RELEASE_SIGNING_KEY \\
+	"$root/src/kash/release-publish.kash" -- "\$@"
+SH
+	chmod +x "$release"
+}
+release_entry "$CLI_ROOT" checkout
 
 test-step "the curated WASM gate retains topology and Kame recipe coverage"
 wasm_tests=$(sed -n '/^TEST_WASM =/,/^$/p' Kamefile)
@@ -75,27 +87,41 @@ for option in --repo --notes-file; do
 	fi
 done
 
-test-step "kame release delegates to the publication wrapper"
-if grep -Eq '^release \{repo=\} \{notes=\} : release-assets' Kamefile &&
-	grep -Fq ':KAME_RELEASE_PREBUILT "1" :KAME (abspath ./dist/kame) ./src/sh/release.sh $flags' Kamefile; then
-	test-ok "release target prebuilds assets and forwards repo, notes and its Kame"
+test-step "kame release publishes through the Kash library with the terminal"
+if grep -Eq '^release \{repo=\} \{notes=\} : release-assets .*; \[tty: :true foreground: :true\]$' Kamefile &&
+	grep -Fq '(release-publish ' Kamefile && [ ! -e src/sh/release.sh ]; then
+	test-ok "release target prebuilds assets and lends npm the terminal"
 else
-	test-fail "release target is missing or not wired to release.sh"
+	test-fail "release target is missing or not wired to release-publish"
 fi
 
 # Exercise the real script in a committed, detached checkout, with only external
 # publishing/build commands mocked. No real keys, builds or remote writes.
 fixture="$TMPDIR/repository"
 mock_bin="$TMPDIR/mock-bin"
-mkdir -p "$fixture/src/sh" "$mock_bin"
-cp "$release" "$fixture/src/sh/release.sh"
+mkdir -p "$fixture/src" "$fixture/dist" "$mock_bin"
+cp -R src/kash "$fixture/src/kash"
 cp VERSION package.json "$fixture/"
+# A committed Kamefile runs the same library as `kame release` does.
+cat >"$fixture/Kamefile" <<'KAMEFILE'
+SHELL = kash
+(include ./src/kash/release.kash)
+
+publish {repo=} : ; [tty: :true foreground: :true]
+	(release-publish (abspath ".") repo "" "" "")
+KAMEFILE
+printf 'dist/\n.kame/\n' >"$fixture/.gitignore"
 git -C "$fixture" init -q
 git -C "$fixture" add .
 git -C "$fixture" -c user.name=ReleaseTest -c user.email=release@example.invalid commit -qm fixture
 git -C "$fixture" checkout -q --detach
 revision=$(git -C "$fixture" rev-parse HEAD)
-release="$fixture/src/sh/release.sh"
+# Staging signs the assets `kame release` builds into dist/ before publishing.
+for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
+	printf 'prebuilt %s\n' "$name" >"$fixture/dist/$name"
+done
+release_test_keys "$TMPDIR/keys"
+release_entry "$fixture" fixture
 export MOCK_REVISION="$revision" MOCK_REPO=owner/repo MOCK_ROOT="$fixture"
 export MOCK_LOG="$TMPDIR/commands.log" MOCK_ASSETS="$TMPDIR/assets.log" MOCK_NPM_MARKER="$TMPDIR/npm-published"
 export MOCK_BRANCH="$TMPDIR/release-branch" MOCK_NPM_CHECKS="$TMPDIR/npm-checks"
@@ -197,18 +223,6 @@ for arg in "$@"; do
 done
 exec "$REAL_GIT" "$@"
 SH
-cat >"$mock_bin/make" <<'SH'
-#!/bin/sh
-set -eu
-printf 'make %s\n' "$*" >>"$MOCK_LOG"
-mkdir -p "$MOCK_ROOT/dist/release"
-cd "$MOCK_ROOT/dist/release"
-for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.js kame.wasm VERSION PROVENANCE.json; do
-	printf 'fixture\n' >"$name"
-done
-sha256sum kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.js kame.wasm VERSION PROVENANCE.json >SHA256SUMS
-printf 'signature fixture\n' >SHA256SUMS.sig
-SH
 cat >"$mock_bin/npm" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -250,6 +264,7 @@ case "$*" in
 "publish --access public --registry https://registry.npmjs.org/" | "publish --access public --registry https://registry.npmjs.org/ --browser=false")
 	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || { [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; } || exit 1
 	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || printf 'Authenticate at https://example.invalid/approve\n'
+	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || { read -r approval; [ "$approval" = approved ]; }
 	[ "$MOCK_NPM_STATE" != publish_failure ] || { echo 'npm authentication expired' >&2; exit 1; }
 	[ "$PWD" != "$MOCK_ROOT" ] && [ -f package.json ] || exit 1
 	[ "$(cat VERSION)" = "$MOCK_VERSION" ] || exit 1
@@ -268,7 +283,7 @@ cat >"$mock_bin/littlesecrets" <<'SH'
 printf '%s\n' "$*" >>"$LITTLESECRETS_LOG"
 exit 1
 SH
-chmod +x "$mock_bin/gh" "$mock_bin/git" "$mock_bin/make" "$mock_bin/npm" "$mock_bin/littlesecrets" "$mock_bin/sleep"
+chmod +x "$mock_bin/gh" "$mock_bin/git" "$mock_bin/npm" "$mock_bin/littlesecrets" "$mock_bin/sleep"
 export PATH="$mock_bin:$PATH"
 unset KAME_RELEASE_PUBLIC_KEY KAME_RELEASE_SIGNING_KEY
 run_release() {
@@ -359,7 +374,7 @@ else
 fi
 
 test-step "successful publication uploads minimal assets and explains usage"
-touch "$TMPDIR/verification.pem" "$TMPDIR/signing.pem"
+cp "$TMPDIR/keys/verification.pem" "$TMPDIR/keys/signing.pem" "$TMPDIR/"
 export KAME_RELEASE_PUBLIC_KEY="$TMPDIR/verification.pem" KAME_RELEASE_SIGNING_KEY="$TMPDIR/signing.pem"
 run_release --repo "$MOCK_REPO" --notes-file "$TMPDIR/notes"
 if [ "$status" = 0 ] && grep -qx kame.wasm "$MOCK_ASSETS" && ! grep -qx kame "$MOCK_ASSETS" &&
@@ -367,6 +382,8 @@ if [ "$status" = 0 ] && grep -qx kame.wasm "$MOCK_ASSETS" && ! grep -qx kame "$M
 	grep -q "npm x --yes $MOCK_PACKAGE@$MOCK_VERSION -- --help" "$MOCK_LOG" &&
 	grep -q 'release notes' "$MOCK_LOG" &&
 	! grep -q -- '--generate-notes' "$MOCK_LOG" &&
+	openssl pkeyutl -verify -pubin -inkey "$TMPDIR/verification.pem" -rawin \
+		-in "$fixture/dist/release/SHA256SUMS" -sigfile "$fixture/dist/release/SHA256SUMS.sig" >/dev/null &&
 	grep -q '^gh release edit .*--draft=false' "$MOCK_LOG" &&
 	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG" &&
 	! grep -q 'bin/kame\|PATCH' "$MOCK_LOG"; then
@@ -376,10 +393,12 @@ else
 fi
 
 test-step "relative operator paths work when invoked outside the checkout"
+rm -rf "$fixture/dist/release"
 (cd "$TMPDIR" && KAME_RELEASE_PUBLIC_KEY=verification.pem KAME_RELEASE_SIGNING_KEY=signing.pem \
 	run_release --notes-file notes)
 if grep -q 'release notes' "$MOCK_LOG" &&
-	grep -q "KAME_RELEASE_PUBLIC_KEY=$TMPDIR/verification.pem" "$MOCK_LOG" &&
+	openssl pkeyutl -verify -pubin -inkey "$TMPDIR/verification.pem" -rawin \
+		-in "$fixture/dist/release/SHA256SUMS" -sigfile "$fixture/dist/release/SHA256SUMS.sig" >/dev/null &&
 	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG"; then
 	test-ok "relative key and note paths remain relative to the caller"
 else
@@ -424,32 +443,54 @@ else
 	test-fail "npm recovery: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
 fi
 
-test-step "headless interactive publication reaches npm's terminal"
+test-step "kame lends npm the terminal from a background release and restores it"
 : >"$MOCK_LOG"
 rm -f "$MOCK_NPM_MARKER"
 status=0
-env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$TMPDIR/captured-out" "$release" --repo owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
-import errno, os, pty, sys
+# Kame runs in its own background process group, as under a job-control shell;
+# the release rule's metadata hands npm the terminal and gives it back.
+(cd "$fixture" && env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 timeout 30 python3 - "$TMPDIR/captured-out" "$CLI_BIN" publish repo=owner/repo) >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
+import errno, os, pty, select, sys, time
 pid, fd = pty.fork()
 if pid == 0:
-    out = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    os.dup2(out, 1)
-    os.dup2(out, 2)
-    os.execv(sys.argv[2], sys.argv[2:])
+    child = os.fork()
+    if child == 0:
+        os.setpgid(0, 0)
+        out = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.dup2(out, 1)
+        os.dup2(out, 2)
+        os.execv(sys.argv[2], sys.argv[2:])
+    _, status = os.waitpid(child, 0)
+    assert os.tcgetpgrp(0) == os.getpgrp(), 'terminal foreground group not restored'
+    sys.exit(os.waitstatus_to_exitcode(status))
+seen = b''
+deadline = time.monotonic() + 20
+approved = False
 try:
-    while data := os.read(fd, 4096):
-        sys.stdout.buffer.write(data)
+    while True:
+        ready, _, _ = select.select([fd], [], [], 0.05)
+        if ready:
+            data = os.read(fd, 4096)
+            if not data:
+                break
+            seen += data
+            sys.stdout.buffer.write(data)
+        if not approved and b'example.invalid/approve' in seen:
+            os.write(fd, b'approved\n')
+            approved = True
+        if time.monotonic() > deadline:
+            break
 except OSError as e:
     if e.errno != errno.EIO:
         raise
 sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
 PY
 if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG" &&
-	grep -q 'https://example.invalid/approve' "$TMPDIR/captured-out" &&
-	grep -q '^gh repo view owner/repo ' "$MOCK_LOG" && ! grep -q '^make ' "$MOCK_LOG"; then
-	test-ok "release retries npm without building or obscuring terminal approval"
+	grep -q 'https://example.invalid/approve' "$TMPDIR/tty-out" &&
+	grep -q '^gh repo view owner/repo ' "$MOCK_LOG" && ! grep -q '^gh release \(create\|upload\|edit\)' "$MOCK_LOG"; then
+	test-ok "npm reads approval from the terminal and the foreground group is restored"
 else
-	test-fail "interactive npm: status=$status output=$(cat "$TMPDIR/tty-out") log=$(cat "$MOCK_LOG")"
+	test-fail "interactive npm: status=$status output=$(cat "$TMPDIR/tty-out") kame=$(cat "$TMPDIR/captured-out" 2>/dev/null) log=$(cat "$MOCK_LOG")"
 fi
 
 test-step "an already published npm version is a successful no-op"
@@ -506,31 +547,6 @@ if [ "$status" = 0 ] && grep -q '^npm publish ' "$MOCK_LOG"; then
 	test-ok "rerunning after failed npm authentication retries publication"
 else
 	test-fail "npm authentication retry: status=$status err=$(cat "$TMPDIR/err")"
-fi
-
-test-step "prebuilt release staging signs without re-entering Kame"
-# The Kame `release` target holds the shared project lease and has built these
-# assets. Staging must not call `make`, which would repeat that production and
-# can wait on the same output locks.
-cp VERSION package.json "$fixture/"
-git -C "$fixture" tag -d "v$MOCK_VERSION" >/dev/null 2>&1 || true
-mkdir -p "$fixture/dist" "$fixture/src"
-cp -R src/kash "$fixture/src/kash"
-for name in kame-linux-x86_64 kame-linux-arm64 kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip kame.wasm kame.js; do
-	printf 'prebuilt %s\n' "$name" >"$fixture/dist/$name"
-done
-release_test_keys "$TMPDIR/prebuilt-keys"
-MOCK_MODE=ok MOCK_NPM_STATE=present KAME_RELEASE_PREBUILT=1 KAME="$CLI_BIN" \
-	KAME_RELEASE_PUBLIC_KEY="$TMPDIR/prebuilt-keys/verification.pem" \
-	KAME_RELEASE_SIGNING_KEY="$TMPDIR/prebuilt-keys/signing.pem" \
-	run_release --repo "$MOCK_REPO"
-if [ "$status" = 0 ] && ! grep -q '^make ' "$MOCK_LOG" &&
-	openssl pkeyutl -verify -pubin -inkey "$TMPDIR/prebuilt-keys/verification.pem" \
-		-rawin -in "$fixture/dist/release/SHA256SUMS" \
-		-sigfile "$fixture/dist/release/SHA256SUMS.sig" >/dev/null; then
-	test-ok "prebuilt assets are staged and signed without a nested Kame"
-else
-	test-fail "prebuilt staging: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
 fi
 
 test-end

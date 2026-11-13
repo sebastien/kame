@@ -6,11 +6,14 @@ import (
 
 // KashInterpreterArgs selects Kash and treats tokens following its source as
 // script arguments, like a normal language interpreter. The returned slice is
-// owned by mem.System; its strings borrow args or static storage.
+// owned by mem.System; its strings borrow args or static storage. Without a
+// source, -i/--interactive selects the REPL instead of reading stdin as source.
 func KashInterpreterArgs(args []string) []string {
 	var result []string
+	interactive := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		interactive = interactive || arg == "-i" || arg == "--interactive"
 		if arg == "-l" || arg == "--lang" {
 			if i+1 == len(args) {
 				return append(result, arg)
@@ -65,5 +68,8 @@ func KashInterpreterArgs(args []string) []string {
 		result = append(result, arg)
 	}
 	result = append(result, "--lang=kash")
+	if interactive {
+		return result
+	}
 	return append(result, "-")
 }

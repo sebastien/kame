@@ -181,6 +181,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	var commands []*exec.Cmd
 	var truncateFiles []*os.File
 	var resources []io.Closer
+	var handoff *terminalHandoff
 	closeAll := func() {
 		for _, f := range resources {
 			f.Close()
@@ -195,6 +196,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 			}
 		}
 		closeAll()
+		handoff.restore()
 		close(run.done)
 		h.native.mu.Lock()
 		delete(h.native.processes, r.ID)
@@ -303,6 +305,14 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		}
 		commands = append(commands, cmd)
 	}
+	if lent, err := startTerminalHandoff(r, stages, commands, out, errout); err != nil {
+		fail()
+		h.pending[0].Diagnostic.Message = err.Error()
+		terminalRejection(h, err)
+		return true
+	} else {
+		handoff = lent
+	}
 	for _, f := range truncateFiles {
 		info, e := f.Stat()
 		if e != nil || (info.Mode().IsRegular() && f.Truncate(0) != nil) {
@@ -336,6 +346,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 			}(index, cmd)
 		}
 		waits.Wait()
+		restoreError := handoff.restore()
 		terminal := host.ProcessEvent{Kind: host.ProcessTerminal, ID: r.ID, PID: int64(run.cmds[0].Process.Pid), PGID: int64(run.cmds[0].Process.Pid), RetainBytes: r.RetainBytes, HasEffectiveStatus: true}
 		for index, cmd := range run.cmds {
 			err := errorsByStage[index]
@@ -382,6 +393,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		terminal.Stdout = bytes.Clone(out.capture.Bytes())
 		terminal.Stderr = bytes.Clone(errout.capture.Bytes())
 		terminal.StdoutTruncated, terminal.StderrTruncated = out.truncated, errout.truncated
+		terminalRestoreFailure(&terminal, restoreError)
 		h.native.mu.Lock()
 		delete(h.native.processes, r.ID)
 		h.native.mu.Unlock()
@@ -507,7 +519,14 @@ func InstallSignals() bool {
 	})
 	return true
 }
-func TakeSignal() int             { return int(pendingSignal.Swap(0)) }
+func TakeSignal() int { return int(pendingSignal.Swap(0)) }
+
+// ResetSignals ends one cancellation episode: an interactive driver that has
+// settled an interrupted entry treats the next interrupt as graceful again.
+func ResetSignals() {
+	pendingSignal.Store(0)
+	receivedSignal.Store(false)
+}
 func km_cli_signal_pending() bool { return pendingSignal.Load() != 0 }
 func terminal(f *os.File) bool {
 	_, e := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)

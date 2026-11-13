@@ -136,12 +136,14 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 	sinks := make([]io.Writer, count)
 	out := &streamWriter{h: h, id: r.ID, kind: host.ProcessStdout, limit: r.RetainBytes, stopped: run.stopped, onTruncate: func() { h.Stop(r.ID, 100) }}
 	errout := &streamWriter{h: h, id: r.ID, kind: host.ProcessStderr, limit: r.RetainBytes, stopped: run.stopped}
+	var handoff *terminalHandoff
 	fail := func(message string) bool {
 		run.stopIO()
 		run.signalCommands(syscall.SIGKILL)
 		for _, cmd := range run.cmds {
 			run.waitCommand(cmd)
 		}
+		handoff.restore()
 		close(run.done)
 		h.native.mu.Lock()
 		delete(h.native.processes, r.ID)
@@ -313,6 +315,13 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			parentCopies = append(parentCopies, pipes[edge].write)
 		}
 	}
+	if lent, err := startTerminalHandoff(r, r.Stages, commands, out, errout); err != nil {
+		fail(err.Error())
+		terminalRejection(h, err)
+		return true
+	} else {
+		handoff = lent
+	}
 	// Open every input and sink before truncating any existing output or
 	// launching a process. A malformed later branch must leave prior sinks intact.
 	for _, f := range truncateFiles {
@@ -448,6 +457,7 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		if timer != nil {
 			timer.Stop()
 		}
+		restoreError := handoff.restore()
 		closeAll()
 		e := host.ProcessEvent{Kind: host.ProcessTerminal, ID: r.ID, PID: pid, PGID: pid, Stages: results, EdgeMetrics: edgeSnapshots(meters), Outcome: host.ProcessOutcome(run.outcome.Load()), HasEffectiveStatus: true, RetainBytes: r.RetainBytes, Stdout: bytes.Clone(out.capture.Bytes()), Stderr: bytes.Clone(errout.capture.Bytes()), StdoutTruncated: out.truncated, StderrTruncated: errout.truncated}
 		for _, stage := range results {
@@ -475,6 +485,7 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		h.native.mu.Lock()
 		delete(h.native.processes, r.ID)
 		h.native.mu.Unlock()
+		terminalRestoreFailure(&e, restoreError)
 		h.emit(e)
 		close(run.done)
 	}()

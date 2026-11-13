@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"kame/cli"
+	"kame/host/posix"
 	"kame/internal/mem"
 	"kame/program"
 	"os"
@@ -84,6 +85,9 @@ func tickCLIProgram(p *program.Program, wait int, errOut io.Writer, json bool) {
 	}
 	p.Tick(wait)
 	p.ObserveWork, dashboardOutput = nil, nil
+	if posix.TerminalHandoffActive() && dashboardRows != 0 {
+		clearDashboard(errOut)
+	}
 }
 
 func resetInvocationPresentation() {

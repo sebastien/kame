@@ -206,7 +206,7 @@ default : build
 
 build : dist
 
-dist : ./build/kame.debug ./dist/kame
+dist : ./build/kame.debug ./dist/kame ./dist/kash
 
 # --- Version metadata -------------------------------------------------------
 #
@@ -236,6 +236,12 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 ./dist/kame : @{KAME_INPUTS}
 	mkdir -p ./dist
 	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath ./dist/kame) ./cmd/kame
+
+# The same binary under its interpreter name: `kash FILE` runs Kash, and bare
+# `kash` on a terminal starts the interactive REPL. A relative link keeps the
+# pair relocatable.
+./dist/kash : ./dist/kame
+	ln -sf kame ./dist/kash
 
 # Cross-compiled release binaries: kame-{linux,darwin}-{x86_64,arm64}.
 
@@ -337,18 +343,15 @@ package-manifests : release-assets ./VERSION ./src/kash/release.kash ./src/kash/
 # --- Release publication ----------------------------------------------------
 #
 # `dist-release` only stages and signs. `release` builds the runtime assets,
-# then runs the operator script, which verifies or publishes the release
-# revision, stages, uploads a draft and publishes it to GitHub and npm. Named
-# arguments mirror the script's optional flags; key paths still come from
-# KAME_RELEASE_PUBLIC_KEY and KAME_RELEASE_SIGNING_KEY. The target holds the
-# project lock, so the script is told the assets are prebuilt and stages them
-# without re-entering Kame.
+# then `release-publish` (src/kash/release.kash) verifies or publishes the
+# release revision, stages and signs the built assets, uploads a draft and
+# publishes it to GitHub and npm. Named arguments are optional; relative paths
+# resolve against the project, and key paths come from KAME_RELEASE_PUBLIC_KEY
+# and KAME_RELEASE_SIGNING_KEY or littlesecrets. The metadata lends foreground
+# commands the terminal, so npm can prompt for authentication.
 
-release {repo=} {notes=} : release-assets ./dist/kame ./VERSION ./src/sh/release.sh ./src/kash/release.kash ./src/kash/release-manifest.kash
-	flags = (concat
-		(if (blank? repo) [] ["--repo" repo])
-		(if (blank? notes) [] ["--notes-file" notes]))
-	:KAME_RELEASE_PREBUILT "1" :KAME (abspath ./dist/kame) ./src/sh/release.sh $flags
+release {repo=} {notes=} : release-assets ./VERSION ./package.json ./src/kash/release.kash ; [tty: :true foreground: :true]
+	(release-publish (abspath ".") repo (release-path notes) (release-path (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)) (release-path (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)))
 
 # --- Windows launcher -------------------------------------------------------
 #

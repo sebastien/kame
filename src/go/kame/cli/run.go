@@ -134,6 +134,10 @@ func parseRun(args []string, discover bool) Invocation {
 			inv.PrintResult = true
 			continue
 		}
+		if !discover && (arg == "-i" || arg == "--interactive") {
+			inv.Interactive = true
+			continue
+		}
 		if assignmentOperand(&inv, arg) {
 			if inv.Error.Code != "" {
 				return inv
@@ -179,6 +183,18 @@ func parseRun(args []string, discover bool) Invocation {
 		if !runEntry(&inv, arg) {
 			return inv
 		}
+	}
+	if inv.Interactive {
+		// Entries are read after any preloaded sources, from stdin.
+		if stdin {
+			inv.fail("OPT_CONFLICT", "--interactive reads entries from stdin; it cannot also load source from stdin")
+			return inv
+		}
+		if language != "" && language != "kash" {
+			inv.fail("OPT_CONFLICT", "--interactive requires --lang kash")
+			return inv
+		}
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "interactive", Lang: "kash"})
 	}
 	if len(inv.Inputs) == 0 {
 		inv.fail("OPT_NO_VALUE", "run requires a source input")

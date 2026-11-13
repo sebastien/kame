@@ -32,7 +32,7 @@ func emitTaskbar(out io.Writer, state int, percent int) {
 }
 
 func updateTaskbar(out io.Writer) {
-	if !taskbarEnabled {
+	if !taskbarEnabled || posix.TerminalHandoffActive() {
 		return
 	}
 	if dashboardIdle {

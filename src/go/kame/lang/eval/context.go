@@ -84,7 +84,9 @@ type Context struct {
 	sequencedOperand   bool // Reached let/exit operands retain in-flight progress.
 	loopDepth          int  // Native function and constructed-script boundaries reset it.
 	InputClosed        bool // Capture, background and cleanup cannot recover invocation input.
-	RecordBody         bool // Body commands cannot steal the next record's default input.
+	// Terminal is the recipe's terminal-handoff authority from rule metadata.
+	Terminal   TerminalAuthority
+	RecordBody bool // Body commands cannot steal the next record's default input.
 	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
 	CloneCallableAST      bool
 	FinalizationForbidden bool

@@ -105,6 +105,21 @@ func validProcessEnvironment(value core.Value) bool {
 	return true
 }
 
+// IsProcessResult recognizes the completion record built by processResult,
+// whose output has already been delivered as the command ran.
+func IsProcessResult(value core.Value) bool {
+	if value.Kind != core.Record || len(value.Record) != 7 {
+		return false
+	}
+	keys := [...]string{"status", "signal", "stages", "stdoutCaptured", "stderrCaptured", "effectiveStatus", "effectiveSignal"}
+	for i := range keys {
+		if value.Record[i].Key != keys[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Results retain completion metadata, never implicit stdout/stderr buffers.
 // A record is deliberately not an argv scalar; capture remains explicit.
 func processResult(a mem.Allocator, completion core.Value, span source.Span) Result {

@@ -72,6 +72,13 @@ type ProcessRequest struct {
 	Outputs         []string
 	TimeoutMS       int64
 	RetainBytes     int
+	// Terminal lends the controlling terminal to the stages that set
+	// ProcessStage.Terminal. TerminalRequired fails the request when no terminal
+	// is available (rule-authorized handoff); otherwise the graph keeps its
+	// pipes. ForegroundAuto selects the foreground stage when none is explicit.
+	Terminal         bool
+	TerminalRequired bool
+	ForegroundAuto   bool
 }
 
 // ExecutorDescriptor binds a stable remote executor name to its implementation
@@ -101,6 +108,10 @@ type ProcessStage struct {
 	Error       string
 	ErrorAppend bool
 	ErrorMode   int
+	// Terminal attaches this stage's unredirected standard streams to the
+	// controlling terminal; Foreground also makes its group the foreground.
+	Terminal   bool
+	Foreground bool
 }
 
 const (
