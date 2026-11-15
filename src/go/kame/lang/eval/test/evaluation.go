@@ -152,6 +152,41 @@ func evaluate(t *testing.T, program *eval.Program, text string) eval.Result {
 	return result
 }
 
+func TestMapCallbacksReceiveKeyAndMissingParametersAreNil(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(map ([value key] (list value key)) [10 20])")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].List[0].Int != 20 || result.Value.List[1].List[1].Int != 1 {
+		t.Error("binary map callback did not receive value and key")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(map ([value] value) [10 20])")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Int != 20 {
+		t.Error("unary map callback did not receive only the value")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(map ([value key extra] (list value key extra)) [10])")
+	if result.Diagnostic.Code != "" || result.Value.List[0].List[2].Kind != core.Nil {
+		t.Error("missing callback parameter was not nil")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(([first second] (list first second)) 1)")
+	if result.Diagnostic.Code != "" || result.Value.List[1].Kind != core.Nil {
+		t.Error("missing function parameter was not nil")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestEvaluatesContainersReferencesAndSpecialForms(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
@@ -1767,8 +1802,8 @@ func TestPlaceholderSectionsEvaluateAsLambdas(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(((([x] x) _0)))")
-	if result.Diagnostic.Code != "EXPR_INVALID" {
-		t.Error("section accepted too few arguments")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Nil {
+		t.Error("section did not bind its missing argument to nil")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(((([x] x) _0)) 1 2)")

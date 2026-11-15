@@ -78,6 +78,8 @@ use `(pattern TEXT)` to explicitly construct a rooted expansion pattern.
 
 Applications are `(FUNCTION ARG...)`; `()` is invalid. Lambdas begin with a
 parameter list; a single final `rest...` parameter collects remaining arguments.
+A declared parameter with no supplied argument is nil; extra arguments are an
+error.
 `((str "prefix-" _))` is a placeholder section equivalent to a one-argument
 lambda. Outside sections, underscore names remain ordinary names.
 

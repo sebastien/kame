@@ -632,6 +632,40 @@ func (c *Context) CallAt(callable core.Value, values []core.Value, index int) Re
 	return r
 }
 
+// CallEachAt invokes a collection callback with its item and, when the
+// callable declares a second parameter, the item's zero-based position.
+func (c *Context) CallEachAt(callable core.Value, value core.Value, index int) Result {
+	values := []core.Value{value}
+	if c.acceptsKey(callable) {
+		values = append(values, core.Value{Kind: core.Int, Int: int64(index)})
+	}
+	return c.CallAt(callable, values, index)
+}
+
+func (c *Context) acceptsKey(callable core.Value) bool {
+	if c.Program == nil || callable.Kind != core.Callable {
+		return false
+	}
+	function, ok := callable.Callable.(*Function)
+	if !ok {
+		return false
+	}
+	if function.NativeCall != nil {
+		return function.Arity >= 2
+	}
+	if function.Kind == FunctionOperation {
+		operation := c.Program.operationForCallable(function)
+		if operation == nil {
+			return false
+		}
+		if operation.MaxArity < 0 {
+			return operation.MinArity >= 2
+		}
+		return operation.MaxArity >= 2
+	}
+	return len(function.Parameters) >= 2
+}
+
 func invocationPath(a mem.Allocator, parent string, start int, end int) string {
 
 	return owned(a, parent+"/"+strconv.FormatInt(int64(start), 10)+":"+strconv.FormatInt(int64(end), 10))

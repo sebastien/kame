@@ -117,7 +117,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	state := callbackProgress(c)
 	for state.Index < len(values) {
 		effects, paths := len(c.Effects), len(c.WritePaths)
-		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
+		result := c.CallEachAt(*callback, values[state.Index], state.Index)
 		if result.Waiting {
 			suspendCallback(c, state)
 			return result
@@ -187,7 +187,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 			}
 		} else {
 			effects, paths := len(c.Effects), len(c.WritePaths)
-			result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
+			result := c.CallEachAt(*callback, values[state.Index], state.Index)
 			if result.Waiting {
 				suspendCallback(c, state)
 				freeOptionalCallable(c, callback)

@@ -91,11 +91,13 @@ absence from a present nil without introducing implicit lazy operation arguments
 ## Collections
 
 Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
-`filter` and `filter-out` require `(PREDICATE-OR-VALUE LIST)`.
+`filter` and `filter-out` require `(PREDICATE-OR-VALUE LIST)`. A unary callback
+receives the item alone; a callback declaring two or more parameters receives
+the item followed by its zero-based position, with any further parameters nil.
 
 | Operation | Signature | Result |
 | --- | --- | --- |
-| `map` | `(map FUNCTION LIST)` | One callback result per item. |
+| `map` | `(map FUNCTION LIST)` | One callback result per item; `([value key] ...)` receives the item then its position. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
 | `filter` | `(filter PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
 | `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |

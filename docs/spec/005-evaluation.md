@@ -279,13 +279,15 @@ and defining scope. Calling it creates a child scope, binds arguments, and
 evaluates body expressions in order. The final expression is returned; an empty
 body returns nil.
 
-Too few or too many arguments are `EXPR_INVALID`. A rest argument receives a
-list, including an empty list.
+Too many arguments are `EXPR_INVALID`. Missing arguments are dynamic: every
+declared parameter without a supplied argument binds nil. A rest argument
+receives a list, including an empty list.
 
 Placeholder sections lower to ordinary lexical functions. A placeholder atom
 evaluates by reading its indexed argument from the enclosing section call
-without name lookup; user definitions named `_0` cannot shadow it. Section
-arity and argument-count diagnostics follow the ordinary function rules.
+without name lookup; user definitions named `_0` cannot shadow it. A missing
+section argument reads as nil. Section arity and argument-count diagnostics
+follow the ordinary function rules.
 
 Function definitions in script and `(def ...)` use the same callable
 representation.

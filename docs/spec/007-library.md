@@ -273,10 +273,10 @@ The collection operations are:
 
 | Name | Contract |
 | --- | --- |
-| `map` | Apply a function to each list item |
-| `flatmap` | Map and flatten one list level |
-| `filter` | Keep items for which a predicate is true |
-| `filter-out` | Remove items for which a predicate is true |
+| `map` | Apply a function to each list item, passing the item and its position |
+| `flatmap` | Map and flatten one list level, with the same callback arguments |
+| `filter` | Keep items for which a predicate is true, passing the item and its position |
+| `filter-out` | Remove items for which a predicate is true, with the same callback arguments |
 | `in?` | `(in? ITEM LIST)` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
 | `reduce` | Fold a list from left to right |
 | `concat` | Concatenate lists or append scalar values |
@@ -286,7 +286,10 @@ The collection operations are:
 
 Callbacks are lexical functions evaluated in item order for deterministic
 effects and diagnostics. Their internally discovered host dependencies may run
-in parallel, but the resulting list preserves input order.
+in parallel, but the resulting list preserves input order. `map`, `flatmap`,
+`filter`, and `filter-out` call a unary callback with the item alone and a
+callable declaring two or more parameters with the item followed by its
+zero-based position; further parameters are nil.
 
 `has?` remains a compatibility alias for list membership; it does not test record
 keys. Use `in?` for list membership, `has-key?` for record presence, and `includes?`

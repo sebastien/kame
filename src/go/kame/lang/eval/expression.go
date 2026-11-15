@@ -170,7 +170,7 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 		}
 		index := int(expression.Int)
 		if index >= len(current.Section) {
-			break
+			return Result{Value: core.Value{Kind: core.Nil}}
 		}
 		return Result{Value: borrowValue(context.Run, current.Section[index])}
 	}

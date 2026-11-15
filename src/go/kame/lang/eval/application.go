@@ -411,17 +411,13 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	if rest {
 		fixed--
 	}
-	if len(values) < fixed || (!rest && len(values) != fixed) {
+	if !rest && len(values) > fixed {
 		discardCallValues(context.Run, values)
 		name := "function"
 		if function.Definition != nil {
 			name = function.Definition.Name
 		}
-		max := fixed
-		if rest {
-			max = -1
-		}
-		return arityFailure(context.Run, span, name, len(values), fixed, max)
+		return arityFailure(context.Run, functionAritySpan(function, context, span), name, len(values), fixed, fixed)
 	}
 	child := newScope(context.Run, function.Scope)
 	defer child.Free()
@@ -438,10 +434,16 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		// No wouldStrandCapture check here: child is freshly created, so it cannot
 		// be an ancestor of any capture scope and the store cannot deadlock.
 		for i := 0; i < fixed; i++ {
-			child.setValue(function.Parameters[i].Name, values[i])
+			if i < len(values) {
+				child.setValue(function.Parameters[i].Name, values[i])
+			} else {
+				// Missing arguments are dynamic: an unbound parameter is nil.
+				child.setValue(function.Parameters[i].Name, core.Value{Kind: core.Nil})
+			}
 		}
 		if rest {
-			remainder := core.NewList(context.Run, values[fixed:])
+			start := min(fixed, len(values))
+			remainder := core.NewList(context.Run, values[start:])
 			child.setValue(function.Parameters[fixed].Name, remainder)
 			remainder.Free(context.Run)
 		}
@@ -519,8 +521,34 @@ func attachNamedFrame(result *Result, context *Context, span source.Span, kind s
 	result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
 }
 
-func arityFailure(a mem.Allocator, span source.Span, name string, count int, min int, max int) Result {
+// functionAritySpan points arity diagnostics at the authored parameter list
+// when it belongs to the source currently being evaluated.
+func functionAritySpan(function *Function, context *Context, fallback source.Span) source.Span {
+	if function == nil || len(function.Parameters) == 0 {
+		return fallback
+	}
+	start := function.Parameters[0].Span.Start
+	end := function.Parameters[len(function.Parameters)-1].Span.End
+	if context != nil && context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
+		part := context.Program.SourceParts[context.SourceOrigin-1]
+		if part.Module || start < part.Start || end > part.End {
+			return fallback
+		}
+	}
+	if context != nil && context.Program != nil && context.Program.Script != nil {
+		text := context.Program.Script.Source.Text
+		if start >= 0 && end >= start && end <= len(text) {
+			if open := strings.LastIndexByte(text[:start], '['); open >= 0 {
+				if close := strings.IndexByte(text[end:], ']'); close >= 0 {
+					return source.Span{Start: open, End: end + close + 1}
+				}
+			}
+		}
+	}
+	return source.Span{Start: start, End: end}
+}
 
+func arityFailure(a mem.Allocator, span source.Span, name string, count int, min int, max int) Result {
 	got := strconv.FormatInt(int64(count), 10)
 	expected := strconv.FormatInt(int64(min), 10)
 	if max < 0 {

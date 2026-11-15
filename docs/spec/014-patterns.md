@@ -86,7 +86,8 @@ The section arity is one plus the highest placeholder index in its body:
 
 A section lowers to an ordinary lexical function with that arity and the body
 as its single body expression. Calling it uses the existing function-call
-machinery, so too few or too many arguments are `EXPR_INVALID`.
+machinery, so too many arguments are `EXPR_INVALID` and missing arguments read
+as nil.
 
 A placeholder atom is a dedicated syntactic form, not a name reference.
 Evaluating it reads the argument at its index from the nearest enclosing
@@ -327,7 +328,8 @@ and runtime pattern construction are specified in
 - `((cons _ _))` receives one argument twice.
 - `(f _)` still evaluates the name `_`; `(_0x)` is an ordinary reference.
 - Nested sections bind their own placeholders.
-- Wrong section arity is `EXPR_INVALID`.
+- Wrong section arity with too many arguments is `EXPR_INVALID`; a missing
+  argument reads as nil.
 - Sections pass through `map`, `apply`, and definitions.
 - `./{**}/{*}.c` classifies as a match pattern with two positional captures;
   `./build/{_0}/{_1}.c` classifies as an expansion pattern.

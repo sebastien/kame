@@ -31,6 +31,12 @@ evaluates '(map ([x] (str x)) (list 1 2 3))' '["1" "2" "3"]'
 evaluates '(map ([x] (str x)) (list "b" "a"))' '["b" "a"]'
 evaluates '(map ([x] (str x)) (list))' '[]'
 
+test-step "map passes value then key when the callback declares it"
+evaluates '(map ([value key] (list value key)) (list "a" "b"))' '[["a" 0] ["b" 1]]'
+evaluates '(map ([value key extra] (list value key extra)) (list "a"))' '[["a" 0 :nil]]'
+evaluates '(flatmap ([value key] (list value key)) (list "a"))' '["a" 0]'
+evaluates '(filter ([value key] (eq? key 1)) (list "a" "b"))' '["b"]'
+
 test-step "flatmap flattens one level"
 evaluates '(flatmap ([x] (list x x)) (list 1 2))' '[1 1 2 2]'
 evaluates '(flatmap ([x] (list x)) (list 1 2))' '[1 2]'

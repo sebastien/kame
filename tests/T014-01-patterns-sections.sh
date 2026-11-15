@@ -36,8 +36,8 @@ evaluates '(((list _0 _0)) "same")' '["same" "same"]'
 evaluates '(((list _0 __ _2)) "a" "b" "c")' '["a" "b" "c"]'
 evaluates '(((list _1)) "unused" "kept")' '["kept"]'
 
-test-step "section arity is enforced"
-diag '(((nop _0)))' 'EXPR_INVALID'
+test-step "section arity and missing arguments"
+evaluates '(((nop _0)))' ':nil'
 diag '(((nop _0)) 1 2)' 'EXPR_INVALID'
 diag '_0x' 'REF_MISSING'
 
