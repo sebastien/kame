@@ -890,11 +890,16 @@ kame do run -i --allow-run
 Entries share one session: `let` and `def` rebind, lazy names cannot be
 redefined, and a failure ends only its entry. Whole-line `cd`, `export`, and
 `unset` change the session directory and child environment. Foreground
-commands receive the terminal; Ctrl-C reaches only them.
+commands receive the terminal; Ctrl-C reaches only them. A second interrupt
+while an interrupted entry settles kills its processes and ends the session
+with 130, skipping cleanup. On a terminal, entries are jobs: Ctrl-Z stops one
+anywhere, `jobs`, `fg [%N]`, `bg [%N]` and `kill [-SIG] %N` manage them, and a
+final `&` line starts an entry in the background. Use `let x = $(...)` to run a capture now;
+`x = $(...)` is lazy and runs only when `x` is used.
 
 The startup file `$KASH_INIT` (default `~/.config/kash/init.kash`; empty
 disables) runs as entries before the first prompt. A `kash-prompt` function
-receives `[status: dir: name:]` and returns the prompt string:
+receives `[status: dir: name: jobs:]` and returns the prompt string:
 
 ```kash
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")

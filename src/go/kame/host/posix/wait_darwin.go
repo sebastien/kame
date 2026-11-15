@@ -2,7 +2,11 @@ package posix
 
 import "golang.org/x/sys/unix"
 
-func observeProcessExit(pid int) error {
+// observeProcess blocks until pid exits without reaping it. Darwin's kqueue
+// reports no stops, so changed is never called.
+// ponytail: stop observation is Linux-only; Darwin job control needs a
+// waitpid(WUNTRACED|WNOHANG) poller if it is ever required.
+func observeProcess(pid int, changed func(stopped bool, signal int)) error {
 	queue, e := unix.Kqueue()
 	if e != nil {
 		return e

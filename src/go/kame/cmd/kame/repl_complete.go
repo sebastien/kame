@@ -42,7 +42,7 @@ const (
 )
 
 var (
-	replSessionCommands = map[string]string{"cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables"}
+	replSessionCommands = map[string]string{"cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 

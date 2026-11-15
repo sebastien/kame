@@ -228,6 +228,8 @@ hi you
 - An entry with an unclosed parenthesis or quote continues on the next line.
 - An entry opening a block (`def`, `if`, `for`, `match`, …) continues until a
   blank line.
+- A final line holding only `&` ends the entry and runs it in the background
+  (on a terminal, Ctrl-X Enter adds that line after a one-line entry).
 - Entries are named `<kash:N>` in diagnostics.
 - A parse or registration error rejects the whole entry; nothing runs.
 - A failing statement ends its entry only; the session continues.
@@ -266,21 +268,40 @@ never move.
   share with the session. Captures, `&` graphs, defers and record loops keep
   pipes; `:tty :false` opts a stage out.
 - Ctrl-C reaches the running command only; the entry ends with status 130 and
-  the session continues. Ctrl-C at the prompt clears the pending input.
+  the session continues. Ctrl-C at the prompt clears the pending input. A
+  second Ctrl-C while an interrupted entry settles kills its processes and
+  ends the session with 130, skipping cleanup.
 - Ctrl-D on an empty line or `exit N` ends the session: owned work is joined
   and cleanup runs. The exit status is the last entry's status or `N`.
 - History keeps 1000 entries in `$KASH_HISTORY`, else
   `$XDG_STATE_HOME/kash/history`, else `~/.local/state/kash/history`;
   multi-line entries are stored with backslash-continued lines.
-- Not provided: job control, programmable completion, right or multi-line
-  prompts.
+- Not provided: programmable completion, right or multi-line prompts.
+
+### Jobs
+
+On a terminal every entry is a job: its Kash evaluation plus the `&` graphs it
+starts. Ctrl-Z stops the running entry wherever it is (a command, a capture,
+an `if` test, plain evaluation) and `fg` resumes it exactly there.
+
+| Entry | Effect |
+| --- | --- |
+| `jobs` | List `[N]+ STATE  TEXT` (`running`, `stopped`, `done`, `exit S`, `signal NAME`). |
+| `fg [%N]` | Resume in the foreground with the job's terminal modes. |
+| `bg [%N]` | Resume a stopped job in the background. |
+| `kill [-SIG] %N…` | Cancel the job, or send `SIG` to its processes; `kill PID` stays external. |
+
+Background jobs run while you type; reading the terminal stops them
+(`stopped (tty input)`). Stops and completions are reported before the next
+prompt. The first Ctrl-D or `exit` with stopped jobs lists them; the second
+ends the session and terminates them.
 
 ### Startup file and prompt
 
 `$KASH_INIT`, else `$XDG_CONFIG_HOME/kash/init.kash`, else
 `~/.config/kash/init.kash`, runs as entries before the first prompt (empty
 `KASH_INIT` disables it). A `kash-prompt` function receives
-`[status: dir: name:]` and returns the prompt string:
+`[status: dir: name: jobs:]` and returns the prompt string:
 
 ```kash
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")

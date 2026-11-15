@@ -5,6 +5,7 @@ import (
 	"io"
 	"kame/host"
 	"os/exec"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -19,7 +20,8 @@ type ownedProcess struct {
 	cmd     *exec.Cmd
 	mu      sync.Mutex
 	retired bool
-	timer   *time.Timer
+	timer   *pausableTimer
+	stopped bool // guarded by running.control
 }
 
 func (p *ownedProcess) signal(signal syscall.Signal) {
@@ -29,8 +31,10 @@ func (p *ownedProcess) signal(signal syscall.Signal) {
 		killGroup(p.cmd.Process.Pid, signal)
 	}
 }
-func (p *ownedProcess) wait() error {
-	observed := observeProcessExit(p.cmd.Process.Pid)
+func (p *ownedProcess) wait(r *running) error {
+	observed := observeProcess(p.cmd.Process.Pid, func(stopped bool, signal int) { r.stageChanged(p, stopped, signal) })
+	// An exit can supersede an unobserved continue.
+	r.stageChanged(p, false, 0)
 	p.mu.Lock()
 	killGroup(p.cmd.Process.Pid, syscall.SIGKILL)
 	p.retired = true
@@ -66,7 +70,7 @@ func (r *running) waitCommand(cmd *exec.Cmd) error {
 	r.commandMu.Lock()
 	p := r.owned[cmd]
 	r.commandMu.Unlock()
-	return p.wait()
+	return p.wait(r)
 }
 func (r *running) signalCommands(signal syscall.Signal) {
 	r.commandMu.Lock()
@@ -87,6 +91,8 @@ func (r *running) terminate(outcome host.ProcessOutcome, grace int64) {
 			signal = syscall.SIGTERM
 		}
 		r.signalCommands(signal)
+		// A stopped group must run to observe SIGTERM.
+		r.signalCommands(syscall.SIGCONT)
 		if grace > 0 {
 			go func() {
 				timer := time.NewTimer(time.Duration(grace) * time.Millisecond)
@@ -119,7 +125,7 @@ func (r *running) stageTimeout(cmd *exec.Cmd, milliseconds int64) {
 	if p.retired {
 		return
 	}
-	p.timer = time.AfterFunc(time.Duration(milliseconds)*time.Millisecond, func() {
+	p.timer = r.newTimer(milliseconds, func() {
 		p.mu.Lock()
 		active := !p.retired
 		p.mu.Unlock()
@@ -127,4 +133,166 @@ func (r *running) stageTimeout(cmd *exec.Cmd, milliseconds int64) {
 			r.terminate(host.ProcessTimedOut, 100)
 		}
 	})
+}
+
+// pausableTimer is a deadline that does not advance while paused.
+type pausableTimer struct {
+	mu        sync.Mutex
+	fn        func()
+	remaining time.Duration
+	started   time.Time
+	timer     *time.Timer
+	stopped   bool
+}
+
+func (t *pausableTimer) Stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stopped = true
+	if t.timer != nil {
+		t.timer.Stop()
+	}
+}
+
+func (t *pausableTimer) done() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.stopped
+}
+
+func (t *pausableTimer) pause() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.timer != nil && t.timer.Stop() {
+		t.remaining -= time.Since(t.started)
+	}
+	t.timer = nil
+}
+
+func (t *pausableTimer) resume() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped || t.timer != nil {
+		return
+	}
+	t.started = time.Now()
+	t.timer = time.AfterFunc(max(t.remaining, 0), func() {
+		t.mu.Lock()
+		t.stopped = true
+		t.mu.Unlock()
+		t.fn()
+	})
+}
+
+// newTimer starts a request deadline, paused while the request is.
+func (r *running) newTimer(milliseconds int64, fn func()) *pausableTimer {
+	t := &pausableTimer{fn: fn, remaining: time.Duration(milliseconds) * time.Millisecond}
+	r.control.Lock()
+	// Per-record workers start many deadlines; drop the finished ones.
+	r.timers = slices.DeleteFunc(r.timers, (*pausableTimer).done)
+	r.timers = append(r.timers, t)
+	paused := r.paused
+	r.control.Unlock()
+	if !paused {
+		t.resume()
+	}
+	return t
+}
+
+// Suspension (003): a request is paused while Kame suspended it or any of
+// its stages is stopped. A stage stopped by a signal stops the whole request
+// and reports one ProcessStopped; ProcessContinued follows once every
+// stopped stage runs again. A terminal handoff is released while stopped.
+
+// stageChanged records a stage's stop, continue, or exit, from its waiter.
+func (r *running) stageChanged(p *ownedProcess, stopped bool, signal int) {
+	r.control.Lock()
+	var event host.ProcessEventKind = -1
+	if stopped != p.stopped {
+		p.stopped = stopped
+		if stopped {
+			r.stoppedStages++
+		} else {
+			r.stoppedStages--
+		}
+	}
+	switch {
+	case stopped && r.stoppedStages == 1 && !r.suspended && !r.reportedStop:
+		event, r.reportedStop = host.ProcessStopped, true
+	case r.stoppedStages == 0 && r.reportedStop && !r.suspended:
+		event, r.reportedStop = host.ProcessContinued, false
+	}
+	r.updatePausedLocked()
+	r.control.Unlock()
+	if event == host.ProcessStopped {
+		r.signalCommands(syscall.SIGSTOP) // Peers must not run against a stopped stage.
+	}
+	if event >= 0 && r.host != nil {
+		r.host.emit(host.ProcessEvent{Kind: event, ID: r.id, Signal: signal})
+	}
+}
+
+// updatePausedLocked pauses or resumes deadlines and releases the terminal
+// when the request stops; r.control is held.
+func (r *running) updatePausedLocked() {
+	paused := r.suspended || r.stoppedStages > 0
+	if paused == r.paused {
+		return
+	}
+	r.paused = paused
+	for _, t := range r.timers {
+		if paused {
+			t.pause()
+		} else {
+			t.resume()
+		}
+	}
+	if paused {
+		r.handoff.release()
+	}
+}
+
+func (r *running) suspend() {
+	r.control.Lock()
+	r.suspended = true
+	r.updatePausedLocked()
+	r.control.Unlock()
+	r.signalCommands(syscall.SIGSTOP)
+}
+
+// resume continues the request; foreground first returns a released
+// terminal handoff to it.
+func (r *running) resume(foreground bool) error {
+	r.control.Lock()
+	var err error
+	if foreground {
+		err = r.handoff.reacquire()
+	}
+	if err == nil {
+		r.suspended = false
+		if r.stoppedStages == 0 {
+			r.updatePausedLocked()
+		}
+	}
+	r.control.Unlock()
+	if err == nil {
+		r.signalCommands(syscall.SIGCONT)
+	}
+	return err
+}
+
+// signal delivers one signal to every group, continuing a paused request
+// for a signal that does not stop it.
+func (r *running) signal(signal syscall.Signal) {
+	r.signalCommands(signal)
+	switch signal {
+	case syscall.SIGSTOP, syscall.SIGTSTP, syscall.SIGTTIN, syscall.SIGTTOU:
+		return
+	}
+	r.control.Lock()
+	paused := r.paused
+	r.control.Unlock()
+	if paused {
+		r.resume(false)
+	}
 }

@@ -55,7 +55,7 @@ func startTerminalSession(t *testing.T, binary, directory string, env []string, 
 	t.Helper()
 	controller, device := openTestTerminal(t)
 	command := exec.Command(binary, args...)
-	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "KASH_HISTORY="+directory+"/.history"), env...)
+	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "INPUTRC=/dev/null", "KASH_HISTORY="+directory+"/.history"), env...)
 	command.Stdin, command.Stdout, command.Stderr = device, device, device
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {
@@ -155,7 +155,8 @@ func (s *terminalSession) finish() int {
 		return 0
 	case <-time.After(10 * time.Second):
 		s.command.Process.Kill()
-		s.t.Fatalf("interactive session did not end: %q", s.text())
+		text := s.text()
+		s.t.Fatalf("interactive session did not end; terminal ends %q", text[max(0, len(text)-2000):])
 	}
 	return -1
 }
@@ -407,5 +408,43 @@ func TestNativeInteractiveKashHighlightingAndBlocks(t *testing.T) {
 	s.waitFor("block-42")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("highlighting session status %d: %q", status, s.text())
+	}
+}
+
+// NO_COLOR and TERM=dumb disable highlighting; the entry still runs.
+func TestNativeInteractiveKashHighlightingDisabled(t *testing.T) {
+	for _, env := range [][]string{{"TERM=xterm-256color", "NO_COLOR=1"}, {"TERM=dumb", "NO_COLOR="}} {
+		t.Run(env[0]+","+env[1], func(t *testing.T) {
+			s := startTerminalSession(t, nativeCLIBinary(t), t.TempDir(), env, "do", "run", "-i")
+			s.waitFor("kash ")
+			s.send("sh -c 'echo plain-$((40+2))'\r")
+			s.waitFor("plain-42")
+			if strings.Contains(s.raw(), "\x1b[1;32m") || strings.Contains(s.raw(), "\x1b[33m") {
+				t.Fatalf("highlighting was not disabled: %q", s.raw())
+			}
+			if status := s.finish(); status != 0 {
+				t.Fatalf("session status %d: %q", status, s.text())
+			}
+		})
+	}
+}
+
+// The editor reads $INPUTRC with the application name kash: a `$if kash`
+// section selecting vi bindings applies, so Escape enters command mode.
+func TestNativeInteractiveKashInputrcViMode(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/inputrc", "$if kash\nset editing-mode vi\n$endif\n$if other\nset editing-mode emacs\n$endif\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"INPUTRC=" + directory + "/inputrc"}, "do", "run", "-i")
+	s.waitFor("kash ")
+	// Command mode: 0 to line start, w to the next word, x deletes its first
+	// character. Emacs bindings would insert the letters instead.
+	s.send("echo xvi-mode")
+	time.Sleep(100 * time.Millisecond)
+	s.send("\x1b")
+	time.Sleep(100 * time.Millisecond)
+	s.send("0wx\r")
+	s.waitFor("\nvi-mode")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("vi session status %d: %q", status, s.text())
 	}
 }

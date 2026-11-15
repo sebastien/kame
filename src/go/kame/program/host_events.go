@@ -88,6 +88,8 @@ func (p *Program) pump(wait int) {
 				p.emitProcess(entry, ProcessExited, event.ID)
 			}
 			p.complete(event)
+		} else if event.Kind == host.ProcessStopped || event.Kind == host.ProcessContinued {
+			p.recordHostStop(event)
 		}
 		event.Free(p.Alloc)
 	}
@@ -337,6 +339,7 @@ func (p *Program) drainRequests() {
 			processRequest.Terminal = host.PayloadBool(request.Payload, "terminal")
 			processRequest.TerminalRequired = host.PayloadBool(request.Payload, "terminalRequired")
 			processRequest.ForegroundAuto = host.PayloadBool(request.Payload, "foregroundAuto")
+			processRequest.TerminalBackground = processRequest.Terminal && p.BackgroundNode != nil && p.BackgroundNode(request.NodeID)
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
 				validDescriptor = false
@@ -365,6 +368,10 @@ func (p *Program) drainRequests() {
 				}
 				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
 				p.Pending = append(p.Pending, pending)
+				// The root may have been suspended after the request was queued.
+				if control, ok := p.Host.(host.ProcessControl); ok && p.Engine.Suspended(p.Engine.LookupID(request.NodeID)) {
+					control.Suspend(request.ID)
+				}
 			}
 			mem.FreeSlice(nil, scopedEnvironment)
 			mem.FreeSlice(nil, argv)
@@ -1081,7 +1088,54 @@ func (p *Program) completeRequest(request host.Request) {
 	p.Engine.Complete(completion)
 }
 
+// HostStop is a host report that a request stopped or continued on its own
+// (003, Suspension). The owner decides whether to suspend its roots (002).
+type HostStop struct {
+	RequestID int64
+	NodeID    int64
+	Stopped   bool
+	Signal    int
+}
+
+func (p *Program) recordHostStop(event host.ProcessEvent) {
+	stop := HostStop{RequestID: event.ID, Stopped: event.Kind == host.ProcessStopped, Signal: event.Signal}
+	for i := range p.Pending {
+		if p.Pending[i].ID == event.ID {
+			stop.NodeID = p.Pending[i].NodeID
+		}
+	}
+	p.HostStops = append(p.HostStops, stop)
+}
+
+// TakeHostStops returns and clears the stop reports received so far.
+func (p *Program) TakeHostStops() []HostStop {
+	stops := p.HostStops
+	p.HostStops = nil
+	return stops
+}
+
+// drainSuspensions forwards engine suspension requests to a host that
+// supports them; resumes use ResumeForeground.
+func (p *Program) drainSuspensions() {
+	control, _ := p.Host.(host.ProcessControl)
+	for {
+		s := p.Engine.NextSuspension()
+		if s.RequestID == 0 {
+			return
+		}
+		if control == nil || p.Forwarding {
+			continue
+		}
+		if s.Suspend {
+			control.Suspend(s.RequestID)
+		} else {
+			control.Resume(s.RequestID, p.ResumeForeground)
+		}
+	}
+}
+
 func (p *Program) drainCancellations() {
+	p.drainSuspensions()
 	p.closeAbandonedRecordReaders()
 	for {
 		cancellation := p.Engine.NextCancellation()

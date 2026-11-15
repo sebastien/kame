@@ -58,6 +58,16 @@ type running struct {
 	cmds         []*exec.Cmd
 	outcome      atomic.Int32
 	done         chan struct{}
+	// Suspension state (owned_process.go), guarded by control.
+	control       sync.Mutex
+	host          *Host
+	id            int64
+	handoff       *terminalHandoff
+	timers        []*pausableTimer
+	suspended     bool
+	paused        bool
+	stoppedStages int
+	reportedStop  bool
 }
 type nativeHost struct {
 	predicates  chan *predicateRequest
@@ -163,7 +173,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	if r.Topology {
 		return h.startTopology(r)
 	}
-	run := &running{done: make(chan struct{}), stopped: make(chan struct{})}
+	run := &running{done: make(chan struct{}), stopped: make(chan struct{}), host: h, id: r.ID}
 	run.stopIO = func() { run.halt.Do(func() { close(run.stopped) }) }
 	h.native.mu.Lock()
 	if _, ok := h.native.processes[r.ID]; ok {
@@ -312,6 +322,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		return true
 	} else {
 		handoff = lent
+		run.handoff = lent
 	}
 	for _, f := range truncateFiles {
 		info, e := f.Stat()
@@ -327,9 +338,9 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	}
 	closeAll()
 	h.pending = append(h.pending, host.ProcessEvent{Kind: host.ProcessStarted, ID: r.ID, PID: int64(run.cmds[0].Process.Pid), PGID: int64(run.cmds[0].Process.Pid)})
-	var timer *time.Timer
+	var timer *pausableTimer
 	if timeout := processTimeout(r); timeout > 0 {
-		timer = time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() { run.terminate(host.ProcessTimedOut, 100) })
+		timer = run.newTimer(timeout, func() { run.terminate(host.ProcessTimedOut, 100) })
 	}
 	go func() {
 		defer close(run.done)
@@ -435,7 +446,35 @@ func (h *Host) Next() host.ProcessEventResult {
 	h.pending = h.pending[1:]
 	return host.ProcessEventResult{OK: true, Event: e}
 }
-func (h *Host) Cancel(id int64) bool      { return h.cancel(id, 100) }
+func (h *Host) Cancel(id int64) bool { return h.cancel(id, 100) }
+
+func (h *Host) running(id int64) *running {
+	h.native.mu.Lock()
+	defer h.native.mu.Unlock()
+	return h.native.processes[id]
+}
+
+// Suspend, Resume, and Signal implement host.ProcessControl.
+func (h *Host) Suspend(id int64) bool {
+	r := h.running(id)
+	if r != nil {
+		r.suspend()
+	}
+	return r != nil
+}
+
+func (h *Host) Resume(id int64, foreground bool) bool {
+	r := h.running(id)
+	return r != nil && r.resume(foreground) == nil
+}
+
+func (h *Host) Signal(id int64, signal int) bool {
+	r := h.running(id)
+	if r != nil {
+		r.signal(syscall.Signal(signal))
+	}
+	return r != nil
+}
 func (h *Host) Stop(id, grace int64) bool { return h.cancel(id, grace) }
 func (h *Host) cancel(id, grace int64) bool {
 	h.native.mu.Lock()

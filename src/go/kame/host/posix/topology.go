@@ -102,7 +102,7 @@ func stageCommand(r host.ProcessRequest, s host.ProcessStage) *exec.Cmd {
 	return cmd
 }
 func (h *Host) startTopology(r host.ProcessRequest) bool {
-	run := &running{done: make(chan struct{}), stopped: make(chan struct{})}
+	run := &running{done: make(chan struct{}), stopped: make(chan struct{}), host: h, id: r.ID}
 	h.native.mu.Lock()
 	if h.native.processes[r.ID] != nil {
 		h.native.mu.Unlock()
@@ -321,6 +321,7 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		return true
 	} else {
 		handoff = lent
+		run.handoff = lent
 	}
 	// Open every input and sink before truncating any existing output or
 	// launching a process. A malformed later branch must leave prior sinks intact.
@@ -357,9 +358,9 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		}
 		return host.ProcessEvent{Kind: host.ProcessSnapshot, ID: r.ID, StageStates: states, EdgeMetrics: edgeSnapshots(meters)}
 	}
-	var timer *time.Timer
+	var timer *pausableTimer
 	if timeout := processTimeout(r); timeout > 0 {
-		timer = time.AfterFunc(time.Duration(timeout)*time.Millisecond, func() { run.terminate(host.ProcessTimedOut, 100) })
+		timer = run.newTimer(timeout, func() { run.terminate(host.ProcessTimedOut, 100) })
 	}
 	results := make([]host.ProcessStageResult, count)
 	drainCopies := false

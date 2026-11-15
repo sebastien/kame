@@ -53,16 +53,20 @@ type Node struct {
 	Subs            []*Subscription
 	Interest        int64
 	RequestInterest int64
-	Completion      Completion
-	HasCompletion   bool
-	Submitted       bool
-	HostRequestID   int64
-	materializer    *Materializer
-	offered         bool
-	invalidating    bool
+	// SuspendedInterest is the part of Interest held by suspended roots.
+	SuspendedInterest int64
+	Completion        Completion
+	HasCompletion     bool
+	Submitted         bool
+	HostRequestID     int64
+	materializer      *Materializer
+	offered           bool
+	invalidating      bool
 	// Restartable nodes can be evaluated again after their last consumer releases them.
 	Restartable bool
 }
+
+func (n *Node) suspended() bool { return n.Interest != 0 && n.SuspendedInterest == n.Interest }
 
 func (n *Node) HasActiveSource() bool { return n != nil && n.materializer != nil }
 func (n *Node) IsTearingDown() bool   { return n != nil && n.tearingDown }

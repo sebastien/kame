@@ -38,9 +38,7 @@ func (c *EngineContext) RestoreDependencies(checkpoint *DependencyCheckpoint) {
 	for i := checkpoint.Dynamic; i < len(n.Dynamic); i++ {
 		dependency := n.Dynamic[i]
 		removeDependent(dependency, n)
-		if n.Interest != 0 {
-			c.engine.interest(dependency, -n.Interest)
-		}
+		c.engine.edgeInterest(dependency, n, -1)
 	}
 	n.Dynamic = n.Dynamic[:checkpoint.Dynamic]
 	mem.FreeSlice(nil, n.OrderOnly)

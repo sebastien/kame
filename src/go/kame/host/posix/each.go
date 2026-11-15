@@ -5,7 +5,6 @@ import (
 	"io"
 	"kame/host"
 	"os/exec"
-	"time"
 )
 
 // Start and register under the same lock used by cancellation. A stopped graph
@@ -55,11 +54,11 @@ func runEach(request host.ProcessRequest, stage host.ProcessStage, template *exe
 		if e != nil {
 			return operatorResult(e, run)
 		}
-		var timer *time.Timer
+		var timer *pausableTimer
 		if stage.TimeoutMS > 0 {
-			timer = time.AfterFunc(time.Duration(stage.TimeoutMS)*time.Millisecond, func() { run.terminate(host.ProcessTimedOut, 100) })
+			timer = run.newTimer(stage.TimeoutMS, func() { run.terminate(host.ProcessTimedOut, 100) })
 		}
-		e = owner.wait()
+		e = owner.wait(run)
 		if timer != nil {
 			timer.Stop()
 		}

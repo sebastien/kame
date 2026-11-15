@@ -57,11 +57,20 @@ func newEditorReader() *editorReader {
 	e.shell.Config.Set("menu-complete-display-prefix", true)
 	// Tab indents at the start of a line, as block bodies need, and
 	// completes elsewhere.
-	e.shell.Keymap.Register(map[string]func(){"kash-complete-or-indent": e.completeOrIndent})
+	e.shell.Keymap.Register(map[string]func(){"kash-complete-or-indent": e.completeOrIndent, "kash-insert-newline": e.insertNewline})
 	for _, keymap := range []string{"emacs", "emacs-standard", "vi-insert"} {
 		e.shell.Config.Bind(keymap, "\t", "kash-complete-or-indent", false)
+		// Ctrl-X Enter adds a line without submitting, e.g. for a final &
+		// line. (This readline never dispatches ESC Enter, so not Alt-Enter.)
+		e.shell.Config.Bind(keymap, "\x18\r", "kash-insert-newline", false)
 	}
 	return e
+}
+
+func (e *editorReader) insertNewline() {
+	line, cursor := e.shell.Line(), e.shell.Cursor()
+	line.Insert(cursor.Pos(), '\n')
+	cursor.Inc()
 }
 
 func (e *editorReader) completeOrIndent() {
@@ -77,7 +86,13 @@ func (e *editorReader) completeOrIndent() {
 
 // bind connects completion and highlighting to the session.
 func (e *editorReader) bind(repl *replSession) {
-	e.context = repl.completion
+	// The editor runs on its own goroutine: it asks the session's goroutine,
+	// which owns the program, for a snapshot (replSession.read).
+	e.context = func() completionContext {
+		reply := make(chan completionContext, 1)
+		repl.contextRequests <- reply
+		return <-reply
+	}
 	e.shell.Completer = e.complete
 	if e.color {
 		e.shell.SyntaxHighlighter = e.highlight
@@ -114,6 +129,9 @@ func (e *editorReader) Close() { e.history.Close() }
 // readEntry applies line by line: open expressions continue, and an entry
 // that began a control block continues until a blank line.
 func replEntryComplete(text string) bool {
+	if head, last, multi := cutLastLine(text); multi && replBackgroundLine(last) && strings.TrimSpace(head) != "" {
+		return true
+	}
 	lines := strings.Split(text, "\n")
 	block := false
 	for i, line := range lines {

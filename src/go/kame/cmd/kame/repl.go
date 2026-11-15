@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"kame/core"
@@ -48,43 +49,64 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 			return status
 		}
 	}
-	repl := &replSession{run: run, shell: replShell{Program: session.Program, FollowGrants: len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants}}
+	repl := &replSession{run: run, shell: replShell{Program: session.Program, FollowGrants: len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants}, contextRequests: make(chan chan completionContext)}
+	session.Program.BackgroundNode = repl.backgroundNode
 	reader := newLineReader(in)
 	defer reader.Close()
 	terminal, _ := reader.(*editorReader)
 	if terminal != nil {
-		// Foreground commands receive the terminal; Kame waits like a shell
-		// without job control.
+		// Foreground commands receive the terminal, and entries are jobs.
 		session.Program.Eval.Terminal = true
-		posix.IgnoreJobControlSignals()
+		repl.jobControl = true
+		repl.stopSignals = posix.CatchJobControlSignals()
 		terminal.bind(repl)
+		for _, w := range []*io.Writer{&run.Out, &run.Err} {
+			o := &editorOutput{w: *w, shell: terminal.shell}
+			repl.outputs = append(repl.outputs, o)
+			*w = o
+		}
 	}
 	status, stop := repl.loadStartup()
 	if stop {
+		repl.end()
 		return status
 	}
 	entries := 0
 	for {
+		repl.notifyJobs()
 		prompt := ""
 		if terminal != nil {
 			if prompt, stop = repl.prompt(status); stop {
 				return status
 			}
 		}
-		text, _, err := readEntry(reader, prompt)
+		entry, err := repl.read(reader, prompt)
 		if errors.Is(err, errInterrupted) {
 			status = 130
 			continue
 		}
 		if err != nil {
+			if repl.warnStopped() {
+				status = 1
+				continue
+			}
 			break
 		}
+		if replExitEntry(entry.Text) && repl.warnStopped() {
+			status = 1
+			continue
+		}
+		repl.warned = false
 		// Entries, builtins included, are numbered in typed order.
 		entries++
 		name := "<kash:" + strconv.Itoa(entries) + ">"
-		if status, stop = repl.runEntry(name, text, text, true); stop {
+		if status, stop = repl.runEntry(name, entry.Text, entry.Text, true, entry.Background); stop {
+			repl.end()
 			return status
 		}
+	}
+	if joined, stop := repl.end(); stop {
+		return joined
 	}
 	if run.joinNeeded() {
 		if joined, stop := run.step(len(session.Work)); stop || joined != 0 {
@@ -99,14 +121,45 @@ type replSession struct {
 	run            *sessionRun
 	shell          replShell
 	promptFragment int // 1 + index of the <kash-prompt> fragment; 0 before the first call
+	// Job control (repl_jobs.go).
+	jobs            []*replJob
+	asyncSeen       int  // async graphs already attributed to jobs
+	jobControl      bool // a terminal session
+	stopSignals     <-chan os.Signal
+	warned          bool // stopped jobs were reported at the last end attempt
+	outputs         []*editorOutput
+	contextRequests chan chan completionContext
+}
+
+// warnStopped reports stopped jobs at the first attempt to end the session.
+func (s *replSession) warnStopped() bool {
+	stopped := s.stopped()
+	if len(stopped) == 0 || s.warned {
+		return false
+	}
+	s.warned = true
+	fmt.Fprintln(s.run.Err, "kash: there are stopped jobs")
+	for _, j := range stopped {
+		s.report(j, j == s.current())
+	}
+	return true
+}
+
+// replExitEntry reports a whole-line exit statement.
+func replExitEntry(text string) bool {
+	fields := strings.Fields(text)
+	return !strings.ContainsRune(text, '\n') && len(fields) != 0 && len(fields) <= 2 && fields[0] == "exit"
 }
 
 // runEntry runs one entry: a session command, or Kash appended to the
 // session. parsed is the text given to the parser; it equals text, except for
 // startup entries, which keep their file offsets through blank padding.
 // fragment registers text as the diagnostic source named name.
-func (s *replSession) runEntry(name, text, parsed string, fragment bool) (int, bool) {
+func (s *replSession) runEntry(name, text, parsed string, fragment, background bool) (int, bool) {
 	run, session := s.run, s.run.Session
+	if handled, status, stop := s.jobCommand(text); handled {
+		return status, stop
+	}
 	if handled, status := s.shell.run(text, run.Err); handled {
 		return status, false
 	}
@@ -117,15 +170,11 @@ func (s *replSession) runEntry(name, text, parsed string, fragment bool) (int, b
 	if s.reportDiagnostics(diagnostics) {
 		return 1, false
 	}
-	posix.ResetSignals()
-	run.StartedAt = time.Now().UnixNano() // --timeout bounds each entry.
-	for i := first; i < len(session.Work); i++ {
-		status, stop := run.step(i)
-		if stop || status != 0 {
-			return status, stop
-		}
+	job := s.newJob(text, first, background)
+	if background {
+		return 0, false
 	}
-	return 0, false
+	return s.foreground(job)
 }
 
 func (s *replSession) reportDiagnostics(diagnostics []diagnostic.Diagnostic) bool {
@@ -174,10 +223,11 @@ func (s *replSession) loadStartup() (int, bool) {
 	reader := &pipeReader{reader: bufio.NewReader(strings.NewReader(text))}
 	status := 0
 	for {
-		entry, offset, err := readEntry(reader, "")
+		read, err := readEntry(reader, "")
 		if err != nil {
 			return status, false
 		}
+		entry, offset := read.Text, read.Offset
 		padding := []byte(text[:offset])
 		for i := range padding {
 			if padding[i] != '\n' {
@@ -185,7 +235,7 @@ func (s *replSession) loadStartup() (int, bool) {
 			}
 		}
 		var stop bool
-		if status, stop = s.runEntry(path, entry, string(padding)+entry, false); stop {
+		if status, stop = s.runEntry(path, entry, string(padding)+entry, false, read.Background); stop {
 			return status, true
 		}
 	}
@@ -200,7 +250,13 @@ func (s *replSession) prompt(status int) (string, bool) {
 		return fallback, false
 	}
 	const name = "<kash-prompt>"
-	text := "(kash-prompt [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + "])"
+	jobs := 0
+	for _, j := range s.jobs {
+		if j.id != 0 && j.state != jobDone {
+			jobs++
+		}
+	}
+	text := "(kash-prompt [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + " jobs: " + strconv.Itoa(jobs) + "])"
 	if s.promptFragment == 0 {
 		run.Fragments = append(run.Fragments, program.Fragment{Name: name, Lang: "kash"})
 		s.promptFragment = len(run.Fragments)
@@ -259,11 +315,23 @@ func (s *replSession) completion() completionContext {
 	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Names: p.Eval.InteractiveNames()}
 }
 
+// replEntry is one entry read from the input: Kash text, the byte offset of
+// its first line for pipe input, and whether a final & line submitted it as
+// a background job.
+type replEntry struct {
+	Text       string
+	Offset     int
+	Background bool
+}
+
+// replBackgroundLine reports the line that submits an entry in the background.
+func replBackgroundLine(line string) bool { return strings.TrimSpace(line) == "&" }
+
 // readEntry assembles one entry. Text ending inside an expression continues
 // until it closes; a control header continues until a blank line, as the
-// body's extent cannot be known before then. For pipe input it also returns
-// the byte offset of the entry's first line.
-func readEntry(reader lineReader, prompt string) (string, int, error) {
+// body's extent cannot be known before then. A line holding only & ends the
+// entry at once and marks it background.
+func readEntry(reader lineReader, prompt string) (replEntry, error) {
 	var lines []string
 	block := false
 	offset := 0
@@ -273,17 +341,30 @@ func readEntry(reader lineReader, prompt string) (string, int, error) {
 		}
 		line, err := reader.ReadLine(prompt)
 		if errors.Is(err, io.EOF) && len(lines) != 0 {
-			return strings.Join(lines, "\n"), offset, nil
+			return replEntry{Text: strings.Join(lines, "\n"), Offset: offset}, nil
 		}
 		if err != nil {
-			return "", 0, err
+			return replEntry{}, err
+		}
+		// The editor returns a whole entry, whose last line may be the marker.
+		if head, last, multi := cutLastLine(line); multi && replBackgroundLine(last) {
+			if strings.TrimSpace(head) == "" {
+				continue
+			}
+			return replEntry{Text: head, Background: true}, nil
+		}
+		if replBackgroundLine(line) {
+			if len(lines) == 0 {
+				continue
+			}
+			return replEntry{Text: strings.Join(lines, "\n"), Offset: offset, Background: true}, nil
 		}
 		blank := strings.TrimSpace(line) == ""
 		if blank && len(lines) == 0 {
 			continue
 		}
 		if blank && block {
-			return strings.Join(lines, "\n"), offset, nil
+			return replEntry{Text: strings.Join(lines, "\n"), Offset: offset}, nil
 		}
 		if pipe, ok := reader.(*pipeReader); ok && len(lines) == 0 {
 			offset = pipe.line
@@ -295,10 +376,20 @@ func readEntry(reader lineReader, prompt string) (string, int, error) {
 			block = true
 		case script.KashComplete:
 			if !block {
-				return text, offset, nil
+				return replEntry{Text: text, Offset: offset}, nil
 			}
 		}
 	}
+}
+
+// cutLastLine splits text before its last line, reporting whether it has
+// more than one.
+func cutLastLine(text string) (string, string, bool) {
+	i := strings.LastIndexByte(text, '\n')
+	if i < 0 {
+		return "", text, false
+	}
+	return text[:i], text[i+1:], true
 }
 
 // pipeReader reads entries from non-terminal input without prompts. line

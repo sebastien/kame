@@ -94,6 +94,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("ListSpreadValuesTypesAndCallableOwnership", func(t *testing.T) { TestListSpreadValuesTypesAndCallableOwnership(legacy.Wrap(t)) })
 	t.Run("LiveStreamOperandsHaveDistinctArgumentPorts", func(t *testing.T) { TestLiveStreamOperandsHaveDistinctArgumentPorts(legacy.Wrap(t)) })
 	t.Run("LoweredOperationsWithSameSpanKeepSeparateOperands", func(t *testing.T) { TestLoweredOperationsWithSameSpanKeepSeparateOperands(legacy.Wrap(t)) })
+	t.Run("MapCallbacksReceiveKeyAndMissingParametersAreNil", func(t *testing.T) { TestMapCallbacksReceiveKeyAndMissingParametersAreNil(legacy.Wrap(t)) })
 	t.Run("MixedWordRetainsCompletedFragmentsAcrossSuspension", func(t *testing.T) { TestMixedWordRetainsCompletedFragmentsAcrossSuspension(legacy.Wrap(t)) })
 	t.Run("ModuleCancellationReleasesPartialNestedLoad", func(t *testing.T) { TestModuleCancellationReleasesPartialNestedLoad(legacy.Wrap(t)) })
 	t.Run("ModuleHostCanRejectSourceLoad", func(t *testing.T) { TestModuleHostCanRejectSourceLoad(legacy.Wrap(t)) })

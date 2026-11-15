@@ -334,12 +334,20 @@ type Program struct {
 	Parsed              *script.Script
 	ParsedOwned         bool
 	Host                host.ProgramHost
-	Options             Options
-	Rules               []registeredRule
-	GeneratedRules      []*rule.Rule
-	ResolvedRules       []*rule.Rule
-	GeneratedRuleMeta   []generatedRuleMeta
-	Tools               []Tool
+	// HostStops collects host stop reports for the owner (TakeHostStops).
+	HostStops []HostStop
+	// ResumeForeground makes host resumes return a released terminal
+	// handoff to the resumed request (052 fg).
+	ResumeForeground bool
+	// BackgroundNode reports nodes of background jobs, whose graphs attach
+	// the terminal without taking its foreground (052).
+	BackgroundNode    func(nodeID int64) bool
+	Options           Options
+	Rules             []registeredRule
+	GeneratedRules    []*rule.Rule
+	ResolvedRules     []*rule.Rule
+	GeneratedRuleMeta []generatedRuleMeta
+	Tools             []Tool
 	// Configuration owns the effective literal definition overrides.
 	Configuration []string
 	// ParameterDefinitions owns shorthand operands consumed as definition

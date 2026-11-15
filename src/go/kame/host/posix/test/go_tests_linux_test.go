@@ -11,6 +11,7 @@ import (
 func TestGoLinuxSuite(t *testing.T) {
 	t.Run("AcceptedExitKeepsRawAndEffectiveFailureSeparate", func(t *testing.T) { TestAcceptedExitKeepsRawAndEffectiveFailureSeparate(legacy.Wrap(t)) })
 	t.Run("CancelAllTerminatesActiveGroups", func(t *testing.T) { TestCancelAllTerminatesActiveGroups(legacy.Wrap(t)) })
+	t.Run("CancelSuspendedRequest", func(t *testing.T) { TestCancelSuspendedRequest(legacy.Wrap(t)) })
 	t.Run("CancellationAndTimeout", func(t *testing.T) { TestCancellationAndTimeout(legacy.Wrap(t)) })
 	t.Run("CancellationTerminatesBackgroundGrandchild", func(t *testing.T) { TestCancellationTerminatesBackgroundGrandchild(legacy.Wrap(t)) })
 	t.Run("ClosingOneStreamDoesNotCloseTheOther", func(t *testing.T) { TestClosingOneStreamDoesNotCloseTheOther(legacy.Wrap(t)) })
@@ -34,9 +35,13 @@ func TestGoLinuxSuite(t *testing.T) {
 	t.Run("RejectedRequestIsOnlyFailedTerminal", func(t *testing.T) { TestRejectedRequestIsOnlyFailedTerminal(legacy.Wrap(t)) })
 	t.Run("RepeatedSpawnAndCancellation", func(t *testing.T) { TestRepeatedSpawnAndCancellation(legacy.Wrap(t)) })
 	t.Run("RetainedPrefixAndBackpressure", func(t *testing.T) { TestRetainedPrefixAndBackpressure(legacy.Wrap(t)) })
+	t.Run("SignalContinuesSuspendedRequest", func(t *testing.T) { TestSignalContinuesSuspendedRequest(legacy.Wrap(t)) })
+	t.Run("StageStopStopsWholeRequest", func(t *testing.T) { TestStageStopStopsWholeRequest(legacy.Wrap(t)) })
 	t.Run("StdinRecordCancellationDoesNotConsumeFutureBytes", func(t *testing.T) { TestStdinRecordCancellationDoesNotConsumeFutureBytes(legacy.Wrap(t)) })
 	t.Run("StdinRecordClaimWaitAndRemainingBytes", func(t *testing.T) { TestStdinRecordClaimWaitAndRemainingBytes(legacy.Wrap(t)) })
 	t.Run("StopHonorsConfiguredGracePeriod", func(t *testing.T) { TestStopHonorsConfiguredGracePeriod(legacy.Wrap(t)) })
 	t.Run("StreamsStatusAndRetention", func(t *testing.T) { TestStreamsStatusAndRetention(legacy.Wrap(t)) })
+	t.Run("SuspendAndResumeRequest", func(t *testing.T) { TestSuspendAndResumeRequest(legacy.Wrap(t)) })
+	t.Run("TimeoutPausedWhileSuspended", func(t *testing.T) { TestTimeoutPausedWhileSuspended(legacy.Wrap(t)) })
 	t.Run("WaitpidFailureEmitsHostFailure", func(t *testing.T) { TestWaitpidFailureEmitsHostFailure(legacy.Wrap(t)) })
 }

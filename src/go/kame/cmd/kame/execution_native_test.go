@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -455,6 +456,119 @@ func TestNativeInteractiveKashStartupFile(t *testing.T) {
 	}
 	if status, out, errOut = run(filepath.Join(directory, "missing.kash"), "echo ok\n"); status != 0 || out != "ok\n" || !strings.Contains(errOut, "HOST_FAIL") {
 		t.Fatalf("unreadable startup file: status=%d out=%q err=%q", status, out, errOut)
+	}
+}
+
+// startInteractiveKash starts `do run -i` without a terminal, with entries
+// written to the returned pipe and output collected in files.
+func startInteractiveKash(t *testing.T, directory string) (*exec.Cmd, io.WriteCloser, string, string) {
+	t.Helper()
+	stdout, stderr := filepath.Join(directory, "stdout"), filepath.Join(directory, "stderr")
+	out, err := os.Create(stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { out.Close() })
+	errOut, err := os.Create(stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { errOut.Close() })
+	command := exec.Command(nativeCLIBinary(t), "do", "run", "-i")
+	command.Dir, command.Env, command.Stdout, command.Stderr = directory, append(os.Environ(), "KASH_INIT="), out, errOut
+	in, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if command.ProcessState == nil {
+			command.Process.Signal(syscall.SIGKILL)
+			command.Wait()
+		}
+	})
+	return command, in, stdout, stderr
+}
+
+// An interrupt received by the session itself, here during a capture, cancels
+// and reaps only the running entry: the session continues without a
+// diagnostic or a terminal newline, and the entry status is 130.
+func TestNativeInteractiveKashSessionInterrupt(t *testing.T) {
+	for _, mode := range []string{"continue", "status"} {
+		t.Run(mode, func(t *testing.T) {
+			directory := t.TempDir()
+			command, in, stdout, stderr := startInteractiveKash(t, directory)
+			io.WriteString(in, "let x = $(sh -c 'echo $$ > child; sleep 30')\n")
+			nativeCLIAwait(t, stderr, func() bool { return strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "child"))) != "" })
+			if err := command.Process.Signal(syscall.SIGINT); err != nil {
+				t.Fatal(err)
+			}
+			want, wantStatus := "", 130
+			if mode == "continue" {
+				io.WriteString(in, "echo after\n")
+				want, wantStatus = "after\n", 0
+			}
+			in.Close()
+			if status := nativeCLIWait(t, command, stderr); status != wantStatus || nativeCLIRead(stdout) != want || nativeCLIRead(stderr) != "" {
+				t.Fatalf("session interrupt: status=%d out=%q err=%q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "child"))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Kill(pid, 0); err == nil {
+				t.Fatalf("interrupted capture %d was not reaped", pid)
+			}
+		})
+	}
+}
+
+// A second interrupt while an interrupted entry settles forces shutdown: the
+// session ends with 130, kills the process groups, and runs no later entry.
+func TestNativeInteractiveKashForcedInterrupt(t *testing.T) {
+	directory := t.TempDir()
+	command, in, stdout, stderr := startInteractiveKash(t, directory)
+	// The child ignores the graceful stop, so settling lasts its grace period.
+	io.WriteString(in, "sh -c 'trap \"\" INT TERM; echo $$ > child; while :; do sleep 0.01; done'\n")
+	nativeCLIAwait(t, stderr, func() bool { return strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "child"))) != "" })
+	if err := command.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if err := command.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	if status := nativeCLIWait(t, command, stderr); status != 130 {
+		t.Fatalf("forced interrupt status %d: %q", status, nativeCLIRead(stderr))
+	}
+	io.WriteString(in, "echo after\n")
+	in.Close()
+	if nativeCLIRead(stdout) != "" {
+		t.Fatalf("entries ran after forced shutdown: %q", nativeCLIRead(stdout))
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "child"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("forced shutdown left %d running", pid)
+	}
+}
+
+// Without a terminal, a final & line runs a still-open entry (a block) while
+// later entries run, and the session joins it at end of input; a lone &
+// line after a complete entry is ignored.
+func TestNativeInteractiveKashBackgroundLineWithoutTerminal(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	directory := t.TempDir()
+	entries := "if true\n\tsh -c 'sleep 0.3'\n\techo background-done\n&\necho foreground-first\n&\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
+	if status != 0 || out.String() != "foreground-first\nbackground-done\n" {
+		t.Fatalf("background entry: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 }
 

@@ -201,6 +201,35 @@ requires it. Shared dependencies remain active for other roots.
 The core emits cancellation requests to the host but does not assume immediate
 host termination. Late completions are rejected through generation checks.
 
+## Suspension
+
+A live root request can be suspended and later resumed. Suspension pauses work
+without abandoning it: generations, attempts, dynamic edges, partial producer
+state, and published values are kept, and resuming continues exactly where the
+work paused. No completed effect is repeated.
+
+- A node is **suspended** when every live root or active subscriber interested
+  in it is suspended. The engine does not offer suspended nodes as ready work.
+  A completion that arrives for a suspended node is accepted and kept on the
+  node; its producer consumes it only once the node is offered again.
+- A node also required by an unsuspended root or subscriber stays runnable;
+  suspension never delays other roots.
+- When a node with submitted host work becomes suspended, the engine emits a
+  host suspension request for it; when it becomes runnable again, a host
+  resume request. Requests are idempotent and ordered per node.
+- The host may report that submitted work stopped on its own (for a process,
+  a stop signal). The engine reports this to the owner as a stop of the
+  interested roots; it does not suspend them itself. The owner decides whether
+  to suspend those roots or to resume the work.
+- Suspension is not cancellation: suspended roots keep their interest, and
+  cancelling a suspended root behaves as for a live one. Host cancellation of
+  suspended work resumes it first so it can observe termination.
+- Host deadlines of suspended work do not advance (`003-posix-process.md`).
+  Deadlines an owner keeps itself, such as an interactive entry timeout, are
+  the owner's to pause.
+
+Suspending or resuming an already suspended or live root is harmless.
+
 ## Parallelism
 
 The deterministic engine can run with executor capacity one. A hosted executor
@@ -229,4 +258,12 @@ lines inside one build node remain one ordered shell script.
 - Completion from an older attempt in the current generation is ignored.
 - Cancelling one of two roots does not cancel their shared dependency.
 - Cancelling the last interested root requests host cancellation.
+- A suspended root's ready nodes are not offered; resuming offers them again
+  and the root completes with the same value and effects as without suspension.
+- A node shared by a suspended and a live root keeps running.
+- Suspending a root with submitted host work emits one host suspension request;
+  resuming emits one resume request; repeated calls emit no more.
+- A host stop report reaches the owner without suspending the root.
+- Cancelling a suspended root requests resume and cancellation, and rejects
+  late completions.
 - Engine teardown under `mem.Tracker` leaks no owned value, node, edge, or event.

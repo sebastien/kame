@@ -1,7 +1,9 @@
 package program
 
 import (
+	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/lang/definition"
 	"kame/lang/eval"
 	"kame/lang/script"
@@ -118,3 +120,61 @@ func (p *Program) SetEnvironment(name string, value string, present bool) {
 		p.Options.Environment = append(p.Options.Environment, cloneText(p.Alloc, name+"="+value))
 	}
 }
+
+// SuspendRoots pauses an interactive job's roots and their host work (052).
+func (p *Program) SuspendRoots(roots []*core.Root) {
+	for _, r := range roots {
+		p.Engine.Suspend(r)
+	}
+	p.drainSuspensions()
+}
+
+// ResumeRoots continues an interactive job's roots. In the foreground, every
+// host request of the job also gets back a released terminal handoff.
+func (p *Program) ResumeRoots(roots []*core.Root, foreground bool) {
+	for _, r := range roots {
+		p.Engine.Resume(r)
+	}
+	p.ResumeForeground = foreground
+	p.drainSuspensions()
+	p.ResumeForeground = false
+	if control, ok := p.Host.(host.ProcessControl); ok && foreground {
+		for _, id := range p.RootRequests(roots) {
+			control.Resume(id, true)
+		}
+	}
+}
+
+// SignalRoots delivers a signal to every running host request of the roots.
+func (p *Program) SignalRoots(roots []*core.Root, signal int) {
+	if control, ok := p.Host.(host.ProcessControl); ok {
+		for _, id := range p.RootRequests(roots) {
+			control.Signal(id, signal)
+		}
+	}
+}
+
+// RootRequests lists the host requests submitted by nodes of the roots' graphs.
+func (p *Program) RootRequests(roots []*core.Root) []int64 {
+	var ids []int64
+	for _, n := range p.Engine.TrackedNodes() {
+		if n.Submitted && n.HostRequestID != 0 && RootsReach(roots, n) {
+			ids = append(ids, n.HostRequestID)
+		}
+	}
+	return ids
+}
+
+// RootsReach reports whether n belongs to one of the roots' graphs.
+func RootsReach(roots []*core.Root, n *core.Node) bool {
+	for _, r := range roots {
+		if r.Reaches(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// DrainCancellations forwards queued engine cancellations to the host at
+// once, for owners that may not tick again soon.
+func (p *Program) DrainCancellations() { p.drainCancellations() }

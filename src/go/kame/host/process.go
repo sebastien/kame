@@ -24,6 +24,10 @@ const (
 	ProcessStderr
 	ProcessTerminal
 	ProcessSnapshot
+	// ProcessStopped reports that a running request stopped on its own, with
+	// the stopping signal; ProcessContinued that it runs again (003).
+	ProcessStopped
+	ProcessContinued
 )
 
 // ProcessDiagnostic carries a stable host diagnostic code and its owned message.
@@ -79,6 +83,9 @@ type ProcessRequest struct {
 	Terminal         bool
 	TerminalRequired bool
 	ForegroundAuto   bool
+	// TerminalBackground attaches the terminal without taking its foreground,
+	// for a background job (052); Resume with foreground gives it later.
+	TerminalBackground bool
 }
 
 // ExecutorDescriptor binds a stable remote executor name to its implementation
@@ -228,6 +235,15 @@ func (e *ProcessEvent) Free(a mem.Allocator) {
 type ProcessEventResult struct {
 	Event ProcessEvent
 	OK    bool
+}
+
+// ProcessControl is implemented by hosts that can suspend, resume, and signal
+// running requests (003-posix-process.md, Suspension). Resume with foreground
+// returns a terminal handoff released by a stop to the request.
+type ProcessControl interface {
+	Suspend(id int64) bool
+	Resume(id int64, foreground bool) bool
+	Signal(id int64, signal int) bool
 }
 
 // ProcessHost is the portable runtime contract for executing complete recipe

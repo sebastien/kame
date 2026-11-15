@@ -67,9 +67,7 @@ func (e *Engine) Interrupt(n *Node) {
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
 		removeDependent(d, n)
-		if n.Interest != 0 {
-			e.interest(d, -n.Interest)
-		}
+		e.edgeInterest(d, n, -1)
 	}
 	mem.FreeSlice(nil, n.Dynamic)
 	mem.FreeSlice(nil, n.Observed)

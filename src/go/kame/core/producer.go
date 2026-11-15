@@ -103,9 +103,7 @@ func (c *EngineContext) ForgetDependency(key ResourceKey) {
 				break
 			}
 		}
-		if n.Interest != 0 {
-			c.engine.interest(d, -n.Interest)
-		}
+		c.engine.edgeInterest(d, n, -1)
 		return
 	}
 }
@@ -176,8 +174,8 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 				break
 			}
 		}
-		if c.node.Interest != 0 && !held {
-			c.engine.interest(dep, c.node.Interest)
+		if !held {
+			c.engine.edgeInterest(dep, c.node, 1)
 		}
 	}
 	for i := range c.node.OrderOnly {

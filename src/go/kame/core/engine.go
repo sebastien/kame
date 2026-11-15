@@ -7,8 +7,9 @@ import (
 )
 
 type Root struct {
-	node *Node
-	live bool
+	node      *Node
+	live      bool
+	suspended bool
 }
 
 type Engine struct {
@@ -18,6 +19,7 @@ type Engine struct {
 	roots         []*Root
 	nextID        int64
 	cancellations []Cancellation
+	suspensions   []Suspension
 	completions   []Completion
 	nextUpdate    int64
 	lastRun       *Node
@@ -128,9 +130,7 @@ func (e *Engine) AddStatic(n *Node, dependency *Node) bool {
 	}
 	n.Static = append(n.Static, dependency)
 	dependency.Dependents = append(dependency.Dependents, n)
-	if n.Interest != 0 {
-		e.interest(dependency, n.Interest)
-	}
+	e.edgeInterest(dependency, n, 1)
 	return true
 }
 
@@ -187,7 +187,11 @@ func (e *Engine) Release(r *Root) {
 		return
 	}
 	r.live = false
-	e.interest(r.node, -1)
+	suspended := int64(0)
+	if r.suspended {
+		suspended = -1
+	}
+	e.adjustInterest(r.node, -1, suspended)
 	for i := range e.roots {
 		if e.roots[i] == r {
 			copy(e.roots[i:], e.roots[i+1:])
@@ -198,23 +202,84 @@ func (e *Engine) Release(r *Root) {
 	mem.Free(e.Alloc, r)
 }
 
-func (e *Engine) interest(n *Node, delta int64) {
+func (e *Engine) interest(n *Node, delta int64) { e.adjustInterest(n, delta, 0) }
+
+// edgeInterest adds (sign 1) or removes (sign -1) the interest a dependent
+// passes along one edge, suspended part included.
+func (e *Engine) edgeInterest(dependency, dependent *Node, sign int64) {
+	if dependent.Interest != 0 {
+		e.adjustInterest(dependency, sign*dependent.Interest, sign*dependent.SuspendedInterest)
+	}
+}
+
+// adjustInterest changes a node's interest by delta, of which suspended comes
+// from suspended roots, and propagates it to dependencies. A node whose
+// suspension state flips while it holds host work queues a host request.
+func (e *Engine) adjustInterest(n *Node, delta, suspended int64) {
 	if delta < 0 && n.Interest+delta == 0 && !n.invalidating && !n.tearingDown && n.BeginTeardown != nil {
 		e.beginTeardown(n, false)
 	}
+	was := n.suspended()
 	n.Interest += delta
+	n.SuspendedInterest += suspended
 	for i := range n.Static {
-		e.interest(n.Static[i], delta)
+		e.adjustInterest(n.Static[i], delta, suspended)
 	}
 	for i := range n.Dynamic {
-		e.interest(n.Dynamic[i], delta)
+		e.adjustInterest(n.Dynamic[i], delta, suspended)
 	}
 	for i := range n.previousDynamic {
-		e.interest(n.previousDynamic[i], delta)
+		e.adjustInterest(n.previousDynamic[i], delta, suspended)
 	}
-	if n.Interest == 0 && !n.invalidating && n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled {
+	if now := n.suspended(); now != was && n.Submitted && n.HostRequestID != 0 {
+		e.suspensions = append(e.suspensions, Suspension{NodeID: n.ID, RequestID: n.HostRequestID, Suspend: now})
+	}
+	if delta != 0 && n.Interest == 0 && !n.invalidating && n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled {
 		e.cancel(n)
 	}
+}
+
+// Suspension asks the host to suspend or resume one request (002).
+type Suspension struct {
+	NodeID    int64
+	RequestID int64
+	Suspend   bool
+}
+
+// Suspend pauses a live root without abandoning its work: nodes only it
+// (and other suspended roots) are interested in are no longer offered.
+func (e *Engine) Suspend(r *Root) {
+	if r != nil && r.live && !r.suspended {
+		r.suspended = true
+		e.adjustInterest(r.node, 0, 1)
+	}
+}
+
+// Resume makes a suspended root's work runnable again.
+func (e *Engine) Resume(r *Root) {
+	if r != nil && r.live && r.suspended {
+		r.suspended = false
+		e.adjustInterest(r.node, 0, -1)
+	}
+}
+
+// Suspended reports whether every interest in n comes from suspended roots.
+func (e *Engine) Suspended(n *Node) bool { return n != nil && n.suspended() }
+
+// Reaches reports whether n is part of the root's graph.
+func (r *Root) Reaches(n *Node) bool { return r != nil && r.live && n != nil && reaches(r.node, n) }
+
+// Node returns the requested node of a root.
+func (r *Root) Node() *Node { return r.node }
+
+// NextSuspension returns the next queued host suspension or resume request.
+func (e *Engine) NextSuspension() Suspension {
+	if len(e.suspensions) == 0 {
+		return Suspension{}
+	}
+	s := e.suspensions[0]
+	e.suspensions = slices.Delete(e.suspensions, 0, 1)
+	return s
 }
 
 func (e *Engine) Subscribe(n *Node) *Subscription {
@@ -333,7 +398,7 @@ func (e *Engine) ready(n *Node) bool {
 			return false
 		}
 	}
-	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting {
+	if n.Interest == 0 || n.suspended() || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting {
 		return false
 	}
 	for i := range n.Static {
@@ -446,7 +511,7 @@ func (e *Engine) Dispatch(n *Node) *Node {
 // Unlike Ready, this does not validate dependencies or advance the engine.
 func (e *Engine) CanDispatch(n *Node) bool {
 	_ = e
-	return n != nil && n.offered && n.Interest != 0 && n.Requested && (n.State == NodeIdle || n.State == NodeReady)
+	return n != nil && n.offered && n.Interest != 0 && !n.suspended() && n.Requested && (n.State == NodeIdle || n.State == NodeReady)
 }
 
 // DispatchRoot starts a newly requested independent root without reentering
@@ -672,8 +737,8 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 		removeDependent(d, n)
 		if retain {
 			n.previousDynamic = append(n.previousDynamic, d)
-		} else if n.Interest != 0 {
-			e.interest(d, -n.Interest)
+		} else {
+			e.edgeInterest(d, n, -1)
 		}
 	}
 	if !retain {
@@ -713,9 +778,7 @@ func (e *Engine) releasePreviousDependencies(n *Node) {
 	previous := n.previousDynamic
 	n.previousDynamic = nil
 	for i := range previous {
-		if n.Interest != 0 {
-			e.interest(previous[i], -n.Interest)
-		}
+		e.edgeInterest(previous[i], n, -1)
 	}
 	mem.FreeSlice(nil, previous)
 }
@@ -823,6 +886,7 @@ func (e *Engine) Free() {
 	mem.FreeSlice(nil, e.nodes)
 	mem.FreeSlice(nil, e.nodeIndex)
 	mem.FreeSlice(nil, e.cancellations)
+	mem.FreeSlice(nil, e.suspensions)
 	mem.FreeSlice(nil, e.completions)
 	mem.Free(e.Alloc, e)
 }

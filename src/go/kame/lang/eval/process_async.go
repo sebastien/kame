@@ -17,6 +17,7 @@ type processTask struct {
 	Node             *core.Node
 	Root             *core.Root
 	LauncherRoot     *core.Root
+	LauncherID       int64 // node whose evaluation started the graph
 	Graph            *expr.Expr
 	Prepared         *captureState
 	Context          Context
@@ -26,6 +27,9 @@ type processTask struct {
 func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState) Result {
 	task := mem.Alloc[processTask](p.Alloc)
 	task.Program, task.Graph = p, expr.Clone(p.Alloc, e)
+	if c.Engine != nil {
+		task.LauncherID = c.Engine.NodeID()
+	}
 	task.Finalizer = c.finalizer
 	task.FinalizerCleanup = c.finalizer != nil && c.finalizer.Stage >= 2
 	task.Graph.Async = false
@@ -298,4 +302,32 @@ func clonePreparedProcess(a mem.Allocator, prepared *captureState) *captureState
 		s.Setups = append(s.Setups, prepared.Setups[i].Clone(a))
 	}
 	return s
+}
+
+// AsyncProcessCount and AsyncProcess expose async graphs, oldest first, for
+// interactive job control (052): the node whose evaluation started each one
+// and its own root, nil once released.
+func (p *Program) AsyncProcessCount() int { return len(p.Processes) }
+
+func (p *Program) AsyncProcess(i int) (int64, *core.Root) {
+	return p.Processes[i].LauncherID, p.Processes[i].Root
+}
+
+// ObserveAsyncProcess marks async graph i as observed by its job's report,
+// so the session join does not raise its outcome again (052).
+func (p *Program) ObserveAsyncProcess(i int) { p.Processes[i].Observed = true }
+
+// CancelAsyncProcess discards async graph i, cancelling it if still running,
+// as an owning lifetime that does not join it.
+func (p *Program) CancelAsyncProcess(i int) {
+	task := p.Processes[i]
+	task.Observed = true
+	if task.Root != nil {
+		p.Engine.Release(task.Root)
+		task.Root = nil
+	}
+	if task.LauncherRoot != nil {
+		p.Engine.Release(task.LauncherRoot)
+		task.LauncherRoot = nil
+	}
 }

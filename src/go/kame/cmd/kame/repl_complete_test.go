@@ -129,6 +129,9 @@ func TestReplEntryComplete(t *testing.T) {
 		"def f\n\techo hi\n":          true,
 		"if true\n\tif false\n\t\tls": false,
 		"echo a\necho b":              true,
+		"echo a\n&":                   true,
+		"def f\n\techo hi\n  &  ":     true,
+		"\n&":                         true, // submitted; readEntry ignores it
 	} {
 		if got := replEntryComplete(text); got != want {
 			t.Errorf("entry complete %q = %v, want %v", text, got, want)

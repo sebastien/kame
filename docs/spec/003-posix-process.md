@@ -103,6 +103,33 @@ descendants that remain in the process group it created. A descendant that
 deliberately creates a new session escapes this guarantee; stronger containment
 is outside the POSIX process-group contract.
 
+## Suspension
+
+A running request can be suspended and resumed, per `002-engine.md`. The host
+also observes stops it did not request.
+
+- Suspend sends `SIGSTOP` to every process group of the request; resume sends
+  `SIGCONT`. Both are idempotent, and neither is reported as a failure or ends
+  the request.
+- The host observes each stage's direct child for stops and continues
+  (`waitid` with `WSTOPPED`/`WCONTINUED` and `WNOWAIT`, or an equivalent
+  that never consumes the exit status). A stop of any stage emits one
+  `stopped` event with the stopping signal; when every stopped stage has
+  continued, one `continued` event. A stop by `SIGTSTP`, `SIGTTIN`, or
+  `SIGTTOU` is not resumed by the host. The Darwin host does not yet observe
+  stops (its exit observer uses `kqueue`), so it emits neither event.
+- A request stopped by a signal is stopped as a whole: the host sends
+  `SIGSTOP` to its other process groups before emitting `stopped`, so no
+  stage keeps running against a stopped peer.
+- Request timeouts do not advance while the request is suspended or stopped.
+- Cancellation of a suspended or stopped request sends `SIGTERM` and then
+  `SIGCONT` to each group, and continues with the ordinary grace and
+  `SIGKILL`.
+- A signal request delivers one named signal to every process group of the
+  request, followed by `SIGCONT` when the request is stopped and the signal
+  is not a stop signal. It does not change the request's ownership or
+  terminal outcome rules; the observed status reports what the signal did.
+
 ## Retries
 
 Retries belong to the runtime, not the low-level spawn primitive. Each attempt
@@ -122,8 +149,9 @@ derived before execution.
 ## Signals
 
 The CLI maps `SIGINT` and `SIGTERM` into cancellation of active root requests.
-It does not forward arbitrary signals directly to child PIDs. Process-group
-termination follows the cancellation contract.
+It does not forward arbitrary signals directly to child PIDs; signals reach
+children only through a request's process groups (see Suspension).
+Process-group termination follows the cancellation contract.
 
 Signal handlers perform only signal-safe notification. Cleanup happens in the
 normal event loop.
@@ -152,3 +180,12 @@ normal event loop.
   logs contain the byte prefix and a truncation flag.
 - Repeated spawn and cancellation under sanitizer reports no descriptor, child,
   or memory leak.
+- Suspend stops every stage group and resume continues them; output written
+  before and after is delivered in order and the exit status is unchanged.
+- A stage stopped by `SIGTSTP` emits one `stopped` event, its peer groups are
+  stopped, and the request is not resumed until asked.
+- Observing stops never consumes a stage's exit status.
+- A timeout does not fire while the request is suspended.
+- Cancelling a stopped request terminates and reaps it within the grace.
+- A signal request reaches every stage group, continuing a stopped request
+  for a non-stop signal.
