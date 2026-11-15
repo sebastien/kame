@@ -37,6 +37,17 @@ evaluates '(map ([value key extra] (list value key extra)) (list "a"))' '[["a" 0
 evaluates '(flatmap ([value key] (list value key)) (list "a"))' '["a" 0]'
 evaluates '(filter ([value key] (eq? key 1)) (list "a" "b"))' '["b"]'
 
+test-step "map and filter keep records, passing field names as keys"
+evaluates '(map ([value key] (str key "=" value)) [a: 1 b: 2])' '[a: "a=1" b: "b=2"]'
+evaluates '(map ([value] (str value "!")) [a: 1 b: 2])' '[a: "1!" b: "2!"]'
+evaluates '(filter ([value key] (eq? key "b")) [a: 1 b: 2 c: 3])' '[b: 2]'
+evaluates '(filter-out 2 [a: 1 b: 2])' '[a: 1]'
+diag '(flatmap ([value] [value]) [a: 1])' 'EXPR_INVALID'
+
+test-step "reduce passes the position to a third parameter"
+evaluates '(reduce ([acc item index] (concat acc [[item index]])) [] (list "a" "b"))' '[["a" 0] ["b" 1]]'
+evaluates '(reduce ([acc item] (str acc item)) (list "a" "b"))' '"ab"'
+
 test-step "flatmap flattens one level"
 evaluates '(flatmap ([x] (list x x)) (list 1 2))' '[1 1 2 2]'
 evaluates '(flatmap ([x] (list x)) (list 1 2))' '[1 2]'

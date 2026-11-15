@@ -16,6 +16,7 @@ type callbackState struct {
 	Alloc          mem.Allocator
 	Index          int
 	Values         []core.Value
+	Keys           []string // record fields kept, in order, for record results
 	Accumulator    core.Value
 	HasAccumulator bool
 	Tracked        bool
@@ -103,21 +104,63 @@ func finishCallback(c *eval.Context, state *callbackState) core.Value {
 	discardCallback(c, state)
 	return result
 }
+
+// finishRecordCallback builds a record from the kept field names and values.
+func finishRecordCallback(c *eval.Context, state *callbackState) core.Value {
+	fields := make([]core.RecordField, len(state.Values))
+	for i := range state.Values {
+		fields[i] = core.RecordField{Key: state.Keys[i], Value: state.Values[i]}
+	}
+	result := core.NewRecord(c.Run, fields)
+	state.Keys = nil
+	for i := range state.Values {
+		state.Values[i].Free(state.Alloc)
+	}
+	mem.FreeSlice(nil, state.Values)
+	state.Values = nil
+	discardCallback(c, state)
+	return result
+}
+
+// collectionItem returns the item at index of a list or record subject, and
+// its key: the zero-based position, or the field name.
+func collectionItem(subject core.Value, index int) (core.Value, core.Value) {
+	if subject.Kind == core.Record {
+		field := subject.Record[index]
+		return field.Value, core.Value{Kind: core.String, Text: field.Key}
+	}
+	return subject.List[index], core.Value{Kind: core.Int, Int: int64(index)}
+}
+
+func collectionLength(subject core.Value) int {
+	if subject.Kind == core.Record {
+		return len(subject.Record)
+	}
+	return len(subject.List)
+}
+
 func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result {
 	_ = s
 	callback := &v[0]
-	values := v[1].List
 	if v[0].Kind != core.Callable {
 		return invalidArgument(c, v, 0, "callable")
 	}
-	if v[1].Kind != core.List {
-		return invalidArgument(c, v, 1, "list")
+	record := !flatten && v[1].Kind == core.Record
+	if record && !validRecord(v[1]) {
+		return invalidArgument(c, v, 1, "record with unique keys")
+	}
+	if v[1].Kind != core.List && !record {
+		if flatten {
+			return invalidArgument(c, v, 1, "list")
+		}
+		return invalidArgument(c, v, 1, "list or record")
 	}
 	defer discardArgCallables(c, v)
 	state := callbackProgress(c)
-	for state.Index < len(values) {
+	for state.Index < collectionLength(v[1]) {
+		item, key := collectionItem(v[1], state.Index)
 		effects, paths := len(c.Effects), len(c.WritePaths)
-		result := c.CallEachAt(*callback, values[state.Index], state.Index)
+		result := c.CallEachAt(*callback, []core.Value{item}, key, state.Index)
 		if result.Waiting {
 			suspendCallback(c, state)
 			return result
@@ -142,9 +185,15 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 		} else {
 			state.Values = append(state.Values, result.Value.Clone(c.Run))
 			result.Value.Free(c.Run)
+			if record {
+				state.Keys = append(state.Keys, strings.Clone(key.Text))
+			}
 		}
 		rememberCallbackEffects(c, state, effects, paths)
 		state.Index++
+	}
+	if record {
+		return eval.Result{Value: finishRecordCallback(c, state)}
 	}
 	return eval.Result{Value: finishCallback(c, state)}
 }
@@ -159,12 +208,14 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	_ = s
 	defer discardArgCallables(c, v)
 	var callback *core.Value
-	var values []core.Value
 	var target *core.Value
-	if v[1].Kind != core.List {
-		return invalidArgument(c, v, 1, "list")
+	record := v[1].Kind == core.Record
+	if record && !validRecord(v[1]) {
+		return invalidArgument(c, v, 1, "record with unique keys")
 	}
-	values = v[1].List
+	if v[1].Kind != core.List && !record {
+		return invalidArgument(c, v, 1, "list or record")
+	}
 	if v[0].Kind == core.Callable {
 		callback = &v[0]
 	} else {
@@ -174,20 +225,21 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 		}
 	}
 	state := callbackProgress(c)
-	for state.Index < len(values) {
+	for state.Index < collectionLength(v[1]) {
+		item, key := collectionItem(v[1], state.Index)
 		var keep bool
 		if target != nil {
 			var ok bool
-			keep, ok = compareEq(values[state.Index], *target)
+			keep, ok = compareEq(item, *target)
 			if !ok {
-				result := equalityFailure(c, values[state.Index], *target)
+				result := equalityFailure(c, item, *target)
 				discardCallback(c, state)
 				discardArgCallables(c, v)
 				return result
 			}
 		} else {
 			effects, paths := len(c.Effects), len(c.WritePaths)
-			result := c.CallEachAt(*callback, values[state.Index], state.Index)
+			result := c.CallEachAt(*callback, []core.Value{item}, key, state.Index)
 			if result.Waiting {
 				suspendCallback(c, state)
 				freeOptionalCallable(c, callback)
@@ -205,11 +257,19 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 			rememberCallbackEffects(c, state, effects, paths)
 		}
 		if keep != invert {
-			state.Values = append(state.Values, c.BorrowValue(values[state.Index]))
+			state.Values = append(state.Values, c.BorrowValue(item))
+			if record {
+				state.Keys = append(state.Keys, strings.Clone(key.Text))
+			}
 		}
 		state.Index++
 	}
-	value := finishCallback(c, state)
+	var value core.Value
+	if record {
+		value = finishRecordCallback(c, state)
+	} else {
+		value = finishCallback(c, state)
+	}
 	freeOptionalCallable(c, callback)
 	return eval.Result{Value: value}
 }
@@ -237,7 +297,7 @@ func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	for state.Index < len(v[subject].List) {
 		args := []core.Value{state.Accumulator, v[subject].List[state.Index]}
 		effects, paths := len(c.Effects), len(c.WritePaths)
-		result := c.CallAt(v[0], args, state.Index)
+		result := c.CallEachAt(v[0], args, core.Value{Kind: core.Int, Int: int64(state.Index)}, state.Index)
 		if result.Waiting {
 			suspendCallback(c, state)
 			return result

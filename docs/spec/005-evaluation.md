@@ -279,9 +279,11 @@ and defining scope. Calling it creates a child scope, binds arguments, and
 evaluates body expressions in order. The final expression is returned; an empty
 body returns nil.
 
-Too many arguments are `EXPR_INVALID`. Missing arguments are dynamic: every
-declared parameter without a supplied argument binds nil. A rest argument
-receives a list, including an empty list.
+Too many arguments are `EXPR_INVALID`. Its primary span is the function's
+parameter list when that list is authored in the source being evaluated,
+otherwise the call. Missing arguments are dynamic: every declared parameter
+without a supplied argument binds nil. A rest argument receives a list,
+including an empty list.
 
 Placeholder sections lower to ordinary lexical functions. A placeholder atom
 evaluates by reading its indexed argument from the enclosing section call

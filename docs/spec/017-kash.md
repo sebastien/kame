@@ -384,7 +384,8 @@ exists. Environment access remains explicit through `env.`, for example
 `env` is a reserved, lazy environment namespace in Kash. Accessing a named field
 performs the corresponding Kame environment operation with its capability check
 and dependency tracking; it does not eagerly read the whole environment. A
-missing variable yields nil, and a denied read fails. Definitions, parameters,
+missing variable yields nil, so as an argv word it behaves like an unset shell
+variable, and a denied read fails. Definitions, parameters,
 and captures may not bind `env`. No other name has an environment fallback.
 
 ### Kame expressions
@@ -565,10 +566,12 @@ until argv conversion:
 | Integer or float | One argument using Kame's canonical numeric spelling. |
 | Boolean | One argument, `true` or `false`. |
 | List | One argument per scalar item, in order; an empty list contributes none. |
-| Nil, bytes, record, callable, resource, process/result, or nested list | Argument-type error. |
+| Nil | No argument, like an unset shell variable. A nil executable is an error. |
+| Bytes, record, callable, resource, process/result, or nested list | Argument-type error. |
 
 Quoted substitutions and words combining literal and substitution parts require
-scalar values from the first three rows and produce exactly one argument. They
+scalar values from the first three rows, or nil, and produce exactly one
+argument; a nil fragment contributes empty text. They
 never splice lists: `$files` splices a flat list, while `"$files"` fails when
 `files` is a list. A standalone `(modules)` may splice its flat list result,
 but `--modules=(modules)` rejects that result rather than joining or splicing it.
@@ -580,8 +583,8 @@ or not followed by substitution syntax; single quotes disable substitutions.
 Word fragments evaluate in authored order and retain completed values across
 suspension, without replaying calls or effects. Result bytes are inert data:
 spaces, operators, quotes, braces, parentheses and substitution-looking text
-cannot create words, commands or new source. Nil and nonscalar mixed fragments
-are argument-type errors; invalid values fail before launching the containing
+cannot create words, commands or new source. Nonscalar mixed fragments other
+than nil are argument-type errors; invalid values fail before launching the containing
 process graph, under the existing capability and phase policy.
 
 Parsing and formatting retain expression-fragment boundaries and authored spans.

@@ -88,6 +88,8 @@ echo (greet name)
 - A scalar is always exactly one argument, whitespace included.
 - A standalone list (`$files`, `(wildcard ./src/*.c)`) splices its items; an
   empty list adds nothing. Mixed or quoted words require scalars.
+- Nil behaves like an unset shell variable: a standalone nil adds no argument,
+  and inside a quoted or mixed word it reads as empty text.
 - Raw `*.c` is literal: use `(wildcard …)` to glob.
 - Single quotes and legacy `@(…)` are rejected.
 - Captures keep output exactly, trailing newline included: use `(line …)` to

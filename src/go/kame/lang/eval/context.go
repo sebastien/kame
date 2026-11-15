@@ -632,17 +632,19 @@ func (c *Context) CallAt(callable core.Value, values []core.Value, index int) Re
 	return r
 }
 
-// CallEachAt invokes a collection callback with its item and, when the
-// callable declares a second parameter, the item's zero-based position.
-func (c *Context) CallEachAt(callable core.Value, value core.Value, index int) Result {
-	values := []core.Value{value}
-	if c.acceptsKey(callable) {
-		values = append(values, core.Value{Kind: core.Int, Int: int64(index)})
+// CallEachAt invokes a collection callback with its fixed arguments and, when
+// the callable declares one more parameter, the item's key: a list position
+// or a record field name.
+func (c *Context) CallEachAt(callable core.Value, values []core.Value, key core.Value, index int) Result {
+	args := slices.Clip(values)
+	if c.accepts(callable, len(values)+1) {
+		args = append(args, key)
 	}
-	return c.CallAt(callable, values, index)
+	return c.CallAt(callable, args, index)
 }
 
-func (c *Context) acceptsKey(callable core.Value) bool {
+// accepts reports whether a callable declares at least count parameters.
+func (c *Context) accepts(callable core.Value, count int) bool {
 	if c.Program == nil || callable.Kind != core.Callable {
 		return false
 	}
@@ -651,7 +653,7 @@ func (c *Context) acceptsKey(callable core.Value) bool {
 		return false
 	}
 	if function.NativeCall != nil {
-		return function.Arity >= 2
+		return function.Arity >= count
 	}
 	if function.Kind == FunctionOperation {
 		operation := c.Program.operationForCallable(function)
@@ -659,11 +661,11 @@ func (c *Context) acceptsKey(callable core.Value) bool {
 			return false
 		}
 		if operation.MaxArity < 0 {
-			return operation.MinArity >= 2
+			return operation.MinArity >= count
 		}
-		return operation.MaxArity >= 2
+		return operation.MaxArity >= count
 	}
-	return len(function.Parameters) >= 2
+	return len(function.Parameters) >= count
 }
 
 func invocationPath(a mem.Allocator, parent string, start int, end int) string {

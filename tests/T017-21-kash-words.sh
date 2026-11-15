@@ -29,6 +29,8 @@ for backend in native wasm; do
 	check '<value><captured><empty->' $'head = "printf"\n${head}(nop "") "<%s>" ("value" | str) (str $(printf captured)) empty-(nop "")'
 	check '<quoted suffix>' 'printf "<%s>" (nop "quoted")" suffix"'
 	check '<$(touch forbidden) | ; > @{}>' $'data = """$(touch forbidden) | ; > @{}"""\nprintf "<%s>" (nop data)'
+	check '<a><><z>' $'b = :nil\nprintf "<%s>" a "$b" z'
+	check '<a><z><x-><-y>' $'b = :nil\nprintf "<%s>" a $b (nop :nil) z x-(nop :nil) "-$b"y'
 
 	test-step "$backend scalar setup and redirection destinations"
 	check 'release-debug' $'(variant) = "debug"\n:MODE release-(variant) printenv MODE'
@@ -38,7 +40,7 @@ for backend in native wasm; do
 	check '' $'if (nop :false)\n  printf forbidden-(missing)'
 
 	test-step "$backend invalid scalars fail before launch or truncation"
-	for operand in 'prefix-(nop [1])' '(nop :nil).txt' '(nop [secret: "never-print-this"]).txt' '(nop ([x] x)).txt'; do
+	for operand in 'prefix-(nop [1])' '(nop [secret: "never-print-this"]).txt' '(nop ([x] x)).txt'; do
 		for destination in argument head redirect cwd timeout environment; do
 			printf unchanged >"$work/protected"
 			case "$destination" in

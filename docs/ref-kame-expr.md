@@ -104,7 +104,13 @@ Bare names are always references: quote text (`"app"`) or use a symbol
 
 - `(HEAD ARG…)` evaluates arguments then calls; `()` is invalid.
 - Lambdas start with a parameter list; a final `rest...` collects the rest.
+  Missing arguments bind nil; extra arguments are an error that underlines
+  the parameter list.
 - `((… _ …))` is a one-argument lambda (placeholder section).
+- Collection callbacks receive the item, then its key when they declare a
+  second parameter: `(map ([v i] …) list)` gets the position, and
+  `(map ([v k] …) record)` gets the field name and returns a record.
+  `filter`/`filter-out` keep records too; `reduce` passes the position third.
 - `(v | f a)` means `(f a v)`: the subject goes last unless `_` places it.
 - Library operations take **parameters first, subject last**:
   `(nth 1 files)`, `(sub FROM TO text)`. Comparisons keep left/right order:

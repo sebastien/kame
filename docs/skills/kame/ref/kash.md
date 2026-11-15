@@ -268,7 +268,9 @@ Kash executes argv directly:
   `$name` still requires a scalar executable. Explicit spreads are standalone,
   unquoted argv words, never definition/setup values or redirection paths.
 - Quoted or mixed words require scalars; `"$files"` is invalid for a list.
-- Nil, bytes, records, nested lists, callables, and process/results are not argv.
+- Nil reads as empty text in quoted or mixed words and contributes no argument
+  as a standalone word, like an unset shell variable.
+- Bytes, records, nested lists, callables, and process/results are not argv.
 - Double quotes group words and allow references/process captures; parentheses
   inside them stay literal. Empty quotes preserve an empty argument. Single
   quotes are reserved and rejected.

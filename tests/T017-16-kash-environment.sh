@@ -40,7 +40,8 @@ for backend in native wasm; do
 	check binding 'KASH_TEST_ENV = "binding"; printf "%s" $KASH_TEST_ENV'
 	check binding 'PATH = "binding"; /bin/printf "%s" $PATH'
 	reject REF_MISSING 'printf "%s" $KASH_TEST_ENV'
-	reject EXPR_INVALID 'printf "%s" $env.KASH_TEST_MISSING'
+	check '<>' 'printf "<%s>" $env.KASH_TEST_MISSING'
+	check '<>' 'printf "<%s>" "$env.KASH_TEST_MISSING"'
 	check fallback 'value = $env.KASH_TEST_MISSING ?? "fallback"; printf "%s" $value'
 	reject REF_MISSING 'printf "%s" $env'
 	check '' 'unused = $env.KASH_TEST_ENV' --allow-run

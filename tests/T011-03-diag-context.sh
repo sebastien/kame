@@ -26,6 +26,20 @@ cli_run -- do run --lang expr -c '(first)'
 cli_expect_status 1
 cli_expect_stderr_contains '`first` expects 1 argument; got 0'
 
+test-step "lambda arity failures underline the parameter list"
+for case in '(([a b] a) 1 2 3)|[a b]' '(reduce ([a] a) [1 2])|[a]'; do
+	expr="${case%|*}" params="${case#*|}"
+	cli_run -- --json do run --lang expr -c "$expr"
+	cli_expect_status 1
+	span="$(jq -r 'select(.diagnostic) | "\(.diagnostic.span.start) \(.diagnostic.span.end)"' "$CLI_OUT" | head -1)"
+	read -r start end <<<"$span"
+	if [ "${expr:start:end-start}" = "$params" ]; then
+		test-ok "$expr underlines $params"
+	else
+		test-fail "$expr underlines '${expr:start:end-start}', not $params"
+	fi
+done
+
 test-step "recipe failures retain the operand span and full dependency path"
 build=$'root : leaf\nleaf :\n\t@(first 1)\n'
 cli_run -- --json -l kmk -c "$build" root

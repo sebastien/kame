@@ -79,8 +79,8 @@ Within raw words they can adjoin other unquoted or quoted fragments, as in
 `biome --config-path=(js-biome-config)`, `emit (name).json`,
 `:cwd ./build/(variant) tool` and `tool > ./out/(name).txt`. Their complete
 parentheses belong to the shared expression grammar, so a single name calls
-without arguments. Mixed words require scalar fragments and produce one
-value; only standalone unquoted argv substitutions retain list-splicing behavior.
+without arguments. Mixed words require scalar or nil fragments, nil reading as
+empty text, and produce one value; only standalone unquoted argv substitutions retain list-splicing behavior.
 This applies equally to argv, redirection paths and scalar stage setup, with
 ordinary per-context validation. Typed `:env` records and definition values do
 not become scalar words. Raw path-shaped words accept the same fragments;

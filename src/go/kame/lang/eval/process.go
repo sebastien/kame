@@ -544,6 +544,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					return failure(c.Run, "EXPR_INVALID", word.Span, "executable requires one nonempty string or path without NUL")
 				}
 			}
+			if r.Value.Kind == core.Nil && len(state.Argv) != 0 {
+				// A standalone nil argument contributes no argument.
+				state.Index++
+				continue
+			}
 			if r.Value.Kind == core.List {
 				for i := range r.Value.List {
 					if !appendArgument(state, r.Value.List[i]) {
@@ -1028,6 +1033,10 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 		}
 		value := operands.Values[next]
 		next++
+		if value.Kind == core.Nil {
+			// A nil fragment renders as empty text, like an unset shell variable.
+			continue
+		}
 		if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
 			b.Reset()
 			return failure(c.Run, "EXPR_INVALID", part.Span, destination+" word requires a scalar fragment; got "+core.KindName(value.Kind)+"; list splicing is only valid in standalone unquoted argv substitutions")

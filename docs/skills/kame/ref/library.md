@@ -90,19 +90,22 @@ absence from a present nil without introducing implicit lazy operation arguments
 
 ## Collections
 
-Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
-`filter` and `filter-out` require `(PREDICATE-OR-VALUE LIST)`. A unary callback
+Callbacks run in input order. `map` and `flatmap` require `(FUNCTION SUBJECT)`;
+`filter` and `filter-out` require `(PREDICATE-OR-VALUE SUBJECT)`. A unary callback
 receives the item alone; a callback declaring two or more parameters receives
-the item followed by its zero-based position, with any further parameters nil.
+the item followed by its key (list position or record field name), with any
+further parameters nil. `map`, `filter`, and `filter-out` accept a record and
+return a record with the same field order: `(map ([v k] (str k "=" v)) [a: 1])`
+is `[a: "a=1"]`. `flatmap` and `reduce` take lists only.
 
 | Operation | Signature | Result |
 | --- | --- | --- |
-| `map` | `(map FUNCTION LIST)` | One callback result per item; `([value key] ...)` receives the item then its position. |
+| `map` | `(map FUNCTION LIST-OR-RECORD)` | One callback result per item or field; `([value key] ...)` receives the item then its key. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
-| `filter` | `(filter PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
-| `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |
+| `filter` | `(filter PREDICATE-OR-VALUE LIST-OR-RECORD)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
+| `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST-OR-RECORD)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |
 | `in?` | `(in? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
-| `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
+| `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks; a third parameter receives the item's position. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
 | `slice` | `(slice START [END] LIST-OR-TEXT)` | Half-open slice; negative bounds count from the end. |
 | `sorted` | `(sorted LIST)` | Ascending sort of one comparable scalar kind. |

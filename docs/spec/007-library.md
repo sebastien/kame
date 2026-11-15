@@ -75,7 +75,8 @@ Canonical changed signatures are `(nth INDEX VALUE)`, `(slice START [END] VALUE)
 `(join SEPARATOR LIST)`, `(split SEPARATOR TEXT)`, `(includes? PART TEXT)`,
 `(starts? PREFIX TEXT)`, `(ends? SUFFIX TEXT)`, `(reduce FUNCTION [INITIAL] LIST)`,
 `(apply FUNCTION LIST)`, and `(relpath BASE TARGET)`. `map` and `flatmap` accept only
-`(FUNCTION LIST)`; `reduce` callbacks still receive `(accumulator item)`.
+`(FUNCTION SUBJECT)`; `reduce` callbacks receive `(accumulator item)`, plus the
+item's position when they declare a third parameter.
 `(sh! [OPTIONS] COMMAND)` also puts its subject last.
 
 Migration: rename `set-field` to `set`, `regex-replace` to `resub`, and
@@ -273,12 +274,12 @@ The collection operations are:
 
 | Name | Contract |
 | --- | --- |
-| `map` | Apply a function to each list item, passing the item and its position |
-| `flatmap` | Map and flatten one list level, with the same callback arguments |
-| `filter` | Keep items for which a predicate is true, passing the item and its position |
-| `filter-out` | Remove items for which a predicate is true, with the same callback arguments |
+| `map` | Apply a function to each list item or record field value, passing the item and its key |
+| `flatmap` | Map a list and flatten one level, with the same callback arguments |
+| `filter` | Keep list items or record fields for which a predicate is true, passing the item and its key |
+| `filter-out` | Remove list items or record fields for which a predicate is true, with the same callback arguments |
 | `in?` | `(in? ITEM LIST)` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
-| `reduce` | Fold a list from left to right |
+| `reduce` | Fold a list from left to right, passing the accumulator, the item, and its position |
 | `concat` | Concatenate lists or append scalar values |
 | `slice` | Half-open list or string slice |
 | `sorted` | Stable ascending scalar sort |
@@ -286,17 +287,25 @@ The collection operations are:
 
 Callbacks are lexical functions evaluated in item order for deterministic
 effects and diagnostics. Their internally discovered host dependencies may run
-in parallel, but the resulting list preserves input order. `map`, `flatmap`,
-`filter`, and `filter-out` call a unary callback with the item alone and a
-callable declaring two or more parameters with the item followed by its
-zero-based position; further parameters are nil.
+in parallel, but the result preserves input order. `map`, `flatmap`, `filter`,
+and `filter-out` call a unary callback with the item alone and a callable
+declaring two or more parameters with the item followed by its key; further
+parameters are nil. The key of a list item is its zero-based position and the
+key of a record field is its name. `reduce` likewise appends the item's
+position for a callable declaring three or more parameters.
+
+`map`, `filter`, and `filter-out` also accept a record with unique keys as
+their subject and return a record: `map` keeps every field in order with the
+callback result as its value, and `filter`/`filter-out` keep the selected
+fields in order. `flatmap`, `reduce`, and the membership operations accept
+lists only.
 
 `has?` remains a compatibility alias for list membership; it does not test record
 keys. Use `in?` for list membership, `has-key?` for record presence, and `includes?`
 for text substrings. The three domains are explicit and do not silently coerce.
 
-`filter` and `filter-out` accept `(PREDICATE LIST)`,
-or `(VALUE LIST)` as an equality shorthand. The shorthand retains or removes
+`filter` and `filter-out` accept `(PREDICATE SUBJECT)`,
+or `(VALUE SUBJECT)` as an equality shorthand. The shorthand retains or removes
 items equal to `VALUE`, respectively, using the same recursive equality contract
 as `eq`, including bytes, lists, and records. Unsupported values remain errors.
 
