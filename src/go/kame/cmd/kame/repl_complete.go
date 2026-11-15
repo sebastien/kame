@@ -1,77 +1,60 @@
 package main
 
 import (
+	"kame/lang/eval"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 )
 
 // completionContext is the session state completion reads. Gathering it
 // evaluates nothing.
 type completionContext struct {
-	Directory string   // session directory, absolute
-	Home      string   // $HOME of the session child environment
-	Path      string   // $PATH of the session child environment
-	Callables []string // session functions and library operations
-	Values    []string // other top-level bindings
+	Directory string // session directory, absolute
+	Home      string // $HOME of the session child environment
+	Path      string // $PATH of the session child environment
+	Names     []eval.InteractiveName
 }
 
+// completionCandidate is one completion. Text replaces the word being
+// completed; directories end with / and take no trailing space.
 type completionCandidate struct {
-	Text    string // inserted text, escaped
-	Display string // listed text
-	Dir     bool   // inserted without a trailing space
+	Text        string // inserted text, escaped
+	Display     string // listed text
+	Description string
+	Tag         string // group heading
 }
 
 const (
-	completionDelimiters = " \t()[]|;&<>=\"'"
+	completionDelimiters = " \t\n()[]|;&<>=\"'"
 	completionEscapes    = " \t\\()[]{}|;&<>\"'$@#*?"
-	completionListLimit  = 100
+)
+
+// Completion group headings, in listing order.
+const (
+	tagSession   = "session commands"
+	tagKeywords  = "keywords"
+	tagCommands  = "commands"
+	tagFunctions = "functions"
+	tagBindings  = "bindings"
+	tagFiles     = "files"
 )
 
 var (
-	replSessionCommands = []string{"cd", "export", "unset"}
+	replSessionCommands = map[string]string{"cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 
-// completeLine completes the word before pos. It returns the new line and
-// cursor, and the candidates to list when the word cannot be extended.
-func completeLine(line string, pos int, ctx completionContext) (string, int, []string) {
+// completionsAt returns the word before pos and its candidates, sorted by
+// group and text, without duplicates.
+func completionsAt(line string, pos int, ctx completionContext) (string, []completionCandidate) {
 	start := completionWordStart(line, pos)
 	word, before := line[start:pos], line[:start]
 	candidates := completionCandidates(word, before, ctx)
-	slices.SortFunc(candidates, func(a, b completionCandidate) int { return strings.Compare(a.Text, b.Text) })
+	slices.SortStableFunc(candidates, func(a, b completionCandidate) int { return strings.Compare(a.Text, b.Text) })
 	candidates = slices.CompactFunc(candidates, func(a, b completionCandidate) bool { return a.Text == b.Text })
-	replace := func(text string) (string, int, []string) {
-		return line[:start] + text + line[pos:], start + len(text), nil
-	}
-	switch len(candidates) {
-	case 0:
-		return line, pos, nil
-	case 1:
-		text := candidates[0].Text
-		if !candidates[0].Dir {
-			text += " "
-		}
-		return replace(text)
-	}
-	prefix := candidates[0].Text
-	for _, c := range candidates[1:] {
-		n := 0
-		for n < len(prefix) && n < len(c.Text) && prefix[n] == c.Text[n] {
-			n++
-		}
-		prefix = prefix[:n]
-	}
-	if len(prefix) > len(word) && strings.HasPrefix(prefix, word) {
-		return replace(prefix)
-	}
-	list := make([]string, len(candidates))
-	for i, c := range candidates {
-		list[i] = c.Display
-	}
-	return line, pos, list
+	return word, candidates
 }
 
 // completionWordStart finds the start of the word ending at pos: the byte
@@ -88,15 +71,40 @@ func completionWordStart(line string, pos int) int {
 }
 
 func completionCandidates(word, before string, ctx completionContext) []completionCandidate {
+	// Only the current line decides the position of a multi-line entry.
+	if newline := strings.LastIndexByte(before, '\n'); newline >= 0 {
+		before = before[newline+1:]
+	}
 	trimmed := strings.TrimRight(before, " \t")
 	switch {
 	case strings.HasPrefix(word, "$"):
-		return completeNames(word, "$", ctx.Values)
+		var candidates []completionCandidate
+		for _, name := range ctx.Names {
+			if !name.Callable && strings.HasPrefix("$"+name.Name, word) {
+				candidates = append(candidates, completionCandidate{Text: "$" + name.Name, Display: "$" + name.Name, Description: name.Detail, Tag: tagBindings})
+			}
+		}
+		return candidates
 	case strings.HasSuffix(before, "(") && !strings.HasSuffix(before, "$("):
-		return completeNames(word, "", ctx.Callables)
+		var candidates []completionCandidate
+		for _, name := range ctx.Names {
+			if name.Callable && strings.HasPrefix(name.Name, word) {
+				candidates = append(candidates, completionCandidate{Text: name.Name, Display: name.Name, Description: name.Detail, Tag: tagFunctions})
+			}
+		}
+		return candidates
 	case completionCommandPosition(trimmed) && !strings.Contains(word, "/"):
-		candidates := completeNames(word, "", replSessionCommands)
-		candidates = append(candidates, completeNames(word, "", replKeywords)...)
+		var candidates []completionCandidate
+		for name, description := range replSessionCommands {
+			if strings.HasPrefix(name, word) && trimmed == "" {
+				candidates = append(candidates, completionCandidate{Text: name, Display: name, Description: description, Tag: tagSession})
+			}
+		}
+		for _, name := range replKeywords {
+			if strings.HasPrefix(name, word) {
+				candidates = append(candidates, completionCandidate{Text: name, Display: name, Tag: tagKeywords})
+			}
+		}
 		return append(candidates, completeExecutables(word, ctx.Path)...)
 	case strings.TrimSpace(before) == "cd":
 		return completePaths(word, ctx, true)
@@ -120,16 +128,6 @@ func completionCommandPosition(text string) bool {
 	return false
 }
 
-func completeNames(word, prefix string, names []string) []completionCandidate {
-	var candidates []completionCandidate
-	for _, name := range names {
-		if text := prefix + name; strings.HasPrefix(text, word) {
-			candidates = append(candidates, completionCandidate{Text: text, Display: text})
-		}
-	}
-	return candidates
-}
-
 func completeExecutables(word, path string) []completionCandidate {
 	var candidates []completionCandidate
 	for _, directory := range filepath.SplitList(path) {
@@ -142,13 +140,17 @@ func completeExecutables(word, path string) []completionCandidate {
 			if !strings.HasPrefix(name, word) || strings.HasPrefix(name, ".") && !strings.HasPrefix(word, ".") {
 				continue
 			}
-			if info, err := os.Stat(filepath.Join(directory, name)); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
-				escaped := completionEscape(name)
-				candidates = append(candidates, completionCandidate{Text: escaped, Display: name})
+			if executableFile(filepath.Join(directory, name)) {
+				candidates = append(candidates, completionCandidate{Text: completionEscape(name), Display: name, Description: directory, Tag: tagCommands})
 			}
 		}
 	}
 	return candidates
+}
+
+func executableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
 }
 
 // completePaths lists entries of the directory named by word's leading part.
@@ -158,15 +160,7 @@ func completePaths(word string, ctx completionContext, dirsOnly bool) []completi
 	if slash := strings.LastIndexByte(word, '/'); slash >= 0 {
 		typedDir, base = word[:slash+1], word[slash+1:]
 	}
-	directory := completionUnescape(typedDir)
-	switch {
-	case ctx.Home != "" && strings.HasPrefix(directory, "~/"):
-		directory = filepath.Join(ctx.Home, directory[2:])
-	case directory == "":
-		directory = ctx.Directory
-	case !filepath.IsAbs(directory):
-		directory = filepath.Join(ctx.Directory, directory)
-	}
+	directory := completionDirectory(completionUnescape(typedDir), ctx)
 	base = completionUnescape(base)
 	entries, _ := os.ReadDir(directory)
 	var candidates []completionCandidate
@@ -183,7 +177,7 @@ func completePaths(word string, ctx completionContext, dirsOnly bool) []completi
 		if dirsOnly && !dir {
 			continue
 		}
-		c := completionCandidate{Text: typedDir + completionEscape(name), Display: name, Dir: dir}
+		c := completionCandidate{Text: typedDir + completionEscape(name), Display: name, Tag: tagFiles}
 		if dir {
 			c.Text += "/"
 			c.Display += "/"
@@ -191,6 +185,20 @@ func completePaths(word string, ctx completionContext, dirsOnly bool) []completi
 		candidates = append(candidates, c)
 	}
 	return candidates
+}
+
+// completionDirectory resolves a typed directory from the session directory,
+// with a leading ~/ from $HOME.
+func completionDirectory(directory string, ctx completionContext) string {
+	switch {
+	case ctx.Home != "" && (directory == "~" || strings.HasPrefix(directory, "~/")):
+		return filepath.Join(ctx.Home, directory[1:])
+	case directory == "":
+		return ctx.Directory
+	case !filepath.IsAbs(directory):
+		return filepath.Join(ctx.Directory, directory)
+	}
+	return directory
 }
 
 func completionEscape(name string) string {
@@ -211,39 +219,6 @@ func completionUnescape(text string) string {
 			i++
 		}
 		b.WriteByte(text[i])
-	}
-	return b.String()
-}
-
-// formatCompletionList lays candidates out in columns fitting width, at most
-// completionListLimit of them, followed by a count of the rest.
-func formatCompletionList(list []string, width int) string {
-	rest := 0
-	if len(list) > completionListLimit {
-		list, rest = list[:completionListLimit], len(list)-completionListLimit
-	}
-	column := 0
-	for _, item := range list {
-		column = max(column, len(item)+2)
-	}
-	columns := max(1, width/column)
-	rows := (len(list) + columns - 1) / columns
-	var b strings.Builder
-	for row := 0; row < rows; row++ {
-		for col := 0; col < columns; col++ {
-			i := col*rows + row
-			if i >= len(list) {
-				break
-			}
-			b.WriteString(list[i])
-			if col+1 < columns && i+rows < len(list) {
-				b.WriteString(strings.Repeat(" ", column-len(list[i])))
-			}
-		}
-		b.WriteByte('\n')
-	}
-	if rest != 0 {
-		b.WriteString("... and " + strconv.Itoa(rest) + " more\n")
 	}
 	return b.String()
 }

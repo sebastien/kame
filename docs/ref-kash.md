@@ -206,16 +206,17 @@ kash -i [FILE.kash…] [-- ARG…]        # preload sources, then interactive
 kame do run -i [OPTIONS] [FILE.kash…] [-- ARG…]
 ```
 
-On a terminal, entries are line-edited behind a `kash DIR> ` prompt, with
-`   .. ` for continuation lines. With piped input, lines are read without prompts.
+On a terminal, entries are edited behind a `kash DIR> ` prompt; Enter inserts
+a new line while the entry is incomplete and submits it once complete. With
+piped input, lines are read without prompts.
 
 ```text
 kash ~/src> let n = 3
 kash ~/src> (str "n=" n)
 "n=3"
 kash ~/src> def hi who
-   .. 	echo hi $who
-   ..
+	echo hi $who
+
 kash ~/src> (hi "you")
 hi you
 ```
@@ -266,9 +267,35 @@ never move.
   the session continues. Ctrl-C at the prompt clears the pending input.
 - Ctrl-D on an empty line or `exit N` ends the session: owned work is joined
   and cleanup runs. The exit status is the last entry's status or `N`.
-- History keeps 1000 lines in `$KASH_HISTORY`, else
-  `$XDG_STATE_HOME/kash/history`, else `~/.local/state/kash/history`.
-- Not provided: job control, completion, prompt customization, startup files.
+- History keeps 1000 entries in `$KASH_HISTORY`, else
+  `$XDG_STATE_HOME/kash/history`, else `~/.local/state/kash/history`;
+  multi-line entries are stored with backslash-continued lines.
+- Not provided: job control, programmable completion, right or multi-line
+  prompts.
+
+### Startup file and prompt
+
+`$KASH_INIT`, else `$XDG_CONFIG_HOME/kash/init.kash`, else
+`~/.config/kash/init.kash`, runs as entries before the first prompt (empty
+`KASH_INIT` disables it). A `kash-prompt` function receives
+`[status: dir: name:]` and returns the prompt string:
+
+```kash
+(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+```
+
+### Editing, completion and highlighting
+
+- The editor follows GNU Readline conventions: emacs bindings by default, vi
+  when selected, incremental history search and undo. It reads `$INPUTRC`,
+  else `~/.inputrc`, else `/etc/inputrc`, with application name `kash`.
+- Tab with only blanks before the cursor inserts a tab, for block bodies.
+- Elsewhere Tab completes into a grouped, described menu: `$` bindings,
+  functions after `(`, session commands, keywords and `PATH` executables at
+  command position, directories after `cd`, and paths otherwise.
+- Entries are highlighted by lexical class, and literal command words that
+  resolve to nothing are marked as unknown. `NO_COLOR` or `TERM=dumb`
+  disables highlighting.
 
 ## References
 

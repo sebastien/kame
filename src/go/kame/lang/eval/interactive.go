@@ -3,25 +3,58 @@ package eval
 import (
 	"kame/diagnostic"
 	"kame/lang/definition"
+	"strconv"
 )
 
+// InteractiveName is a top-level name visible in an interactive session.
+type InteractiveName struct {
+	Name     string
+	Callable bool   // session function or library operation
+	Detail   string // parameters, arity, or binding kind, for display
+}
+
 // InteractiveNames lists names visible at the session top level for
-// completion: callables are session functions and registered operations,
-// values are the other top-level bindings. Nothing is evaluated.
-func (p *Program) InteractiveNames() (callables []string, values []string) {
+// completion: session functions and registered operations, then the other
+// top-level bindings. Nothing is evaluated.
+func (p *Program) InteractiveNames() []InteractiveName {
+	var names []InteractiveName
 	for _, entry := range p.Scope.bindingIndex {
-		if p.Scope.Bindings[entry.index].Kind == bindingFunction {
-			callables = append(callables, entry.name)
-		} else {
-			values = append(values, entry.name)
+		b := &p.Scope.Bindings[entry.index]
+		name := InteractiveName{Name: entry.name}
+		switch b.Kind {
+		case bindingFunction:
+			name.Callable, name.Detail = true, "function"
+			if b.Function != nil {
+				for _, parameter := range b.Function.Parameters {
+					name.Detail += " " + parameter.Name
+					if parameter.Rest {
+						name.Detail += "..."
+					}
+				}
+			}
+		case bindingEager:
+			name.Detail = "let"
+		case bindingDefinition, bindingLocalDefinition:
+			name.Detail = "lazy"
+		default:
+			name.Detail = "value"
 		}
+		names = append(names, name)
 	}
 	if p.Registry != nil {
 		for i := range p.Registry.Items {
-			callables = append(callables, p.Registry.Items[i].Name)
+			operation := &p.Registry.Items[i]
+			arity := strconv.Itoa(operation.MinArity)
+			switch {
+			case operation.MaxArity < 0:
+				arity += "+"
+			case operation.MaxArity != operation.MinArity:
+				arity += "-" + strconv.Itoa(operation.MaxArity)
+			}
+			names = append(names, InteractiveName{Name: operation.Name, Callable: true, Detail: "operation, " + arity + " args"})
 		}
 	}
-	return callables, values
+	return names
 }
 
 // HasFunction reports whether name is bound to a top-level session function.

@@ -27,10 +27,11 @@ still reads stdin as source. `--interactive` cannot be combined with `-` (stdin
 as source) and requires the Kash language. Capability, timeout, directory, and
 argument options apply as for any Kash session. `--timeout` applies per entry.
 
-With a terminal on stdin, entries are edited with a line editor (history,
-cursor movement, completion) behind a prompt, by default `kash DIR> ` naming
-the session directory (`~` for home). Lines typed ahead while a command runs
-are read as entries.
+With a terminal on stdin, entries are edited with a line editor (see Line
+editing) behind a prompt, by default `kash DIR> ` naming the session directory
+(`~` for home). The editor renders on stdout when it is a terminal, otherwise
+on stderr, so redirected output never receives prompts. Lines typed ahead while
+a command runs are read as entries.
 Otherwise lines are read from stdin without prompts, which is the testable
 form of the same contract; terminal handoff then does not apply. Progress
 dashboards and taskbar updates are disabled in interactive sessions.
@@ -45,6 +46,9 @@ An entry is one or more lines submitted together:
   `for`, `match`, ...) continues until a blank line, since the body extent is
   not known earlier.
 - End of input submits a pending partial entry before the session ends.
+
+On a terminal the whole entry is one editable buffer: Enter submits it when
+these rules find it complete and otherwise inserts a new line.
 
 Each entry is parsed as Kash in the context of the live session and is a source
 named `<kash:N>`, numbered from one per session. Diagnostics locate entry text
@@ -134,17 +138,19 @@ read and write grants move with `cd`; explicit grants never move or broaden.
   then the session continues with status 130. Work started by earlier entries
   is not cancelled. A second interrupt while the entry is settling escalates to
   the ordinary forced shutdown.
-- An interrupt at the prompt discards the line or partial entry and sets the
-  session status to 130.
+- An interrupt at the prompt discards the whole entry being edited, closing
+  any completion menu, and sets the session status to 130.
 - `SIGTERM` keeps the ordinary session cancellation contract.
 
 ## History
 
-Terminal sessions keep up to 1000 recent lines. They append to
-`$KASH_HISTORY`, otherwise `$XDG_STATE_HOME/kash/history`, otherwise
-`~/.local/state/kash/history`. A history file that cannot be opened disables
-persistence, not the session. Startup-file entries and prompt calls are not
-recorded.
+Terminal sessions keep up to 1000 recent entries; a consecutive repeat is
+kept once. They append to `$KASH_HISTORY`, otherwise
+`$XDG_STATE_HOME/kash/history`, otherwise `~/.local/state/kash/history`. The
+file holds one entry per line; each line of a multi-line entry except the last
+ends with a backslash, which no Kash line can. A history file that cannot be
+opened disables persistence, not the session. Startup-file entries and prompt
+calls are not recorded.
 
 ## Startup file
 
@@ -186,38 +192,64 @@ sessions without a terminal never call it.
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
 ```
 
+## Line editing
+
+The terminal editor follows GNU Readline conventions: emacs bindings by
+default, vi bindings when selected, incremental history search, undo, and
+editing across the lines of an entry. It reads the user's inputrc
+(`$INPUTRC`, otherwise `~/.inputrc`, otherwise `/etc/inputrc`) with the
+application name `kash`, so `$if kash` sections apply. Tab is bound to
+completion as specified below, except that Tab with only blanks before the
+cursor on its line inserts a tab, as indented block bodies need.
+
 ## Completion
 
 On a terminal, Tab completes the word before the cursor. The word extends
 back to the nearest unescaped blank or `(` `)` `[` `]` `|` `;` `&` `<` `>`
-`=` `"` `'`. Candidates depend on its position, first match wins:
+`=` `"` `'`, within the current line. Candidates depend on its position, first
+match wins; each group has a heading and candidates carry descriptions:
 
-| Position | Candidates |
-| --- | --- |
-| Word starting with `$` | `$NAME` for top-level session bindings that are not functions. |
-| Directly after `(` | Session functions and library operations. |
-| Command position, word without `/` | Session commands, Kash statement keywords, and executables found on the session child environment's `PATH`. |
-| First operand of `cd` | Directories. |
-| Anything else | Paths. |
+| Position | Group | Candidates and descriptions |
+| --- | --- | --- |
+| Word starting with `$` | `bindings` | `$NAME` for top-level session bindings that are not functions, described as `let`, `lazy`, or `value`. |
+| Directly after `(` | `functions` | Session functions, described by their parameters, and library operations, described by their arity. |
+| Command position, word without `/` | `session commands`, `keywords`, `commands` | Session commands (only at the start of an entry line), Kash statement keywords, and executables found on the session child environment's `PATH`, described by their directory. |
+| First operand of `cd` | `files` | Directories. |
+| Anything else | `files` | Paths. |
 
-Command position is the start of the line, or follows `|`, `;`, `&`, `$(`, or
+Command position is the start of a line, or follows `|`, `;`, `&`, `$(`, or
 the keywords `if`, `elif`, and `while`.
 
 Paths resolve from the session directory; a leading `~/` resolves from `$HOME`
 and is kept as typed. Names starting with `.` are candidates only when the
 typed name starts with `.`. Inserted path text escapes blanks and Kash
 metacharacters with a backslash, and typed backslash escapes are honored when
-matching. Directories are inserted with a trailing `/`.
+matching. Directories are inserted with a trailing `/` and no space.
 
 - One candidate replaces the word, followed by a space unless it is a
   directory.
-- Several candidates extend the word to their longest common prefix. When the
-  word cannot be extended, the candidates are listed below the line in sorted
-  order, at most 100 with a count of the rest, and the line is redrawn.
-- No candidate leaves the line unchanged.
+- Several candidates extend the word to their longest common prefix and are
+  listed below the entry in a menu, grouped under their headings; Tab again
+  and the arrow keys select a candidate, which is inserted as typed.
+- No candidate leaves the entry unchanged.
 
 Completion only reads session state; it evaluates no definitions and runs no
 commands.
+
+## Highlighting
+
+On a color terminal the editor highlights the entry as it is typed, by Kash
+lexical class: command words, keywords, defined names, options, quoted text,
+references and captures, operators and redirections, comments, and, inside
+Kame expressions, call heads, constants, and numbers. Unclosed quotes and
+expressions are highlighted to the end of the entry. Highlighting never
+changes the text.
+
+A literal command word is marked as unknown when it is not a session command,
+does not exist as a path when it contains `/`, and names no entry of a
+directory on the session `PATH`. Words built from substitutions are not
+judged. `NO_COLOR` set to a non-empty value, or `TERM=dumb`, disables
+highlighting.
 
 ## Non-goals
 
@@ -225,6 +257,8 @@ commands.
   graphs to the terminal.
 - Programmable completion, completion of command options, and right or
   multi-line prompts.
+- Semantic highlighting beyond command words, such as validating references
+  or expressions.
 - Expressions as session-command operands, and Kash `export`/`unset`
   statements (`051`), which remain scoped to recipes.
 - Redefining lazy definitions or rules.
@@ -234,12 +268,13 @@ commands.
 | Contract | Required executable checks |
 | --- | --- |
 | Invocation | `-i` with and without preloaded sources; bare `kash` on a terminal; conflict with stdin source. |
-| Entries | Open-expression continuation, block continuation ended by a blank line, partial entry at end of input. |
+| Entries | Open-expression continuation, block continuation ended by a blank line, partial entry at end of input; under a pseudo-terminal, a block entered with Tab indentation runs as one entry. |
 | Session | `let` and `def` rebinding, lazy redefinition and `+=` rejected without effects, failure ends only its entry, value display, diagnostics named `<kash:N>`. |
 | Termination | `exit` status, end-of-input status, interrupt of a running entry continues the session, interrupt at the prompt clears the line. |
 | Terminal | Under a pseudo-terminal: foreground commands see a terminal on every stream and own the foreground group; captures keep pipes; Ctrl-C ends only the command without a diagnostic; typed-ahead entries run; the session regains the terminal with unchanged modes. |
 | Session state | `cd` with relative, `-`, and home forms; redirections after `cd` honor moved default grants and explicit grants deny them; `export` expansion and single-quote literals; `unset`; malformed operands. |
-| History | Submitted lines are appended to `$KASH_HISTORY` and recalled by a later session. |
+| History | Submitted entries are appended to `$KASH_HISTORY` and recalled by a later session; multi-line entries round-trip through the file format. |
 | Startup file | Definitions and session commands apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
 | Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default. |
-| Completion | Word extraction and escapes; `$` bindings; functions after `(`; command position with session commands, keywords, and `PATH` executables; `cd` directories; hidden-file rule; unique, common-prefix, and listed outcomes; one completion under a pseudo-terminal. |
+| Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with session commands, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
+| Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, and session commands; under a pseudo-terminal, an unknown command is marked. |

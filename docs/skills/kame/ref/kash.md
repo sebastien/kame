@@ -898,6 +898,10 @@ receives `[status: dir: name:]` and returns the prompt string:
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
 ```
 
-Tab completes `$` bindings, functions after `(`, commands at command position,
-and paths elsewhere. History persists in `$KASH_HISTORY`. Normative details:
+The editor follows Readline conventions (emacs or vi, `~/.inputrc` with
+`$if kash`) and edits a whole multi-line entry; Tab indents at line start.
+Tab elsewhere opens a grouped, described completion menu: `$` bindings,
+functions after `(`, commands at command position, and paths elsewhere.
+Entries are syntax-highlighted, with unknown commands in red; `NO_COLOR`
+disables it. History persists in `$KASH_HISTORY`. Normative details:
 [interactive Kash](../../../spec/052-kash-interactive.md).

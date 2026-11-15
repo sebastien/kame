@@ -70,6 +70,10 @@ func startTerminalSession(t *testing.T, binary, directory string, env []string, 
 			s.mu.Lock()
 			s.output.Write(buffer[:n])
 			s.mu.Unlock()
+			// Answer cursor-position queries as a terminal emulator would.
+			if bytes.Contains(buffer[:n], []byte("\x1b[6n")) {
+				controller.WriteString("\x1b[1;1R")
+			}
 			if err != nil {
 				return
 			}
@@ -83,10 +87,13 @@ func startTerminalSession(t *testing.T, binary, directory string, env []string, 
 	return s
 }
 
+var terminalControls = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// text is the terminal output without control sequences.
 func (s *terminalSession) text() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.output.String()
+	return terminalControls.ReplaceAllString(s.output.String(), "")
 }
 
 func (s *terminalSession) waitFor(text string) {
@@ -108,9 +115,35 @@ func (s *terminalSession) send(text string) {
 	}
 }
 
+// waitReading waits until the output ends with the editor's prompt redraw,
+// which happens only once it reads keys in raw mode.
+func (s *terminalSession) waitReading() {
+	s.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw := s.raw()
+		if i := strings.LastIndex(raw, "\x1b[?25h"); i >= 0 && strings.TrimSpace(terminalControls.ReplaceAllString(raw[i:], "")) == "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("editor is not reading: %q", s.text())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (s *terminalSession) raw() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.output.String()
+}
+
 // finish ends input and returns the session exit status.
 func (s *terminalSession) finish() int {
 	s.t.Helper()
+	// Ctrl-D typed while a command still runs reaches the cooked terminal,
+	// whose line discipline consumes it; send it once the editor reads again.
+	s.waitReading()
 	s.send("\x04")
 	select {
 	case err := <-s.done:
@@ -235,7 +268,8 @@ func TestNativeInteractiveKashPromptFunction(t *testing.T) {
 	}
 }
 
-// Tab completes a unique path and lists ambiguous candidates.
+// Tab completes a unique path and lists ambiguous candidates under their
+// group heading.
 func TestNativeInteractiveKashCompletion(t *testing.T) {
 	directory := t.TempDir()
 	nativeCLIWrite(t, directory+"/uniquefile.txt", "completed-content\n")
@@ -246,9 +280,13 @@ func TestNativeInteractiveKashCompletion(t *testing.T) {
 	s.send("cat uniq\t\r")
 	s.waitFor("completed-content")
 	s.send("cat list\t")
+	s.waitFor("files")
 	s.waitFor("lista.txt  listb.txt")
 	s.send("\x03")
-	s.finish()
+	s.waitFor("^C")
+	if status := s.finish(); status != 130 {
+		t.Fatalf("completion session status %d: %q", status, s.text())
+	}
 }
 
 // runOnTerminal runs the CLI as a session leader on a fresh pseudo-terminal
@@ -347,5 +385,27 @@ invalid : ; [foreground: :true]
 		if err := command.Run(); err == nil || !strings.Contains(errOut.String()+out.String(), check.code) {
 			t.Fatalf("%s: want %s, err=%v output=%q", check.target, check.code, err, errOut.String()+out.String())
 		}
+	}
+}
+
+// On a color terminal, entries are highlighted and unknown commands marked;
+// Tab indents a block body and Enter on a blank line submits the block.
+func TestNativeInteractiveKashHighlightingAndBlocks(t *testing.T) {
+	s := startTerminalSession(t, nativeCLIBinary(t), t.TempDir(), []string{"TERM=xterm-256color", "NO_COLOR="}, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("nosuchcommand-kash 'arg'")
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(s.raw(), "\x1b[1;31mnosuchcommand-kash\x1b[0m \x1b[33m'arg'\x1b[0m") {
+		if time.Now().After(deadline) {
+			t.Fatalf("unknown command not highlighted: %q", s.raw())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	s.send("\x03")
+	s.waitFor("^C")
+	s.send("def f\r\tsh -c 'echo block-$((40+2))'\r\r(f)\r")
+	s.waitFor("block-42")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("highlighting session status %d: %q", status, s.text())
 	}
 }

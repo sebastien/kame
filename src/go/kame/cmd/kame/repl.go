@@ -16,14 +16,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/term"
 )
 
 const (
-	replPrompt        = "kash> "
-	replContinuation  = "   .. "
-	replHistoryLength = 1000
+	replContinuation = "   .. "
 )
 
 var errInterrupted = errors.New("interrupted")
@@ -55,15 +51,13 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 	repl := &replSession{run: run, shell: replShell{Program: session.Program, FollowGrants: len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants}}
 	reader := newLineReader(in)
 	defer reader.Close()
-	terminal, _ := reader.(*terminalReader)
+	terminal, _ := reader.(*editorReader)
 	if terminal != nil {
 		// Foreground commands receive the terminal; Kame waits like a shell
 		// without job control.
 		session.Program.Eval.Terminal = true
 		posix.IgnoreJobControlSignals()
-		terminal.complete = func(line string, pos int) (string, int, []string) {
-			return completeLine(line, pos, repl.completion())
-		}
+		terminal.bind(repl)
 	}
 	status, stop := repl.loadStartup()
 	if stop {
@@ -260,10 +254,9 @@ func kameString(text string) string {
 
 func (s *replSession) completion() completionContext {
 	p := s.run.Session.Program
-	callables, values := p.Eval.InteractiveNames()
 	home, _ := s.shell.lookup("HOME")
 	path, _ := s.shell.lookup("PATH")
-	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Callables: callables, Values: values}
+	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Names: p.Eval.InteractiveNames()}
 }
 
 // readEntry assembles one entry. Text ending inside an expression continues
@@ -308,19 +301,6 @@ func readEntry(reader lineReader, prompt string) (string, int, error) {
 	}
 }
 
-func newLineReader(in io.Reader) lineReader {
-	if file, ok := in.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		output := os.Stderr
-		if !term.IsTerminal(int(output.Fd())) {
-			output = os.Stdout
-		}
-		r := &terminalReader{fd: int(file.Fd()), input: &interruptReader{reader: file}, output: output, history: loadReplHistory()}
-		r.reset()
-		return r
-	}
-	return &pipeReader{reader: bufio.NewReader(in)}
-}
-
 // pipeReader reads entries from non-terminal input without prompts. line
 // is the byte offset of the last line read, consumed the offset of the next.
 type pipeReader struct {
@@ -338,168 +318,3 @@ func (r *pipeReader) ReadLine(string) (string, error) {
 }
 
 func (r *pipeReader) Close() {}
-
-// terminalReader edits lines in raw mode only while reading, so commands run
-// with the terminal's normal settings and signal keys.
-type terminalReader struct {
-	fd       int
-	input    *interruptReader
-	output   *os.File
-	history  *replHistory
-	term     *term.Terminal
-	width    int
-	complete func(line string, pos int) (string, int, []string)
-}
-
-// reset replaces the line editor. x/term keeps the bytes of a Ctrl-C or
-// Ctrl-D that ended ReadLine buffered and would replay them on every later
-// call, so an interrupted editor is discarded with its partial line.
-func (r *terminalReader) reset() {
-	r.term = term.NewTerminal(struct {
-		io.Reader
-		io.Writer
-	}{r.input, r.output}, replPrompt)
-	r.term.History = r.history
-	r.term.AutoCompleteCallback = r.autoComplete
-}
-
-// autoComplete handles Tab; other keys keep their editing behavior. Listed
-// candidates are written above a redrawn line.
-func (r *terminalReader) autoComplete(line string, pos int, key rune) (string, int, bool) {
-	if key != '\t' || r.complete == nil {
-		return "", 0, false
-	}
-	line, pos, list := r.complete(line, pos)
-	if len(list) != 0 {
-		r.term.Write([]byte(formatCompletionList(list, r.width)))
-	}
-	return line, pos, true
-}
-
-func (r *terminalReader) ReadLine(prompt string) (string, error) {
-	state, err := term.MakeRaw(r.fd)
-	if err != nil {
-		return "", err
-	}
-	r.width = 80
-	if width, height, err := term.GetSize(r.fd); err == nil && width > 0 && height > 0 {
-		r.term.SetSize(width, height)
-		r.width = width
-	}
-	r.term.SetPrompt(prompt)
-	r.input.interrupted = false
-	line, err := r.term.ReadLine()
-	term.Restore(r.fd, state)
-	if errors.Is(err, io.EOF) && r.input.interrupted {
-		r.reset()
-		io.WriteString(r.output, "^C\n")
-		return "", errInterrupted
-	}
-	if errors.Is(err, io.EOF) {
-		io.WriteString(r.output, "\n")
-	}
-	return line, err
-}
-
-func (r *terminalReader) Close() { r.history.Close() }
-
-// interruptReader distinguishes Ctrl-C from Ctrl-D, which x/term both
-// report as io.EOF while reading a line. It also maps newline to carriage
-// return: lines typed ahead while a command ran in cooked mode had Enter
-// translated to newline, which x/term does not accept as Enter.
-// Bytes after a Ctrl-C are held back for the next editor, since the
-// interrupted one is discarded with its buffer.
-type interruptReader struct {
-	reader      io.Reader
-	interrupted bool
-	pending     []byte
-}
-
-func (r *interruptReader) Read(buffer []byte) (int, error) {
-	var n int
-	var err error
-	if len(r.pending) != 0 {
-		n = copy(buffer, r.pending)
-		r.pending = r.pending[n:]
-	} else {
-		n, err = r.reader.Read(buffer)
-	}
-	for i := range buffer[:n] {
-		switch buffer[i] {
-		case 3:
-			r.interrupted = true
-			r.pending = append(append([]byte(nil), buffer[i+1:n]...), r.pending...)
-			return i + 1, err
-		case '\n':
-			buffer[i] = '\r'
-		}
-	}
-	return n, err
-}
-
-// replHistory keeps recent lines in memory and appends new ones to the
-// history file, when one can be opened.
-type replHistory struct {
-	entries []string
-	file    *os.File
-}
-
-func replHistoryPath() string {
-	if path := os.Getenv("KASH_HISTORY"); path != "" {
-		return path
-	}
-	state := os.Getenv("XDG_STATE_HOME")
-	if state == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		state = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(state, "kash", "history")
-}
-
-func loadReplHistory() *replHistory {
-	h := &replHistory{}
-	path := replHistoryPath()
-	if path == "" {
-		return h
-	}
-	if data, err := os.ReadFile(path); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if line != "" {
-				h.entries = append(h.entries, line)
-			}
-		}
-		if len(h.entries) > replHistoryLength {
-			h.entries = h.entries[len(h.entries)-replHistoryLength:]
-		}
-	}
-	if os.MkdirAll(filepath.Dir(path), 0o700) == nil {
-		h.file, _ = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	}
-	return h
-}
-
-func (h *replHistory) Add(entry string) {
-	if strings.TrimSpace(entry) == "" || (len(h.entries) != 0 && h.entries[len(h.entries)-1] == entry) {
-		return
-	}
-	h.entries = append(h.entries, entry)
-	if len(h.entries) > replHistoryLength {
-		h.entries = h.entries[1:]
-	}
-	if h.file != nil {
-		h.file.WriteString(entry + "\n")
-	}
-}
-
-func (h *replHistory) Len() int { return len(h.entries) }
-
-func (h *replHistory) At(index int) string { return h.entries[len(h.entries)-1-index] }
-
-func (h *replHistory) Close() {
-	if h.file != nil {
-		h.file.Close()
-	}
-}

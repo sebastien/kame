@@ -48,6 +48,8 @@ func TestGoSuite(t *testing.T) {
 	t.Run("KashSingleQuotedWords", func(t *testing.T) { TestKashSingleQuotedWords(legacy.Wrap(t)) })
 	t.Run("KashSourceKeepsCommandAndValueBoundaries", func(t *testing.T) { TestKashSourceKeepsCommandAndValueBoundaries(legacy.Wrap(t)) })
 	t.Run("KashStatementDelimitersAndMultilineValues", func(t *testing.T) { TestKashStatementDelimitersAndMultilineValues(legacy.Wrap(t)) })
+	t.Run("KashTokensClassifyInteractiveText", func(t *testing.T) { TestKashTokensClassifyInteractiveText(legacy.Wrap(t)) })
+	t.Run("KashTokensTolerateUnclosedInput", func(t *testing.T) { TestKashTokensTolerateUnclosedInput(legacy.Wrap(t)) })
 	t.Run("KashValueRecoveryKeepsExpressionBoundary", func(t *testing.T) { TestKashValueRecoveryKeepsExpressionBoundary(legacy.Wrap(t)) })
 	t.Run("KashWithPreservesSetupOrderBodyAndFormatting", func(t *testing.T) { TestKashWithPreservesSetupOrderBodyAndFormatting(legacy.Wrap(t)) })
 	t.Run("KashWithRejectsInvalidHeadersAndEmptyBodies", func(t *testing.T) { TestKashWithRejectsInvalidHeadersAndEmptyBodies(legacy.Wrap(t)) })
