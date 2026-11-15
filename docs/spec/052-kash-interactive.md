@@ -7,8 +7,9 @@ refines `009-cli.md`, `017-kash.md`, and `048-kash-practical-scripting.md` for
 interactive sessions only. Batch execution is unchanged.
 
 This is a REPL, not a login shell. It lends the terminal to foreground
-commands and keeps a session working directory and child environment, but it
-does not manage jobs or complete words; see Non-goals.
+commands, keeps a session working directory and child environment, loads a
+startup file, completes words, and lets a Kash function draw the prompt, but
+it does not manage jobs; see Non-goals.
 
 ## Invocation
 
@@ -19,15 +20,17 @@ kame do run -i [OPTIONS] [FILE.kash...] [-- ARG...]
 ```
 
 `-i`/`--interactive` appends an interactive input after any listed sources.
-Listed sources load and run first, in order, in the same session. Bare `kash`
+Listed sources load and run first, in order, in the same session, followed by
+the startup file (see Startup file). Bare `kash`
 with no source starts the REPL when stdin is a terminal; with piped stdin it
 still reads stdin as source. `--interactive` cannot be combined with `-` (stdin
 as source) and requires the Kash language. Capability, timeout, directory, and
 argument options apply as for any Kash session. `--timeout` applies per entry.
 
 With a terminal on stdin, entries are edited with a line editor (history,
-cursor movement) behind a `kash DIR> ` prompt naming the session directory
-(`~` for home). Lines typed ahead while a command runs are read as entries.
+cursor movement, completion) behind a prompt, by default `kash DIR> ` naming
+the session directory (`~` for home). Lines typed ahead while a command runs
+are read as entries.
 Otherwise lines are read from stdin without prompts, which is the testable
 form of the same contract; terminal handoff then does not apply. Progress
 dashboards and taskbar updates are disabled in interactive sessions.
@@ -58,8 +61,8 @@ and deferred-cleanup scope.
 | `let NAME = RHS` | Evaluates when submitted. A later `let` of the same name rebinds it for later entries. |
 | `def NAME ...` | Registers the function. A later definition of the same name replaces it for later lookups. |
 | `NAME = RHS` (lazy) | Registered once. Redefinition is `DEF_INVALID` with a `let` tip; an evaluated lazy value is never replayed. `?=` against an existing name is ignored. |
-| `NAME += RHS` | `DEF_INVALID`: contributions would mutate an aggregate that may already be evaluated. |
-| Rules, includes, composition | `FEATURE_UNSUP` within entries. Preloaded files keep their ordinary contracts. |
+| `NAME += RHS` | Rejected: contributions are not Kash syntax (`PARSE_ERR`), and would mutate an aggregate that may already be evaluated. |
+| Rules, includes, composition | Not Kash syntax; any such item reaching an entry is `FEATURE_UNSUP`. Preloaded files keep their ordinary contracts. |
 
 A parse or registration failure rejects the whole entry before any effect: no
 statement runs and the session is unchanged.
@@ -131,7 +134,8 @@ read and write grants move with `cd`; explicit grants never move or broaden.
   then the session continues with status 130. Work started by earlier entries
   is not cancelled. A second interrupt while the entry is settling escalates to
   the ordinary forced shutdown.
-- An interrupt at the prompt discards the line or partial entry.
+- An interrupt at the prompt discards the line or partial entry and sets the
+  session status to 130.
 - `SIGTERM` keeps the ordinary session cancellation contract.
 
 ## History
@@ -139,13 +143,88 @@ read and write grants move with `cd`; explicit grants never move or broaden.
 Terminal sessions keep up to 1000 recent lines. They append to
 `$KASH_HISTORY`, otherwise `$XDG_STATE_HOME/kash/history`, otherwise
 `~/.local/state/kash/history`. A history file that cannot be opened disables
-persistence, not the session.
+persistence, not the session. Startup-file entries and prompt calls are not
+recorded.
+
+## Startup file
+
+Every interactive session, with or without a terminal, loads a startup file
+after listed sources and before the first entry. The file is `$KASH_INIT`
+when that variable is set, otherwise `$XDG_CONFIG_HOME/kash/init.kash`,
+otherwise `~/.config/kash/init.kash`, read from the invocation environment.
+`KASH_INIT` set to the empty string disables the startup file.
+
+- A missing default file is skipped silently. A file named by `KASH_INIT`
+  that cannot be read is reported as `HOST_FAIL` with status 1, and the
+  session continues.
+- The text is divided into entries exactly as typed input is, including
+  continuation rules and session commands, and each entry runs under the
+  entry contracts above. A failing entry ends only that entry; later entries
+  of the file still run. `exit` ends the session.
+- Diagnostics name the file path and locate positions in the file, not in the
+  entry. Startup entries do not consume `<kash:N>` numbers.
+
+## Prompt
+
+Before each first-line prompt of a terminal session, when the session defines
+a function named `kash-prompt`, the REPL calls it with one record argument:
+
+| Field | Value |
+| --- | --- |
+| `status` | Status of the last entry, as an integer. |
+| `dir` | Absolute session directory. |
+| `name` | Directory display of the default prompt (`~`, `/`, or the base name). |
+
+A string result is the prompt, verbatim; terminal style sequences are allowed
+and do not count toward the cursor column. Any other result uses the default
+prompt. A failing call is reported as a diagnostic named `<kash-prompt>` and
+also uses the default prompt. The call is not an entry: it consumes no entry
+number and leaves the session status unchanged. Continuation prompts and
+sessions without a terminal never call it.
+
+```kash
+(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+```
+
+## Completion
+
+On a terminal, Tab completes the word before the cursor. The word extends
+back to the nearest unescaped blank or `(` `)` `[` `]` `|` `;` `&` `<` `>`
+`=` `"` `'`. Candidates depend on its position, first match wins:
+
+| Position | Candidates |
+| --- | --- |
+| Word starting with `$` | `$NAME` for top-level session bindings that are not functions. |
+| Directly after `(` | Session functions and library operations. |
+| Command position, word without `/` | Session commands, Kash statement keywords, and executables found on the session child environment's `PATH`. |
+| First operand of `cd` | Directories. |
+| Anything else | Paths. |
+
+Command position is the start of the line, or follows `|`, `;`, `&`, `$(`, or
+the keywords `if`, `elif`, and `while`.
+
+Paths resolve from the session directory; a leading `~/` resolves from `$HOME`
+and is kept as typed. Names starting with `.` are candidates only when the
+typed name starts with `.`. Inserted path text escapes blanks and Kash
+metacharacters with a backslash, and typed backslash escapes are honored when
+matching. Directories are inserted with a trailing `/`.
+
+- One candidate replaces the word, followed by a space unless it is a
+  directory.
+- Several candidates extend the word to their longest common prefix. When the
+  word cannot be extended, the candidates are listed below the line in sorted
+  order, at most 100 with a count of the rest, and the line is redrawn.
+- No candidate leaves the line unchanged.
+
+Completion only reads session state; it evaluates no definitions and runs no
+commands.
 
 ## Non-goals
 
 - Job control: stopping, resuming, and listing jobs, and moving background
   graphs to the terminal.
-- Completion, prompt customization, and startup files.
+- Programmable completion, completion of command options, and right or
+  multi-line prompts.
 - Expressions as session-command operands, and Kash `export`/`unset`
   statements (`051`), which remain scoped to recipes.
 - Redefining lazy definitions or rules.
@@ -156,7 +235,11 @@ persistence, not the session.
 | --- | --- |
 | Invocation | `-i` with and without preloaded sources; bare `kash` on a terminal; conflict with stdin source. |
 | Entries | Open-expression continuation, block continuation ended by a blank line, partial entry at end of input. |
-| Session | `let` and `def` rebinding, lazy redefinition rejected without effects, failure ends only its entry, value display, diagnostics named `<kash:N>`. |
+| Session | `let` and `def` rebinding, lazy redefinition and `+=` rejected without effects, failure ends only its entry, value display, diagnostics named `<kash:N>`. |
 | Termination | `exit` status, end-of-input status, interrupt of a running entry continues the session, interrupt at the prompt clears the line. |
 | Terminal | Under a pseudo-terminal: foreground commands see a terminal on every stream and own the foreground group; captures keep pipes; Ctrl-C ends only the command without a diagnostic; typed-ahead entries run; the session regains the terminal with unchanged modes. |
 | Session state | `cd` with relative, `-`, and home forms; redirections after `cd` honor moved default grants and explicit grants deny them; `export` expansion and single-quote literals; `unset`; malformed operands. |
+| History | Submitted lines are appended to `$KASH_HISTORY` and recalled by a later session. |
+| Startup file | Definitions and session commands apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
+| Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default. |
+| Completion | Word extraction and escapes; `$` bindings; functions after `(`; command position with session commands, keywords, and `PATH` executables; `cd` directories; hidden-file rule; unique, common-prefix, and listed outcomes; one completion under a pseudo-terminal. |

@@ -37,7 +37,7 @@ func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagno
 		switch item.Kind {
 		case script.Definition:
 			definitions = append(definitions, item.Definition)
-		case script.Expression, script.Command:
+		case script.Expression, script.Command, script.Comment:
 		default:
 			diagnostics = append(diagnostics, located("FEATURE_UNSUP", item.Span, "this declaration is not supported interactively"))
 		}

@@ -876,3 +876,28 @@ standalone/process feature works, and never silently fall back to a shell.
 Normative details: [CLI](../../../spec/009-cli.md),
 [Kash](../../../spec/017-kash.md), [streaming](../../../spec/042-kash-streaming.md),
 and [output-port/list spec](../../../spec/047-kash-output-ports-and-command-lists.md).
+
+## Interactive sessions
+
+```sh
+kash                              # REPL when stdin is a terminal
+kash -i ./lib.kash                # preload, then read entries
+kame do run -i --allow-run
+```
+
+Entries share one session: `let` and `def` rebind, lazy names cannot be
+redefined, and a failure ends only its entry. Whole-line `cd`, `export`, and
+`unset` change the session directory and child environment. Foreground
+commands receive the terminal; Ctrl-C reaches only them.
+
+The startup file `$KASH_INIT` (default `~/.config/kash/init.kash`; empty
+disables) runs as entries before the first prompt. A `kash-prompt` function
+receives `[status: dir: name:]` and returns the prompt string:
+
+```kash
+(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+```
+
+Tab completes `$` bindings, functions after `(`, commands at command position,
+and paths elsewhere. History persists in `$KASH_HISTORY`. Normative details:
+[interactive Kash](../../../spec/052-kash-interactive.md).

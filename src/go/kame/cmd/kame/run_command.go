@@ -315,6 +315,8 @@ type sessionRun struct {
 	Last        core.Value
 	HasLast     bool
 	Interactive bool
+	// Capture, when set, receives a clone of the next completed work value.
+	Capture *core.Value
 }
 
 func (r *sessionRun) emit(out io.Writer, d diagnostic.Diagnostic, json bool) {
@@ -408,6 +410,7 @@ func (r *sessionRun) step(i int) (int, bool) {
 		if h.Definition && h.Node.Current {
 			if r.Interactive {
 				r.display(i, h.Node.Latest)
+				r.capture(h.Node.Latest)
 			}
 			if r.Inv.Name == "render" {
 				r.Last.Free(mem.System)
@@ -456,6 +459,7 @@ func (r *sessionRun) step(i int) (int, bool) {
 		}
 		if r.Interactive {
 			r.display(i, polled.Result.Value)
+			r.capture(polled.Result.Value)
 		}
 		if i < len(r.Session.Work) && r.Session.Work[i].Value && r.Session.Work[i].Display {
 			r.Last.Free(mem.System)
@@ -476,6 +480,13 @@ func (r *sessionRun) display(i int, value core.Value) {
 	if i < len(r.Session.Work) && r.Session.Work[i].Display && value.Kind != core.Nil && !eval.IsProcessResult(value) && !r.Inv.DryRun {
 		writeValue(r.Out, value)
 		io.WriteString(r.Out, "\n")
+	}
+}
+
+func (r *sessionRun) capture(value core.Value) {
+	if r.Capture != nil {
+		r.Capture.Free(mem.System)
+		*r.Capture = value.Clone(mem.System)
 	}
 }
 

@@ -351,6 +351,7 @@ func TestNativeMaterializeDiagnosticsKeepOperandIdentity(t *testing.T) {
 // entry, eager bindings and functions persist and may be rebound, rejected
 // entries leave the session unchanged, and exit ends the session.
 func TestNativeInteractiveKashSession(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
 	directory := t.TempDir()
 	nativeCLIWrite(t, filepath.Join(directory, "lib.kash"), "let greeting = \"hello\"\n")
 	entries := strings.Join([]string{
@@ -387,6 +388,76 @@ func TestNativeInteractiveKashSession(t *testing.T) {
 	}
 }
 
+// Entry contracts: comments are accepted, += is rejected without effects, a
+// partial block at end of input runs, end of input reports the last entry's
+// status, and -i cannot also read source from stdin.
+func TestNativeInteractiveKashEntryContracts(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	directory := t.TempDir()
+	entries := "# a comment\nlet xs = [1]\nxs += [2]\necho (count xs)\nif true\n\techo partial\n\tfalse"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
+	if status != 1 || out.String() != "1\npartial\n" {
+		t.Fatalf("entry contracts: status=%d out=%q err=%q", status, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "error[PARSE_ERR]") || !strings.Contains(errOut.String(), "<kash:3>") || strings.Contains(errOut.String(), "FEATURE_UNSUP") {
+		t.Fatalf("entry diagnostics: %q", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLIIn(t, directory, []string{"do", "run", "-i", "-"}, strings.NewReader("echo x\n"), &out, &errOut); status != 2 || !strings.Contains(errOut.String(), "OPT_CONFLICT") {
+		t.Fatalf("stdin source conflict: status=%d err=%q", status, errOut.String())
+	}
+}
+
+// Explicit grants do not move with cd, unlike the default policy.
+func TestNativeInteractiveKashExplicitGrants(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	directory := t.TempDir()
+	sub := filepath.Join(directory, "sub")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, sub, []string{"do", "run", "-i", "--allow-write=" + sub, "--allow-run"}, strings.NewReader("cd ..\necho no > ./denied.txt\necho continued\n"), &out, &errOut)
+	if status != 0 || out.String() != "continued\n" || !strings.Contains(errOut.String(), "CAP_DENIED") {
+		t.Fatalf("explicit grants: status=%d out=%q err=%q", status, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(directory, "denied.txt")); err == nil {
+		t.Fatal("redirection escaped an explicit grant")
+	}
+}
+
+// The startup file runs as entries before the first one: definitions and
+// session commands apply, diagnostics locate file positions, and a failing
+// entry does not stop later ones. Empty KASH_INIT disables it; an unreadable
+// explicit file is reported and the session continues.
+func TestNativeInteractiveKashStartupFile(t *testing.T) {
+	directory := t.TempDir()
+	init := filepath.Join(directory, "init.kash")
+	nativeCLIWrite(t, init, "# startup\nlet who = \"init\"\n\nexport FROM_INIT=yes\n\ndef hello name\n\techo hello $name\n\nls ./missing-startup\necho after-failure\n")
+	run := func(value, entries string) (int, string, string) {
+		t.Helper()
+		t.Setenv("KASH_INIT", value)
+		var out, errOut bytes.Buffer
+		status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
+		return status, out.String(), errOut.String()
+	}
+	status, out, errOut := run(init, "echo $who\n(hello \"x\")\nprintenv FROM_INIT\nls ./missing-entry\n")
+	if status != 2 || out != "after-failure\ninit\nhello x\nyes\n" {
+		t.Fatalf("startup session: status=%d out=%q err=%q", status, out, errOut)
+	}
+	if !strings.Contains(errOut, init+":9:1") || !strings.Contains(errOut, "<kash:4>:1:1") {
+		t.Fatalf("startup diagnostics: %q", errOut)
+	}
+	if status, out, errOut = run("", "echo $who\n"); status == 0 || strings.Contains(out, "init") {
+		t.Fatalf("empty KASH_INIT loaded the startup file: status=%d out=%q err=%q", status, out, errOut)
+	}
+	if status, out, errOut = run(filepath.Join(directory, "missing.kash"), "echo ok\n"); status != 0 || out != "ok\n" || !strings.Contains(errOut, "HOST_FAIL") {
+		t.Fatalf("unreadable startup file: status=%d out=%q err=%q", status, out, errOut)
+	}
+}
+
 // Interactive cd and export change the session directory and child
 // environment for later entries; default grants follow the directory.
 func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
@@ -409,7 +480,7 @@ func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
 	}, "\n") + "\n"
 	var out, errOut bytes.Buffer
 	command := exec.Command(nativeCLIBinary(t), "do", "run", "-i")
-	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash")
+	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash", "KASH_INIT=")
 	command.Stdin, command.Stdout, command.Stderr = strings.NewReader(entries), &out, &errOut
 	err := command.Run()
 	status := 0

@@ -5,6 +5,31 @@ import (
 	"kame/lang/definition"
 )
 
+// InteractiveNames lists names visible at the session top level for
+// completion: callables are session functions and registered operations,
+// values are the other top-level bindings. Nothing is evaluated.
+func (p *Program) InteractiveNames() (callables []string, values []string) {
+	for _, entry := range p.Scope.bindingIndex {
+		if p.Scope.Bindings[entry.index].Kind == bindingFunction {
+			callables = append(callables, entry.name)
+		} else {
+			values = append(values, entry.name)
+		}
+	}
+	if p.Registry != nil {
+		for i := range p.Registry.Items {
+			callables = append(callables, p.Registry.Items[i].Name)
+		}
+	}
+	return callables, values
+}
+
+// HasFunction reports whether name is bound to a top-level session function.
+func (p *Program) HasFunction(name string) bool {
+	b := p.Scope.lookup(name)
+	return b != nil && b.Kind == bindingFunction
+}
+
 // RegisterInteractive adds definitions entered into a live interactive session.
 // Eager bindings and functions shadow earlier top-level bindings, as successive
 // REPL entries do. Lazy definitions are engine resources whose evaluated value

@@ -15,10 +15,12 @@ For current syntax, start with the [language overview](skills/kame/ref/language.
 ## Language and CLI references
 
 - [Language overview](skills/kame/ref/language.md)
+- [Kame expression reference](ref-kame-expr.md): the value language, compactly
 - [Expressions](skills/kame/ref/expressions.md) and [standard library](skills/kame/ref/library.md)
 - [Scripts and includes](skills/kame/ref/scripts.md)
 - [Build rules](skills/kame/ref/rules.md)
 - [Templates](skills/kame/ref/templates.md)
+- [Kash reference](ref-kash.md): the language and the interactive shell, compactly
 - [Kash processes](skills/kame/ref/kash.md)
 - [Kash operational cookbook](kash-cookbook.md): argv, status policy, finite retry, scoped environments and deferred cleanup
 - [CLI](skills/kame/ref/cli.md)

@@ -18,16 +18,21 @@ type replShell struct {
 	previous     string
 }
 
-func (s *replShell) prompt() string {
+// prompt is the default prompt.
+func (s *replShell) prompt() string { return "kash " + s.directoryName() + "> " }
+
+// directoryName displays the session directory: ~ for home, / for the root,
+// otherwise its base name.
+func (s *replShell) directoryName() string {
 	directory := s.Program.Options.Directory
 	home, _ := s.lookup("HOME")
 	switch {
 	case home != "" && directory == home:
-		directory = "~"
+		return "~"
 	case directory != "/":
-		directory = filepath.Base(directory)
+		return filepath.Base(directory)
 	}
-	return "kash " + directory + "> "
+	return directory
 }
 
 // run executes cd, export, or unset. It reports false for other entries,
