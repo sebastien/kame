@@ -139,20 +139,6 @@ func TestReplEntryComplete(t *testing.T) {
 	}
 }
 
-func TestReplHistoryFormat(t *testing.T) {
-	entries := []string{"echo one", "def f\n\techo two", "printf 'a\\nb'"}
-	var data strings.Builder
-	for _, entry := range entries {
-		data.WriteString(formatReplHistory(entry))
-	}
-	if got := parseReplHistory(data.String()); !slices.Equal(got, entries) {
-		t.Errorf("history round trip = %q", got)
-	}
-	if got := parseReplHistory("ls\n\nls -l\n"); !slices.Equal(got, []string{"ls", "ls -l"}) {
-		t.Errorf("plain history = %q", got)
-	}
-}
-
 func TestReplHighlight(t *testing.T) {
 	ctx := completionFixture(t)
 	e := &editorReader{context: func() completionContext { return ctx }}

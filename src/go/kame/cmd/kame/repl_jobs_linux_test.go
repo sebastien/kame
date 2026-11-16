@@ -303,3 +303,80 @@ func TestNativeInteractiveKashJobCommandsAndPrompt(t *testing.T) {
 	s.waitFor("J0> ")
 	s.finish()
 }
+
+// A one-line `cmd &` graph attaches the terminal in the background: reading
+// it stops the job, and fg gives it the terminal. fg of a running & job waits
+// for it to finish before the next entry runs.
+func TestNativeInteractiveKashAsyncGraphTerminal(t *testing.T) {
+	s := startTerminalSession(t, nativeCLIBinary(t), t.TempDir(), nil, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("sh -c 'read line; echo read-$line' &\r")
+	time.Sleep(500 * time.Millisecond)
+	s.send("sh -c 'true'\r")
+	s.waitFor("stopped (tty input)")
+	s.send("fg\r")
+	time.Sleep(300 * time.Millisecond)
+	s.send("typed\r")
+	s.waitFor("read-typed")
+	s.send("sh -c 'sleep 0.4; echo slept-$((40+2))' &\r")
+	s.send("fg\r")
+	s.send("sh -c 'echo after-$((40+2))'\r")
+	s.waitFor("after-42")
+	if text := s.text(); !strings.Contains(text, "slept-42") || strings.Index(text, "slept-42") > strings.Index(text, "after-42") {
+		t.Fatalf("fg returned before its & graph finished: %q", text)
+	}
+	if status := s.finish(); status != 0 {
+		t.Fatalf("session status %d: %q", status, s.text())
+	}
+}
+
+// wait observes a job's status; %+ and %- select the current and previous
+// jobs, which jobs marks; a job cancelled by kill is listed as killed.
+func TestNativeInteractiveKashWaitAndJobSelectors(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
+	s.waitFor("S0J0> ")
+	s.send("sh -c 'sleep 0.5; exit 3' &\r")
+	s.waitFor("S0J1> ")
+	s.send("sh -c 'echo $$ > pid; sleep 30'\r")
+	pid := readPID(t, directory+"/pid")
+	s.send("\x1a")
+	s.waitFor("[2]+ stopped")
+	s.send("jobs\r")
+	s.waitFor("[1]- running  sh -c 'sleep")
+	s.waitFor("[2]+ stopped  sh -c 'echo")
+	s.send("wait %-\r")
+	s.waitFor("S3J1> ")
+	s.send("kill %-\r")
+	s.waitFor("kill: no previous job")
+	s.send("kill %+\r")
+	waitProcessState(t, pid, "")
+	s.send("jobs\r")
+	s.waitFor("[2]  killed  sh -c 'echo")
+	s.send("wait\r")
+	// Match this entry's prompt, not the identical one from session startup.
+	s.waitFor("wait\r\r\nS0J0> ")
+	if strings.Contains(s.text(), "[1]  exit 3") {
+		t.Fatalf("a waited job was reported again: %q", s.text())
+	}
+	s.finish()
+}
+
+// A session ending on --timeout cancels its background jobs instead of
+// joining them.
+func TestNativeInteractiveKashTimeoutCancelsJobs(t *testing.T) {
+	directory := t.TempDir()
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, nil, "do", "run", "-i", "--timeout", "1500")
+	s.waitFor("kash ")
+	s.send("sh -c 'echo $$ > pid; sleep 30' &\r")
+	pid := readPID(t, directory+"/pid")
+	s.send("sleep 30\r")
+	select {
+	case <-s.done:
+	case <-time.After(10 * time.Second):
+		s.command.Process.Kill()
+		t.Fatalf("timed-out session joined its background job: %q", s.text())
+	}
+	waitProcessState(t, pid, "")
+}

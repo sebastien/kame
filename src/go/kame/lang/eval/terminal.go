@@ -33,6 +33,7 @@ const (
 	terminalAutoKey       = "foregroundAuto"
 	terminalAttachKey     = "terminalAttach"
 	terminalForegroundKey = "terminalForeground"
+	terminalBackgroundKey = "terminalBackground"
 )
 
 func setupBoolean(value core.Value) (bool, bool) {
@@ -144,5 +145,8 @@ func (p *Program) terminalPayload(state *captureState, payload *core.Value, elig
 		core.RecordField{Key: owned(c.Run, terminalKey), Value: core.Value{Kind: core.Bool, Bool: true}},
 		core.RecordField{Key: owned(c.Run, terminalRequiredKey), Value: core.Value{Kind: core.Bool, Bool: !session}},
 		core.RecordField{Key: owned(c.Run, terminalAutoKey), Value: core.Value{Kind: core.Bool, Bool: foregroundAuto && foreground < 0}})
+	if c.TerminalBackground {
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, terminalBackgroundKey), Value: core.Value{Kind: core.Bool, Bool: true}})
+	}
 	return Result{}
 }

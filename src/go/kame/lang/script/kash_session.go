@@ -38,11 +38,20 @@ func (p *kashParser) sessionCommand(start, wordEnd int) ScriptItem {
 	} else if word == "alias" && len(words) > 2 || word == "unalias" && len(words) < 2 {
 		s.error(start, pos, "alias expects at most one name; unalias expects one or more names")
 	}
+	if word == "option" {
+		args := words[1:]
+		if len(args) != 0 && (args[0] == "-l" || args[0] == "--local" || args[0] == "-g" || args[0] == "--global") {
+			args = args[1:]
+		}
+		if len(args) > 2 || len(args) != 0 && strings.HasPrefix(args[0], "-") || strings.ContainsAny(item.Text, "|&<>") {
+			s.error(start, pos, "expected option [-l|--local|-g|--global] [NAME [VALUE]]")
+		}
+	}
 	for pos < len(text) && space(text[pos]) {
 		pos++
 	}
 	if pos < len(text) && text[pos] != '\n' && text[pos] != '#' {
-		s.error(pos, pos+1, "alias and unalias require a whole session entry")
+		s.error(pos, pos+1, "session commands require a whole session entry")
 	}
 	p.Pos, item.Span.End = pos, pos
 	return item

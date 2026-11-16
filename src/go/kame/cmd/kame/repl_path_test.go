@@ -114,7 +114,7 @@ func TestSessionPathCompletionAndHighlighting(t *testing.T) {
 			name = "relative-tool"
 		}
 		_, candidates := completionsAt(name, len(name), ctx)
-		if len(candidates) != 1 || candidates[0].Display != name {
+		if len(candidates) != 1 || candidates[0].Text != name || candidates[0].Display != name+"*" {
 			t.Errorf("PATH=%q completion: %+v", path, candidates)
 		}
 		editor := editorReader{context: func() completionContext { return ctx }}

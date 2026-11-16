@@ -882,6 +882,15 @@ and [output-port/list spec](../../../spec/047-kash-output-ports-and-command-list
 
 ## Interactive sessions
 
+`option [-l|--local|-g|--global] [NAME [VALUE]]` inspects or changes shell
+settings. Local (default) is this running shell; global saves user defaults in
+`$XDG_CONFIG_HOME/kash/options` (fallback `~/.config/kash/options`), one
+`name: value` per line. Local overrides beat global defaults, then environment
+and built-in defaults. Initial options are `history-scope` (`local|global`),
+`history-max-age-days`, and `history-max-bytes`. `option` lists effective
+settings with their source and bounds; `option -g` lists saved overrides.
+Lowering history limits can prune saved entries at the next refresh/write.
+
 ```sh
 kash                              # REPL when stdin is a terminal
 kash -i ./lib.kash                # preload, then read entries
@@ -896,16 +905,23 @@ redefined, and a failure ends only its entry. Whole-line `cd`, `export`, and
 commands receive the terminal; Ctrl-C reaches only them. A second interrupt
 while an interrupted entry settles kills its processes and ends the session
 with 130, skipping cleanup. On a terminal, entries are jobs: Ctrl-Z stops one
-anywhere, `jobs`, `fg [%N]`, `bg [%N]` and `kill [-SIG] %N` manage them, and a
-final `&` line starts an entry in the background. Use `let x = $(...)` to run a capture now;
+anywhere, `jobs`, `fg [%N]`, `bg [%N]`, `kill [-SIG] %N` and `wait [%N]`
+manage them (`%+`/`%%` current, `%-` previous), and a one-line `cmd &` or a
+final `&` line starts one in the background; a background read of the
+terminal stops it until `fg`. On a terminal, a command's unsuccessful exit
+is not reported beyond its own output and status; `explain` shows the latest
+failure's full diagnostic. Use `let x = $(...)` to run a capture now;
 `x = $(...)` is lazy and runs only when `x` is used.
 
-The startup file `$KASH_INIT` (default `~/.config/kash/init.kash`; empty
-disables) runs as entries before the first prompt. A `kash-prompt` function
-receives `[status: dir: name: jobs:]` and returns the prompt string:
+The startup file `$KASH_INIT` (default `$XDG_CONFIG_HOME/kash/init.kash` or
+`~/.config/kash/init.kash`; empty disables) runs as entries before the first
+prompt. A `kash-prompt` function receives `[status: dir: name: jobs:]` and
+returns the prompt string; `kash-rprompt` receives the same record and returns
+a right prompt, drawn at the right edge of the entry's last line:
 
 ```kash
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
 ```
 
 Login invocation (`-kash` as argv[0], or standalone `kash -l`/`--login`) loads
@@ -945,6 +961,18 @@ The editor follows Readline conventions (emacs or vi, `~/.inputrc` with
 `$if kash`) and edits a whole multi-line entry; Tab indents at line start.
 Tab elsewhere opens a grouped, described completion menu: `$` bindings,
 functions after `(`, commands at command position, and paths elsewhere.
+The menu has a terminal-width separator and display-only file-type marks:
+directory `/`, executable `*`, symlink `@`, FIFO `|`, socket `=`, device `#`.
+Type colours are disabled by `NO_COLOR` or `TERM=dumb`; only a directory's
+usual trailing slash is included in inserted paths, not the extra type marks.
 Entries are syntax-highlighted, with unknown commands in red; `NO_COLOR`
-disables it. History persists in `$KASH_HISTORY`. Normative details:
-[interactive Kash](../../../spec/052-kash-interactive.md).
+disables it. History defaults to repository/CWD-local recall, 15-day retention,
+and 1 MiB per scope. Ctrl-X h toggles local/global recall; `history scope
+[local|global]` reports/selects the view, and `history clear local|global`
+deletes entries. Likely secrets and space/tab-prefixed commands are not recorded;
+detection is best-effort. `KASH_HISTORY_MAX_AGE_DAYS`, `KASH_HISTORY_MAX_BYTES`,
+and `KASH_HISTORY_SCOPE` configure defaults. Persistence uses `$KASH_HISTORY`
+or the XDG state path; explicitly empty `KASH_HISTORY` disables all history.
+Legacy history is discarded without backups. Normative details:
+[interactive Kash](../../../spec/052-kash-interactive.md) and
+[history](../../../spec/053-kash-history.md).

@@ -1,0 +1,51 @@
+---
+identity: agent-kame:learnings
+agent_nodes:
+  run-native-cli-tests:
+    role: guidance
+    core: true
+    topic: testing
+  pty-redraw-assertions:
+    role: guidance
+    core: true
+    topic: testing
+created: 2026-11-16T01:50:04.405444+00:00
+updated: 2026-11-16T04:17:11.559315+00:00
+---
+{
+  "version": 1,
+  "memory": {
+    "root": "root",
+    "nodes": {
+      "pty-redraw-assertions": {
+        "title": "Assert fresh PTY redraws",
+        "text": "When a PTY test asserts the editor's current layout after multiple keys, inspect only a completed redraw beginning at the fresh clear-screen marker (\\x1b[H\\x1b[2J), not all output accumulated since the keys were sent; intermediate redraws can represent transient input states and cause false failures.",
+        "children": [],
+        "sources": [
+          "identity==\"kame:observations\" item=k-be77b5ad32ddaa18f66c52173eacb77d571c035445219c8962777d2ef66517e1"
+        ],
+        "review": false
+      },
+      "root": {
+        "title": "",
+        "text": "",
+        "children": [
+          "run-native-cli-tests",
+          "pty-redraw-assertions"
+        ],
+        "sources": [],
+        "review": true
+      },
+      "run-native-cli-tests": {
+        "title": "Run native CLI tests explicitly",
+        "text": "When verifying changes to the native CLI or interactive Kash tests, build the CLI and set KAME_NATIVE_CLI_TEST_BINARY to its absolute path before running the package tests; otherwise those tests silently skip and a passing plain `go test` is incomplete.",
+        "children": [],
+        "sources": [
+          "identity==\"kame:observations\" item=99608bfc-677e-4332-bb77-d8cf859aabac",
+          "identity==\"kame:observations\" item=k-85274f569b38b5beecf2ac6c2fb3465238a7bae006fc3a5cff9367bbf6409aa7"
+        ],
+        "review": false
+      }
+    }
+  }
+}

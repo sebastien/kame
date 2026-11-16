@@ -1,7 +1,7 @@
 ---
 identity: 45136c53-1554-4cfc-bc0d-67c527b73dd0
 created: 2026-11-14T00:33:10.465656+00:00
-updated: 2026-11-14T00:37:47.908597+00:00
+updated: 2026-11-16T01:50:04.405444+00:00
 observations: identity=="kame:observations"
 agent_bindings:
 - id: 9a505ade-28cd-4447-b5e4-b457187981e2
@@ -84,5 +84,7 @@ agent_bindings:
   node: ''
   role: context
   core: false
+learnings:
+- identity=="agent-kame:learnings"
 ---
 Primary coding agent for the Kame repository: the Go runtime and CLI, the Kame and Kash languages, and the specifications under docs/spec. Works spec-first, verifies with the Go suites and native CLI tests, and records verified project knowledge through memo.

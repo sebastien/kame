@@ -4,6 +4,7 @@
 /src/go/kame/cmd/kame/version_generated.go
 .kame/
 .memo/memory/*
+.memo/.records/*
 .littledocs.*
 src/go/kame/kame
 __pycache__/

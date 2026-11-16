@@ -205,6 +205,17 @@ config = (joinpath (source-dir) "defaults.json")
 
 ## Interactive shell
 
+Shell settings use `option [--local|--global] [NAME [VALUE]]` (`-l`/`-g`).
+Local is the running shell and is the default; global saves user defaults in
+`$XDG_CONFIG_HOME/kash/options` (fallback `~/.config/kash/options`), a simple
+`name: value` file. `option` lists effective settings and their sources;
+`option -g` lists saved overrides. Initial settings are `history-scope`
+(`local|global`), `history-max-age-days`, and `history-max-bytes`.
+Local overrides beat global overrides, then environment and built-in defaults.
+For example, `option -g history-max-age-days 15` saves retention globally.
+Lowering retention or size limits can prune saved history on the next refresh.
+See [shell options](spec/054-kash-options.md).
+
 ```text
 kash                                  # REPL when stdin is a terminal
 kash -i [FILE.kash…] [-- ARG…]        # preload sources, then interactive
@@ -311,8 +322,9 @@ any statements; formatting a startup file does not execute it.
 ### Terminal, interrupts and exit
 
 - Foreground statements get the terminal on every stream they would otherwise
-  share with the session. Captures, `&` graphs, defers and record loops keep
-  pipes; `:tty :false` opts a stage out.
+  share with the session. Eligible `&` graphs attach without taking the
+  foreground. Captures, defers and record loops keep pipes; `:tty :false` opts
+  a stage out.
 - Ctrl-C reaches the running command only; the entry ends with status 130 and
   the session continues. Ctrl-C at the prompt clears the pending input. A
   second Ctrl-C while an interrupted entry settles kills its processes and
@@ -321,10 +333,30 @@ any statements; formatting a startup file does not execute it.
   and cleanup runs. The exit status is the last entry's status or `N`.
 - SIGHUP and SIGTERM cancel/reap owned jobs and run cleanup, including when
   waiting at the prompt; exit status is `128 + signal`.
-- History keeps 1000 entries in `$KASH_HISTORY`, else
-  `$XDG_STATE_HOME/kash/history`, else `~/.local/state/kash/history`;
-  multi-line entries are stored with backslash-continued lines.
-- Not provided: programmable completion, right or multi-line prompts.
+- History recalls up to 1000 entries in the current repository scope (nearest
+  `.git`/`.jj` root), or CWD outside repositories. Ctrl-X h toggles local/global
+  recall without changing input; `history scope [local|global]` reports or
+  selects the view. `history clear local|global` deletes retained entries.
+- History defaults to 15 days and 1 MiB **per scope**, controlled by
+  `KASH_HISTORY_MAX_AGE_DAYS` and `KASH_HISTORY_MAX_BYTES`.
+  `KASH_HISTORY_SCOPE=global` selects global recall initially.
+- Persistence uses `$KASH_HISTORY`, else `$XDG_STATE_HOME/kash/history`, else
+  `~/.local/state/kash/history`. An explicitly empty `KASH_HISTORY` disables
+  recording and recall. Legacy untimestamped history is discarded without a
+  backup. Storage files are private; an explicit store needs a private parent
+  directory. Expired entries are removed on the next maintenance operation,
+  not by a background service.
+- Likely secrets and space/tab-prefixed entries are excluded from history.
+  Detection recognizes common token formats, private keys, password URLs,
+  authorization headers, and sensitive literal assignments/options; it is
+  best-effort, not a security guarantee. Use leading whitespace or disable
+  history for sensitive commands. Deletion cannot erase external backups or
+  terminal scrollback. See [history](spec/053-kash-history.md).
+- On a terminal, a command that exits non-zero or dies of a signal is not
+  reported further: its own output and the status say what happened. `explain`
+  shows the latest failure in full (source excerpt, cause, frames). Kash's own
+  errors are always reported.
+- Not provided: programmable completion or multi-line prompts.
 
 ### Jobs
 
@@ -334,14 +366,17 @@ an `if` test, plain evaluation) and `fg` resumes it exactly there.
 
 | Entry | Effect |
 | --- | --- |
-| `jobs` | List `[N]+ STATE  TEXT` (`running`, `stopped`, `done`, `exit S`, `signal NAME`). |
-| `fg [%N]` | Resume in the foreground with the job's terminal modes. |
+| `jobs` | List `[N]+ STATE  TEXT` (`running`, `stopped`, `done`, `exit S`, `signal NAME`, `killed`); `+` marks the current job, `-` the previous one. |
+| `fg [%N]` | Resume in the foreground with the job's terminal modes; waits for its `&` commands too. |
 | `bg [%N]` | Resume a stopped job in the background. |
 | `kill [-SIG] %N…` | Cancel the job, or send `SIG` to its processes; `kill PID` stays external. |
+| `wait [%N…]` | Wait for the jobs to finish or stop (all running jobs without operands); status of the last one. |
 
-Background jobs run while you type; reading the terminal stops them
-(`stopped (tty input)`). Stops and completions are reported before the next
-prompt. The first Ctrl-D or `exit` with stopped jobs lists them; the second
+`%N` names job `N`, `%+` or `%%` the current job, `%-` the previous one.
+Background jobs run while you type; a one-line `cmd &` starts one, and
+reading the terminal stops it (`stopped (tty input)`) until `fg` hands it the
+terminal, as in `vim notes.txt &` then `fg`. Stops and completions are
+reported before the next prompt. The first Ctrl-D or `exit` with stopped jobs lists them; the second
 ends the session and terminates them.
 
 ### Startup file and prompt
@@ -368,11 +403,17 @@ strings are Kash, not POSIX shell source.
 
 `$KASH_INIT`, else `$XDG_CONFIG_HOME/kash/init.kash`, else
 `~/.config/kash/init.kash`, runs as entries before the first prompt (empty
-`KASH_INIT` disables it). A `kash-prompt` function receives
-`[status: dir: name: jobs:]` and returns the prompt string:
+`KASH_INIT` disables it). A missing default file is skipped; the directory is
+`$XDG_CONFIG_HOME` when nonempty, otherwise `$HOME/.config`, and an
+unresolvable `$HOME` leaves no default path. Only this file and the profile are
+read; other files in the directory are not. A `kash-prompt` function receives
+`[status: dir: name: jobs:]` and returns the prompt string; `kash-rprompt`
+receives the same record and returns a right prompt, drawn at the right edge
+of the entry's last line:
 
 ```kash
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
 ```
 
 ### Editing, completion and highlighting
@@ -384,6 +425,10 @@ strings are Kash, not POSIX shell source.
 - Elsewhere Tab completes into a grouped, described menu: `$` bindings,
   functions after `(`, aliases, session commands, keywords and `PATH` executables at
   command position, directories after `cd`, and paths otherwise.
+- A separator sets the menu apart from input. Directory `/`, executable `*`,
+  symlink `@`, FIFO `|`, socket `=`, and device `#` marks are display-only.
+  Directories are blue, executables green, symlinks cyan, and special files
+  yellow; `NO_COLOR` or `TERM=dumb` disables type colours.
 - Entries are highlighted by lexical class, and literal command words that
   resolve to nothing are marked as unknown. `NO_COLOR` or `TERM=dumb`
   disables highlighting.

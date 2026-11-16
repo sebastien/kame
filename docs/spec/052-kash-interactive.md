@@ -104,8 +104,10 @@ host primitive. Stage `:tty :false` keeps a stage on pipes, and stage
 `:tty`/`:foreground` need no metadata here.
 
 - Eligible graphs are statement and test graphs whose input is not closed:
-  captures, background (`&`) graphs, deferred cleanup, record-fed graphs, and
-  record-loop bodies keep their ordinary pipes.
+  captures, deferred cleanup, record-fed graphs, and record-loop bodies keep
+  their ordinary pipes. A Kash `&` graph that would otherwise be eligible is
+  a background graph: it attaches the terminal without taking its
+  foreground (see Background jobs).
 - Each standard stream a stage would otherwise give to the session (closed
   stdin, session stdout, session stderr) attaches to the controlling terminal.
   Redirections, pipes between stages, and channels are unchanged.
@@ -165,10 +167,13 @@ for f in *.log
 &
 ```
 
-Kash `&` inside an entry keeps its meaning: that graph runs asynchronously.
-An entry whose evaluation finishes while such graphs still run becomes a
-running background job, the prompt returns, and the job finishes when its
-last graph does. A one-line entry `cmd &` is therefore a background job.
+Kash `&` inside an entry keeps its meaning: that graph runs asynchronously,
+as a background graph of the entry's job. An entry whose evaluation finishes
+while such graphs still run becomes a running background job, the prompt
+returns, and the job finishes when its last graph does. A one-line entry
+`cmd &` is therefore a background job, and `fg` gives `cmd` the terminal as
+it would after Ctrl-Z. An evaluated job's status is that of its last failed
+`&` graph, by the ordinary statement rules, otherwise its evaluation's.
 
 ### Background jobs
 
@@ -176,14 +181,16 @@ A background job keeps running while later entries run and while the prompt
 is shown; the session keeps servicing it between keystrokes.
 
 - Its graphs never take the terminal foreground. A graph eligible for
-  handoff still attaches its standard streams to the terminal, so a read
-  stops it with `SIGTTIN`, which stops the job and is reported; writes are
-  allowed. Mode changes stop it with `SIGTTOU`.
+  handoff, and a background `&` graph, still attaches its standard streams to
+  the terminal, so a read stops it with `SIGTTIN`, which stops the job and is
+  reported; writes are allowed. Mode changes stop it with `SIGTTOU`. When
+  `fg` resumes a job whose several graphs hold the terminal, the first to
+  reclaim it takes the foreground and the others continue in the background.
 - Output and value displays the session itself writes for a background job
   while an entry is being edited are printed above the edited entry, which
   is then redrawn.
 - When a background job stops or finishes, the session reports
-  `[N]  STATE  TEXT` (`[N]+` for the current job) before the next
+  `[N]M STATE  TEXT` (as `jobs` lists it) before the next
   first-line prompt. A finished job's
   status is observed by that report: it never becomes the last status and
   never fails the invocation join.
@@ -193,19 +200,22 @@ is shown; the session keeps servicing it between keystrokes.
 ### Job commands
 
 Jobs are numbered from 1 in the order they become jobs; a number is reused
-only after every job is gone. The **current** job (`+`) is the most recently
-stopped job, otherwise the most recently started one. Four whole single-line
-entries are session commands, with the operand syntax of the session
-commands below. `%N` selects job `N`; no operand selects the current job.
+only after every job is gone. Live jobs are ranked: stopped jobs from the
+most recently stopped, then running jobs from the most recently started. The
+first is the **current** job (`+`), the second the **previous** job (`-`).
+Five whole single-line entries are session commands, with the operand syntax
+of the session commands below. `%N` selects job `N`, `%+` or `%%` the
+current job, and `%-` the previous job; no operand selects the current job.
 
 | Entry | Effect |
 | --- | --- |
-| `jobs` | Lists jobs, oldest first, as `[N]+ STATE  TEXT`. `STATE` is `running`, `stopped`, `stopped (tty input)`, `stopped (tty output)`, `done`, `exit S`, or `signal NAME`; `TEXT` is the entry's first line, followed by `...` when it has more. Listing a finished job forgets it. Status 0. |
-| `fg [%N]` | Writes the job's text, then makes it the foreground job: restores its saved terminal modes, gives the terminal foreground to its graph that held it, resumes it, and waits as for a typed entry. The status is the entry's status, or 128 plus `SIGTSTP` if it stops again. |
+| `jobs` | Lists jobs, oldest first, as `[N]M STATE  TEXT`, where `M` is `+`, `-`, or a blank. `STATE` is `running`, `stopped`, `stopped (tty input)`, `stopped (tty output)`, `done`, `exit S`, `signal NAME`, or `killed` for a job ended by `kill %N` or by the session; `TEXT` is the entry's first line, followed by `...` when it has more. Listing a finished job forgets it. Status 0. |
+| `fg [%N]` | Writes the job's text, then makes it the foreground job: restores its saved terminal modes, gives the terminal foreground to its graph that held it, resumes it, and waits until it finishes, including its `&` graphs. The status is the job's status, or 128 plus `SIGTSTP` if it stops again. |
 | `bg [%N]` | Resumes a stopped job in the background. Status 0. |
 | `kill [-SIGNAL] %N...` | Without `-SIGNAL`, cancels each job as an interrupt cancels the foreground entry, reaping its processes; the job finishes with status 130. With `-SIGNAL` (a name such as `-HUP`, with or without `SIG`, or a number), delivers that signal to every process group the job currently owns, continuing a stopped job for a non-stop signal; the job's Kash evaluation then sees each graph's outcome by the ordinary rules. `-STOP` stops the job and `-CONT` is `bg`. Status 0 when every job was signalled. |
+| `wait [%N...]` | Waits until each job has finished or stopped; without operands, until no job runs. The status is the last operand's: its status when finished, 128 plus its stopping signal when stopped; 0 without operands. A finished job's status is observed by `wait`: it is forgotten and not reported. An interrupt or Ctrl-Z ends the wait with 128 plus that signal and leaves the jobs as they are. |
 
-`kill` is a session command only when at least one operand is a `%N` job;
+`kill` is a session command only when at least one operand is a `%` job;
 otherwise the entry is ordinary Kash and runs the external `kill`. An
 unknown job, no job, `bg` of a running job, a malformed operand, or an
 unknown signal fails with status 1 and a message, without other effect.
@@ -272,15 +282,36 @@ scripts and recipes retain startup-PATH resolution.
   including while waiting at the prompt: cancel/reap owned work and finalize
   before returning `128 + signal`.
 
+## Failure reports
+
+A failed entry reports its diagnostic, except on a terminal when the failure
+is only that a process exited unsuccessfully or died of a signal
+(`RECIPE_FAIL` with a process cause). The program has printed its own error,
+so, like other shells, the session reports nothing and keeps the status. Kash
+errors such as parse, name, and type errors are still reported in full.
+
+`explain` renders the latest reported or withheld diagnostic of the session in
+full: its source excerpt, cause, and frames. It keeps the latest one until a
+later failure replaces it, so successful entries in between do not clear it.
+Status 0, or 1 with `explain: no failure to explain` before any failure.
+`explain` takes no operand.
+
+## Shell options
+
+`option [-l|--local|-g|--global] [NAME [VALUE]]` inspects or changes shell
+settings under [054 Kash options](054-kash-options.md). Local (the default)
+means this running shell; global saves user defaults in the XDG configuration
+directory. Initial settings cover history recall scope, retention, and byte
+budget. Settings and enumerated values are completed; invalid changes leave
+the options unchanged.
+
 ## History
 
-Terminal sessions keep up to 1000 recent entries; a consecutive repeat is
-kept once. They append to `$KASH_HISTORY`, otherwise
-`$XDG_STATE_HOME/kash/history`, otherwise `~/.local/state/kash/history`. The
-file holds one entry per line; each line of a multi-line entry except the last
-ends with a backslash, which no Kash line can. A history file that cannot be
-opened disables persistence, not the session. Startup-file entries and prompt
-calls are not recorded.
+Terminal sessions provide scoped, secret-filtered history under
+[053 Kash history](053-kash-history.md). That contract defines configuration,
+local/global recall, 15-day default retention, a default 1 MiB budget per
+repository/CWD scope, safe concurrent persistence, and legacy-history disposal.
+Startup-file entries and prompt calls are not recorded.
 
 ## Startup file
 
@@ -319,6 +350,11 @@ otherwise `~/.config/kash/init.kash`, read from the invocation environment.
   of the file still run. `exit` ends the session.
 - Diagnostics name the file path and locate positions in the file, not in the
   entry. Startup entries do not consume `<kash:N>` numbers.
+
+Both default paths use `$XDG_CONFIG_HOME` when it is set to a nonempty value,
+including a relative one, and `$HOME/.config` otherwise. If `$HOME` cannot be
+resolved either, no default path exists and no file is loaded. Only these two
+files are read; nothing else in their directory is loaded.
 
 ## Command aliases
 
@@ -398,6 +434,16 @@ sessions without a terminal never call it.
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
 ```
 
+A function named `kash-rprompt` is called the same way, after `kash-prompt`,
+with the same record. Its string result is the right prompt: drawn flush
+with the right edge of the terminal on the entry's last line, and omitted
+while that line leaves no room for it. Any other result, or a failure,
+reported as a diagnostic named `<kash-rprompt>`, shows no right prompt.
+
+```kash
+(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
+```
+
 ## Line editing
 
 The terminal editor follows GNU Readline conventions: emacs bindings by
@@ -407,6 +453,11 @@ editing across the lines of an entry. It reads the user's inputrc
 application name `kash`, so `$if kash` sections apply. Tab is bound to
 completion as specified below, except that Tab with only blanks before the
 cursor on its line inserts a tab, as indented block bodies need.
+
+Before each prompt the editor turns off terminal input reports it does not
+read: mouse tracking, focus events, and kitty keyboard flags. A full-screen
+program that exits without restoring them, for example after a crash, leaves
+no mouse or focus reports echoed or inserted into the line.
 
 ## Completion
 
@@ -439,6 +490,16 @@ matching. Directories are inserted with a trailing `/` and no space.
   and the arrow keys select a candidate, which is inserted as typed.
 - No candidate leaves the entry unchanged.
 
+A horizontal separator above the completion groups follows terminal width and
+disappears when the menu closes. It is dim on color terminals and uses ASCII
+on `TERM=dumb`. The menu marks directories with `/` (blue), executables with
+`*` (green), and symlinks with `@` (cyan, with a further `/` for directory
+targets). FIFOs use `|`, sockets `=`, and devices `#`, with yellow styling
+and a type description. Regular files keep their plain names. These marks and
+styles are display-only: inserted text stays unchanged. `NO_COLOR` and
+`TERM=dumb` disable type colors, not the marks. Selection uses reverse video
+by default; an explicit inputrc selection style is preserved.
+
 Completion only reads session state; it evaluates no definitions and runs no
 commands.
 
@@ -459,11 +520,12 @@ highlighting.
 
 ## Non-goals
 
-- `disown`, `wait`, and job specifications other than `%N`. Without a
-  terminal, only the `&` line applies; there is no stopping and no job
-  command.
-- Programmable completion, completion of command options, and right or
-  multi-line prompts.
+- `disown`, `$!`, and job specifications other than `%N`, `%+`, `%%`, and
+  `%-`. Job commands inside other statements. Without a terminal, only the
+  `&` line applies; there is no stopping and no job command, and `&` graphs
+  keep their pipes.
+- Programmable completion, completion of command options, and multi-line
+  prompts.
 - Semantic highlighting beyond command words, such as validating references
   or expressions.
 - Expressions as session-command operands, and Kash `export`/`unset`
@@ -480,9 +542,9 @@ highlighting.
 | Termination | `exit` status, end-of-input status, an interrupt received by the session during an entry reaps it, reports 130 without output, and continues the session; a second interrupt while settling ends the session with 130 and kills its processes; interrupt at the prompt clears the line. |
 | Terminal | Under a pseudo-terminal: foreground commands see a terminal on every stream and own the foreground group; captures keep pipes; Ctrl-C ends only the command without a diagnostic; typed-ahead entries run; the session regains the terminal with unchanged modes. |
 | Session state | `cd` with relative, `-`, and home forms; redirections after `cd` honor moved default grants and explicit grants deny them; `export` expansion and single-quote literals; `unset`; malformed operands. |
-| History | Submitted entries are appended to `$KASH_HISTORY` and recalled by a later session; multi-line entries round-trip through the file format. |
+| History | Eligible entries persist and round-trip across sessions under the scope, secret filtering, retention, concurrency, and migration requirements of `053-kash-history.md`. |
 | Startup file | Definitions and session commands apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
-| Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
-| Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default. |
+| Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; a `cmd &` graph reading the terminal stops its job, `fg` gives it the terminal, and `fg` of a running `&` job waits for it to finish; `wait %N` returns the job's `&` graph status and forgets it, and `wait` without operands returns 0; `jobs` marks the current and previous jobs, `%+` and `%-` select them, and a cancelled job is listed as `killed`; a session ending on `--timeout` cancels its background jobs; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
+| Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default; a `kash-rprompt` string is drawn as the right prompt and sees the last status, and a failing one is reported. ANSI colours and wide Unicode use display columns; the right prompt hides before overlapping input, returns after deletion, and follows resizing; wrapped cursor editing and completion preserve submitted argv. |
 | Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with session commands, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
 | Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, and session commands; under a pseudo-terminal, an unknown command is marked. |

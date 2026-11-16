@@ -118,12 +118,17 @@ func (p *Program) capture(e *expr.Expr, c *Context) Result {
 	}
 	previousStart, previousEnd := c.operationStart, c.operationEnd
 	c.operationStart, c.operationEnd = e.Span.Start, e.Span.End
-	previousInput := c.InputClosed
+	previousInput, previousBackground := c.InputClosed, c.TerminalBackground
+	if e.Async {
+		c.TerminalBackground = p.Terminal && !previousInput && !c.RecordBody
+	} else if e.Kind == expr.CommandCapture || e.TypedCapture {
+		c.TerminalBackground = false
+	}
 	if e.Kind == expr.CommandCapture || e.TypedCapture || e.Async {
 		c.InputClosed = true
 	}
 	r := p.captureRequest(e, c)
-	c.InputClosed = previousInput
+	c.InputClosed, c.TerminalBackground = previousInput, previousBackground
 	c.operationStart, c.operationEnd = previousStart, previousEnd
 	return r
 }
@@ -879,8 +884,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	// Capture, background, cleanup and record-fed graphs keep their pipes; the
-	// same boundaries that close invocation input exclude the terminal.
-	eligible := !c.InputClosed && !c.RecordBody && !state.Async && !e.Async && len(e.Body) == 0 && (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult)
+	// same boundaries that close invocation input exclude the terminal. An
+	// interactive session's & graph runs (Async cleared) as a background graph.
+	eligible := (!c.InputClosed || c.TerminalBackground) && !c.RecordBody && !state.Async && !e.Async && len(e.Body) == 0 && (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult)
 	if r := p.terminalPayload(state, &payload, eligible, e.Span, c); r.Diagnostic.Code != "" {
 		payload.Free(c.Run)
 		return r

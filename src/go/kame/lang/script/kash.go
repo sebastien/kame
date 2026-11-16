@@ -81,9 +81,9 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
-		if (word == "alias" || word == "unalias") && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+		if (word == "alias" || word == "unalias" || word == "option") && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
 			if level != 0 || !leading {
-				s.error(start, wordEnd, "alias and unalias require a whole top-level session entry")
+				s.error(start, wordEnd, "session commands require a whole top-level session entry")
 				break
 			}
 			items = append(items, p.sessionCommand(start, wordEnd))

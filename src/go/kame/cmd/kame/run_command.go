@@ -322,10 +322,28 @@ type sessionRun struct {
 	Forced bool
 	// Capture, when set, receives a clone of the next completed work value.
 	Capture *core.Value
+	// QuietExits leaves a failed process's exit unreported, as a terminal
+	// session does: the program printed its own error and the status is
+	// kept. Failure holds the latest interactive diagnostic for explain.
+	QuietExits bool
+	Failure    diagnostic.Diagnostic
 }
 
 func (r *sessionRun) emit(out io.Writer, d diagnostic.Diagnostic, json bool) {
+	if r.Interactive && !json {
+		r.Failure.Free(mem.System)
+		r.Failure = d.Clone(mem.System)
+		if r.QuietExits && processExit(d) {
+			return
+		}
+	}
 	emitRunDiagnostic(out, d, json, r.Fragments, r.Loaded)
+}
+
+// processExit reports a failure whose only cause is a process that exited
+// unsuccessfully or died of a signal.
+func processExit(d diagnostic.Diagnostic) bool {
+	return d.Code == "RECIPE_FAIL" && d.Cause.Kind == "process" && (d.Cause.HasStatus || d.Cause.HasSignal)
 }
 
 // joinNeeded reports whether the invocation join has owned work to settle.

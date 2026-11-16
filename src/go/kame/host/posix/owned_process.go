@@ -261,12 +261,15 @@ func (r *running) suspend() {
 }
 
 // resume continues the request; foreground first returns a released
-// terminal handoff to it.
+// terminal handoff to it. When another graph of the job already took the
+// terminal, this one continues in the background.
 func (r *running) resume(foreground bool) error {
 	r.control.Lock()
 	var err error
 	if foreground {
-		err = r.handoff.reacquire()
+		if err = r.handoff.reacquire(); errors.Is(err, errTerminalBusy) {
+			err = nil
+		}
 	}
 	if err == nil {
 		r.suspended = false

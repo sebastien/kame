@@ -339,7 +339,7 @@ func (p *Program) drainRequests() {
 			processRequest.Terminal = host.PayloadBool(request.Payload, "terminal")
 			processRequest.TerminalRequired = host.PayloadBool(request.Payload, "terminalRequired")
 			processRequest.ForegroundAuto = host.PayloadBool(request.Payload, "foregroundAuto")
-			processRequest.TerminalBackground = processRequest.Terminal && p.BackgroundNode != nil && p.BackgroundNode(request.NodeID)
+			processRequest.TerminalBackground = processRequest.Terminal && (host.PayloadBool(request.Payload, "terminalBackground") || p.BackgroundNode != nil && p.BackgroundNode(request.NodeID))
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
 				validDescriptor = false

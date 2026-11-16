@@ -39,6 +39,7 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 	session := run.Session
 	preloaded := len(session.Work)
 	run.Interactive = true
+	defer run.Failure.Free(mem.System)
 	// Progress rows and taskbar state would draw over foreground programs and
 	// the prompt; commands report through their own output instead.
 	dashboardLive = false
@@ -55,12 +56,17 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 		defer reader.Close()
 		terminal, _ = reader.(*editorReader)
 	}
+	repl.options = loadReplOptions(run.Err)
 	if terminal != nil {
 		// Foreground commands receive the terminal, and entries are jobs.
 		session.Program.Eval.Terminal = true
+		run.QuietExits = true
 		repl.jobControl = true
 		repl.stopSignals = posix.CatchJobControlSignals()
 		terminal.bind(repl)
+		repl.history = terminal.history
+		repl.history.options = repl.options
+		repl.history.applyOptions()
 		for _, w := range []*io.Writer{&run.Out, &run.Err} {
 			o := &editorOutput{w: *w, shell: terminal.shell}
 			repl.outputs = append(repl.outputs, o)
@@ -105,7 +111,11 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 		repl.notifyJobs()
 		prompt := ""
 		if terminal != nil {
+			terminal.history.refresh(repl.completion().Directory)
 			if prompt, stop = repl.prompt(status); stop {
+				return status
+			}
+			if terminal.right, stop = repl.rightPrompt(status); stop {
 				return status
 			}
 		}
@@ -156,14 +166,18 @@ type replSession struct {
 	run            *sessionRun
 	shell          replShell
 	promptFragment int // 1 + index of the <kash-prompt> fragment; 0 before the first call
+	rightFragment  int // the same for <kash-rprompt>
 	// Job control (repl_jobs.go).
 	jobs            []*replJob
 	asyncSeen       int  // async graphs already attributed to jobs
+	started         int  // jobs started so far, for their start order
 	jobControl      bool // a terminal session
 	stopSignals     <-chan os.Signal
 	warned          bool // stopped jobs were reported at the last end attempt
 	outputs         []*editorOutput
 	contextRequests chan chan completionContext
+	history         *replHistory
+	options         *replOptions
 }
 
 // warnStopped reports stopped jobs at the first attempt to end the session.
@@ -175,7 +189,7 @@ func (s *replSession) warnStopped() bool {
 	s.warned = true
 	fmt.Fprintln(s.run.Err, "kash: there are stopped jobs")
 	for _, j := range stopped {
-		s.report(j, j == s.current())
+		s.report(j)
 	}
 	return true
 }
@@ -192,8 +206,24 @@ func replExitEntry(text string) bool {
 // fragment registers text as the diagnostic source named name.
 func (s *replSession) runEntry(name, text, parsed string, fragment, background bool) (int, bool) {
 	run, session := s.run, s.run.Session
+	if s.options != nil {
+		if handled, status := s.options.command(text, run.Out, run.Err); handled {
+			if status == 0 && s.history != nil {
+				s.history.applyOptions()
+			}
+			return status, false
+		}
+	}
+	if s.history != nil {
+		if handled, status := s.history.command(text, run.Out, run.Err); handled {
+			return status, false
+		}
+	}
 	if handled, status, stop := s.jobCommand(text); handled {
 		return status, stop
+	}
+	if fields := strings.Fields(text); len(fields) != 0 && fields[0] == "explain" && !strings.ContainsRune(text, '\n') {
+		return s.explain(len(fields)), false
 	}
 	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
 		return status, false
@@ -209,7 +239,23 @@ func (s *replSession) runEntry(name, text, parsed string, fragment, background b
 	if background {
 		return 0, false
 	}
-	return s.foreground(job)
+	return s.foreground(job, false)
+}
+
+// explain renders the latest failure in full, including one a terminal
+// session left unreported because a process exited unsuccessfully.
+func (s *replSession) explain(fields int) int {
+	run := s.run
+	if fields != 1 {
+		fmt.Fprintln(run.Err, "explain: expected no operand")
+		return 2
+	}
+	if run.Failure.Code == "" {
+		fmt.Fprintln(run.Err, "explain: no failure to explain")
+		return 1
+	}
+	emitRunDiagnostic(run.Err, run.Failure, false, run.Fragments, run.Loaded)
+	return 0
 }
 
 func (s *replSession) reportDiagnostics(diagnostics []diagnostic.Diagnostic) bool {
@@ -298,24 +344,37 @@ func (s *replSession) loadStartupFile(path string, explicit bool) (int, bool) {
 // prompt returns the first-line prompt: the result of the session's
 // kash-prompt function when it yields a string, otherwise the default.
 func (s *replSession) prompt(status int) (string, bool) {
-	fallback := s.shell.prompt()
+	return s.callPrompt("kash-prompt", &s.promptFragment, status, s.shell.prompt())
+}
+
+// rightPrompt returns the right prompt: the result of the session's
+// kash-rprompt function when it yields a string, otherwise none.
+func (s *replSession) rightPrompt(status int) (string, bool) {
+	return s.callPrompt("kash-rprompt", &s.rightFragment, status, "")
+}
+
+// callPrompt calls the prompt function function with the prompt record,
+// returning its string result, or fallback when it is undefined, fails, or
+// yields another value. fragment holds 1 + the index of its diagnostic
+// fragment, 0 before the first call.
+func (s *replSession) callPrompt(function string, fragment *int, status int, fallback string) (string, bool) {
 	run, session := s.run, s.run.Session
-	if !session.Program.Eval.HasFunction("kash-prompt") {
+	if !session.Program.Eval.HasFunction(function) {
 		return fallback, false
 	}
-	const name = "<kash-prompt>"
+	name := "<" + function + ">"
 	jobs := 0
 	for _, j := range s.jobs {
 		if j.id != 0 && j.state != jobDone {
 			jobs++
 		}
 	}
-	text := "(kash-prompt [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + " jobs: " + strconv.Itoa(jobs) + "])"
-	if s.promptFragment == 0 {
+	text := "(" + function + " [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + " jobs: " + strconv.Itoa(jobs) + "])"
+	if *fragment == 0 {
 		run.Fragments = append(run.Fragments, program.Fragment{Name: name, Lang: "kash"})
-		s.promptFragment = len(run.Fragments)
+		*fragment = len(run.Fragments)
 	}
-	run.Fragments[s.promptFragment-1].Text = text
+	run.Fragments[*fragment-1].Text = text
 	first, diagnostics := session.AppendKash(name, text)
 	if s.reportDiagnostics(diagnostics) {
 		return fallback, false

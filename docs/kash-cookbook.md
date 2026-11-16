@@ -21,7 +21,8 @@ alias gs = ["git" "status" "--short"]
 Then type `ll` or `gs`, without `$...`. Use `alias` to list shortcuts and
 `unalias ll` to remove one. Declarations are typed argv prefixes, not shell text.
 Format initialization safely with
-`kame do fmt --lang kash -i ~/.config/kash/init.kash`.
+`kame do fmt --lang kash -i ~/.config/kash/init.kash`. Only these two files are
+read; nothing else in `~/.config/kash/` is loaded.
 
 For login-only environment setup, use `~/.config/kash/profile.kash`:
 

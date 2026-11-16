@@ -55,7 +55,11 @@ func startTerminalSession(t *testing.T, binary, directory string, env []string, 
 	t.Helper()
 	controller, device := openTestTerminal(t)
 	command := exec.Command(binary, args...)
-	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "INPUTRC=/dev/null", "KASH_HISTORY="+directory+"/.history"), env...)
+	historyDir := filepath.Join(directory, ".kash-history")
+	if err := os.MkdirAll(historyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "INPUTRC=/dev/null", "KASH_HISTORY="+historyDir+"/history"), env...)
 	command.Stdin, command.Stdout, command.Stderr = device, device, device
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {
@@ -136,6 +140,40 @@ func (s *terminalSession) raw() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.output.String()
+}
+
+// redraw returns only the fresh Ctrl-L frame, not intermediate key redraws.
+func (s *terminalSession) redraw() string {
+	s.t.Helper()
+	s.waitReading()
+	before := len(s.raw())
+	s.send("\x0c")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw := s.raw()
+		if i := strings.LastIndex(raw[before:], "\x1b[H\x1b[2J"); i >= 0 && strings.HasSuffix(raw, "\x1b[?25h") {
+			return raw[before+i:]
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("no completed redraw: %q", raw[before:])
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (s *terminalSession) waitFrame(after int, accept func(string) bool) string {
+	s.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		raw := s.raw()[after:]
+		if i := strings.LastIndex(raw, "\x1b[?25l"); i >= 0 && strings.HasSuffix(raw, "\x1b[?25h") && accept(raw[i:]) {
+			return raw[i:]
+		}
+		if time.Now().After(deadline) {
+			s.t.Fatalf("expected terminal frame: %q", raw)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // finish ends input and returns the session exit status.
@@ -224,6 +262,49 @@ func TestNativeInteractiveKashPromptInterrupt(t *testing.T) {
 	}
 }
 
+// Each prompt turns off input reports a previous program left on, so mouse,
+// focus, and kitty keyboard reports are not echoed or edited as text.
+func TestNativeInteractiveKashResetsInputModes(t *testing.T) {
+	directory := t.TempDir()
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"TERM=xterm-256color"}, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("printf 'modes-%s\\033[?1000h\\033[?1004h' set\r")
+	s.waitFor("modes-set")
+	deadline := time.Now().Add(10 * time.Second)
+	for raw := s.raw(); !strings.Contains(raw[strings.LastIndex(raw, "modes-set"):], resetInputModes); raw = s.raw() {
+		if time.Now().After(deadline) {
+			t.Fatalf("no input-mode reset after the command: %q", raw)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if status := s.finish(); status != 0 {
+		t.Fatalf("status %d: %q", status, s.text())
+	}
+}
+
+// A failed command's exit is left to the command's own output and the
+// status; explain renders the withheld report in full.
+func TestNativeInteractiveKashQuietExitAndExplain(t *testing.T) {
+	directory := t.TempDir()
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, nil, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("explain\r")
+	s.waitFor("explain: no failure to explain")
+	s.send("sh -c 'echo own-$((40+2)) >&2; exit 3'\r")
+	s.waitFor("own-42")
+	s.send("sh -c 'echo after-$((1+1))'\r")
+	s.waitFor("after-2")
+	if strings.Contains(s.text(), "RECIPE_FAIL") {
+		t.Fatalf("process exit was reported: %q", s.text())
+	}
+	s.send("explain\r")
+	s.waitFor("error[RECIPE_FAIL]")
+	s.waitFor("exited (status 3)")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("status %d: %q", status, s.text())
+	}
+}
+
 // Submitted lines are appended to KASH_HISTORY and recalled by a later
 // session.
 func TestNativeInteractiveKashHistory(t *testing.T) {
@@ -236,7 +317,7 @@ func TestNativeInteractiveKashHistory(t *testing.T) {
 	if status := s.finish(); status != 0 {
 		t.Fatalf("first session status %d: %q", status, s.text())
 	}
-	if data, err := os.ReadFile(directory + "/.history"); err != nil || string(data) != "sh -c 'echo recalled-$((40+2))'\n" {
+	if data, err := os.ReadFile(filepath.Join(directory, ".kash-history", "history")); err != nil || !strings.HasPrefix(string(data), historyHeader) || !strings.Contains(string(data), "echo recalled-") {
 		t.Fatalf("history file: %q %v", data, err)
 	}
 	s = startTerminalSession(t, binary, directory, nil, "do", "run", "-i")
@@ -269,6 +350,103 @@ func TestNativeInteractiveKashPromptFunction(t *testing.T) {
 	}
 }
 
+// A kash-rprompt function draws a right prompt from the last status; a
+// failing right prompt is reported and leaves none.
+func TestNativeInteractiveKashRightPrompt(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = \"P> \"\n(kash-rprompt info) = (str \"[R\" info.status \"]\")\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
+	s.waitFor("[R0]")
+	// A narrow terminal hides the right prompt; widening redraws it.
+	s.send("abcde")
+	s.waitFor("abcde")
+	for _, width := range []uint16{10, 100} {
+		s.waitReading()
+		before := len(s.raw())
+		if err := unix.IoctlSetWinsize(int(s.control.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: width}); err != nil {
+			t.Fatal(err)
+		}
+		s.send("\x0c")
+		deadline := time.Now().Add(10 * time.Second)
+		for len(s.raw()) == before {
+			if time.Now().After(deadline) {
+				t.Fatal("resize did not redraw the prompt")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		s.waitReading()
+		if got := strings.Contains(s.raw()[before:], "[R0]"); got != (width == 100) {
+			t.Fatalf("right prompt at width %d: %q", width, s.raw()[before:])
+		}
+	}
+	s.send("\x15sh -c 'exit 4'\r")
+	s.waitFor("[R4]")
+	s.send("(kash-rprompt info) = (fail! \"rprompt-broke\")\r")
+	s.waitFor("rprompt-broke")
+	s.send("sh -c 'echo $((40 + 2))x'\r")
+	s.waitFor("42x")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("right prompt session status %d: %q", status, s.text())
+	}
+}
+
+// Colours take no columns and wide graphemes take their display width.
+// The right prompt disappears as input grows and returns after deletion;
+// wrapped editing and completion must still submit exactly the typed argv.
+func TestNativeInteractiveKashRightPromptUnicodeEditing(t *testing.T) {
+	directory := t.TempDir()
+	left, right := "\x1b[36m🐢 ▷ \x1b[0m", "\x1b[35m界🧰[R]\x1b[0m"
+	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = "+kameString(left)+"\n(kash-rprompt info) = "+kameString(right)+"\n")
+	nativeCLIWrite(t, directory+"/unique-prompt-file", "completion-ok\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
+	s.waitFor("[R]")
+	if err := unix.IoctlSetWinsize(int(s.control.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 40}); err != nil {
+		t.Fatal(err)
+	}
+	s.send("abc")
+	s.waitFor("abc")
+	if raw := s.redraw(); !strings.Contains(raw, strings.Repeat(" ", 25)+right) {
+		t.Fatalf("right prompt did not align by display width: %q", raw)
+	}
+	s.send(strings.Repeat("a", 27))
+	if raw := s.redraw(); strings.Contains(raw, "[R]") {
+		t.Fatalf("right prompt overlaps input: %q", raw)
+	}
+	s.send("\x15")
+	if raw := s.redraw(); !strings.Contains(raw, "[R]") {
+		t.Fatalf("right prompt did not return after deleting input: %q", raw)
+	}
+	payload := "界" + strings.Repeat("a", 55) + "END"
+	s.send("printf \"RESULT:%s:END\\n\" \"" + payload + "\"\x02\x02X\x05\r")
+	s.waitFor("RESULT:界" + strings.Repeat("a", 55) + "ENXD:END")
+	s.waitReading()
+	s.send("cat unique-prompt-\t\r")
+	s.waitFor("completion-ok")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("Unicode prompt session status %d: %q", status, s.text())
+	}
+}
+
+func TestNativeInteractiveKashLoginTerminal(t *testing.T) {
+	directory := t.TempDir()
+	interpreter := filepath.Join(directory, "kash")
+	if err := os.Symlink(nativeCLIBinary(t), interpreter); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, directory+"/profile.kash", "export LOGIN_STAGE=profile\n")
+	nativeCLIWrite(t, directory+"/init.kash", "export LOGIN_STAGE=${LOGIN_STAGE}-init\n")
+	s := startTerminalSession(t, interpreter, directory, []string{
+		"KASH_PROFILE=" + directory + "/profile.kash",
+		"KASH_INIT=" + directory + "/init.kash",
+	}, "-il")
+	s.waitFor("kash ")
+	s.send("printenv LOGIN_STAGE\r")
+	s.waitFor("profile-init")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("login session status %d: %q", status, s.text())
+	}
+}
+
 // Tab completes a unique path and lists ambiguous candidates under their
 // group heading.
 func TestNativeInteractiveKashCompletion(t *testing.T) {
@@ -287,6 +465,74 @@ func TestNativeInteractiveKashCompletion(t *testing.T) {
 	s.waitFor("^C")
 	if status := s.finish(); status != 130 {
 		t.Fatalf("completion session status %d: %q", status, s.text())
+	}
+}
+
+func TestNativeInteractiveKashCompletionSeparator(t *testing.T) {
+	for _, mode := range []string{"colour", "no-colour", "dumb"} {
+		t.Run(mode, func(t *testing.T) {
+			directory := t.TempDir()
+			nativeCLIWrite(t, directory+"/menu-file", "marker-not-in-argv\n")
+			nativeCLIWrite(t, directory+"/menu-exec", "")
+			if err := os.Chmod(directory+"/menu-exec", 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(directory+"/menu-dir", 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("menu-file", directory+"/menu-link"); err != nil {
+				t.Fatal(err)
+			}
+			env := []string{"TERM=xterm-256color", "NO_COLOR="}
+			glyph := "─"
+			if mode == "dumb" {
+				env = []string{"TERM=dumb"}
+				glyph = "-"
+			} else if mode == "no-colour" {
+				env = append(env, "NO_COLOR=1")
+			}
+			s := startTerminalSession(t, nativeCLIBinary(t), directory, env, "do", "run", "-i")
+			s.waitFor("kash ")
+			s.send("cat menu-\t")
+			s.waitFor("menu-link@")
+			raw := s.redraw()
+			if !strings.Contains(raw, strings.Repeat(glyph, 99)) || !strings.Contains(raw, "menu-dir/") || !strings.Contains(raw, "menu-exec*") {
+				t.Fatalf("completion separator/types: %q", raw)
+			}
+			if mode == "colour" {
+				for _, style := range []string{"\x1b[34m", "\x1b[36m", "\x1b[32m", "\x1b[2m"} {
+					if !strings.Contains(raw, style) {
+						t.Errorf("menu lacks style %q: %q", style, raw)
+					}
+				}
+			} else if strings.Contains(raw, "\x1b[36m") || strings.Contains(raw, "\x1b[32m") {
+				t.Fatalf("file-type colours were not disabled: %q", raw)
+			}
+			before := len(s.raw())
+			if err := unix.IoctlSetWinsize(int(s.control.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 40}); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(10 * time.Second)
+			for !strings.Contains(s.raw()[before:], strings.Repeat(glyph, 39)) && time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if raw = s.raw()[before:]; !strings.Contains(raw, strings.Repeat(glyph, 39)) || strings.Contains(raw, strings.Repeat(glyph, 40)) {
+				t.Fatalf("separator did not resize: %q", raw)
+			}
+			before = len(s.raw())
+			s.send("\t\t")
+			s.waitFrame(before, func(raw string) bool { return strings.Contains(raw, "\x1b[39;49;7m") })
+			before = len(s.raw())
+			s.send("\x15")
+			s.waitFrame(before, func(raw string) bool {
+				return !strings.Contains(raw, glyph+glyph) && !strings.Contains(raw, "menu-")
+			})
+			s.send("\x15cat menu-l\t\r")
+			s.waitFor("marker-not-in-argv")
+			if status := s.finish(); status != 0 {
+				t.Fatalf("completion session status %d: %q", status, s.text())
+			}
+		})
 	}
 }
 

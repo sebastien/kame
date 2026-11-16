@@ -87,6 +87,10 @@ type Context struct {
 	// Terminal is the recipe's terminal-handoff authority from rule metadata.
 	Terminal   TerminalAuthority
 	RecordBody bool // Body commands cannot steal the next record's default input.
+	// TerminalBackground marks an interactive session's & graph that would
+	// otherwise have been a foreground statement: it attaches the terminal
+	// without taking its foreground (052 job control).
+	TerminalBackground bool
 	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
 	CloneCallableAST      bool
 	FinalizationForbidden bool

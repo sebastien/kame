@@ -25,6 +25,7 @@ type completionCandidate struct {
 	Display     string // listed text
 	Description string
 	Tag         string // group heading
+	Style       string // display-only SGR style
 }
 
 const (
@@ -43,7 +44,7 @@ const (
 )
 
 var (
-	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background"}
+	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background", "wait": "wait for jobs to finish", "history": "select history scope or clear history", "option": "inspect or change shell options", "explain": "show the full report of the latest failure"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 
@@ -75,6 +76,36 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 	// Only the current line decides the position of a multi-line entry.
 	if newline := strings.LastIndexByte(before, '\n'); newline >= 0 {
 		before = before[newline+1:]
+	}
+	if fields := strings.Fields(before); len(fields) != 0 && fields[0] == "option" {
+		args := fields[1:]
+		if len(args) != 0 && (args[0] == "-l" || args[0] == "--local" || args[0] == "-g" || args[0] == "--global") {
+			args = args[1:]
+		}
+		var candidates []completionCandidate
+		if len(args) == 0 {
+			for _, option := range replOptionRegistry {
+				if strings.HasPrefix(option.name, word) {
+					candidates = append(candidates, completionCandidate{Text: option.name, Description: option.description, Tag: tagSession})
+				}
+			}
+			if len(fields) == 1 {
+				for _, flag := range []string{"-l", "--local", "-g", "--global"} {
+					if strings.HasPrefix(flag, word) {
+						candidates = append(candidates, completionCandidate{Text: flag, Description: "option scope", Tag: tagSession})
+					}
+				}
+			}
+		} else if len(args) == 1 {
+			if option, ok := findReplOption(args[0]); ok {
+				for _, choice := range option.choices {
+					if strings.HasPrefix(choice, word) {
+						candidates = append(candidates, completionCandidate{Text: choice, Tag: tagSession})
+					}
+				}
+			}
+		}
+		return candidates
 	}
 	trimmed := strings.TrimRight(before, " \t")
 	switch {
@@ -157,7 +188,11 @@ func completeExecutables(word string, ctx completionContext) []completionCandida
 				continue
 			}
 			if executableFile(filepath.Join(directory, name)) {
-				candidates = append(candidates, completionCandidate{Text: completionEscape(name), Display: name, Description: directory, Tag: tagCommands})
+				display, style := name+"*", "32"
+				if entry.Type()&os.ModeSymlink != 0 {
+					display, style = name+"@", "36"
+				}
+				candidates = append(candidates, completionCandidate{Text: completionEscape(name), Display: display, Description: directory, Tag: tagCommands, Style: style})
 			}
 		}
 	}
@@ -194,6 +229,32 @@ func completePaths(word string, ctx completionContext, dirsOnly bool) []completi
 			continue
 		}
 		c := completionCandidate{Text: typedDir + completionEscape(name), Display: name, Tag: tagFiles}
+		info, err := entry.Info()
+		mode := entry.Type()
+		if err == nil {
+			mode = info.Mode()
+		}
+		switch {
+		case mode&os.ModeSymlink != 0:
+			c.Display += "@"
+			c.Style = "36"
+		case dir:
+			c.Style = "34"
+		case mode&os.ModeNamedPipe != 0:
+			c.Display += "|"
+			c.Description, c.Style = "fifo", "33"
+		case mode&os.ModeSocket != 0:
+			c.Display += "="
+			c.Description, c.Style = "socket", "33"
+		case mode&os.ModeDevice != 0:
+			c.Display += "#"
+			c.Description, c.Style = "device", "33"
+		case mode.IsRegular() && mode&0o111 != 0:
+			c.Display += "*"
+			c.Style = "32"
+		case !mode.IsRegular():
+			c.Description, c.Style = "special", "33"
+		}
 		if dir {
 			c.Text += "/"
 			c.Display += "/"

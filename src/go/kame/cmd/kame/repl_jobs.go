@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"kame/core"
@@ -39,6 +40,8 @@ type replJob struct {
 	state      replJobState
 	signal     int // stopping signal
 	status     int
+	cancelled  bool // ended by kill %N or session cancellation
+	seq        int  // start order, for the current job
 	stop       bool // the session must end (exit)
 	evaluated  bool // every statement finished
 	background bool
@@ -57,7 +60,8 @@ func replJobText(text string) string {
 
 // newJob makes work items [first, len(Work)) the next job.
 func (s *replSession) newJob(text string, first int, background bool) *replJob {
-	j := &replJob{text: replJobText(text), next: first, end: len(s.run.Session.Work), background: background, startedAt: time.Now().UnixNano()}
+	s.started++
+	j := &replJob{text: replJobText(text), next: first, end: len(s.run.Session.Work), background: background, startedAt: time.Now().UnixNano(), seq: s.started}
 	s.jobs = append(s.jobs, j)
 	if background && s.jobControl {
 		s.number(j)
@@ -155,8 +159,20 @@ func (s *replSession) advance(j *replJob) {
 		}
 	}
 	if j.state == jobRunning && j.evaluated && s.asyncDone(j) {
-		s.finish(j, j.status, false)
+		s.finish(j, s.asyncStatus(j), false)
 	}
+}
+
+// asyncStatus is the status of an evaluated job: that of its last failed &
+// graph, as for a statement, otherwise its own.
+func (s *replSession) asyncStatus(j *replJob) int {
+	status, eval := j.status, s.run.Session.Program.Eval
+	for _, i := range j.async {
+		if _, root := eval.AsyncProcess(i); root != nil && root.Node().State == core.NodeFailed {
+			status = processExitStatus(root.Node().Diagnostic, s.run.Inv.Name == "run")
+		}
+	}
+	return status
 }
 
 func (s *replSession) advanceAll() {
@@ -215,6 +231,7 @@ func (s *replSession) cancel(j *replJob) {
 	for _, i := range j.async {
 		eval.CancelAsyncProcess(i)
 	}
+	j.cancelled = true
 	s.finish(j, 130, false)
 	// Nothing may tick before the next entry: stop the processes now.
 	s.run.Session.Program.DrainCancellations()
@@ -286,27 +303,42 @@ func (s *replSession) takeStop() bool {
 	}
 }
 
-// foreground runs j in the foreground until it finishes, stops, or leaves
-// only & graphs running. It returns the session status and whether the
-// session must end.
-func (s *replSession) foreground(j *replJob) (int, bool) {
+// foreground runs j in the foreground until it finishes or stops. A typed
+// entry also returns once only its & graphs run, which run on as a
+// background job; a job brought back with fg is waited for to the end. It
+// returns the session status and whether the session must end.
+func (s *replSession) foreground(j *replJob, resumed bool) (int, bool) {
 	run := s.run
 	j.background = false
 	posix.ResetSignals()
 	s.takeStop()
 	for {
+		// A host timeout can finish the job during tick; still end the invocation.
+		if run.Inv.TimeoutMS > 0 && (time.Now().UnixNano()-j.startedAt)/1000000 >= run.Inv.TimeoutMS {
+			h := j.handle
+			j.handle = nil
+			s.cancelJobs()
+			return run.endForTimeout(h)
+		}
 		s.attributeAsync()
 		s.advanceAll()
 		if j.state != jobRunning {
 			break
 		}
-		if j.evaluated {
+		if j.evaluated && !resumed {
 			// Only & graphs remain: the prompt returns and they run on.
 			s.number(j)
 			j.background = true
 			return j.status, false
 		}
-		if signal := posix.TakeSignal(); signal == int(syscall.SIGINT) {
+		if signal := posix.TakeSignal(); signal == int(syscall.SIGINT) && j.handle == nil {
+			// Only & graphs remain: cancel them as kill %N would.
+			posix.ResetSignals()
+			s.cancel(j)
+			s.terminalLine()
+			s.forget(j)
+			return 128 + signal, false
+		} else if signal == int(syscall.SIGINT) {
 			status, stop := run.interrupt(j.handle, j.pending, signal)
 			j.handle = nil
 			s.finish(j, status, stop)
@@ -325,11 +357,6 @@ func (s *replSession) foreground(j *replJob) (int, bool) {
 			s.suspend(j, int(syscall.SIGTSTP))
 			break
 		}
-		if run.Inv.TimeoutMS > 0 && (time.Now().UnixNano()-j.startedAt)/1000000 >= run.Inv.TimeoutMS {
-			h := j.handle
-			j.handle = nil
-			return run.endForTimeout(h)
-		}
 		s.tick(10)
 		if signal := nativeOutputSignal(); signal != 0 {
 			h := j.handle
@@ -340,12 +367,13 @@ func (s *replSession) foreground(j *replJob) (int, bool) {
 		if code := nativeOutputFailure(); code != "" && (j.handle == nil || j.handle.Node.Diagnostic.Code == "") {
 			h := j.handle
 			j.handle = nil
+			s.cancelJobs()
 			return run.endForOutputFailure(h, code)
 		}
 	}
 	if j.state == jobStopped {
 		s.terminalLine()
-		s.report(j, true)
+		s.report(j)
 		j.notify = false
 		return 128 + int(syscall.SIGTSTP), false
 	}
@@ -371,6 +399,8 @@ func (j *replJob) stateText() string {
 		return "stopped (tty output)"
 	case j.state == jobStopped:
 		return "stopped"
+	case j.cancelled:
+		return "killed"
 	case j.status == 0:
 		return "done"
 	case j.status > 128:
@@ -379,42 +409,61 @@ func (j *replJob) stateText() string {
 	return "exit " + strconv.Itoa(j.status)
 }
 
-// report writes `[N]+ STATE  TEXT`; current marks the current job.
-func (s *replSession) report(j *replJob, current bool) {
-	mark := " "
-	if current {
+// line is `[N]M STATE  TEXT`, M marking the current (+) and previous (-) job.
+func (s *replSession) line(j *replJob) string {
+	mark, ranked := " ", s.ranked()
+	if len(ranked) > 0 && ranked[0] == j {
 		mark = "+"
+	} else if len(ranked) > 1 && ranked[1] == j {
+		mark = "-"
 	}
-	fmt.Fprintf(s.run.Err, "[%d]%s %s  %s\n", j.id, mark, j.stateText(), j.text)
+	return fmt.Sprintf("[%d]%s %s  %s\n", j.id, mark, j.stateText(), j.text)
 }
 
-// current is the most recently stopped job, otherwise the most recent one.
-func (s *replSession) current() *replJob {
-	var latest *replJob
+func (s *replSession) report(j *replJob) { io.WriteString(s.run.Err, s.line(j)) }
+
+// ranked lists live numbered jobs, current first: stopped jobs from the most
+// recently stopped, then running ones from the most recently started.
+func (s *replSession) ranked() []*replJob {
+	var ranked []*replJob
 	for _, j := range s.jobs {
-		if j.id == 0 || j.state == jobDone {
-			continue
-		}
-		if j.state == jobStopped && (latest == nil || latest.state != jobStopped || j.stoppedAt >= latest.stoppedAt) {
-			latest = j
-		} else if latest == nil || latest.state != jobStopped && j.id > latest.id {
-			latest = j
+		if j.id != 0 && j.state != jobDone {
+			ranked = append(ranked, j)
 		}
 	}
-	return latest
+	slices.SortStableFunc(ranked, func(a, b *replJob) int {
+		if (a.state == jobStopped) != (b.state == jobStopped) {
+			if a.state == jobStopped {
+				return -1
+			}
+			return 1
+		}
+		if a.state == jobStopped && a.stoppedAt != b.stoppedAt {
+			return cmp.Compare(b.stoppedAt, a.stoppedAt)
+		}
+		return cmp.Compare(b.seq, a.seq)
+	})
+	return ranked
+}
+
+// current is the current job (+), nil without one.
+func (s *replSession) current() *replJob {
+	if ranked := s.ranked(); len(ranked) > 0 {
+		return ranked[0]
+	}
+	return nil
 }
 
 // notifyJobs reports background jobs that stopped or finished since the
 // last prompt, forgetting the finished ones.
 func (s *replSession) notifyJobs() {
-	current := s.current()
 	for _, j := range slices.Clone(s.jobs) {
 		if !j.notify {
 			continue
 		}
 		j.notify = false
 		if s.jobControl {
-			s.report(j, j == current)
+			s.report(j)
 		}
 		if j.state == jobDone {
 			s.forget(j)
@@ -474,12 +523,11 @@ func (s *replSession) jobCommand(text string) (bool, int, bool) {
 			fmt.Fprintln(errOut, "jobs: expected no operand")
 			return true, 1, false
 		}
-		current := s.current()
 		for _, j := range slices.Clone(s.jobs) {
 			if j.id == 0 {
 				continue
 			}
-			fmt.Fprintf(s.run.Out, "[%d]%s %s  %s\n", j.id, map[bool]string{true: "+", false: " "}[j == current], j.stateText(), j.text)
+			io.WriteString(s.run.Out, s.line(j))
 			if j.state == jobDone {
 				j.notify = false
 				s.forget(j)
@@ -501,12 +549,68 @@ func (s *replSession) jobCommand(text string) (bool, int, bool) {
 		}
 		fmt.Fprintln(s.run.Err, j.text)
 		s.resume(j, true)
-		status, stop := s.foreground(j)
+		status, stop := s.foreground(j, true)
 		return true, status, stop
 	case "kill":
 		return s.kill(fields[1:])
+	case "wait":
+		return s.wait(fields[1:])
 	}
 	return false, 0, false
+}
+
+// wait waits until each operand job has finished or stopped, or without
+// operands until no job runs. A finished job's status is observed by wait,
+// which forgets it without a report.
+func (s *replSession) wait(operands []string) (bool, int, bool) {
+	var jobs []*replJob
+	for _, operand := range operands {
+		j, ok := s.lookupJob("wait", operand)
+		if !ok {
+			return true, 1, false
+		}
+		jobs = append(jobs, j)
+	}
+	if len(operands) == 0 {
+		for _, j := range s.jobs {
+			if j.state == jobRunning {
+				jobs = append(jobs, j)
+			}
+		}
+	}
+	posix.ResetSignals()
+	s.takeStop()
+	for slices.ContainsFunc(jobs, func(j *replJob) bool { return j.state == jobRunning }) {
+		if signal := posix.TakeSignal(); signal == int(syscall.SIGINT) {
+			// An interrupt ends the wait, not the jobs.
+			posix.ResetSignals()
+			s.terminalLine()
+			return true, 128 + signal, false
+		} else if signal != 0 {
+			s.cancelJobs()
+			status, stop := s.run.endForSignal(nil, signal, false)
+			return true, status, stop
+		}
+		if s.takeStop() {
+			s.terminalLine()
+			return true, 128 + int(syscall.SIGTSTP), false
+		}
+		s.tick(10)
+	}
+	status := 0
+	for _, j := range jobs {
+		if j.state == jobDone {
+			status = j.status
+			j.notify = false
+			s.forget(j)
+		} else {
+			status = 128 + j.signal
+		}
+	}
+	if len(operands) == 0 {
+		status = 0
+	}
+	return true, status, false
 }
 
 // selectJob resolves the optional %N operand of fg and bg.
@@ -525,7 +629,23 @@ func (s *replSession) selectJob(name string, operands []string) (*replJob, bool)
 	return s.lookupJob(name, operands[0])
 }
 
+// lookupJob resolves %N, the current job %+ (or %%), and the previous job %-.
 func (s *replSession) lookupJob(name, operand string) (*replJob, bool) {
+	if operand == "%+" || operand == "%%" || operand == "%-" {
+		ranked, i := s.ranked(), 0
+		if operand == "%-" {
+			i = 1
+		}
+		if i < len(ranked) {
+			return ranked[i], true
+		}
+		which := "current"
+		if i == 1 {
+			which = "previous"
+		}
+		fmt.Fprintf(s.run.Err, "%s: no %s job\n", name, which)
+		return nil, false
+	}
 	number, err := strconv.Atoi(strings.TrimPrefix(operand, "%"))
 	if !strings.HasPrefix(operand, "%") || err != nil {
 		fmt.Fprintf(s.run.Err, "%s: expected %%N: %s\n", name, operand)

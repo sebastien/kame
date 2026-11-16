@@ -88,7 +88,7 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 	for i := range parsed.Items {
 		if parsed.Items[i].Kind == script.SessionCommand {
 			parsed.Free()
-			return failure(c.Run, "FEATURE_UNSUP", span, "alias and unalias require an interactive session entry or startup file")
+			return failure(c.Run, "FEATURE_UNSUP", span, "session commands require an interactive session entry or startup file")
 		}
 	}
 	f := mem.Alloc[Function](p.Alloc)
