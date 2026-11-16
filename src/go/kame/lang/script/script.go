@@ -25,6 +25,7 @@ const (
 	EndWhen
 	Generate
 	Composition
+	SessionCommand
 )
 
 type ScriptItem struct {
@@ -344,6 +345,27 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == Comment {
 			b.WriteString(item.Text)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == SessionCommand {
+			words := strings.Fields(item.Text)
+			column := 0
+			for j := range words {
+				if j != 0 {
+					b.WriteByte(' ')
+					column++
+				}
+				b.WriteString(words[j])
+				column += len(words[j])
+			}
+			mem.FreeSlice(nil, words)
+			if item.Expression != nil {
+				b.WriteString(" = ")
+				value := expr.FormatAt(a, item.Expression, column+3)
+				b.WriteString(value)
+				mem.FreeString(a, value)
+			}
 			previousEnd = item.Span.End
 			continue
 		}

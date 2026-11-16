@@ -224,6 +224,8 @@ artifacts. URI grants use canonical roots; see
 `(tool NAME)` and `x/NAME` resolve executables against startup PATH or `--tool`
 overrides, not recipe PATH, and track the chosen executable. Tool lookup needs
 a build/source session; internal metadata checks do not grant user read access.
+Interactive/login Kash sessions instead use their current session PATH, while
+retaining overrides, executable tracking and capability checks.
 `(tool NAME | ?)` (equivalently `(? (tool NAME))`) returns nil for ordinary
 unavailability using the same resolver. Empty/NUL names and nonstrings are invalid; capability
 and operational failures remain errors. Absence is tracked and refreshed on

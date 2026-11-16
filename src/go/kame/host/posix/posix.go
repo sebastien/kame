@@ -543,7 +543,7 @@ var receivedSignal atomic.Bool
 func InstallSignals() bool {
 	signalOnce.Do(func() {
 		ch := make(chan os.Signal, 2)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		go func() {
 			for sig := range ch {
 				n := int32(sig.(syscall.Signal))

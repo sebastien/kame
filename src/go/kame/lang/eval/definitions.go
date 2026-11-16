@@ -19,6 +19,14 @@ type RecordReaderCloser interface {
 }
 
 type Program struct {
+	// CommandAlias supplies driver-owned argv prefixes for literal command heads.
+	// Prefixes are expanded once, before normal executable lookup and authorization.
+	CommandAlias      func(any, string) []string
+	CommandAliasState any
+	// SessionTool resolves live shell lookup to an owned explicit path before
+	// dependency tracking, so changing PATH never invalidates running jobs.
+	SessionTool      func(any, mem.Allocator, string, string) string
+	SessionToolState any
 	// ExitBoundary is enabled only by a host runtime establishing an execution boundary.
 	ExitBoundary       bool
 	StreamStates       []*captureState
@@ -122,6 +130,9 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 	var names []*definition.Definition
 	for i := range parsed.Items {
 		item := parsed.Items[i]
+		if item.Kind == script.SessionCommand {
+			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "alias and unalias are session commands; load them from interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+		}
 		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 			continue
@@ -180,6 +191,10 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 	}
 	for i := range parsed.Items {
 		item := parsed.Items[i]
+		if item.Kind == script.SessionCommand {
+			p.Valid = false
+			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "alias and unalias are session commands; load them from interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+		}
 		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			p.Valid = false
 			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})

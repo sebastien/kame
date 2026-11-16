@@ -28,6 +28,7 @@ type KashToken struct {
 }
 
 var kashStatementKeywords = map[string]bool{
+	"alias": true, "unalias": true,
 	"def": true, "defer": true, "elif": true, "else": true, "exit": true, "for": true, "if": true,
 	"let": true, "match": true, "case": true, "return": true, "while": true, "with": true,
 }
@@ -191,6 +192,17 @@ func (l *kashLexer) afterKeyword(word string, i int) int {
 		}
 	}
 	switch word {
+	case "alias":
+		skip()
+		start := i
+		for i < len(l.text) && !kashWordEnd(l.text[i]) && l.text[i] != '=' {
+			i++
+		}
+		l.emit(KashTokenDefinition, start, i)
+		if l.definitionFollows(i) {
+			return l.definitionValue(i)
+		}
+		return i
 	case "let":
 		skip()
 		end := l.wordEnd(i)

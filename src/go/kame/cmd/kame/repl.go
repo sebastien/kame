@@ -32,28 +32,29 @@ type lineReader interface {
 	Close()
 }
 
-// runInteractive runs preloaded work and the startup file, then reads,
-// appends, and runs Kash entries until end of input or exit. Failures end the
-// entry, not the session. The caller joins outstanding work and runs
-// finalization as for batch runs.
+// runInteractive loads the login profile when requested, runs preloaded work,
+// and, for interactive sessions, loads initialization and reads entries.
+// Entry failures do not end interactive sessions; the caller finalizes both modes.
 func runInteractive(run *sessionRun, in io.Reader) int {
 	session := run.Session
+	preloaded := len(session.Work)
 	run.Interactive = true
 	// Progress rows and taskbar state would draw over foreground programs and
 	// the prompt; commands report through their own output instead.
 	dashboardLive = false
 	emitTaskbar(run.Err, 0, 0)
 	taskbarEnabled = false
-	for i := 0; i < len(session.Work); i++ {
-		if status, stop := run.step(i); stop {
-			return status
-		}
-	}
 	repl := &replSession{run: run, shell: replShell{Program: session.Program, FollowGrants: len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants}, contextRequests: make(chan chan completionContext)}
+	session.Program.Eval.CommandAlias, session.Program.Eval.CommandAliasState = replCommandAlias, &repl.shell
+	session.Program.Eval.SessionTool, session.Program.Eval.SessionToolState = replSessionTool, &repl.shell
 	session.Program.BackgroundNode = repl.backgroundNode
-	reader := newLineReader(in)
-	defer reader.Close()
-	terminal, _ := reader.(*editorReader)
+	var reader lineReader
+	var terminal *editorReader
+	if run.Inv.Interactive {
+		reader = newLineReader(in)
+		defer reader.Close()
+		terminal, _ = reader.(*editorReader)
+	}
 	if terminal != nil {
 		// Foreground commands receive the terminal, and entries are jobs.
 		session.Program.Eval.Terminal = true
@@ -65,6 +66,34 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 			repl.outputs = append(repl.outputs, o)
 			*w = o
 		}
+	}
+	if run.Inv.Login {
+		path, explicit := loginPath()
+		if status, stop := repl.loadStartupFile(path, explicit); stop {
+			repl.end()
+			return status
+		}
+	}
+	run.Interactive = run.Inv.Interactive
+	for i := 0; i < preloaded; i++ {
+		if status, stop := run.step(i); stop {
+			repl.end()
+			return status
+		}
+	}
+	if !run.Inv.Interactive {
+		if status, stop := repl.end(); stop {
+			return status
+		}
+		if run.joinNeeded() {
+			if status, stop := run.step(len(session.Work)); stop {
+				return status
+			}
+		}
+		if run.HasLast && !run.Inv.JSON && !run.Inv.DryRun {
+			writeValue(run.Out, run.Last)
+		}
+		return 0
 	}
 	status, stop := repl.loadStartup()
 	if stop {
@@ -81,6 +110,12 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 			}
 		}
 		entry, err := repl.read(reader, prompt)
+		if signal, ok := err.(replSignalError); ok {
+			repl.cancelJobs()
+			status, _ := run.endForSignal(nil, int(signal), false)
+			repl.end()
+			return status
+		}
 		if errors.Is(err, errInterrupted) {
 			status = 130
 			continue
@@ -160,7 +195,7 @@ func (s *replSession) runEntry(name, text, parsed string, fragment, background b
 	if handled, status, stop := s.jobCommand(text); handled {
 		return status, stop
 	}
-	if handled, status := s.shell.run(text, run.Err); handled {
+	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
 		return status, false
 	}
 	if fragment {
@@ -202,11 +237,30 @@ func startupPath() (string, bool) {
 	return filepath.Join(config, "kash", "init.kash"), false
 }
 
+func loginPath() (string, bool) {
+	if path, ok := os.LookupEnv("KASH_PROFILE"); ok {
+		return path, true
+	}
+	config := os.Getenv("XDG_CONFIG_HOME")
+	if config == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		config = filepath.Join(home, ".config")
+	}
+	return filepath.Join(config, "kash", "profile.kash"), false
+}
+
 // loadStartup runs the startup file as entries. Each entry is parsed with
 // the preceding file text blanked out, so diagnostics locate file positions
 // against the whole file registered as one fragment.
 func (s *replSession) loadStartup() (int, bool) {
 	path, explicit := startupPath()
+	return s.loadStartupFile(path, explicit)
+}
+
+func (s *replSession) loadStartupFile(path string, explicit bool) (int, bool) {
 	if path == "" {
 		return 0, false
 	}
@@ -312,7 +366,11 @@ func (s *replSession) completion() completionContext {
 	p := s.run.Session.Program
 	home, _ := s.shell.lookup("HOME")
 	path, _ := s.shell.lookup("PATH")
-	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Names: p.Eval.InteractiveNames()}
+	aliases := make(map[string][]string, len(s.shell.aliases))
+	for name, prefix := range s.shell.aliases {
+		aliases[name] = prefix
+	}
+	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases}
 }
 
 // replEntry is one entry read from the input: Kash text, the byte offset of

@@ -534,6 +534,10 @@ including an empty path for an unavailable tool. `kame do tools check TARGETS...
 validates tools in selected dependency plans without executing recipes.
 Ordinary command names remain shell-resolved.
 
+Interactive/login Kash sessions are the exception to startup-PATH lookup:
+their `tool` and `x/NAME` references use the current session PATH, as specified
+in `052-kash-interactive.md`. Recipe lookup policy is unchanged.
+
 Normal recipes are the primary shell interface. One explicit `sh!` operation
 is provided for expressions that need collected process results. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:

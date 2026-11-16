@@ -15,6 +15,7 @@ type completionContext struct {
 	Home      string // $HOME of the session child environment
 	Path      string // $PATH of the session child environment
 	Names     []eval.InteractiveName
+	Aliases   map[string][]string
 }
 
 // completionCandidate is one completion. Text replaces the word being
@@ -42,7 +43,7 @@ const (
 )
 
 var (
-	replSessionCommands = map[string]string{"cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background"}
+	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 
@@ -95,6 +96,11 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 		return candidates
 	case completionCommandPosition(trimmed) && !strings.Contains(word, "/"):
 		var candidates []completionCandidate
+		for name, prefix := range ctx.Aliases {
+			if strings.HasPrefix(name, word) {
+				candidates = append(candidates, completionCandidate{Text: name, Display: name, Description: strings.Join(prefix, " "), Tag: tagCommands})
+			}
+		}
 		for name, description := range replSessionCommands {
 			if strings.HasPrefix(name, word) && trimmed == "" {
 				candidates = append(candidates, completionCandidate{Text: name, Display: name, Description: description, Tag: tagSession})
@@ -105,7 +111,7 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 				candidates = append(candidates, completionCandidate{Text: name, Display: name, Tag: tagKeywords})
 			}
 		}
-		return append(candidates, completeExecutables(word, ctx.Path)...)
+		return append(candidates, completeExecutables(word, ctx)...)
 	case strings.TrimSpace(before) == "cd":
 		return completePaths(word, ctx, true)
 	default:
@@ -128,9 +134,19 @@ func completionCommandPosition(text string) bool {
 	return false
 }
 
-func completeExecutables(word, path string) []completionCandidate {
+func commandPathDirectories(ctx completionContext) []string {
+	directories := strings.Split(ctx.Path, string(os.PathListSeparator))
+	for i, directory := range directories {
+		if !filepath.IsAbs(directory) {
+			directories[i] = filepath.Join(ctx.Directory, directory)
+		}
+	}
+	return directories
+}
+
+func completeExecutables(word string, ctx completionContext) []completionCandidate {
 	var candidates []completionCandidate
-	for _, directory := range filepath.SplitList(path) {
+	for _, directory := range commandPathDirectories(ctx) {
 		if directory == "" {
 			continue
 		}

@@ -9,6 +9,32 @@ A complete, harmless example is
 Run it from a disposable writable directory. It creates a private workspace and
 removes it with `defer`; no credentials, installation or network are involved.
 
+## Interactive shortcuts and login setup
+
+In `~/.config/kash/init.kash`:
+
+```kash
+alias ll = ["ls" "-lah"]
+alias gs = ["git" "status" "--short"]
+```
+
+Then type `ll` or `gs`, without `$...`. Use `alias` to list shortcuts and
+`unalias ll` to remove one. Declarations are typed argv prefixes, not shell text.
+Format initialization safely with
+`kame do fmt --lang kash -i ~/.config/kash/init.kash`.
+
+For login-only environment setup, use `~/.config/kash/profile.kash`:
+
+```kash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+`kash --login -i` loads that profile before interactive initialization;
+ordinary `kash -c COMMAND` loads neither. Exported PATH affects later tool
+lookup without restarting running jobs. Kash does not source POSIX profiles.
+See [login-shell setup and limitations](ref-kash.md#startup-file-and-prompt)
+before changing your account shell.
+
 ## Typed prefixes, not generated command source
 
 ```kash

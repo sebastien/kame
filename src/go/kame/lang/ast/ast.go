@@ -895,7 +895,7 @@ func (e *astEncoder) script(value *script.Script) {
 		e.Str(scriptKind(item.Kind))
 		e.Str("span")
 		e.span(item.Span)
-		if item.Kind == script.Comment {
+		if item.Kind == script.Comment || item.Kind == script.SessionCommand {
 			e.Str("text")
 			e.Str(item.Text)
 		}
@@ -929,6 +929,9 @@ func (e *astEncoder) script(value *script.Script) {
 	e.EndObject()
 }
 func scriptKind(k script.ScriptItemKind) string {
+	if k == script.SessionCommand {
+		return "session-command"
+	}
 	if k == script.Composition {
 		return "composition"
 	}

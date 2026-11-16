@@ -328,7 +328,8 @@ recipes, document templates and expression strings where interpolation is intend
 
 Every reached Kash stage automatically resolves and tracks its executable,
 including literal/dynamic command heads, pipelines, captures, and async work.
-Bare names use the driver's startup `PATH` and `--tool NAME=PATH` overrides;
+Bare names use the driver's startup `PATH` and `--tool NAME=PATH` overrides
+(interactive/login sessions instead use the current session PATH);
 explicit paths resolve from the stage working directory. Stage environment
 `PATH` overrides affect the child, not this lookup. Missing/non-executable heads
 report `TOOL_MISSING`. Run grants still apply; internal executable checks do
@@ -884,6 +885,8 @@ and [output-port/list spec](../../../spec/047-kash-output-ports-and-command-list
 ```sh
 kash                              # REPL when stdin is a terminal
 kash -i ./lib.kash                # preload, then read entries
+kash --login                     # load login profile, then REPL on a terminal
+kash -lc 'echo hello'             # login profile, then noninteractive command
 kame do run -i --allow-run
 ```
 
@@ -904,6 +907,39 @@ receives `[status: dir: name: jobs:]` and returns the prompt string:
 ```kash
 (kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
 ```
+
+Login invocation (`-kash` as argv[0], or standalone `kash -l`/`--login`) loads
+`$KASH_PROFILE`, default `$XDG_CONFIG_HOME/kash/profile.kash` or
+`~/.config/kash/profile.kash`, before supplied sources. Empty disables loading.
+Interactive initialization follows only in interactive sessions; ordinary
+`kash -c` loads neither file. Other shells' profiles are not interpreted.
+Standalone `kash -l` means login; use `--lang` for explicit language selection.
+
+Define interactive shortcuts as typed argv prefixes, invoked by bare name:
+
+```kash
+alias ll = ["ls" "-lah"]
+ll ./src | head -n 10
+alias ll                         # show one; alias alone lists all
+unalias ll
+```
+
+Prefixes are nonempty literal string lists, expanded once without shell-text
+reparsing; caller arguments retain their boundaries. Computed command heads and
+explicit paths bypass aliases. Put declarations in initialization or a login
+profile; they are session commands, not script/recipe syntax. Whole-line aliases
+of `cd`, `export`, and `unset` work, with the same whole-line-only limitation.
+The Kash parser/formatter understands these declarations, including multiline
+lists: `kame do fmt --lang kash -i ~/.config/kash/init.kash`. Batch execution
+still rejects session commands with `FEATURE_UNSUP`, without executing earlier
+statements.
+
+Interactive and login sessions use the current session PATH for command and
+`tool`/`x/NAME` lookup. `export PATH=...`, `unset PATH`, and `cd` affect later
+lookups without restarting running jobs; `--tool` overrides and run grants
+remain effective. Relative and empty PATH entries are relative to the lookup
+directory. Stage-local environment records do not change session lookup;
+ordinary scripts and recipes retain startup-PATH lookup.
 
 The editor follows Readline conventions (emacs or vi, `~/.inputrc` with
 `$if kash`) and edits a whole multi-line entry; Tab indents at line start.

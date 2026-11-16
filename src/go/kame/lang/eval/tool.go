@@ -2,10 +2,11 @@ package eval
 
 import (
 	"kame/core"
+	"kame/internal/mem"
 	"kame/lang/source"
 )
 
-// TrackedTool resolves a tool through the driver's startup policy, then retains
+// TrackedTool resolves a tool through the driver's lookup policy, then retains
 // the selected executable's internal metadata without granting user file reads.
 func (c *Context) TrackedTool(name string, span source.Span) Result {
 	if c.PurePredicate {
@@ -16,6 +17,14 @@ func (c *Context) TrackedTool(name string, span source.Span) Result {
 	}
 	if c.Engine == nil || (c.DependencyObserver == nil && c.DependencyContextObserver == nil) {
 		return failure(c.Run, "PHASE_INVALID", span, "tool requires a build or source session")
+	}
+	if c.Program != nil && c.Program.SessionTool != nil {
+		resolved := c.Program.SessionTool(c.Program.SessionToolState, c.Run, name, c.Cwd)
+		if resolved == "" {
+			return failure(c.Run, "TOOL_MISSING", span, "cannot resolve executable: "+name)
+		}
+		defer mem.FreeString(c.Run, resolved)
+		name = resolved
 	}
 	key := core.ResourceKey{Kind: core.ResourceTool, Name: name}
 	if !c.Dependency(key) {

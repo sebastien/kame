@@ -13,8 +13,26 @@ func KashInterpreterArgs(args []string) []string {
 	interactive := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "-l" || arg == "--login" {
+			result = append(result, "--login")
+			continue
+		}
+		if arg == "-lc" || arg == "-ic" {
+			if arg == "-lc" {
+				result = append(result, "--login")
+			} else {
+				result = append(result, "--interactive")
+				interactive = true
+			}
+			arg = "-c"
+		}
+		if arg == "-il" || arg == "-li" {
+			result = append(result, "--login", "--interactive")
+			interactive = true
+			continue
+		}
 		interactive = interactive || arg == "-i" || arg == "--interactive"
-		if arg == "-l" || arg == "--lang" {
+		if arg == "--lang" {
 			if i+1 == len(args) {
 				return append(result, arg)
 			}

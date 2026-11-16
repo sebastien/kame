@@ -520,6 +520,15 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if len(state.Argv) == 0 {
 				destination = "command head"
 			}
+			if len(state.Argv) == 0 && p.CommandAlias != nil && len(word.Parts) == 1 && word.Parts[0].Expr == nil {
+				if prefix := p.CommandAlias(p.CommandAliasState, word.Parts[0].Text); len(prefix) != 0 {
+					for _, argument := range prefix {
+						state.Argv = append(state.Argv, core.NewString(state.Alloc, argument))
+					}
+					state.Index++
+					continue
+				}
+			}
 			r := p.commandWord(word, c, destination)
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
@@ -587,7 +596,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if toolName == "" {
 				toolName = state.Argv[0].Text
 			}
+			previousCwd := c.Cwd
+			if p.SessionTool != nil {
+				c.Cwd = cwd
+			}
 			tool := c.TrackedTool(toolName, headSpan)
+			c.Cwd = previousCwd
 			if tool.Waiting {
 				return tool
 			}

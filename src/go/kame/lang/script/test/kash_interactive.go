@@ -25,6 +25,10 @@ func TestKashInteractiveInputClassification(t *testing.T) {
 		{"def greet name\n\techo $name", script.KashComplete},
 		{"def greet name\n\tif true", script.KashBlock},
 		{"echo )", script.KashComplete},
+		{"alias ll = [", script.KashOpen},
+		{"alias ll = [\"ls\"\n \"-lah\"]", script.KashComplete},
+		{"alias ll = [\"open", script.KashOpen},
+		{"alias ll = []", script.KashComplete},
 	}
 	for i := range cases {
 		if got := script.ClassifyKashInput(cases[i].Text); got != cases[i].Want {

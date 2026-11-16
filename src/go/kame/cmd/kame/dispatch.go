@@ -15,9 +15,13 @@ import (
 func main() {
 	posix.InstallSignals()
 	args := os.Args[1:]
-	kash := len(os.Args) != 0 && path.Base(os.Args[0]) == "kash"
+	executable := path.Base(os.Args[0])
+	kash := executable == "kash" || executable == "-kash"
 	if kash {
 		args = cli.KashInterpreterArgs(args)
+		if executable == "-kash" {
+			args = append([]string{"--login"}, args...)
+		}
 		// Bare kash on a terminal is the REPL; piped stdin remains source.
 		if len(args) != 0 && args[len(args)-1] == "-" && posix.StdinIsTerminal() {
 			args[len(args)-1] = "--interactive"

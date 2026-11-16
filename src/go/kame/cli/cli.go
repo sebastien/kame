@@ -46,6 +46,7 @@ type Invocation struct {
 	PrintResult bool
 	// Interactive reads Kash entries from stdin after preloaded sources run.
 	Interactive      bool
+	Login            bool
 	Color            string
 	DiagnosticFormat string
 	Grants           []eval.Grant

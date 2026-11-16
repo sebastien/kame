@@ -220,6 +220,14 @@ func (s *replSession) cancel(j *replJob) {
 	s.run.Session.Program.DrainCancellations()
 }
 
+func (s *replSession) cancelJobs() {
+	for _, j := range slices.Clone(s.jobs) {
+		if j.state != jobDone {
+			s.cancel(j)
+		}
+	}
+}
+
 // handleStops suspends the jobs whose graphs the host reports stopped.
 func (s *replSession) handleStops() {
 	p := s.run.Session.Program
@@ -310,6 +318,7 @@ func (s *replSession) foreground(j *replJob) (int, bool) {
 		} else if signal != 0 {
 			h := j.handle
 			j.handle = nil
+			s.cancelJobs()
 			return run.endForSignal(h, signal, false)
 		}
 		if s.jobControl && s.takeStop() {
@@ -325,6 +334,7 @@ func (s *replSession) foreground(j *replJob) (int, bool) {
 		if signal := nativeOutputSignal(); signal != 0 {
 			h := j.handle
 			j.handle = nil
+			s.cancelJobs()
 			return run.endForSignal(h, signal, true)
 		}
 		if code := nativeOutputFailure(); code != "" && (j.handle == nil || j.handle.Node.Diagnostic.Code == "") {
@@ -589,11 +599,17 @@ type replInput struct {
 	err   error
 }
 
+type replSignalError int
+
+func (e replSignalError) Error() string { return "shell interrupted by signal" }
+
 // read waits for the next entry, running background jobs meanwhile. The
 // editor runs on its own goroutine and reaches session state only through
 // contextRequests, so the program stays owned by this one.
 func (s *replSession) read(reader lineReader, prompt string) (replEntry, error) {
 	result := make(chan replInput, 1)
+	signals := time.NewTicker(25 * time.Millisecond)
+	defer signals.Stop()
 	for _, o := range s.outputs {
 		o.editing = true
 		defer o.stopEditing()
@@ -603,6 +619,13 @@ func (s *replSession) read(reader lineReader, prompt string) (replEntry, error) 
 		result <- replInput{entry, err}
 	}()
 	for {
+		if signal := posix.TakeSignal(); signal != 0 {
+			if signal == int(syscall.SIGINT) {
+				posix.ResetSignals()
+			} else {
+				return replEntry{}, replSignalError(signal)
+			}
+		}
 		select {
 		case r := <-result:
 			return r.entry, r.err
@@ -620,6 +643,7 @@ func (s *replSession) read(reader lineReader, prompt string) (replEntry, error) 
 			return r.entry, r.err
 		case reply := <-s.contextRequests:
 			reply <- s.completion()
+		case <-signals.C:
 		}
 	}
 }

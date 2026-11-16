@@ -138,6 +138,10 @@ func parseRun(args []string, discover bool) Invocation {
 			inv.Interactive = true
 			continue
 		}
+		if !discover && arg == "--login" {
+			inv.Login = true
+			continue
+		}
 		if assignmentOperand(&inv, arg) {
 			if inv.Error.Code != "" {
 				return inv
@@ -183,6 +187,10 @@ func parseRun(args []string, discover bool) Invocation {
 		if !runEntry(&inv, arg) {
 			return inv
 		}
+	}
+	if inv.Login && language != "kash" {
+		inv.fail("OPT_CONFLICT", "--login requires --lang kash")
+		return inv
 	}
 	if inv.Interactive {
 		// Entries are read after any preloaded sources, from stdin.

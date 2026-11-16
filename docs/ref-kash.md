@@ -31,6 +31,8 @@ kash ./publish.kash preview          # file, then program arguments
 kash -c 'echo $args' one two         # inline text
 kash                                  # REPL on a terminal; piped stdin is read as source
 kash -i ./lib.kash                    # load sources, then go interactive
+kash --login                          # login profile, then REPL on a terminal
+kash -lc 'echo hello'                  # login profile, then noninteractive command
 kame do run ./publish.kash -- preview
 kame do run --lang kash -c 'echo hello'
 kame do parse --lang kash ./publish.kash
@@ -110,7 +112,8 @@ build >> ./build.log 2>&1
 - Stage setup precedes the executable: `:cwd`, `:timeout` (seconds), `:env RECORD`,
   `:KEY VALUE` env overrides, `:accept-exit [codes]`.
 - Every reached command head is resolved and tracked as a tool dependency, using
-  the startup `PATH` and `--tool NAME=PATH`. Missing tools report `TOOL_MISSING`.
+  the startup `PATH` and `--tool NAME=PATH` in scripts and recipes; interactive
+  and login sessions use the current session `PATH`. Missing tools report `TOOL_MISSING`.
 - `(capture! POLICY … CMD ARGS…)` returns a Result with exact `stdout`/`stderr`
   bytes; `(run! …)` and `(pipe! …)` build graphs from expressions.
 - A trailing `&` runs a graph asynchronously; the owning scope joins it. Bind a
@@ -249,7 +252,8 @@ All entries share one engine, top-level scope, capability policy and cleanup sco
 
 ### Session commands
 
-These three single-line entries are shell commands, not Kash statements:
+These single-line entries change shell session state, rather than running
+external processes:
 
 | Entry | Effect |
 | --- | --- |
@@ -262,6 +266,48 @@ from the session environment as it was before the entry (missing names expand
 to empty). With default grants, read/write grants follow `cd`; explicit grants
 never move.
 
+In interactive and login sessions, executable lookup and `tool`/`x/NAME` use
+the current session `PATH`. Exporting or unsetting PATH affects subsequent
+commands, including aliases, pipelines and captures, without restarting running
+jobs. Relative and empty PATH entries search relative to the lookup directory.
+`--tool` overrides still win, and explicit run grants do not broaden.
+Stage-local `:env` records do not change session lookup; ordinary batch scripts
+and recipes retain startup-PATH lookup. Already evaluated lazy values do not
+refresh after an environment change.
+
+### Aliases
+
+Put shortcuts in `~/.config/kash/init.kash`, then invoke their bare names:
+
+```kash
+alias ll = ["ls" "-lah"]
+ll ./src | head -n 10
+alias ll                         # show one
+alias                            # list all, sorted by name
+unalias ll
+```
+
+The nonempty literal string list is an argv prefix. Caller arguments append
+without splitting, globbing, interpolation or reparsing. Expansion happens once,
+so `alias ls = ["ls" "-lah"]` invokes the real `ls`, not itself recursively.
+Computed command heads and explicit executable paths bypass aliases.
+Ordinary value bindings are not aliases.
+
+Redefinition replaces an alias; invalid declarations leave it unchanged.
+Reserved keywords and session-command names cannot be aliases. Whole-line
+aliases of `cd`, `export` and `unset` work, but those commands still cannot
+appear in pipelines or functions.
+
+Alias declarations and removals are whole top-level session entries. They can
+use multiline lists and are understood by `do parse` and `do fmt`:
+
+```sh
+kame do fmt --lang kash -i ~/.config/kash/init.kash
+```
+
+Batch execution rejects session commands with `FEATURE_UNSUP` before running
+any statements; formatting a startup file does not execute it.
+
 ### Terminal, interrupts and exit
 
 - Foreground statements get the terminal on every stream they would otherwise
@@ -273,6 +319,8 @@ never move.
   ends the session with 130, skipping cleanup.
 - Ctrl-D on an empty line or `exit N` ends the session: owned work is joined
   and cleanup runs. The exit status is the last entry's status or `N`.
+- SIGHUP and SIGTERM cancel/reap owned jobs and run cleanup, including when
+  waiting at the prompt; exit status is `128 + signal`.
 - History keeps 1000 entries in `$KASH_HISTORY`, else
   `$XDG_STATE_HOME/kash/history`, else `~/.local/state/kash/history`;
   multi-line entries are stored with backslash-continued lines.
@@ -298,6 +346,26 @@ ends the session and terminates them.
 
 ### Startup file and prompt
 
+Standalone `kash -l`/`--login`, or invocation with argv[0] `-kash`, loads
+`$KASH_PROFILE`, else `$XDG_CONFIG_HOME/kash/profile.kash`, else
+`~/.config/kash/profile.kash`, before supplied files or commands. Empty
+`KASH_PROFILE` disables the profile. Interactive initialization follows only
+in interactive sessions; `kash -lc COMMAND` loads the profile but not init.
+Ordinary `kash -c COMMAND` loads neither, including SSH remote-command use.
+Use `--lang`, not standalone `kash -l`, for language selection; the unified
+runner's `-l` still means language.
+
+Kash profiles contain Kash session entries, not POSIX shell code; `/etc/profile`
+and `~/.profile` are not read. Installing the executable, registering it in
+`/etc/shells`, and selecting it with `chsh` are separate user/admin actions.
+
+To switch, first test `/absolute/path/to/kash --login -i` in another terminal.
+Have an administrator register that exact stable path in `/etc/shells`, then
+run `chsh -s /absolute/path/to/kash`. The installed command must be named `kash`,
+even if it is a symlink to `kame`. Keep your existing shell open for recovery
+and verify your SSH/remote-tool workflows before logging out: remote command
+strings are Kash, not POSIX shell source.
+
 `$KASH_INIT`, else `$XDG_CONFIG_HOME/kash/init.kash`, else
 `~/.config/kash/init.kash`, runs as entries before the first prompt (empty
 `KASH_INIT` disables it). A `kash-prompt` function receives
@@ -314,7 +382,7 @@ ends the session and terminates them.
   else `~/.inputrc`, else `/etc/inputrc`, with application name `kash`.
 - Tab with only blanks before the cursor inserts a tab, for block bodies.
 - Elsewhere Tab completes into a grouped, described menu: `$` bindings,
-  functions after `(`, session commands, keywords and `PATH` executables at
+  functions after `(`, aliases, session commands, keywords and `PATH` executables at
   command position, directories after `cd`, and paths otherwise.
 - Entries are highlighted by lexical class, and literal command words that
   resolve to nothing are marked as unknown. `NO_COLOR` or `TERM=dumb`

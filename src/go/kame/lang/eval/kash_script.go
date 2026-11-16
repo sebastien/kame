@@ -85,6 +85,12 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 		parsed.Free()
 		return r
 	}
+	for i := range parsed.Items {
+		if parsed.Items[i].Kind == script.SessionCommand {
+			parsed.Free()
+			return failure(c.Run, "FEATURE_UNSUP", span, "alias and unalias require an interactive session entry or startup file")
+		}
+	}
 	f := mem.Alloc[Function](p.Alloc)
 	f.Kind, f.Owner, f.KashScript, f.Scope = FunctionInvocation, p, parsed, c.Scope
 	// Only the global scope has no captured invocation-local bindings. Its

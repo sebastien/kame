@@ -223,16 +223,19 @@ func (e *editorReader) commandKnown(text string, token script.KashToken) bool {
 		return true
 	}
 	ctx := e.context()
+	if _, ok := ctx.Aliases[word]; ok {
+		return true
+	}
 	if strings.Contains(word, "/") {
 		_, err := os.Stat(completionDirectory(word, ctx))
 		return err == nil
 	}
 	if e.known == nil {
 		e.known = map[string]bool{}
-		for _, directory := range filepath.SplitList(ctx.Path) {
+		for _, directory := range commandPathDirectories(ctx) {
 			if entries, err := os.ReadDir(directory); err == nil && directory != "" {
 				for _, entry := range entries {
-					e.known[entry.Name()] = true
+					e.known[entry.Name()] = executableFile(filepath.Join(directory, entry.Name()))
 				}
 			}
 		}

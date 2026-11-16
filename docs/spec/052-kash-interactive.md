@@ -6,7 +6,8 @@ Kash can run as a read-eval-print loop over one live execution session. This
 refines `009-cli.md`, `017-kash.md`, and `048-kash-practical-scripting.md` for
 interactive sessions only. Batch execution is unchanged.
 
-This is a REPL, not a login shell. It lends the terminal to foreground
+Kash supports interactive and login-shell invocation, without POSIX shell
+language compatibility. It lends the terminal to foreground
 commands, keeps a session working directory and child environment, loads a
 startup file, completes words, lets a Kash function draw the prompt, and
 manages entries as jobs on a terminal (see Job control).
@@ -16,6 +17,8 @@ manages entries as jobs on a terminal (see Job control).
 ```text
 kash                          # stdin is a terminal
 kash -i [FILE.kash...] [-- ARG...]
+kash --login                  # login profile, then REPL on a terminal
+kash -lc 'echo hello'         # login profile, then a noninteractive command
 kame do run -i [OPTIONS] [FILE.kash...] [-- ARG...]
 ```
 
@@ -26,6 +29,14 @@ with no source starts the REPL when stdin is a terminal; with piped stdin it
 still reads stdin as source. `--interactive` cannot be combined with `-` (stdin
 as source) and requires the Kash language. Capability, timeout, directory, and
 argument options apply as for any Kash session. `--timeout` applies per entry.
+
+An executable invoked as `-kash` is a login shell. Standalone `kash` accepts
+`-l`/`--login`; its `-l` no longer selects a language (use `--lang`).
+`-lc`, `-ic`, `-il`, and `-li` combine the corresponding flags. The unified
+runner accepts `--login` with `--lang kash`; its `-l` still selects a language.
+Login does not itself force interactive mode. Ordinary `kash -c TEXT` loads
+neither the login profile nor interactive initialization, including when used
+by SSH for a remote command.
 
 With a terminal on stdin, entries are edited with a line editor (see Line
 editing) behind a prompt, by default `kash DIR> ` naming the session directory
@@ -229,6 +240,20 @@ environment and the Kash `env` namespace are unchanged; reads keep their
 capability rules. When the session uses the default capability policy, its
 read and write grants move with `cd`; explicit grants never move or broaden.
 
+Interactive sessions and login-shell invocations resolve executable names and
+`tool`/`x/NAME` lookups against the current session `PATH`, not the original
+invocation `PATH`. `export PATH=...`, `unset PATH`, and `cd` affect later lookups,
+including aliases, captures, and pipelines. Relative PATH directories resolve
+against the lookup's working directory; empty entries (including an empty or
+unset PATH) search that directory. `--tool NAME=PATH` overrides still take
+precedence, and run grants still authorize the selected executable.
+
+Resolved absolute paths are tracked as tool dependencies. A PATH change does
+not invalidate old tool nodes, cancel running jobs, or replay earlier effects.
+Already evaluated lazy definitions keep their values. Stage-local `:env PATH`
+overrides affect the child environment, not session lookup. Ordinary batch
+scripts and recipes retain startup-PATH resolution.
+
 ## Termination and interrupts
 
 - End of input (Ctrl-D on an empty line) ends the session. Outstanding owned
@@ -243,7 +268,9 @@ read and write grants move with `cd`; explicit grants never move or broaden.
   is killed and the session ends with status 130 without finalization.
 - An interrupt at the prompt discards the whole entry being edited, closing
   any completion menu, and sets the session status to 130.
-- `SIGTERM` keeps the ordinary session cancellation contract.
+- `SIGTERM` and `SIGHUP` keep the ordinary session cancellation contract,
+  including while waiting at the prompt: cancel/reap owned work and finalize
+  before returning `128 + signal`.
 
 ## History
 
@@ -256,6 +283,26 @@ opened disables persistence, not the session. Startup-file entries and prompt
 calls are not recorded.
 
 ## Startup file
+
+### Login profile
+
+Login sessions load `$KASH_PROFILE`, otherwise
+`$XDG_CONFIG_HOME/kash/profile.kash`, otherwise
+`~/.config/kash/profile.kash`, before listed sources or `-c` commands.
+An empty `KASH_PROFILE` disables loading. Missing default files are skipped;
+unreadable explicit files are reported. Profiles use the same entry, failure,
+source-location, and session-command contracts as interactive initialization.
+`exit` in a profile ends the invocation.
+
+Interactive login sessions then load the interactive startup file after any
+listed sources. Noninteractive login sessions do not load that file.
+Kash never evaluates `/etc/profile`, `~/.profile`, or other shells' startup files.
+Registering an installed executable in `/etc/shells` and selecting it with
+`chsh` are administrator/user operations, not actions performed by Kash.
+
+This does not add POSIX shell language compatibility.
+
+### Interactive initialization
 
 Every interactive session, with or without a terminal, loads a startup file
 after listed sources and before the first entry. The file is `$KASH_INIT`
@@ -272,6 +319,61 @@ otherwise `~/.config/kash/init.kash`, read from the invocation environment.
   of the file still run. `exit` ends the session.
 - Diagnostics name the file path and locate positions in the file, not in the
   entry. Startup entries do not consume `<kash:N>` numbers.
+
+## Command aliases
+
+Aliases are session commands, available as whole entries in interactive input,
+interactive initialization, and login profiles:
+
+```kash
+alias ll = ["ls" "-lah"]
+ll ./src
+ll ./src | head -n 10
+alias ll
+alias
+unalias ll
+```
+
+`alias NAME = LIST` defines or replaces an argv prefix. LIST must be a nonempty,
+closed literal list of strings, without interpolation or NUL bytes; its first
+string must be nonempty. Declaration never executes code. Names contain ASCII
+letters, digits, `_`, `-`, or `.`, cannot start with `-`, and cannot replace
+reserved keywords or session commands. Invalid declarations leave aliases
+unchanged. Ordinary value bindings do not define command aliases.
+
+`alias` lists declarations sorted by name; `alias NAME` shows one.
+`unalias NAME...` removes named aliases, validating all names before mutation.
+Unknown names report an error. Aliases appear in command completion and are
+recognized by highlighting.
+
+A literal command head matching an alias expands once into that prefix,
+followed by the caller's typed arguments. Prefix strings are never reparsed,
+split, interpolated, or globbed. Pipelines, captures, command lists, redirections,
+and capability checks retain their ordinary behavior. Alias expansion does not
+recurse: `alias ls = ["ls" "-lah"]` invokes the executable `ls` once. Computed
+command heads (`$command`, `$...argv`) and explicit paths bypass alias lookup.
+Aliases take precedence over executable lookup, not reserved syntax.
+
+Whole-line aliases of `cd`, `export`, and `unset` use those session commands.
+Their existing whole-line restriction remains: they do not become commands
+usable in pipelines, functions, or compound entries. Alias declarations are
+not executable batch statements; ordinary scripts and recipes are unchanged.
+The Kash parser represents them as `session-command` items with a `text` header
+and an optional typed RHS `expression`. Parsing and formatting never execute
+them. Batch compilation (including constructed `kash` scripts) rejects these
+items with `FEATURE_UNSUP` before any statement runs.
+
+The formatter preserves typed string arguments, canonicalizes declaration
+spacing and multiline lists, and formats surrounding Kash normally:
+
+```sh
+kame do fmt --lang kash -i ~/.config/kash/init.kash
+kame do fmt --lang kash -i ~/.config/kash/profile.kash
+```
+
+Formatting is idempotent; malformed declarations fail without overwriting
+the source. Alias declarations/removals are whole top-level entries, not
+function bodies, control-block statements, pipelines, or command lists.
 
 ## Prompt
 

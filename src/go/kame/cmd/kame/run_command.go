@@ -208,7 +208,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		p.Eval.SetDefinitionEffectSink(writeExprEffect, &output)
 	}
 	var status int
-	if inv.Interactive {
+	if inv.Interactive || inv.Login {
 		run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: time.Now().UnixNano()}
 		status = runInteractive(&run, in)
 		run.Last.Free(mem.System)
