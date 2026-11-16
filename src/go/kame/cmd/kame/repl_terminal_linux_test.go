@@ -53,6 +53,13 @@ type terminalSession struct {
 
 func startTerminalSession(t *testing.T, binary, directory string, env []string, args ...string) *terminalSession {
 	t.Helper()
+	return startTerminalSessionAnswering(t, func() string { return "\x1b[1;1R" }, binary, directory, env, args...)
+}
+
+// startTerminalSessionAnswering starts a session whose cursor-position
+// queries are answered with answer(), which may include typed keys.
+func startTerminalSessionAnswering(t *testing.T, answer func() string, binary, directory string, env []string, args ...string) *terminalSession {
+	t.Helper()
 	controller, device := openTestTerminal(t)
 	command := exec.Command(binary, args...)
 	historyDir := filepath.Join(directory, ".kash-history")
@@ -76,7 +83,7 @@ func startTerminalSession(t *testing.T, binary, directory string, env []string, 
 			s.mu.Unlock()
 			// Answer cursor-position queries as a terminal emulator would.
 			if bytes.Contains(buffer[:n], []byte("\x1b[6n")) {
-				controller.WriteString("\x1b[1;1R")
+				controller.WriteString(answer())
 			}
 			if err != nil {
 				return
@@ -120,13 +127,16 @@ func (s *terminalSession) send(text string) {
 }
 
 // waitReading waits until the output ends with the editor's prompt redraw,
-// which happens only once it reads keys in raw mode.
+// which happens only once it reads keys in raw mode. The redraw of a line
+// just accepted also ends with the cursor shown, followed by the newline that
+// leaves it; keys sent then reach the cooked terminal, where a typed-ahead
+// Ctrl-D becomes a NUL byte instead of end of input.
 func (s *terminalSession) waitReading() {
 	s.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		raw := s.raw()
-		if i := strings.LastIndex(raw, "\x1b[?25h"); i >= 0 && strings.TrimSpace(terminalControls.ReplaceAllString(raw[i:], "")) == "" {
+		if i := strings.LastIndex(raw, "\x1b[?25h"); i >= 0 && !strings.ContainsAny(raw[i:], "\r\n") && strings.TrimSpace(terminalControls.ReplaceAllString(raw[i:], "")) == "" {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -277,6 +287,23 @@ func TestNativeInteractiveKashResetsInputModes(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	if status := s.finish(); status != 0 {
+		t.Fatalf("status %d: %q", status, s.text())
+	}
+}
+
+// Keys typed while the editor probes the cursor position are kept even when
+// they reach it in the same read as the terminal's answer.
+func TestNativeInteractiveKashKeysTypedDuringCursorProbe(t *testing.T) {
+	directory := t.TempDir()
+	var once sync.Once
+	answer := func() string {
+		typed := ""
+		once.Do(func() { typed = "sh -c 'echo early-$((40+2))'\r" })
+		return typed + "\x1b[1;1R"
+	}
+	s := startTerminalSessionAnswering(t, answer, nativeCLIBinary(t), directory, []string{"TERM=xterm-256color"}, "do", "run", "-i")
+	s.waitFor("early-42")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("status %d: %q", status, s.text())
 	}

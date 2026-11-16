@@ -33,6 +33,7 @@ func (p *Program) kashLet(scope *Scope, e *expr.Expr, c *Context) Result {
 	// Reacquire the slot before transferring its immutable value.
 	b = scope.lookup(e.Text)
 	b.Value, b.Initialized = r.Value.Clone(scope.Alloc), true
+	b.Value.Share(scope.Alloc)
 	r.Value.Free(c.Run)
 	return Result{}
 }

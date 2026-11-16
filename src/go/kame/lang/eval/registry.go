@@ -43,6 +43,20 @@ type Operation struct {
 	DeferredReplacement bool
 	// Preflight validates authored constraints without demanding operands.
 	Preflight func(*Context, []*expr.Expr) Result
+	// versionSignature memoizes the observed version digest; Version is
+	// fixed once registered.
+	versionSignature core.Signature
+	versionSigned    bool
+}
+
+// VersionSignature is the signature recorded when an evaluation observes the
+// operation.
+func (o *Operation) VersionSignature() core.Signature {
+	if !o.versionSigned {
+		o.versionSignature = core.ValueSignature(core.Value{Kind: core.String, Text: o.Version})
+		o.versionSigned = true
+	}
+	return o.versionSignature
 }
 
 type Registry struct {

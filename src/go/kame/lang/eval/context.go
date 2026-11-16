@@ -673,8 +673,14 @@ func (c *Context) accepts(callable core.Value, count int) bool {
 }
 
 func invocationPath(a mem.Allocator, parent string, start int, end int) string {
-
-	return owned(a, parent+"/"+strconv.FormatInt(int64(start), 10)+":"+strconv.FormatInt(int64(end), 10))
+	// Room for "/", ":" and two int64 values, so appends never reallocate.
+	b := mem.AllocSlice[byte](a, 0, len(parent)+42)
+	b = append(append(b, parent...), '/')
+	b = append(strconv.AppendInt(b, int64(start), 10), ':')
+	b = strconv.AppendInt(b, int64(end), 10)
+	text := string(b)
+	mem.FreeSlice(a, b)
+	return text
 }
 
 // FreeCallable releases a temporary function after an operation has finished

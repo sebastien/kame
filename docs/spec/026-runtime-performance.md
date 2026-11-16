@@ -42,6 +42,15 @@ poll loop. Expressions that need a host request return the existing
 unchanged. Tests cover literals, local definitions, pure operations, lazy
 host-backed values, and denied effects.
 
+## File content signatures
+
+Native hosts compute file and executable content digests with the platform
+SHA-256, byte-identical to the portable `core.Digest`. A process-wide memo
+reuses a digest while the file's device, inode, size, modification time and
+change time are unchanged. Files changed within two seconds before hashing are
+not memoized, so a same-tick rewrite cannot keep identical metadata and a stale
+digest. Signatures remain content signatures; the memo only avoids re-reading.
+
 ## Measurements
 
 The acceptance suite records tracker total allocations for ownership-sensitive

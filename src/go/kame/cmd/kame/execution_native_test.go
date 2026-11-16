@@ -201,6 +201,24 @@ func TestNativeKashSymlinkRunsInterpreterSourceAndArguments(t *testing.T) {
 	}
 }
 
+// Bound lists and records share their backing between lookups; moving a
+// record's fields into a with scope must not change the binding.
+func TestNativeKashSharedBindingsSurviveScopedWith(t *testing.T) {
+	binary := nativeCLIBinary(t)
+	directory := t.TempDir()
+	interpreter := filepath.Join(directory, "kash")
+	if err := os.Symlink(binary, interpreter); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "script"), "r = [a: [\"x\" \"y\"] b: \"z\"]\necho (with r (count a))\necho (with r (count a)) (get \"b\" r) (count (get \"a\" r))\n")
+	command := exec.Command(interpreter, "script")
+	command.Dir = directory
+	output, err := command.CombinedOutput()
+	if err != nil || string(output) != "2\n2 z 2\n" {
+		t.Fatalf("status=%v output=%q", err, output)
+	}
+}
+
 func fileExists(name string) bool {
 	_, err := os.Stat(name)
 	return err == nil

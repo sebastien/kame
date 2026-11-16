@@ -323,6 +323,9 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		handoff = lent
 		run.handoff = lent
 	}
+	if r.Passthrough {
+		attachPassthrough(commands, out, errout)
+	}
 	// Open every input and sink before truncating any existing output or
 	// launching a process. A malformed later branch must leave prior sinks intact.
 	for _, f := range truncateFiles {

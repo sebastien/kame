@@ -292,7 +292,7 @@ func (e *Engine) Subscribe(n *Node) *Subscription {
 	e.interest(n, 1)
 	request(n)
 	if n.Current {
-		s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.Clone(e.Alloc), Revision: n.Revision})
+		s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.CloneOwned(e.Alloc), Revision: n.Revision})
 	}
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
 		s.terminal = terminal(n)
@@ -309,7 +309,7 @@ func (e *Engine) emit(n *Node, event Event) {
 	for i := range n.Subs {
 		s := n.Subs[i]
 		if event.HasValue() {
-			s.pushValue(Event{Kind: event.Kind, NodeID: event.NodeID, DependencyID: event.DependencyID, Order: event.Order, Value: event.Value.Clone(e.Alloc), Revision: event.Revision})
+			s.pushValue(Event{Kind: event.Kind, NodeID: event.NodeID, DependencyID: event.DependencyID, Order: event.Order, Value: event.Value.CloneOwned(e.Alloc), Revision: event.Revision})
 		} else if event.Terminal() {
 			s.terminal = event
 		} else {
@@ -335,6 +335,7 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 		n.Latest.Free(e.Alloc)
 	}
 	n.Latest, n.Current = value.Clone(e.Alloc), true
+	n.Latest.Share(e.Alloc)
 	n.Signature = signature
 	value.Free(e.Alloc)
 	n.Revision++

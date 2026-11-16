@@ -44,6 +44,17 @@ implicit merge edges or composable shared ports. Separate terminal stages may
 present output concurrently without creating a downstream channel. A selected
 branch never rejoins implicitly.
 
+When nothing observes presentation output, a direct non-interactive session
+lets foreground statement graphs inherit its stdout and stderr descriptors
+instead of relaying them through the host. Unobserved means: not JSON output,
+no live dashboard, the CLI writing to its own descriptors 1 and 2, no recipe
+stream (logs, cache retention), and no finalizer output deadline. The eligible
+graphs are exactly those eligible for the interactive terminal handoff
+(`051-kash-session-authority.md`); captures, background work, cleanup and
+record-fed graphs keep their pipes. Bytes, ordering between sequential
+statements, and exit diagnostics are unchanged; children see the real
+descriptor, as under a POSIX shell.
+
 The whole graph owns backpressure, cancellation, and completion. Streams must
 not be secretly captured, materialized, spooled, or reparsed as code. Stages are
 long-running nodes; only an explicit `each` operation starts executables per item.

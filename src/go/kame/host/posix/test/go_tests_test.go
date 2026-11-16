@@ -11,6 +11,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("AtomicWriteIgnoresPredictableStagingSymlink", func(t *testing.T) { TestAtomicWriteIgnoresPredictableStagingSymlink(legacy.Wrap(t)) })
 	t.Run("EnvironmentNamePlatformPolicy", func(t *testing.T) { TestEnvironmentNamePlatformPolicy(legacy.Wrap(t)) })
 	t.Run("EnvironmentPipelineOverridesLinux", func(t *testing.T) { TestEnvironmentPipelineOverridesLinux(legacy.Wrap(t)) })
+	t.Run("FileSignatureDoesNotReuseRecentlyChangedContent", func(t *testing.T) { TestFileSignatureDoesNotReuseRecentlyChangedContent(legacy.Wrap(t)) })
 	t.Run("FileSignatureStreamsExactContentWithoutTrackedCopies", func(t *testing.T) { TestFileSignatureStreamsExactContentWithoutTrackedCopies(legacy.Wrap(t)) })
 	t.Run("PosixHostMapsFileResourceURIs", func(t *testing.T) { TestPosixHostMapsFileResourceURIs(legacy.Wrap(t)) })
 	t.Run("PosixHostRejectsInvalidFileResourceURIs", func(t *testing.T) { TestPosixHostRejectsInvalidFileResourceURIs(legacy.Wrap(t)) })

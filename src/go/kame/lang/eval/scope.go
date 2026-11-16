@@ -72,7 +72,10 @@ func (s *Scope) setValue(name string, value core.Value) {
 	// Raw setValue performs no strand check. Form stores that can target an
 	// ancestor must go through trySetValue; fresh-child stores in callValues
 	// use this directly because a fresh child cannot be an ancestor.
-	s.appendBinding(binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: value.Clone(s.Alloc)})
+	stored := value.Clone(s.Alloc)
+	// Bound values are read by every lookup; share their backing once here.
+	stored.Share(s.Alloc)
+	s.appendBinding(binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: stored})
 }
 
 func (s *Scope) appendBinding(value binding) {

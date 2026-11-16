@@ -44,6 +44,19 @@ Completed work and historical audit results are not retained here.
 - [ ] Decide the initial bootstrap trust model before changing it (explicitly
   deferred).
 
+## Kash shell options
+
+- [ ] Add completion and vi/emacs editing-mode switches through the existing
+  [option system](docs/spec/054-kash-options.md). Define editing-mode precedence
+  against `.inputrc` and preserve existing behavior by default.
+
+## Agent memory
+
+- [ ] Retry the native-CLI testing guidance consolidation using `node`, not `id`,
+  in the `revise` operation. Preview with `memo agent learn --dry` before
+  publishing; the failed dry run left existing guidance unchanged. Supporting
+  observation: `identity=="kame:observations" item=k-7e3127c193505053ed693b3928a4bc9d619c8e4091a6cf3da19d394dd4d4401e`.
+
 ## Performance research
 
 Measure before optimizing; these are profiling tasks, not established defects.

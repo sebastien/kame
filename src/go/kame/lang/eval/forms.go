@@ -282,6 +282,8 @@ func (p *Program) scopedWith(scope *Scope, values []*expr.Expr, context *Context
 	}
 	child := newScope(context.Run, scope)
 	defer child.Free()
+	// Fields are moved out below; a shared record keeps its owners' copy.
+	r.Value.Unshare(context.Run)
 	for i := range r.Value.Record {
 		key := r.Value.Record[i].Key
 		if context.ReserveEnv && key == "env" {

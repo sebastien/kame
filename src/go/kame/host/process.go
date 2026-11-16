@@ -86,6 +86,10 @@ type ProcessRequest struct {
 	// TerminalBackground attaches the terminal without taking its foreground,
 	// for a background job (052); Resume with foreground gives it later.
 	TerminalBackground bool
+	// Passthrough gives unredirected stdout/stderr stages the invocation's own
+	// descriptors instead of presentation pipes, when no presentation observer
+	// needs the bytes. It never applies to a stage that took the terminal.
+	Passthrough bool
 }
 
 // ExecutorDescriptor binds a stable remote executor name to its implementation

@@ -340,6 +340,9 @@ func (p *Program) drainRequests() {
 			processRequest.TerminalRequired = host.PayloadBool(request.Payload, "terminalRequired")
 			processRequest.ForegroundAuto = host.PayloadBool(request.Payload, "foregroundAuto")
 			processRequest.TerminalBackground = processRequest.Terminal && (host.PayloadBool(request.Payload, "terminalBackground") || p.BackgroundNode != nil && p.BackgroundNode(request.NodeID))
+			// Recipe streams feed logs and caches, and finalizer output is
+			// deadline-bounded; both keep the relay.
+			processRequest.Passthrough = host.PayloadBool(request.Payload, "passthrough") && p.streamInstance(request.NodeID) == nil && p.Eval.FinalizerDeadline(request.NodeID) == 0
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
 				validDescriptor = false

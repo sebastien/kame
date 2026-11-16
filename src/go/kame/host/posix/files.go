@@ -1,6 +1,7 @@
 package posix
 
 import (
+	"crypto/sha256"
 	"errors"
 	"io"
 	"kame/core"
@@ -142,20 +143,28 @@ func (h *Host) FileSignature(name string) core.Signature {
 		return core.Signature{}
 	}
 	defer file.Close()
-	var buffer [65536]byte
-	digest := core.NewDigest()
-	for {
-		n, readErr := file.Read(buffer[:])
-		digest.Write(buffer[:n])
-		if readErr == io.EOF {
-			result := core.Signature{Mode: core.SignatureContent}
-			digest.Sum(result.Digest[:])
-			return result
-		}
-		if readErr != nil || n == 0 {
-			return core.Signature{}
+	identity, known := openFileIdentity(file)
+	if known {
+		if signature, ok := contentDigests.lookup(path.Path, identity); ok {
+			return signature
 		}
 	}
+	started := time.Now()
+	// Native hashing uses the platform SHA-256; it is byte-identical to the
+	// portable core.Digest that wasm and the engine use for values.
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return core.Signature{}
+	}
+	result := core.Signature{Mode: core.SignatureContent}
+	digest.Sum(result.Digest[:0])
+	if known {
+		after, stable := openFileIdentity(file)
+		if stable && after == identity {
+			contentDigests.store(path.Path, identity, result, started)
+		}
+	}
+	return result
 }
 
 func (h *Host) Readlink(a mem.Allocator, name string) host.LinkResult {

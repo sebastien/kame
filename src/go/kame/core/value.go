@@ -91,7 +91,14 @@ type Value struct {
 	ModuleOwner     any
 	ModuleSignature *Signature
 	Resource        ResourceKey
+	// Shared counts the owners of an immutable list or record backing. Clone
+	// adds an owner in O(1); Free releases the elements with the last owner.
+	// Shared values never contain callables, which need per-owner wrappers.
+	Shared *SharedStorage
 }
+
+// SharedStorage is the owner count of one shared list or record backing.
+type SharedStorage struct{ References int }
 
 func NewString(a mem.Allocator, text string) Value {
 	if len(text) == 0 {
@@ -137,6 +144,10 @@ func NewPattern(a mem.Allocator, text string) Value {
 }
 
 func (v *Value) Clone(a mem.Allocator) Value {
+	if v.Shared != nil {
+		v.Shared.References++
+		return *v
+	}
 	copy := *v
 	switch v.Kind {
 	case String:
@@ -157,7 +168,55 @@ func (v *Value) Clone(a mem.Allocator) Value {
 	return copy
 }
 
+// Share makes an owned list or record backing shareable, so later clones are
+// O(1). Values containing callables stay private. The backing is clipped so an
+// append by any owner reallocates rather than writing past a shared length.
+func (v *Value) Share(a mem.Allocator) {
+	if v.Shared != nil || (v.Kind != List && v.Kind != Record) || v.HasCallable() {
+		return
+	}
+	v.List, v.Record = slices.Clip(v.List), slices.Clip(v.Record)
+	v.Shared = mem.Alloc[SharedStorage](a)
+	v.Shared.References = 1
+}
+
+// CloneOwned returns a deep copy with no shared backing at any depth, for
+// consumers outside the evaluator that own and may mutate what they receive.
+func (v *Value) CloneOwned(a mem.Allocator) Value {
+	switch v.Kind {
+	case List:
+		list := make([]Value, len(v.List))
+		for i := range v.List {
+			list[i] = v.List[i].CloneOwned(a)
+		}
+		return Value{Kind: List, List: list}
+	case Record:
+		record := make([]RecordField, len(v.Record))
+		for i := range v.Record {
+			record[i].Key = NewString(a, v.Record[i].Key).Text
+			record[i].Value = v.Record[i].Value.CloneOwned(a)
+		}
+		return Value{Kind: Record, Record: record}
+	}
+	return v.Clone(a)
+}
+
+// Unshare gives v a private backing that its owner may mutate in place.
+func (v *Value) Unshare(a mem.Allocator) {
+	if v.Shared == nil {
+		return
+	}
+	private := *v
+	private.Shared = nil
+	private = private.Clone(a)
+	v.Free(a)
+	*v = private
+}
+
 func (v *Value) HasCallable() bool {
+	if v.Shared != nil {
+		return false
+	}
 	if v.Kind == Callable {
 		return true
 	}
@@ -179,6 +238,9 @@ func (v *Value) HasCallable() bool {
 }
 
 func (v *Value) HasTransientCallable() bool {
+	if v.Shared != nil {
+		return false
+	}
 	if v.Kind == Callable {
 		return v.CallableOwner == nil
 	}
@@ -196,6 +258,14 @@ func (v *Value) HasTransientCallable() bool {
 }
 
 func (v *Value) Free(a mem.Allocator) {
+	if v.Shared != nil {
+		v.Shared.References--
+		if v.Shared.References > 0 {
+			*v = Value{}
+			return
+		}
+		mem.Free(a, v.Shared)
+	}
 	switch v.Kind {
 	case String:
 		mem.FreeString(a, v.Text)

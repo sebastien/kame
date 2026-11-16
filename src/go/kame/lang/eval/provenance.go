@@ -22,6 +22,10 @@ type SourcePart struct {
 	Includes  []diagnostic.Frame
 	Signature core.Signature // Original bytes of a file-backed source.
 	Module    bool           // Module spans are outside the combined source.
+	// observedCwd and observedName memoize the canonical file key recorded by
+	// observeSourcePart, which runs on every call of a source-defined function.
+	observedCwd  string
+	observedName string
 }
 
 type Location struct {
@@ -50,7 +54,7 @@ func (c *Context) observeSourcePart(i int) {
 	if i <= 0 || i > len(c.Program.SourceParts) {
 		return
 	}
-	part := c.Program.SourceParts[i-1]
+	part := &c.Program.SourceParts[i-1]
 	if part.Signature.Mode != core.SignatureContent {
 		return
 	}
@@ -58,14 +62,17 @@ func (c *Context) observeSourcePart(i int) {
 	if !part.Module && c.Phase != EvaluatePhase {
 		return
 	}
-	name := part.Name
-	constructed := part.Directory != ""
-	if part.Directory != "" {
-		name = path.Join(part.Directory, path.Base(part.Name))
+	if part.observedName == "" || part.observedCwd != c.Cwd {
+		name := part.Name
+		if part.Directory != "" {
+			name = path.Join(part.Directory, path.Base(part.Name))
+		}
+		mem.FreeString(c.Program.Alloc, part.observedCwd)
+		mem.FreeString(c.Program.Alloc, part.observedName)
+		part.observedCwd, part.observedName = owned(c.Program.Alloc, c.Cwd), canonicalPath(c.Program.Alloc, c.Cwd, name)
 	}
-	c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: name}, core.ObservationContent, part.Signature)
-	if constructed {
-		mem.FreeString(c.Run, name)
+	if c.Engine != nil {
+		c.Engine.ObserveAspect(core.ResourceKey{Kind: core.ResourceFile, Name: part.observedName}, core.ObservationContent, part.Signature)
 	}
 }
 
@@ -211,6 +218,8 @@ func (p *Program) freeSourceParts() {
 	for i := range p.SourceParts {
 		mem.FreeString(p.Alloc, p.SourceParts[i].Name)
 		mem.FreeString(p.Alloc, p.SourceParts[i].Directory)
+		mem.FreeString(p.Alloc, p.SourceParts[i].observedCwd)
+		mem.FreeString(p.Alloc, p.SourceParts[i].observedName)
 		for j := range p.SourceParts[i].Includes {
 			frame := p.SourceParts[i].Includes[j]
 			mem.FreeString(p.Alloc, frame.Kind)

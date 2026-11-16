@@ -115,6 +115,9 @@ func borrowValue(a mem.Allocator, value core.Value) core.Value {
 }
 
 func borrowValueCallables(a mem.Allocator, value *core.Value) {
+	if value.Shared != nil {
+		return
+	}
 	if value.Kind == core.Callable && value.Callable != nil && value.CallableOwner == nil {
 		value.Callable = borrowFunction(a, value.Callable.(*Function))
 	}
@@ -166,6 +169,9 @@ func (c *Context) DiscardCallables(value *core.Value) {
 }
 
 func (c *Context) discardArgumentCallables(value *core.Value, depth int) {
+	if value.Shared != nil {
+		return
+	}
 	// Rejecting malformed host graphs must not recurse through cycles forever.
 	if depth >= 256 {
 		return
@@ -191,6 +197,9 @@ func (c *Context) discardArgumentCallables(value *core.Value, depth int) {
 }
 
 func containsCallable(value core.Value, function any, depth int) bool {
+	if value.Shared != nil {
+		return false
+	}
 	if depth >= 256 {
 		return false
 	}
@@ -211,6 +220,9 @@ func containsCallable(value core.Value, function any, depth int) bool {
 }
 
 func freeCallables(a mem.Allocator, value *core.Value) {
+	if value.Shared != nil {
+		return
+	}
 	if value.Kind == core.Callable {
 		if value.Callable == nil {
 			return
@@ -400,6 +412,9 @@ func (s *Scope) breakCallableCycle() bool {
 }
 
 func countSelfRetained(value core.Value, scope *Scope) int {
+	if value.Shared != nil {
+		return 0
+	}
 	// Evaluator-owned values are trees: each transient callable leaf owns a
 	// distinct wrapper. Host-created aliased/cyclic ownership graphs are not valid.
 	if value.Kind == core.Callable && value.Callable != nil {
@@ -418,6 +433,9 @@ func countSelfRetained(value core.Value, scope *Scope) int {
 }
 
 func extractSelfRetained(value *core.Value, scope *Scope, values []core.Value, n *int) {
+	if value.Shared != nil {
+		return
+	}
 	if value.Kind == core.Callable && value.Callable != nil && isSelfRetainedCallable(value.Callable.(*Function), scope) {
 		values[*n] = *value
 		*n = *n + 1

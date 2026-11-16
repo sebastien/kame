@@ -324,6 +324,9 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		handoff = lent
 		run.handoff = lent
 	}
+	if r.Passthrough {
+		attachPassthrough(commands, out, errout)
+	}
 	for _, f := range truncateFiles {
 		info, e := f.Stat()
 		if e != nil || (info.Mode().IsRegular() && f.Truncate(0) != nil) {

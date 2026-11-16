@@ -891,6 +891,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		payload.Free(c.Run)
 		return r
 	}
+	if eligible && p.OutputPassthrough {
+		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "passthrough"), Value: core.Value{Kind: core.Bool, Bool: true}})
+	}
 	captureLimit := p.CaptureLimit
 	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {
 		captureLimit = c.captureBudget

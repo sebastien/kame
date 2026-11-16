@@ -48,3 +48,33 @@ func TestFileSignatureStreamsExactContentWithoutTrackedCopies(t *testing.T) {
 		t.Error("empty content has the wrong signature")
 	}
 }
+
+// Recently changed files are not memoized: a same-size rewrite that restores
+// the modification time must still produce the new content's signature.
+func TestFileSignatureDoesNotReuseRecentlyChangedContent(t *testing.T) {
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	directory, err := os.MkdirTemp("", "kame-signature-")
+	if err != nil {
+		t.Fatal("create signature test directory")
+		return
+	}
+	defer removeAtomicTestDirectory(directory)
+	name := directory + "/tool"
+	if os.WriteFile(name, []byte("first"), 0o700) != nil {
+		t.Fatal("write first content")
+		return
+	}
+	info, err := os.Stat(name)
+	if err != nil || !h.FileSignature(name).Equal(core.ContentSignature([]byte("first"))) {
+		t.Fatal("first signature")
+		return
+	}
+	if os.WriteFile(name, []byte("other"), 0o700) != nil || os.Chtimes(name, info.ModTime(), info.ModTime()) != nil {
+		t.Fatal("rewrite content")
+		return
+	}
+	if !h.FileSignature(name).Equal(core.ContentSignature([]byte("other"))) {
+		t.Error("signature reused stale content after a same-size rewrite")
+	}
+}

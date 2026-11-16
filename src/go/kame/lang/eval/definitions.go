@@ -94,7 +94,11 @@ type Program struct {
 	InputSupplied      bool // Boundary supplied borrowed data stdin; never a reusable input identity.
 	// Terminal marks an interactive session on a terminal: foreground statement
 	// graphs receive the terminal instead of piped standard streams.
-	Terminal           bool
+	Terminal bool
+	// OutputPassthrough marks a session whose presentation output is written
+	// unobserved to the invocation's descriptors: foreground statement graphs
+	// may write there directly instead of through the host relay.
+	OutputPassthrough  bool
 	NextRecordReader   int64
 	RecordReaderCloser RecordReaderCloser // ID zero releases all body readers on shutdown.
 	Valid              bool

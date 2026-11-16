@@ -39,6 +39,17 @@ func nativeOutputFD(writer io.Writer) int {
 	return 0
 }
 
+// invocationDescriptors reports whether out and errOut write straight to the
+// process's stdout and stderr, so children may inherit those descriptors.
+func invocationDescriptors(out, errOut io.Writer) bool {
+	stdout, ok := out.(*nativeOutputWriter)
+	if !ok || stdout.FD != 1 {
+		return false
+	}
+	stderr, ok := errOut.(*nativeOutputWriter)
+	return ok && stderr.FD == 2
+}
+
 func restoreNativeOutput(previous *nativeOutputState) { activeNativeOutput = previous }
 
 func restoreDiagnosticOut(previous io.Writer) { cliDiagnosticOut = previous }

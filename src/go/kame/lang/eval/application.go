@@ -278,7 +278,7 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 		context.OperationObserver(context.ResolverState, operation.Name, operation.Version)
 	}
 	if context.Engine != nil {
-		context.Engine.Observe(core.ResourceKey{Kind: core.ResourceOperation, Name: operation.Name}, core.ValueSignature(core.Value{Kind: core.String, Text: operation.Version}))
+		context.Engine.Observe(core.ResourceKey{Kind: core.ResourceOperation, Name: operation.Name}, operation.VersionSignature())
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {

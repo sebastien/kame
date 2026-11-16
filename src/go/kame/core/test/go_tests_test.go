@@ -94,6 +94,8 @@ func TestGoSuite(t *testing.T) {
 	t.Run("RevalidationRejectsUnavailableObservationsAndResults", func(t *testing.T) { TestRevalidationRejectsUnavailableObservationsAndResults(legacy.Wrap(t)) })
 	t.Run("RevalidationSuppressesEqualResultsAcrossSettledGraph", func(t *testing.T) { TestRevalidationSuppressesEqualResultsAcrossSettledGraph(legacy.Wrap(t)) })
 	t.Run("SharedInterestCancelsOnlyLastRoot", func(t *testing.T) { TestSharedInterestCancelsOnlyLastRoot(legacy.Wrap(t)) })
+	t.Run("SharedValuesCloneWithoutCopyingAndFreeWithLastOwner", func(t *testing.T) { TestSharedValuesCloneWithoutCopyingAndFreeWithLastOwner(legacy.Wrap(t)) })
+	t.Run("SharedValuesExcludeCallables", func(t *testing.T) { TestSharedValuesExcludeCallables(legacy.Wrap(t)) })
 	t.Run("SignatureRecordRejectsMissingErrorsAndDuplicateInputs", func(t *testing.T) { TestSignatureRecordRejectsMissingErrorsAndDuplicateInputs(legacy.Wrap(t)) })
 	t.Run("StaleCompletionIsDiscarded", func(t *testing.T) { TestStaleCompletionIsDiscarded(legacy.Wrap(t)) })
 	t.Run("StaticDependenciesRunFirst", func(t *testing.T) { TestStaticDependenciesRunFirst(legacy.Wrap(t)) })

@@ -206,6 +206,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		session.SetJSON(true)
 	} else {
 		p.Eval.SetDefinitionEffectSink(writeExprEffect, &output)
+		p.Eval.OutputPassthrough = !inv.Interactive && !inv.Login && !dashboardLive && invocationDescriptors(out, errOut)
 	}
 	var status int
 	if inv.Interactive || inv.Login {
