@@ -179,6 +179,21 @@ unreached branch. Dynamic heads are deferred unless their values can be resolved
 with read-only authority. Tool-check commands may explicitly validate declared
 candidates without running them.
 
+Native hosts may run a resolved system utility in-process instead of
+launching it, after resolution and tracking are complete, so recorded tool and
+executable identities are unchanged. This applies only to single-stage graphs
+whose executable is `/bin/NAME` or `/usr/bin/NAME` for `true`, `false`,
+`echo`, `printf`, `test` and `[`, and only to argument forms whose output and
+status are identical under GNU coreutils and BSD: `true`/`false` without
+option-like operands; `echo` with an optional single leading `-n`, no other
+option-like first operand and no backslashes; `printf` with `%s`/`%d`/`%i`
+(flags `-`/`0`, width, precision for `%s`), `%%`, the escapes `\n \t \r \\ \"`,
+plain decimal integer operands and no unused operands; `test`/`[` with at most
+three operands using `!`, `-n -z -e -f -d -s -L -h -p -S -b -c -r -w -x`,
+`= !=` and the decimal integer comparisons. Any other form, a program elsewhere
+on `PATH`, or a multi-stage graph runs the executable. Redirections, captures,
+descriptor inheritance and accepted exit statuses apply as for a child process.
+
 Executable tracking does not reveal opaque subprocesses: `bun x tsc` tracks
 Bun, not an inferred npm package/compiler graph. Wrappers, interpreters, and
 their scripts require explicit inputs when those files affect freshness.

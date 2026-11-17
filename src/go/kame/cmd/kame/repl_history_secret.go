@@ -3,28 +3,37 @@ package main
 import (
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Deliberately format-based, not an entropy test. New credential formats belong
 // here with positive and negative fixtures; unknown formats may not be detected.
-var historyTokenPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----`),
-	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),
-	regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`),
-	regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`),
-	regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
-	regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{20,}\b`),
-	regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b`),
-	regexp.MustCompile(`\bsk-(?:proj-|ant-api[0-9]+-)[A-Za-z0-9_-]{20,}\b`),
-	regexp.MustCompile(`\bsk-[A-Za-z0-9]{48}\b`),
-	regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`),
-	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b`),
-}
+// Patterns compile on first use: only interactive history needs them, and
+// eager compilation would cost every kame and kash invocation.
+var historyTokenPatterns = sync.OnceValue(func() []*regexp.Regexp {
+	return []*regexp.Regexp{
+		regexp.MustCompile(`(?i)-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----`),
+		regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}\b`),
+		regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`),
+		regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}\b`),
+		regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
+		regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{20,}\b`),
+		regexp.MustCompile(`\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b`),
+		regexp.MustCompile(`\bsk-(?:proj-|ant-api[0-9]+-)[A-Za-z0-9_-]{20,}\b`),
+		regexp.MustCompile(`\bsk-[A-Za-z0-9]{48}\b`),
+		regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`),
+		regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b`),
+	}
+})
 
 var (
-	historyReference = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_/-]*|\{[A-Za-z_][A-Za-z0-9_/-]*\})$`)
-	historyURL       = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s/"'<>:@]+:([^\s/"'<>@]+)@`)
-	historyHeaderRE  = regexp.MustCompile(`(?i)(?:proxy-)?authorization\s*:\s*(.*)`)
+	historyReference = sync.OnceValue(func() *regexp.Regexp {
+		return regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_/-]*|\{[A-Za-z_][A-Za-z0-9_/-]*\})$`)
+	})
+	historyURL = sync.OnceValue(func() *regexp.Regexp {
+		return regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s/"'<>:@]+:([^\s/"'<>@]+)@`)
+	})
+	historyHeaderRE = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`(?i)(?:proxy-)?authorization\s*:\s*(.*)`) })
 )
 
 func historySensitiveName(name string) bool {
@@ -40,7 +49,7 @@ func historySensitiveName(name string) bool {
 }
 
 func historyLiteral(value string) bool {
-	return value != "" && !historyReference.MatchString(value)
+	return value != "" && !historyReference().MatchString(value)
 }
 
 func historySecret(text string) bool {
@@ -51,12 +60,12 @@ func historySecretDepth(text string, depth int) bool {
 	if depth > 8 {
 		return true // Do not trust arbitrarily nested command-language quoting.
 	}
-	for _, pattern := range historyTokenPatterns {
+	for _, pattern := range historyTokenPatterns() {
 		if pattern.MatchString(text) {
 			return true
 		}
 	}
-	for _, match := range historyURL.FindAllStringSubmatch(text, -1) {
+	for _, match := range historyURL().FindAllStringSubmatch(text, -1) {
 		if historyLiteral(match[1]) {
 			return true
 		}
@@ -69,7 +78,7 @@ func historySecretDepth(text string, depth int) bool {
 				historySensitiveName(name) && value != "" {
 				return true
 			}
-			for _, match := range historyURL.FindAllStringSubmatch(word, -1) {
+			for _, match := range historyURL().FindAllStringSubmatch(word, -1) {
 				if match[1] != "" {
 					return true
 				}
@@ -81,7 +90,7 @@ func historySecretDepth(text string, depth int) bool {
 		if word != text && (token.decoded || strings.ContainsAny(word, " =\t\n")) && historySecretDepth(word, depth+1) {
 			return true
 		}
-		if match := historyHeaderRE.FindStringSubmatch(word); match != nil {
+		if match := historyHeaderRE().FindStringSubmatch(word); match != nil {
 			value := strings.TrimSpace(match[1])
 			literalReference := token.literalReference
 			if value == "" && i+1 < len(words) {

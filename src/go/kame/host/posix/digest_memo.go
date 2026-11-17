@@ -43,12 +43,16 @@ func openFileIdentity(file *os.File) (fileIdentity, bool) {
 
 func (m *digestMemo) lookup(path string, identity fileIdentity) (core.Signature, bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	entry, ok := m.entries[path]
-	if !ok || entry.Identity != identity {
-		return core.Signature{}, false
+	m.mu.Unlock()
+	if ok && entry.Identity == identity {
+		return entry.Signature, true
 	}
-	return entry.Signature, true
+	signature, ok := loadPersistentDigest(path, identity)
+	if ok {
+		m.remember(path, identity, signature)
+	}
+	return signature, ok
 }
 
 func (m *digestMemo) store(path string, identity fileIdentity, signature core.Signature, started time.Time) {
@@ -56,6 +60,11 @@ func (m *digestMemo) store(path string, identity fileIdentity, signature core.Si
 	if identity.ModifiedNs >= limit || identity.ChangedNs >= limit {
 		return
 	}
+	m.remember(path, identity, signature)
+	storePersistentDigest(path, identity, signature)
+}
+
+func (m *digestMemo) remember(path string, identity fileIdentity, signature core.Signature) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.entries == nil {

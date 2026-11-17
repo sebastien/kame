@@ -171,8 +171,11 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	state.InBody = false
 	if e.Kind == expr.KashRecords {
 		state.Iterable.Free(p.Alloc)
-		p.retireRecordProgress(c)
 	}
+	// A completed iteration is never replayed: the loop state alone resumes
+	// later ones. Retiring its progress keeps operation-state lookups bounded
+	// by one iteration rather than growing with every completed one.
+	p.retireRecordProgress(c)
 	if transfer == expr.KashBreak {
 		state.Done = true
 		return Result{}

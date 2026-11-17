@@ -56,6 +56,9 @@ type regexProgram struct {
 	Text         string
 	Instructions []regexInstruction
 	Start        int
+	// Matcher scratch, sized to Instructions and reused by each full match.
+	current, next []int
+	seen          []bool
 }
 
 type regexCompileResult struct {
@@ -73,6 +76,9 @@ func (p *regexProgram) Free(a mem.Allocator) {
 		return
 	}
 	mem.FreeSlice(nil, p.Instructions)
+	mem.FreeSlice(nil, p.current)
+	mem.FreeSlice(nil, p.next)
+	mem.FreeSlice(nil, p.seen)
 	mem.Free(a, p)
 }
 
@@ -325,13 +331,15 @@ func appendRegexInstruction(a mem.Allocator, instructions *[]regexInstruction, i
 }
 
 func regexFullMatch(a mem.Allocator, program *regexProgram, text string, budget *int) (bool, bool) {
-	currentBuffer := make([]int, len(program.Instructions))
-	nextBuffer := make([]int, len(program.Instructions))
-	current, next := currentBuffer, nextBuffer
-	seen := make([]bool, len(program.Instructions))
-	defer mem.FreeSlice(nil, currentBuffer)
-	defer mem.FreeSlice(nil, nextBuffer)
-	defer mem.FreeSlice(nil, seen)
+	if len(program.seen) != len(program.Instructions) {
+		program.current = make([]int, len(program.Instructions))
+		program.next = make([]int, len(program.Instructions))
+		program.seen = make([]bool, len(program.Instructions))
+	}
+	current, next, seen := program.current, program.next, program.seen
+	for j := range seen {
+		seen[j] = false
+	}
 	currentCount, nextCount := 0, 0
 	if !regexAddState(program, program.Start, current, &currentCount, seen, budget) {
 		return false, true

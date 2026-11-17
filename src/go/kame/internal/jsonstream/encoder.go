@@ -2,8 +2,6 @@
 package jsonstream
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -63,16 +61,59 @@ func (e *Encoder) Str(s string) {
 		return
 	}
 	e.sep()
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	err := encoder.Encode(s)
-	b := bytes.TrimSuffix(buffer.Bytes(), []byte{'\n'})
-	if err != nil {
-		e.err = err
+	if e.err == nil {
+		_, e.err = e.out.Write(AppendString(make([]byte, 0, len(s)+2), s))
 	}
-	e.write(string(b))
 }
+
+const hexDigits = "0123456789abcdef"
+
+// AppendString appends s as a JSON string, byte-identical to encoding/json
+// with HTML escaping disabled: short escapes for \b \f \n \r \t, \u00XX for
+// other control bytes, and escaped U+2028/U+2029. s must be valid UTF-8.
+func AppendString(b []byte, s string) []byte {
+	b = append(b, '"')
+	start := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c >= 0x20 && c != '"' && c != '\\' && c < utf8.RuneSelf {
+			i++
+			continue
+		}
+		if c >= utf8.RuneSelf {
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r != '\u2028' && r != '\u2029' {
+				i += size
+				continue
+			}
+			b = append(append(b, s[start:i]...), '\\', 'u', '2', '0', '2', hexDigits[r&0xf])
+			i += size
+			start = i
+			continue
+		}
+		b = append(b, s[start:i]...)
+		switch c {
+		case '"', '\\':
+			b = append(b, '\\', c)
+		case '\b':
+			b = append(b, '\\', 'b')
+		case '\f':
+			b = append(b, '\\', 'f')
+		case '\n':
+			b = append(b, '\\', 'n')
+		case '\r':
+			b = append(b, '\\', 'r')
+		case '\t':
+			b = append(b, '\\', 't')
+		default:
+			b = append(b, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&0xf])
+		}
+		i++
+		start = i
+	}
+	return append(append(b, s[start:]...), '"')
+}
+
 func (e *Encoder) Int(n int64) { e.sep(); e.write(strconv.FormatInt(n, 10)) }
 func (e *Encoder) Float(n float64) {
 	if math.IsNaN(n) || math.IsInf(n, 0) {

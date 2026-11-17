@@ -431,7 +431,24 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 	if budget == nil || *budget <= 0 {
 		return MatchResult{Limited: true}
 	}
-	var slots []string
+	compiled := CompilePattern(a, p)
+	defer compiled.Free(a)
+	if !compiled.Valid {
+		return MatchResult{}
+	}
+	return compiled.MatchTextBudget(a, subject, budget)
+}
+
+// CompiledPattern retains a pattern's compiled regex programs so repeated
+// matches skip regex compilation. It borrows Pattern, and it is not safe for
+// concurrent matching: each program reuses its matcher buffers.
+type CompiledPattern struct {
+	Pattern  *Pattern
+	programs []*regexProgram
+	Valid    bool
+}
+
+func CompilePattern(a mem.Allocator, p *Pattern) CompiledPattern {
 	programs := make([]*regexProgram, p.Matchers)
 	for i := range p.Parts {
 		part := p.Parts[i]
@@ -440,23 +457,37 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 		}
 		compiled := compileRegex(a, part.Pattern)
 		if !compiled.Valid {
-			for j := range programs {
-				if programs[j] != nil {
-					programs[j].Free(a)
-				}
-			}
-			mem.FreeSlice(nil, programs)
-			return MatchResult{}
+			result := CompiledPattern{programs: programs}
+			result.Free(a)
+			return CompiledPattern{}
 		}
 		programs[part.Index] = compiled.Program
 	}
-	matched, limited := p.match(a, subject, 0, 0, &slots, programs, budget)
-	for i := range programs {
-		if programs[i] != nil {
-			programs[i].Free(a)
+	return CompiledPattern{Pattern: p, programs: programs, Valid: true}
+}
+
+func (c *CompiledPattern) Free(a mem.Allocator) {
+	for i := range c.programs {
+		if c.programs[i] != nil {
+			c.programs[i].Free(a)
 		}
 	}
-	mem.FreeSlice(nil, programs)
+	mem.FreeSlice(nil, c.programs)
+	*c = CompiledPattern{}
+}
+
+// MatchText is Pattern.MatchText with the precompiled programs.
+func (c *CompiledPattern) MatchText(a mem.Allocator, subject string) MatchResult {
+	budget := maxRegexSteps
+	return c.MatchTextBudget(a, subject, &budget)
+}
+
+func (c *CompiledPattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) MatchResult {
+	if budget == nil || *budget <= 0 {
+		return MatchResult{Limited: true}
+	}
+	var slots []string
+	matched, limited := c.Pattern.match(a, subject, 0, 0, &slots, c.programs, budget)
 	if !matched {
 		mem.FreeSlice(nil, slots)
 		return MatchResult{Limited: limited}

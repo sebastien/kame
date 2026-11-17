@@ -137,6 +137,9 @@ func (e *Engine) renderHelpers() {
 		return
 	}
 
+	// Helpers below the line can scroll the window, moving the line's start.
+	e.invalidateProbe()
+
 	term.WriteString(term.NewlineReturn)
 
 	// 3. Display Hints
@@ -247,6 +250,8 @@ func (e *Engine) ensureInputSpace() {
 	}
 
 	e.startRows -= deficit
+	// The line moved up with the scroll; keep the cached probe in step.
+	e.probedRows -= deficit
 
 	term.MoveCursorUp(reserve)
 	term.MoveCursorForwards(e.startCols)

@@ -445,7 +445,7 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 	}
 	if id != 0 {
 		if kind == host.RequestProcess {
-			c.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: ProcessEnvironmentName}, core.ObservationValue, ProcessEnvironmentSignature(c.Run, c.Environment))
+			c.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: ProcessEnvironmentName}, core.ObservationValue, c.Program.processEnvironmentSignature(c.Run, c.Environment))
 		}
 		c.Engine.Submit(id)
 	}

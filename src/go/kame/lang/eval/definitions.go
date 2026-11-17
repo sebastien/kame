@@ -62,9 +62,17 @@ type Program struct {
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
 	OperationStates []operationState
-	OperationMemos  []*operationMemo
-	Processes       []*processTask
-	finalizers      []*FinalizerState
+	// environmentDigest* memoize the memo-scope digest of one environment list.
+	environmentDigestBase  *string
+	environmentDigestLen   int
+	environmentDigestValue core.Signature
+	// processEnvironment* memoize the process-environment observation signature.
+	processEnvironmentBase  *string
+	processEnvironmentLen   int
+	processEnvironmentValue core.Signature
+	OperationMemos          []*operationMemo
+	Processes               []*processTask
+	finalizers              []*FinalizerState
 	// The driver must keep polling through cancellation and acknowledge reaping
 	// before cleanup. A missing driver rejects finally! before arming it.
 	FinalizationNow      func(any) int64

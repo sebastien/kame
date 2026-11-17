@@ -51,6 +51,14 @@ change time are unchanged. Files changed within two seconds before hashing are
 not memoized, so a same-tick rewrite cannot keep identical metadata and a stale
 digest. Signatures remain content signatures; the memo only avoids re-reading.
 
+Files of at least 256 KiB (typically executables) also persist their memo
+entry in the user cache directory (`kame/digests` below `os.UserCacheDir`),
+one fixed-size record per absolute path holding the same stat identity and
+digest. A record is used only on an exact identity match and is replaced
+atomically; any read, write or format failure falls back to hashing.
+`KAME_DIGEST_CACHE=0` disables the store. It is a per-user optimization, not
+project cache state, so `kame do cache clean` does not manage it.
+
 ## Measurements
 
 The acceptance suite records tracker total allocations for ownership-sensitive

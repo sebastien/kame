@@ -70,10 +70,8 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 			d.Text(c.Grants[i].Names[j])
 		}
 	}
-	d.Uint64(uint64(len(c.Environment)))
-	for i := range c.Environment {
-		d.Text(c.Environment[i])
-	}
+	environment := p.environmentDigest(c.Environment)
+	d.Write(environment.Digest[:])
 	d.Uint64(uint64(len(c.RenderStack)))
 	for i := range c.RenderStack {
 		d.Text(c.RenderStack[i])
@@ -334,4 +332,24 @@ func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, op
 	}
 	p.OperationMemos = append(p.OperationMemos, state)
 	return true
+}
+
+// environmentDigest fingerprints an environment list for memo scopes. Contexts
+// share their environment slice and never mutate it in place, so the digest
+// is reused while the same backing array and length are presented.
+func (p *Program) environmentDigest(environment []string) core.Signature {
+	if len(environment) != 0 && p.environmentDigestLen == len(environment) && p.environmentDigestBase == &environment[0] {
+		return p.environmentDigestValue
+	}
+	d := core.NewDigest()
+	d.Uint64(uint64(len(environment)))
+	for i := range environment {
+		d.Text(environment[i])
+	}
+	signature := core.Signature{Mode: core.SignatureContent}
+	d.Sum(signature.Digest[:])
+	if len(environment) != 0 {
+		p.environmentDigestBase, p.environmentDigestLen, p.environmentDigestValue = &environment[0], len(environment), signature
+	}
+	return signature
 }

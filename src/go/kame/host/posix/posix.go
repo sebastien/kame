@@ -116,6 +116,18 @@ type streamWriter struct {
 func (w *streamWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	event := w.record(p)
+	select {
+	case w.h.native.events <- event:
+	case <-w.stopped:
+	case <-w.h.native.closed:
+	}
+	return len(p), nil
+}
+
+// record retains p within the capture limit and returns its output event.
+// The caller holds w.mu.
+func (w *streamWriter) record(p []byte) host.ProcessEvent {
 	if w.limit > 0 {
 		n := min(len(p), max(0, w.limit-w.capture.Len()))
 		w.capture.Write(p[:n])
@@ -127,13 +139,7 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	} else if len(p) != 0 {
 		w.truncated = true
 	}
-	event := host.ProcessEvent{Kind: w.kind, ID: w.id, Data: bytes.Clone(p)}
-	select {
-	case w.h.native.events <- event:
-	case <-w.stopped:
-	case <-w.h.native.closed:
-	}
-	return len(p), nil
+	return host.ProcessEvent{Kind: w.kind, ID: w.id, Data: bytes.Clone(p)}
 }
 func (h *Host) Start(r host.ProcessRequest) bool {
 	if h == nil || h.native == nil {
@@ -224,7 +230,16 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		if len(s.Argv) == 0 || s.Kind != "" {
 			return fail()
 		}
-		cmd := stageCommand(r, s)
+		var cmd *exec.Cmd
+		if len(stages) == 1 && filepath.IsAbs(s.Argv[0]) && builtinFor(s.Argv[0], s.Argv[1:]) != nil {
+			// Runs in-process below: skip the child environment and lookup.
+			cmd = &exec.Cmd{Path: s.Argv[0], Args: s.Argv, Dir: s.Directory}
+			if cmd.Dir == "" {
+				cmd.Dir = r.Directory
+			}
+		} else {
+			cmd = stageCommand(r, s)
+		}
 		if cmd.Err != nil {
 			return fail()
 		}
@@ -315,7 +330,16 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		}
 		commands = append(commands, cmd)
 	}
-	if lent, err := startTerminalHandoff(r, stages, commands, out, errout); err != nil {
+	// A builtin writes through the same descriptors a child would receive,
+	// but never needs the terminal: it neither reads input nor takes the
+	// foreground.
+	var inline builtin
+	if len(commands) == 1 && len(r.Stages) <= 1 {
+		inline = builtinFor(commands[0].Path, commands[0].Args[1:])
+	}
+	if inline != nil {
+		// Leave the graph's pipes in place.
+	} else if lent, err := startTerminalHandoff(r, stages, commands, out, errout); err != nil {
 		fail()
 		h.pending[0].Diagnostic.Message = err.Error()
 		terminalRejection(h, err)
@@ -332,6 +356,10 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		if e != nil || (info.Mode().IsRegular() && f.Truncate(0) != nil) {
 			return fail()
 		}
+	}
+	if inline != nil {
+		h.startBuiltin(r, run, commands[0], stages[0], inline, closeAll, out, errout)
+		return true
 	}
 	for i, cmd := range commands {
 		if run.startCommand(cmd) != nil {

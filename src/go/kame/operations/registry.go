@@ -38,7 +38,7 @@ func Register(r *eval.Registry) bool {
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
 		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "line", opLine, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
 		callback(r, "sub", opReplace, 2, 3) && callback(r, "replace", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
-		pure(r, "regex-match", opRegexMatch, 2, 2) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
+		r.Add(eval.Operation{Name: "regex-match", Call: opRegexMatch, Context: &regexCache{alloc: r.Alloc}, FreeContext: freeRegexCache, MinArity: 2, MaxArity: 2, Category: eval.PureOperation, Phases: eval.AllPhases, Version: version}) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&
 		pure(r, "black", opTerminalStyle, 1, 1) && pure(r, "red", opTerminalStyle, 1, 1) &&
 		pure(r, "green", opTerminalStyle, 1, 1) && pure(r, "yellow", opTerminalStyle, 1, 1) &&

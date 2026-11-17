@@ -20,6 +20,7 @@ func TestGoLinuxSuite(t *testing.T) {
 	t.Run("EmptyScript", func(t *testing.T) { TestEmptyScript(legacy.Wrap(t)) })
 	t.Run("EmptyTopologyCannotFallBackToShell", func(t *testing.T) { TestEmptyTopologyCannotFallBackToShell(legacy.Wrap(t)) })
 	t.Run("EnvironmentSnapshotIsCompleteAndOwned", func(t *testing.T) { TestEnvironmentSnapshotIsCompleteAndOwned(legacy.Wrap(t)) })
+	t.Run("FileSignaturePersistsLargeStableDigests", func(t *testing.T) { TestFileSignaturePersistsLargeStableDigests(legacy.Wrap(t)) })
 	t.Run("InvocationInputRejectsInvalidDispositionBeforeLaunch", func(t *testing.T) { TestInvocationInputRejectsInvalidDispositionBeforeLaunch(legacy.Wrap(t)) })
 	t.Run("MissingShellIsOnlyFailedTerminal", func(t *testing.T) { TestMissingShellIsOnlyFailedTerminal(legacy.Wrap(t)) })
 	t.Run("NativeDescendantsRetireWithHostAndTerminal", func(t *testing.T) { TestNativeDescendantsRetireWithHostAndTerminal(legacy.Wrap(t)) })

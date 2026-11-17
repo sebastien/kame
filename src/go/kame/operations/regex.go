@@ -7,21 +7,76 @@ import (
 	"kame/lang/expr"
 )
 
+// regexCache keeps recently used regex-match patterns parsed and compiled.
+// Scripts typically apply one pattern to many subjects; recompiling it per
+// call dominated their matching cost. It belongs to one registry, whose
+// evaluation is single-threaded, and allocates from the registry allocator.
+type regexCache struct {
+	alloc   mem.Allocator
+	entries [16]regexCacheEntry
+	next    int
+}
+
+type regexCacheEntry struct {
+	text     string
+	parsed   expr.PatternParse
+	compiled expr.CompiledPattern
+	valid    bool
+}
+
+func (e *regexCacheEntry) free(a mem.Allocator) {
+	e.compiled.Free(a)
+	e.parsed.Pattern.Free(a)
+	mem.FreeSlice(nil, e.parsed.Diagnostics)
+	mem.FreeString(a, e.text)
+	*e = regexCacheEntry{}
+}
+
+func freeRegexCache(a mem.Allocator, value any) {
+	cache := value.(*regexCache)
+	for i := range cache.entries {
+		cache.entries[i].free(cache.alloc)
+	}
+	mem.Free(a, cache)
+}
+
+func (r *regexCache) lookup(text string) *regexCacheEntry {
+	for i := range r.entries {
+		if r.entries[i].parsed.Pattern != nil && r.entries[i].text == text {
+			return &r.entries[i]
+		}
+	}
+	entry := &r.entries[r.next]
+	r.next = (r.next + 1) % len(r.entries)
+	entry.free(r.alloc)
+	entry.text = core.NewString(r.alloc, text).Text
+	entry.parsed = expr.ParsePatternText(r.alloc, text, 0)
+	pattern := entry.parsed.Pattern
+	entry.valid = len(entry.parsed.Diagnostics) == 0 && pattern.Matchers != 0 && pattern.References == 0 && hasRegexMatcher(pattern)
+	if entry.valid {
+		entry.compiled = expr.CompilePattern(r.alloc, pattern)
+	}
+	return entry
+}
+
 func opRegexMatch(c *eval.Context, state any, values []core.Value) eval.Result {
-	_ = state
 	if values[0].Kind != core.Pattern {
 		return invalidArgument(c, values, 0, "pattern")
 	}
 	if values[1].Kind != core.String {
 		return invalidArgument(c, values, 1, "string")
 	}
-	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
-	defer parsed.Pattern.Free(c.Run)
-	defer mem.FreeSlice(nil, parsed.Diagnostics)
-	if len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers == 0 || parsed.Pattern.References != 0 || !hasRegexMatcher(parsed.Pattern) {
+	entry := state.(*regexCache).lookup(values[0].Text)
+	if !entry.valid {
 		return ownedFailure(c.Run, "PAT_INVALID", "regex-match needs a regex match pattern")
 	}
-	matched := parsed.Pattern.MatchText(c.Run, values[1].Text)
+	parsed := entry.parsed
+	var matched expr.MatchResult
+	if entry.compiled.Valid {
+		matched = entry.compiled.MatchText(c.Run, values[1].Text)
+	} else {
+		matched = parsed.Pattern.MatchText(c.Run, values[1].Text)
+	}
 	if matched.Limited {
 		mem.FreeSlice(nil, matched.Captures)
 		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")

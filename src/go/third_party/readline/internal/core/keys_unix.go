@@ -62,7 +62,7 @@ func (k *Keys) GetCursorPos() (x, y int) {
 		}
 
 		// Attempt to locate cursor response in it.
-		match = rxRcvCursorPos.FindAllStringSubmatch(string(cursor), 1)
+		match = rxRcvCursorPos().FindAllStringSubmatch(string(cursor), 1)
 
 		// If there is something but not cursor answer, its user input.
 		if len(match) == 0 && len(cursor) > 0 {
@@ -80,7 +80,7 @@ func (k *Keys) GetCursorPos() (x, y int) {
 
 		// Keys typed before the query was answered can arrive in the
 		// same read as the answer: keep them as user input.
-		if loc := rxRcvCursorPos.FindIndex(cursor); loc != nil && len(cursor) > loc[1]-loc[0] {
+		if loc := rxRcvCursorPos().FindIndex(cursor); loc != nil && len(cursor) > loc[1]-loc[0] {
 			k.mutex.Lock()
 			k.buf = append(k.buf, cursor[:loc[0]]...)
 			k.buf = append(k.buf, cursor[loc[1]:]...)

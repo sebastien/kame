@@ -47,6 +47,18 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 	if c.Failed() || c.node.State == NodeComplete {
 		return
 	}
+	// Stored keys are canonical, so an exact match is the same resource; this
+	// skips canonicalization for repeated observations (every source-defined
+	// function call re-observes its source file).
+	for i := range c.node.Observations {
+		item := &c.node.Observations[i]
+		if item.Key.Kind == key.Kind && item.Aspect == aspect && item.Key.Name == key.Name {
+			if !item.Signature.Equal(signature) {
+				item.Signature = Signature{}
+			}
+			return
+		}
+	}
 	name, owned := canonicalName(c.engine.Alloc, key)
 	key.Name = name
 	for i := range c.node.Observations {

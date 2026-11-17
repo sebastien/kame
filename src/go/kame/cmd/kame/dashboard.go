@@ -95,9 +95,13 @@ func setDashboardSubject(subject string) {
 }
 
 func dashboardCanDraw() bool {
-	width, height := dashboardDimensions()
+	// Check the state first: the terminal size costs two ioctls per tick.
+	if !dashboardLive || dashboardUnsafe || dashboardPending || posix.TerminalHandoffActive() {
+		return false
+	}
 	// A child holding the terminal owns the screen until it returns it.
-	return dashboardLive && !dashboardUnsafe && !dashboardPending && width >= 40 && height >= 4 && !posix.TerminalHandoffActive()
+	width, height := dashboardDimensions()
+	return width >= 40 && height >= 4
 }
 
 func observeWorker(event program.Event) {
