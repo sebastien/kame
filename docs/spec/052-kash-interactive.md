@@ -493,6 +493,10 @@ application name `kash`, so `$if kash` sections apply. Tab is bound to
 completion as specified below, except that Tab with only blanks before the
 cursor on its line inserts a tab, as indented block bodies need.
 
+Except on `TERM=dumb`, the editor enables bracketed paste: pasted text is
+inserted at once, line breaks included, and is submitted only by a following
+Enter.
+
 Before each prompt the editor turns off terminal input reports it does not
 read: mouse tracking, focus events, and kitty keyboard flags. A full-screen
 program that exits without restoring them, for example after a crash, leaves
@@ -552,10 +556,14 @@ expressions are highlighted to the end of the entry. Highlighting never
 changes the text.
 
 A literal command word is marked as unknown when it is not a session command,
-does not exist as a path when it contains `/`, and names no entry of a
-directory on the session `PATH`. Words built from substitutions are not
-judged. `NO_COLOR` set to a non-empty value, or `TERM=dumb`, disables
+does not exist as a path when it contains `/`, and names no executable file in
+a directory on the session `PATH`. Words built from substitutions are not
+judged. The directory, `PATH`, and aliases are those in effect when the entry's
+prompt is shown. `NO_COLOR` set to a non-empty value, or `TERM=dumb`, disables
 highlighting.
+
+Highlighting runs on every keystroke and must not wait on running jobs or rescan
+`PATH` directories that have not changed since an earlier entry.
 
 ## Non-goals
 
@@ -586,4 +594,5 @@ highlighting.
 | Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; a `cmd &` graph reading the terminal stops its job, `fg` gives it the terminal, and `fg` of a running `&` job waits for it to finish; `wait %N` returns the job's `&` graph status and forgets it, and `wait` without operands returns 0; `jobs` marks the current and previous jobs, `%+` and `%-` select them, and a cancelled job is listed as `killed`; a session ending on `--timeout` cancels its background jobs; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
 | Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default; a `kash-rprompt` string is drawn as the right prompt and sees the last status, and a failing one is reported. ANSI colours and wide Unicode use display columns; the right prompt hides before overlapping input, returns after deletion, and follows resizing; wrapped cursor editing and completion preserve submitted argv. |
 | Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with session commands, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
-| Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, and session commands; under a pseudo-terminal, an unknown command is marked. |
+| Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, and session commands; `PATH` listings follow installs, removals, and mode changes between entries; under a pseudo-terminal, an unknown command is marked, and a `PATH` change, an alias, and a `cd` in the previous entry are reflected. |
+| Line editing | Under a pseudo-terminal, a bracketed multi-line paste is not submitted before Enter and then runs as one entry; a keystroke latency probe reports kash and, when installed, bash on the same terminal without a timing threshold. |

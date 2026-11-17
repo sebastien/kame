@@ -110,7 +110,7 @@ func TestAliasCompletionAndHighlighting(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].Text != "ll" || candidates[0].Description != "ls -lah" {
 		t.Fatalf("alias completion: %+v", candidates)
 	}
-	editor := editorReader{context: func() completionContext { return ctx }}
+	editor := editorReader{snapshot: ctx}
 	if got := editor.highlight([]rune("ll")); strings.Contains(got, replUnknownCommandStyle) {
 		t.Fatalf("alias marked unknown: %q", got)
 	}

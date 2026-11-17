@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"kame/lang/script"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -49,6 +51,7 @@ type terminalSession struct {
 	mu      sync.Mutex
 	output  bytes.Buffer
 	done    chan error
+	changed chan struct{} // signalled after output arrives
 }
 
 func startTerminalSession(t *testing.T, binary, directory string, env []string, args ...string) *terminalSession {
@@ -73,7 +76,7 @@ func startTerminalSessionAnswering(t *testing.T, answer func() string, binary, d
 		t.Fatal(err)
 	}
 	device.Close()
-	s := &terminalSession{t: t, command: command, control: controller, done: make(chan error, 1)}
+	s := &terminalSession{t: t, command: command, control: controller, done: make(chan error, 1), changed: make(chan struct{}, 1)}
 	go func() {
 		buffer := make([]byte, 4096)
 		for {
@@ -81,6 +84,10 @@ func startTerminalSessionAnswering(t *testing.T, answer func() string, binary, d
 			s.mu.Lock()
 			s.output.Write(buffer[:n])
 			s.mu.Unlock()
+			select {
+			case s.changed <- struct{}{}:
+			default:
+			}
 			// Answer cursor-position queries as a terminal emulator would.
 			if bytes.Contains(buffer[:n], []byte("\x1b[6n")) {
 				controller.WriteString(answer())
@@ -718,6 +725,69 @@ func TestNativeInteractiveKashHighlightingAndBlocks(t *testing.T) {
 	s.waitFor("block-42")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("highlighting session status %d: %q", status, s.text())
+	}
+}
+
+// Highlighting uses session state taken before each entry: a PATH change, an
+// alias, and a directory change from the previous entry are all seen.
+func TestNativeInteractiveKashHighlightingFollowsSession(t *testing.T) {
+	directory := t.TempDir()
+	writeReplTool(t, filepath.Join(directory, "bin"), "snapshot-tool", "exit 0")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"TERM=xterm-256color", "NO_COLOR="}, "do", "run", "-i")
+	s.waitFor("kash ")
+	ready := kashLatencyShell("").ready
+	// entry sends keys that end at a fresh prompt.
+	entry := func(keys string) {
+		t.Helper()
+		before := len(s.raw())
+		s.send(keys)
+		s.await(before, ready)
+	}
+	styled := func(word, style string) {
+		t.Helper()
+		before := len(s.raw())
+		s.send(word)
+		s.waitFrame(before, func(frame string) bool { return strings.Contains(frame, "\x1b["+style+"m"+word+"\x1b[0m") })
+		entry("\x03")
+	}
+	s.waitReading()
+	styled("snapshot-tool", replUnknownCommandStyle)
+	styled("snapshot-alias", replUnknownCommandStyle)
+	styled("./snapshot-tool", replUnknownCommandStyle)
+	known := replTokenStyles[script.KashTokenCommand]
+	entry("export PATH=" + filepath.Join(directory, "bin") + ":" + os.Getenv("PATH") + "\r")
+	styled("snapshot-tool", known)
+	entry("alias snapshot-alias = [\"true\"]\r")
+	styled("snapshot-alias", known)
+	entry("cd bin\r")
+	styled("./snapshot-tool", known)
+	// The last entry was interrupted.
+	if status := s.finish(); status != 130 {
+		t.Fatalf("highlighting session status %d: %q", status, s.text())
+	}
+}
+
+// A bracketed paste is inserted whole: its line breaks do not submit it, and
+// Enter then runs the pasted entry.
+func TestNativeInteractiveKashBracketedPaste(t *testing.T) {
+	s := startTerminalSession(t, nativeCLIBinary(t), t.TempDir(), []string{"TERM=xterm-256color"}, "do", "run", "-i")
+	s.waitFor("kash ")
+	if !strings.Contains(s.raw(), "\x1b[?2004h") {
+		t.Fatalf("bracketed paste was not enabled: %q", s.raw())
+	}
+	s.waitReading()
+	before := len(s.raw())
+	s.send("\x1b[200~echo pasted-one\recho pasted-two\x1b[201~")
+	s.waitFrame(before, func(frame string) bool { return strings.Contains(stripControls(frame), "echo pasted-two") })
+	time.Sleep(200 * time.Millisecond)
+	if text := s.text(); strings.Contains(text, "\npasted-one") {
+		t.Fatalf("pasted line break submitted the entry: %q", text)
+	}
+	s.send("\r")
+	s.waitFor("\npasted-one\r\n")
+	s.waitFor("\npasted-two\r\n")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("paste session status %d: %q", status, s.text())
 	}
 }
 

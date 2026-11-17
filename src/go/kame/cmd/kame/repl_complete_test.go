@@ -141,7 +141,7 @@ func TestReplEntryComplete(t *testing.T) {
 
 func TestReplHighlight(t *testing.T) {
 	ctx := completionFixture(t)
-	e := &editorReader{context: func() completionContext { return ctx }}
+	e := &editorReader{snapshot: ctx}
 	highlight := func(text string) string { return e.highlight([]rune(text)) }
 	if got := highlight("kashtool a | nosuchtool 'q'"); got != "\x1b[1;32mkashtool\x1b[0m a \x1b[1m|\x1b[0m \x1b[1;31mnosuchtool\x1b[0m \x1b[33m'q'\x1b[0m" {
 		t.Errorf("highlight = %q", got)

@@ -729,6 +729,12 @@ func (s *replSession) read(reader lineReader, prompt string) (replEntry, error) 
 		o.editing = true
 		defer o.stopEditing()
 	}
+	// Highlighting runs per keystroke: hand it the session state now rather
+	// than per key through contextRequests, which waits out job ticks.
+	// Tab completion still asks for a fresh context.
+	if editor, ok := reader.(*editorReader); ok {
+		editor.snapshot = s.completion()
+	}
 	go func() {
 		entry, err := readEntry(reader, prompt)
 		result <- replInput{entry, err}

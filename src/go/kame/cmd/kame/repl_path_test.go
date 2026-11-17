@@ -117,9 +117,50 @@ func TestSessionPathCompletionAndHighlighting(t *testing.T) {
 		if len(candidates) != 1 || candidates[0].Text != name || candidates[0].Display != name+"*" {
 			t.Errorf("PATH=%q completion: %+v", path, candidates)
 		}
-		editor := editorReader{context: func() completionContext { return ctx }}
+		editor := editorReader{snapshot: ctx}
 		if got := editor.highlight([]rune(name)); strings.Contains(got, replUnknownCommandStyle) {
 			t.Errorf("PATH=%q marked executable unknown: %q", path, got)
 		}
+	}
+}
+
+// PATH listings are kept across entries but follow installs, removals and
+// mode changes; any executable match on PATH counts, not only the last one.
+func TestReplHighlightPathCache(t *testing.T) {
+	root := t.TempDir()
+	first, second := filepath.Join(root, "first"), filepath.Join(root, "second")
+	if err := os.Mkdir(first, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(first, "shared-tool"), "")
+	writeReplTool(t, second, "shared-tool", "exit 0")
+	editor := editorReader{snapshot: completionContext{Directory: root, Path: first + ":" + second}}
+	known := func(word string) bool {
+		t.Helper()
+		// Each check stands for a new entry, which forgets judged words.
+		editor.known = nil
+		return !strings.Contains(editor.highlight([]rune(word)), replUnknownCommandStyle)
+	}
+	if !known("shared-tool") {
+		t.Fatal("an executable later on PATH was hidden by a plain file earlier on it")
+	}
+	if known("late-tool") {
+		t.Fatal("missing tool marked known")
+	}
+	writeReplTool(t, first, "late-tool", "exit 0")
+	if !known("late-tool") {
+		t.Fatal("tool installed after the first listing marked unknown")
+	}
+	if err := os.Chmod(filepath.Join(first, "late-tool"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if known("late-tool") {
+		t.Fatal("tool made non-executable still marked known")
+	}
+	if err := os.Remove(filepath.Join(first, "late-tool")); err != nil {
+		t.Fatal(err)
+	}
+	if known("late-tool") {
+		t.Fatal("removed tool still marked known")
 	}
 }

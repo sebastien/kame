@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
@@ -38,9 +39,19 @@ type editorReader struct {
 	right   string   // right prompt, empty for none
 	output  *os.File // replaces a non-terminal stdout while editing
 	context func() completionContext
-	color   bool
-	known   map[string]bool // command names on PATH, gathered once per entry
-	menu    bool            // the latest completion has multiple candidates
+	// snapshot is the session state for highlighting, taken by the session
+	// before each entry is read.
+	snapshot completionContext
+	color    bool
+	known    map[string]bool          // command words judged during this entry
+	path     map[string]pathDirectory // PATH directory listings, kept across entries
+	menu     bool                     // the latest completion has multiple candidates
+}
+
+// pathDirectory is a PATH directory's entry names as of its modification time.
+type pathDirectory struct {
+	modified time.Time
+	names    map[string]struct{}
 }
 
 func newEditorReader() *editorReader {
@@ -58,6 +69,11 @@ func (e *editorReader) resetEditor() {
 	terminal := os.Getenv("TERM")
 	if terminal == "" || terminal == "dumb" {
 		e.shell.Config.Set("cursor-position-probe", false)
+	} else {
+		// A bracketed paste is inserted at once, with one redraw, and its
+		// line breaks do not submit the entry; otherwise every pasted
+		// character is a keystroke. Bash enables it by default too.
+		e.shell.Config.Set("enable-bracketed-paste", true)
 	}
 	e.color = os.Getenv("NO_COLOR") == "" && terminal != "dumb"
 	if !term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
@@ -325,7 +341,7 @@ func (e *editorReader) commandKnown(text string, token script.KashToken) bool {
 	if replSessionCommands[word] != "" {
 		return true
 	}
-	ctx := e.context()
+	ctx := e.snapshot
 	if _, ok := ctx.Aliases[word]; ok {
 		return true
 	}
@@ -333,15 +349,45 @@ func (e *editorReader) commandKnown(text string, token script.KashToken) bool {
 		_, err := os.Stat(completionDirectory(word, ctx))
 		return err == nil
 	}
+	if known, ok := e.known[word]; ok {
+		return known
+	}
 	if e.known == nil {
 		e.known = map[string]bool{}
-		for _, directory := range commandPathDirectories(ctx) {
-			if entries, err := os.ReadDir(directory); err == nil && directory != "" {
-				for _, entry := range entries {
-					e.known[entry.Name()] = executableFile(filepath.Join(directory, entry.Name()))
-				}
-			}
+	}
+	known := false
+	for _, directory := range commandPathDirectories(ctx) {
+		if _, ok := e.pathNames(directory)[word]; ok && executableFile(filepath.Join(directory, word)) {
+			known = true
+			break
 		}
 	}
-	return e.known[word]
+	e.known[word] = known
+	return known
+}
+
+// pathNames lists a PATH directory, reusing the previous listing while the
+// directory is unmodified: only the looked-up word is then checked with stat.
+func (e *editorReader) pathNames(directory string) map[string]struct{} {
+	info, err := os.Stat(directory)
+	if err != nil || directory == "" {
+		delete(e.path, directory)
+		return nil
+	}
+	if cached, ok := e.path[directory]; ok && cached.modified.Equal(info.ModTime()) {
+		return cached.names
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil
+	}
+	names := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		names[entry.Name()] = struct{}{}
+	}
+	if e.path == nil {
+		e.path = map[string]pathDirectory{}
+	}
+	e.path[directory] = pathDirectory{modified: info.ModTime(), names: names}
+	return names
 }
