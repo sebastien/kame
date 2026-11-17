@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Distribution
 
 ## Purpose
@@ -62,7 +66,7 @@ runtime `WASM`.
 
 ## Version and cache
 
-The launcher resolves `KAME_VERSION`, a legacy embedded stamp, then the adjacent
+The launcher resolves `KAME_VERSION`, an embedded version stamp, then the adjacent
 `VERSION`. `latest` explicitly reads the latest release's version asset. Version
 syntax is validated before using it in a path. A lone `--version` or `-V` request
 answers without provisioning. `KAME_BIN` bypasses detection and downloads after
@@ -129,7 +133,7 @@ bootstrap settings (`KAME`, `KAME_VERSION`, `KAME_REPOSITORY`,
 `KAME_RELEASE_URL`, `KAME_BOOTSTRAP`, `GO`, `KAME_MAKEFILE`). A goal containing
 `/` is prefixed with `./` so it names a file. GNU Make normalizes away a
 leading `./`, so a top-level file goal without another `/` reaches Kame as a
-bare task; invoke Kame directly for those. Kame's exit status is make's.
+bare target name; invoke Kame directly for those. Kame's exit status is make's.
 
 ## Package manifests
 
@@ -160,7 +164,7 @@ artifacts. Registry errors are not treated as proof that an npm version is
 missing. Exit status 3 means npm accepted the upload but has not finished
 processing it; do not republish.
 
-The `release` rule declares `[tty: :true foreground: :true]`
+The `release` task declares `{tty: true, foreground: true}`
 (`051-kash-session-authority.md`), so its foreground commands, notably
 `npm publish` prompting for authentication, receive the terminal even when Kame
 itself runs in a background process group. Publication therefore requires a

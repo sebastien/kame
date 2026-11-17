@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # POSIX Process Host
 
 ## Purpose
@@ -139,8 +143,8 @@ the runtime request.
 
 ## Recipe Semantics
 
-All command lines from one rule are joined with newlines and executed in one
-shell. Consequently shell variables, `cd`, traps, and multiline control flow
+A foreign-shell recipe body is rendered to one script (`055` §10.2) and
+executed in one shell. Consequently shell variables, `cd`, traps, and multiline control flow
 persist across recipe lines.
 
 The host does not parse shell syntax. Source-line mapping is runtime metadata

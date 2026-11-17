@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # CLI ANSI and presentation modes
 
 ## Purpose and scope
@@ -477,9 +481,9 @@ stderr. Its canonical value remains the result; empty programs do not invent one
 error[RECIPE_FAIL]: [./build/app] recipe exited unsuccessfully
   required by default -> ./build/app
 
-  ╭─ Makefile.kmk:18:2
- 18 │ cc @<* -o @>
-    │ ╰──────────╯
+  ╭─ Makefile.km:18:2
+ 18 │ cc $...inputs -o $outputs.0
+    │ ╰─────────────────────────╯
 
 caused by: process exited (status 1)
 
@@ -532,10 +536,10 @@ padding or wrapping. Styling changes only attributes, not wording or ordering.
 plan ./build/main.o · depth unlimited · declared and read-only resolved
 
   rule        ./build/{name}.o : ./src/{name}.c
-  source      Makefile.kmk:8:1
+  source      Makefile.km:8:1
   captures    name = "main"
   input       ./src/main.c       source file · persistent
-  config      ./Makefile.kmk     configuration input · persistent
+  config      ./Makefile.km      configuration input · persistent
   output      ./build/main.o     artifact · product · persistent
   tools       cc -> /usr/bin/cc
   freshness   unknown
@@ -558,7 +562,7 @@ inputs ./build/app · depth 1 · declared and read-only resolved
     ./build/main.o [1]
     ./build/util.o [1]
   configuration
-    ./Makefile.kmk [1]
+    ./Makefile.km [1]
   truncated          deeper producer inputs omitted
 
 tools
@@ -581,7 +585,7 @@ Human reports use consistent spelling independently of their theme:
 | Target | Preserve authored classification, including significant `./`; never shorten a file target into a bare task |
 | Rule | Authored target/input syntax with captures; keep rule identity distinct from the concrete selected target |
 | Symbol or option in prose | Backtick-delimited spelling, such as `SOURCES` or `--force`; dedicated labelled fields need no extra punctuation |
-| Literal value | Canonical Kame display: quoted strings/patterns, `:nil`, `:true`, `:false`, lists and records |
+| Literal value | Canonical Kame display: quoted strings/patterns, `nil`, `true`, `false`, lists and records |
 | Source location | `source:line:column`, one-based display coordinates; no invented coordinates |
 | Count or measured progress | Integer with a named unit or labelled category; `6/10 files`, not an unexplained percentage |
 | Duration | CLI ANSI: seconds with one decimal place, such as `1.4s`; other human presentations use explicit units; unknown duration is omitted |
@@ -745,7 +749,7 @@ Summary status is `success`, `failure`, `cancelled`, or `different`. `different`
 represents successful format checking that found differences and exits 1; it is
 not a fabricated execution diagnostic. Summary counts use the command's defined
 units. Invocation start/summary records belong to execution and new result-stream
-commands, not around legacy single-document inspections. Graceful completion
+commands, not around single-document inspections. Graceful completion
 emits one summary after all owned work is reaped; forced termination may prevent
 final publication.
 

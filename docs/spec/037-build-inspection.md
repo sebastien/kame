@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Build inspection
 
 ## Purpose
@@ -93,7 +97,7 @@ not establish whether it is temporary, an intermediate, or a final product.
 
 | Dimension | Meaning |
 | --- | --- |
-| Kind | Typed resource: `file`, `target` (bare task), `task` (cached task), `service`, `definition`, `glob`, `environment`, `tool`, or `operation` |
+| Kind | Typed resource: `file`, `target` (phony `task`), `task` (`task cached`), `service`, `definition`, `glob`, `environment`, `tool`, or `operation` |
 | Role | One or more of `input`, `artifact`, `intermediate`, `product`, or `configuration` in the selected graph |
 | Lifetime | `persistent`, `invocation`, `generation`, `interest`, `host`, or `unknown`, when established by the resource contract |
 
@@ -110,8 +114,8 @@ ends. Intermediate does not mean transient. `mem:` resources are host-scoped,
 not promised to persist beyond their host. URI display and identity follow
 `031-resource-protocols.md`; do not expose private host mappings.
 
-Bare-task completion is invocation-local; definition and operation values are
-generation-local. Cached-task values are also generation-local, with reusable
+Phony-task completion is invocation-local; definition and operation values are
+generation-local. `task cached` values are also generation-local, with reusable
 completion records rather than declared file artifacts; explain their cache
 policy separately from value lifetime.
 Services are interest-scoped and retained until final-owner shutdown and reap

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Interactive Kash
 
 ## Purpose
@@ -86,9 +90,10 @@ and deferred-cleanup scope.
 | --- | --- |
 | `let NAME = RHS` | Evaluates when submitted. A later `let` of the same name rebinds it for later entries. |
 | `def NAME ...` | Registers the function. A later definition of the same name replaces it for later lookups. |
-| `NAME = RHS` (lazy) | Registered once. Redefinition is `DEF_INVALID` with a `let` tip; an evaluated lazy value is never replayed. `?=` against an existing name is ignored. |
-| `NAME += RHS` | Rejected: contributions are not Kash syntax (`PARSE_ERR`), and would mutate an aggregate that may already be evaluated. |
-| Rules, includes, composition | Not Kash syntax; any such item reaching an entry is `FEATURE_UNSUP`. Preloaded files keep their ordinary contracts. |
+| `set NAME = RHS` | Assigns an existing top-level `let` binding for later entries. |
+| `set env/NAME = RHS` | Writes the session child environment (see Session directory and environment). |
+| `import PATH`, `from PATH import …` | Binds the module's exports for later entries. Lazy definitions of the module are evaluated at most once per session. |
+| Rules, tasks, services, `generate`, `include` | Declarations; any such item reaching an entry is `FEATURE_UNSUP`. Preloaded files keep their ordinary contracts. |
 
 A parse or registration failure rejects the whole entry before any effect: no
 statement runs and the session is unchanged.
@@ -139,7 +144,7 @@ output was already delivered.
 On a terminal session, a foreground statement graph receives the terminal.
 This is the interactive counterpart of `051-kash-session-authority.md`
 handoff, enabled by the session rather than rule metadata, and uses the same
-host primitive. Stage `:tty :false` keeps a stage on pipes, and stage
+host primitive. Stage `:tty false` keeps a stage on pipes, and stage
 `:tty`/`:foreground` need no metadata here.
 
 - Eligible graphs are statement and test graphs whose input is not closed:
@@ -242,9 +247,11 @@ Jobs are numbered from 1 in the order they become jobs; a number is reused
 only after every job is gone. Live jobs are ranked: stopped jobs from the
 most recently stopped, then running jobs from the most recently started. The
 first is the **current** job (`+`), the second the **previous** job (`-`).
-Five whole single-line entries are session commands, with the operand syntax
-of the session commands below. `%N` selects job `N`, `%+` or `%%` the
-current job, and `%-` the previous job; no operand selects the current job.
+Five builtins (`055` §6) act on jobs when written as whole single-line
+entries: `jobs`, `fg` and `bg` are interactive builtins, and `wait` and `kill`
+are the general builtins applied to job operands. Operands are ordinary command
+words. `%N` selects job `N`, `%+` or `%%` the current job, and `%-` the previous
+job; no operand selects the current job.
 
 | Entry | Effect |
 | --- | --- |
@@ -254,8 +261,8 @@ current job, and `%-` the previous job; no operand selects the current job.
 | `kill [-SIGNAL] %N...` | Without `-SIGNAL`, cancels each job as an interrupt cancels the foreground entry, reaping its processes; the job finishes with status 130. With `-SIGNAL` (a name such as `-HUP`, with or without `SIG`, or a number), delivers that signal to every process group the job currently owns, continuing a stopped job for a non-stop signal; the job's Kash evaluation then sees each graph's outcome by the ordinary rules. `-STOP` stops the job and `-CONT` is `bg`. Status 0 when every job was signalled. |
 | `wait [%N...]` | Waits until each job has finished or stopped; without operands, until no job runs. The status is the last operand's: its status when finished, 128 plus its stopping signal when stopped; 0 without operands. A finished job's status is observed by `wait`: it is forgotten and not reported. An interrupt or Ctrl-Z ends the wait with 128 plus that signal and leaves the jobs as they are. |
 
-`kill` is a session command only when at least one operand is a `%` job;
-otherwise the entry is ordinary Kash and runs the external `kill`. An
+`wait` and `kill` with async-handle operands keep their ordinary `017`/`049`
+meaning. The external `kill` executable is reached as `x/kill`. An
 unknown job, no job, `bg` of a running job, a malformed operand, or an
 unknown signal fails with status 1 and a message, without other effect.
 
@@ -271,27 +278,31 @@ the foreground job.
 
 ## Session directory and environment
 
-Three whole single-line entries are session commands, not Kash statements:
+The session is the process-like unit of every entry (`055` §5.3), so its
+working directory and child environment persist across entries:
 
-| Entry | Effect |
+| Statement | Effect |
 | --- | --- |
-| `cd [DIR]` | Changes the session directory for later entries. No operand selects `$HOME`; `-` the previous directory; `~` and `~/...` expand to `$HOME`; relative paths resolve from the session directory. A missing directory fails with status 1. |
-| `export NAME=VALUE...` | Sets variables of the child environment that later processes inherit. Names use letters, digits and `_`, not starting with a digit. |
-| `unset NAME...` | Removes variables from that child environment. |
+| `cd [DIR]` | Changes the session directory for later statements and entries. No operand selects `$HOME`; `-` the previous directory; `~` and `~/...` expand to `$HOME`; relative paths resolve from the session directory. A missing directory fails with status 1. |
+| `set env/NAME = VALUE` | Sets `NAME` in the child environment that later lookups and processes see. `VALUE` is a scalar (string, number or path). |
+| `set env/NAME = nil` | Removes `NAME` from that child environment. |
 
-Operands split on blanks. Single quotes are literal. Unquoted and double-quoted
-text expands `$NAME` and `${NAME}` from the session child environment; a
-missing name expands to empty. Malformed operands fail with status 2 without
-changing the session.
+`cd` is the builtin of `055` §6 and is available in any statement position,
+including functions, control blocks and command lists. Its operand is an
+ordinary command word. `set env/…` is the ordinary block statement; its
+right-hand side is an expression evaluated in value context. A write made by a
+function called from an entry stays visible after the function returns.
+Invalid operands or values fail the statement without changing the session.
 
-The child environment starts as the invocation environment. Kame's own process
-environment and the Kash `env` namespace are unchanged; reads keep their
-capability rules. When the session uses the default capability policy, its
-read and write grants move with `cd`; explicit grants never move or broaden.
+The child environment starts as the invocation environment. It is the
+environment store read by `env/NAME`, bare `ENV-NAME` references and `$NAME`
+words; reads keep their capability rules. Kame's own process environment is
+unchanged. When the session uses the default capability policy, its read and
+write grants move with `cd`; explicit grants never move or broaden.
 
 Interactive sessions and login-shell invocations resolve executable names and
-`tool`/`x/NAME` lookups against the current session `PATH`, not the original
-invocation `PATH`. `export PATH=...`, `unset PATH`, and `cd` affect later lookups,
+`x/NAME` lookups against the current session `PATH`, not the original
+invocation `PATH`. `set env/PATH = …`, `set env/PATH = nil`, and `cd` affect later lookups,
 including aliases, captures, and pipelines. Relative PATH directories resolve
 against the lookup's working directory; empty entries (including an empty or
 unset PATH) search that directory. `--tool NAME=PATH` overrides still take
@@ -300,15 +311,18 @@ precedence, and run grants still authorize the selected executable.
 Resolved absolute paths are tracked as tool dependencies. A PATH change does
 not invalidate old tool nodes, cancel running jobs, or replay earlier effects.
 Already evaluated lazy definitions keep their values. Stage-local `:env PATH`
-overrides affect the child environment, not session lookup. Ordinary batch
-scripts and recipes retain startup-PATH resolution.
+overrides affect the child environment, not session lookup. Batch scripts and
+recipes resolve against their own unit's `PATH` under the same rule, which is
+the startup `PATH` until the unit writes it.
 
 ## Termination and interrupts
 
 - End of input (Ctrl-D on an empty line) ends the session. Outstanding owned
   work is joined, cleanup and finalization run, and the exit status is the
   last entry's status.
-- `exit` ends the session with the ordinary exit and finalization contract.
+- `exit [N]` in an entry ends the session (`055` §8.4) with status `N`
+  (default 0), under the ordinary exit and finalization contract. `exit`
+  inside a `$(…)` or `$?(…)` capture ends only that capture.
 - An interrupt while an entry runs cancels that entry and reaps its processes,
   then the session continues with status 130. Work started by earlier entries
   is not cancelled. No diagnostic is reported; on a terminal the session
@@ -361,7 +375,7 @@ Login sessions load `$KASH_PROFILE`, otherwise
 `~/.config/kash/profile.kash`, before listed sources or `-c` commands.
 An empty `KASH_PROFILE` disables loading. Missing default files are skipped;
 unreadable explicit files are reported. Profiles use the same entry, failure,
-source-location, and session-command contracts as interactive initialization.
+source-location, and builtin contracts as interactive initialization.
 `exit` in a profile ends the invocation.
 
 Interactive login sessions then load the interactive startup file after any
@@ -384,7 +398,7 @@ otherwise `~/.config/kash/init.kash`, read from the invocation environment.
   that cannot be read is reported as `HOST_FAIL` with status 1, and the
   session continues.
 - The text is divided into entries exactly as typed input is, including
-  continuation rules and session commands, and each entry runs under the
+  continuation rules, builtins and aliases, and each entry runs under the
   entry contracts above. A failing entry ends only that entry; later entries
   of the file still run. `exit` ends the session.
 - Diagnostics name the file path and locate positions in the file, not in the
@@ -397,11 +411,11 @@ files are read; nothing else in their directory is loaded.
 
 ## Command aliases
 
-Aliases are session commands, available as whole entries in interactive input,
-interactive initialization, and login profiles:
+`alias` and `unalias` are interactive builtins (`055` §6), available as whole
+entries in interactive input, interactive initialization, and login profiles:
 
 ```kash
-alias ll = ["ls" "-lah"]
+alias ll = ["ls", "-lah"]
 ll ./src
 ll ./src | head -n 10
 alias ll
@@ -413,7 +427,7 @@ unalias ll
 closed literal list of strings, without interpolation or NUL bytes; its first
 string must be nonempty. Declaration never executes code. Names contain ASCII
 letters, digits, `_`, `-`, or `.`, cannot start with `-`, and cannot replace
-reserved keywords or session commands. Invalid declarations leave aliases
+reserved keywords or builtins. Invalid declarations leave aliases
 unchanged. Ordinary value bindings do not define command aliases.
 
 `alias` lists declarations sorted by name; `alias NAME` shows one.
@@ -425,18 +439,17 @@ A literal command head matching an alias expands once into that prefix,
 followed by the caller's typed arguments. Prefix strings are never reparsed,
 split, interpolated, or globbed. Pipelines, captures, command lists, redirections,
 and capability checks retain their ordinary behavior. Alias expansion does not
-recurse: `alias ls = ["ls" "-lah"]` invokes the executable `ls` once. Computed
+recurse: `alias ls = ["ls", "-lah"]` invokes the executable `ls` once. Computed
 command heads (`$command`, `$...argv`) and explicit paths bypass alias lookup.
 Aliases take precedence over executable lookup, not reserved syntax.
 
-Whole-line aliases of `cd`, `export`, and `unset` use those session commands.
-Their existing whole-line restriction remains: they do not become commands
-usable in pipelines, functions, or compound entries. Alias declarations are
-not executable batch statements; ordinary scripts and recipes are unchanged.
-The Kash parser represents them as `session-command` items with a `text` header
-and an optional typed RHS `expression`. Parsing and formatting never execute
-them. Batch compilation (including constructed `kash` scripts) rejects these
-items with `FEATURE_UNSUP` before any statement runs.
+An alias whose prefix starts with `cd` runs the `cd` builtin. Alias
+declarations and removals keep their whole-line restriction: they are not
+usable in pipelines, functions, or compound entries. The Kash parser
+represents them as `session-command` items with a `text` header and an
+optional typed RHS `expression`. Parsing and formatting never execute them.
+Like every interactive-only builtin, they are `PARSE_ERR` in a script or rule
+body (`055` §6).
 
 The formatter preserves typed string arguments, canonicalizes declaration
 spacing and multiline lists, and formats surrounding Kash normally:
@@ -470,7 +483,9 @@ number and leaves the session status unchanged. Continuation prompts and
 sessions without a terminal never call it.
 
 ```kash
-(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
+def kash-prompt info
+	let mark = if info.status == 0 then "" else " !"
+	return "@{info.name}@{mark} $ "
 ```
 
 A function named `kash-rprompt` is called the same way, after `kash-prompt`,
@@ -480,7 +495,8 @@ while that line leaves no room for it. Any other result, or a failure,
 reported as a diagnostic named `<kash-rprompt>`, shows no right prompt.
 
 ```kash
-(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
+def kash-rprompt info
+	return if info.jobs == 0 then "" else "[@{info.jobs} jobs]"
 ```
 
 ## Line editing
@@ -513,7 +529,7 @@ match wins; each group has a heading and candidates carry descriptions:
 | --- | --- | --- |
 | Word starting with `$` | `bindings` | `$NAME` for top-level session bindings that are not functions, described as `let`, `lazy`, or `value`. |
 | Directly after `(` | `functions` | Session functions, described by their parameters, and library operations, described by their arity. |
-| Command position, word without `/` | `session commands`, `keywords`, `commands` | Session commands (only at the start of an entry line), Kash statement keywords, and executables found on the session child environment's `PATH`, described by their directory. |
+| Command position, word without `/` | `builtins`, `keywords`, `commands` | Builtins and aliases, Kash statement keywords, and executables found on the session child environment's `PATH`, described by their directory. |
 | First operand of `cd` | `files` | Directories. |
 | Anything else | `files` | Paths. |
 
@@ -555,7 +571,7 @@ Kame expressions, call heads, constants, and numbers. Unclosed quotes and
 expressions are highlighted to the end of the entry. Highlighting never
 changes the text.
 
-A literal command word is marked as unknown when it is not a session command,
+A literal command word is marked as unknown when it is not a builtin, alias, or session function,
 does not exist as a path when it contains `/`, and names no executable file in
 a directory on the session `PATH`. Words built from substitutions are not
 judged. The directory, `PATH`, and aliases are those in effect when the entry's
@@ -575,8 +591,6 @@ Highlighting runs on every keystroke and must not wait on running jobs or rescan
   prompts.
 - Semantic highlighting beyond command words, such as validating references
   or expressions.
-- Expressions as session-command operands, and Kash `export`/`unset`
-  statements (`051`), which remain scoped to recipes.
 - Redefining lazy definitions or rules.
 
 ## Conformance
@@ -585,14 +599,14 @@ Highlighting runs on every keystroke and must not wait on running jobs or rescan
 | --- | --- |
 | Invocation | `-i` with and without preloaded sources; bare `kash` on a terminal; conflict with stdin source. |
 | Entries | Open-expression continuation, block continuation ended by a blank line, partial entry at end of input; under a pseudo-terminal, a block entered with Tab indentation runs as one entry. |
-| Session | `let` and `def` rebinding, lazy redefinition and `+=` rejected without effects, failure ends only its entry, value display, diagnostics named `<kash:N>`. |
+| Session | `let` and `def` rebinding, `set` of an existing binding, a declaration entry rejected without effects, failure ends only its entry, value display, diagnostics named `<kash:N>`. |
 | Termination | `exit` status, end-of-input status, an interrupt received by the session during an entry reaps it, reports 130 without output, and continues the session; a second interrupt while settling ends the session with 130 and kills its processes; interrupt at the prompt clears the line. |
 | Terminal | Under a pseudo-terminal: foreground commands see a terminal on every stream and own the foreground group; captures keep pipes; Ctrl-C ends only the command without a diagnostic; typed-ahead entries run; the session regains the terminal with unchanged modes. |
-| Session state | `cd` with relative, `-`, and home forms; redirections after `cd` honor moved default grants and explicit grants deny them; `export` expansion and single-quote literals; `unset`; malformed operands. |
+| Session state | `cd` with relative, `-`, and home forms, including `cd` inside a function persisting after it returns; redirections after `cd` honor moved default grants and explicit grants deny them; `set env/NAME` visible to later entries, processes and `PATH` lookup; `set env/NAME = nil`; writes inside a capture do not escape; non-scalar values rejected; interactive-only builtins rejected in a preloaded script. |
 | History | Eligible entries persist and round-trip across sessions under the scope, secret filtering, retention, concurrency, and migration requirements of `053-kash-history.md`. |
-| Startup file | Definitions and session commands apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
-| Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; a `cmd &` graph reading the terminal stops its job, `fg` gives it the terminal, and `fg` of a running `&` job waits for it to finish; `wait %N` returns the job's `&` graph status and forgets it, and `wait` without operands returns 0; `jobs` marks the current and previous jobs, `%+` and `%-` select them, and a cancelled job is listed as `killed`; a session ending on `--timeout` cancels its background jobs; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
+| Startup file | Definitions, aliases, `cd` and `set env/NAME` apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
+| Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; a `cmd &` graph reading the terminal stops its job, `fg` gives it the terminal, and `fg` of a running `&` job waits for it to finish; `wait %N` returns the job's `&` graph status and forgets it, and `wait` without operands returns 0; `jobs` marks the current and previous jobs, `%+` and `%-` select them, and a cancelled job is listed as `killed`; a session ending on `--timeout` cancels its background jobs; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `x/kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
 | Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default; a `kash-rprompt` string is drawn as the right prompt and sees the last status, and a failing one is reported. ANSI colours and wide Unicode use display columns; the right prompt hides before overlapping input, returns after deletion, and follows resizing; wrapped cursor editing and completion preserve submitted argv. |
-| Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with session commands, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
-| Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, and session commands; `PATH` listings follow installs, removals, and mode changes between entries; under a pseudo-terminal, an unknown command is marked, and a `PATH` change, an alias, and a `cd` in the previous entry are reflected. |
+| Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with builtins, aliases, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
+| Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, builtins, and aliases; `PATH` listings follow installs, removals, and mode changes between entries; under a pseudo-terminal, an unknown command is marked, and a `PATH` change, an alias, and a `cd` in the previous entry are reflected. |
 | Line editing | Under a pseudo-terminal, a bracketed multi-line paste is not submitted before Enter and then runs as one entry; a keystroke latency probe reports kash and, when installed, bash on the same terminal without a timing threshold. |

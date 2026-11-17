@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Go WebAssembly Host
 
 ## Purpose
@@ -101,7 +105,7 @@ integers, pointer-plus-length byte strings, and caller-owned output buffers.
 No C struct layout containing pointers is exposed directly to JavaScript.
 
 Core exports and the declaration predicate query are listed explicitly in the
-build link lines (`-Wl,--export=...`) in both `Makefile` and `Makefile.kmk`.
+build link lines (`-Wl,--export=...`) in both `Makefile` and `Kamefile`.
 Additional session, process-streaming, and heap-control extensions carry
 `export_name` attributes in the C ABI source.
 
@@ -110,15 +114,15 @@ data, length, dst, capacity, out_length)`. Its JSON descriptor accepts optional
 `name` and `prefix` strings, a required `predicate` string, and optional
 `defines`/`environment` arrays of strings. The prefix contains only already
 selected definition declarations, extracted using each source's own portable
-parser. Selection follows ordinary `if` truth: only `:nil` and `:false` select
+parser. Selection follows ordinary `if` truth: only `nil` and `false` select
 the false branch. The result is UTF-8 `true` or `false`; ordinary query buffer statuses,
 instance diagnostics, and allocation-exhaustion recovery apply. The query never
 requests host work or acquires runtime grants. Hosts retain authored predicate
 spans for diagnostic rendering, select branches and includes in source order,
 and supply only selected fragments to compilation. Direct registration of
-uncomposed composition forms returns `FEATURE_UNSUP`. The older
-`kame_wasm_declaration_predicate` query retains its boolean-only contract for
-embedding compatibility; it does not restore the removed `when` source syntax.
+uncomposed composition forms returns `FEATURE_UNSUP`. The
+`kame_wasm_declaration_predicate` query has a boolean-only contract for
+embedding hosts and introduces no source syntax.
 Condition failures preserve structured diagnostic fields, including tips, in
 the instance diagnostic JSON envelope. Reports are owned by the instance until
 its next query replacing the diagnostic or destruction and are bounded at the
@@ -162,7 +166,7 @@ and retain both inclusion paths, including distinct sites loading the same file.
 Build source entries and session fragments may also carry `sourceDirectory`, an
 absolute lexical directory supplied by the file loader. An omitted or empty value
 provides no file-backed context. It is independent of the display `name`, cwd, and
-the session's `inline` entry-selection flag. `(source-dir)` uses this metadata at
+the session's `inline` entry-selection flag. `module/dir` uses this metadata at
 its authored expression, including in functions called from another source;
 generated expressions do not acquire context through coincident byte spans.
 Nonstring or nonabsolute nonempty values fail `PARSE_ERR` before registration.
@@ -736,8 +740,8 @@ detached daemons. A host copies each request and calls `kame_wasm_request_detach
 to release its query pin while servicing other nodes in the same instance.
 Completions retain their request handles; request-aware process stream/start
 exports correlate events without relying on whichever request is currently
-pinned. `kame_wasm_request_attach` selects a detached request for the legacy
-terminal-event export. Foreign-instance handles remain invalid. Recompilation
+pinned. `kame_wasm_request_attach` selects a detached request for the
+single-request terminal-event export. Foreign-instance handles remain invalid. Recompilation
 while detached requests are outstanding is rejected.
 
 The JavaScript runner services outstanding requests concurrently, executes a
@@ -808,7 +812,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 
 - Portable packages build for `GOOS=wasip1 GOARCH=wasm` with the standard Go toolchain.
 - An expression using only pure operations evaluates without host requests.
-- Template and script parse/format results match native fixtures byte-for-byte.
+- Template, Kame and Kash parse/format results match native fixtures byte-for-byte.
 - An in-memory host services read, stat, glob, and write requests.
 - A simulated process host streams stdout and stderr before completion.
 - Cancelling a request causes a late completion to be ignored safely.
@@ -830,7 +834,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
   module without instantiating it. Missing or invalid metadata and differing
   `KAME_WASM` bytes cannot inherit an unrelated release's identity.
 - `do run --lang expr` output matches native output byte-for-byte for pure expressions.
-- Direct `.km`/`.kmk`/`.kash`/`.ksh` execution and `do run` share native dispatch,
+- Direct `.km`/`.kame`/`.kash`/`.ksh` execution and `do run` share native dispatch,
   ordered multi-source compilation, shared scope/engine, first-fragment policy,
   selected-work, argument, grant, and stream semantics. A later parse failure
   prevents earlier effects; fragment boundaries retain authored source spans.

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Remote execution
 
 ## Purpose
@@ -9,8 +13,8 @@ network configuration and credentials belong to the embedding host.
 
 ## Selection and fallback
 
-A file rule may declare `[executor: "local"]` or
-`[executor: "remote:NAME"]`. An omitted executor means `local`. The remote
+A file rule may declare `{executor: "local"}` or
+`{executor: "remote:NAME"}` in its metadata record. An omitted executor means `local`. The remote
 name is a stable, case-sensitive identifier registered by the embedding host.
 Task rules and service rules remain local in this version because they do not
 declare a closed set of output artifacts.

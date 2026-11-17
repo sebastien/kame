@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Runtime performance and allocation contract
 
 ## Scope

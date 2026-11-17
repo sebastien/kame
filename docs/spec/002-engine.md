@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Reactive Engine
 
 ## Purpose
@@ -39,10 +43,10 @@ publication.
 A resource key contains a kind and canonical name. Resource kinds include:
 
 - `definition` for lazy named values.
-- `target` for phony named rules.
+- `target` for phony named rules (`task`).
 - `file` for filesystem paths.
-- `task` for cached named rules.
-- `service` for long-running actions.
+- `task` for cached named rules (`task cached`).
+- `service` for long-running actions (`service`).
 
 The same canonical key identifies a node within one engine. The engine
 does not support arbitrary URI schemes. Source syntax has one namespace for bare

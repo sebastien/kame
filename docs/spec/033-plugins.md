@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Plugin operations
 
 ## Purpose and boundary

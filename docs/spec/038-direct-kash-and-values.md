@@ -1,38 +1,40 @@
+---
+revision: 2
+---
+
 # Direct Kash and Explicit Value Boundaries
 
 ## Purpose and precedence
 
-Specification `044-value-producing-rule-bodies.md` supersedes build-template
-effects: shell-template expansion is read-only, and `[shell: kame]` bodies
-return artifact content directly. Direct Kash remains an action program.
-
 Kash is a typed process language, not template-generated shell text. A Kash
 program has the same parsing and evaluation semantics whether authored as a
-standalone source, a rule recipe, a service recipe, or a constructed callable.
+`.kash` source, a rule body, a service body, a block-bodied `def`, or a rule
+constructed in expression position.
 
 This specification refines `004-language.md`, `005-evaluation.md`,
 `006-runtime.md`, `007-library.md`, `008-cache.md`, `016-templates.md`,
 `017-kash.md`, `018-source-style.md`, `023-wildcard-sources.md`,
 `024-managed-services.md`, `025-generated-declarations.md`, and
-`037-build-inspection.md`. Its contracts replace implicit template expansion
-of Kash recipes, Kash `@(...)` expression boundaries, implicit collection
-serialization through `str`, and unsuffixed action-operation spellings in
-those documents. External-shell recipe templating is unchanged.
+`037-build-inspection.md` within the language defined by
+`055-unified-kame-kash-language.md`. It defines direct Kash bodies, the value
+boundaries inside Kash, executable tracking, scalar text and JSON operations,
+interpolated paths, wildcard kinds, and action naming.
+`044-value-producing-rule-bodies.md` defines content publication by expression
+bodies and Kash `return VALUE`. Foreign-shell recipes use the template contract
+of `016-templates.md`.
 
-## Direct recipe parsing
+## Direct bodies
 
-`SHELL = kash` and per-rule `[shell: kash]` select direct Kash interpretation.
-The parser delegates the authored recipe body to Kash without first rendering
-it as a document template. Interpreter settings retain their existing pure
-resolution contract. Because selection can be computed, source loading may
-retain a body with authored spans until the interpreter is resolved; it must
-not select a parser by guessing from body text.
+A rule, task or service block body is a Kash action block unless its resolved
+`shell` names an external shell (`055` §10.1, §10.2). The body is parsed as
+Kash directly; it is never rendered as a document template first.
+Interpreter settings keep their pure resolution contract. Because `shell` can be
+computed, source loading may retain a body with authored spans until the
+interpreter is resolved; it never selects a parser by guessing from body text.
 
 ```kame
-SHELL = kash
-
-authenticate {mode=sso} :
-	if (= mode "sso")
+task authenticate {mode=sso}
+	if mode == "sso"
 		aws sso login
 	else
 		printf "Using caller-supplied credentials.\n"
@@ -41,140 +43,147 @@ authenticate {mode=sso} :
 The entire selected Kash body is parsed before any of its statements execute.
 Syntax errors in unselected runtime branches remain errors; their expressions,
 tool lookups, reads, and actions are not evaluated merely by parsing them.
-Generated recipe strings receive the same direct parsing when their resolved
-interpreter is Kash. Generation still cannot perform host requests.
+Rules constructed in expression position and registered with `generate` carry
+their authored bodies and receive the same direct parsing. Generation still
+cannot perform host requests beyond tracked discovery (`025`).
 
-Kash recipe scope includes build definitions, target arguments, target captures,
-and its rule input/output frame. Definitions and branch scopes retain ordinary
-lazy semantics. Rule selectors continue to resolve against that frame when used
-as expression atoms; they are not document-template expansions. The named context
-aliases `inputs`, `outputs`, `inputs/changed`, and `args` follow the selector
-contracts in `005-evaluation.md`.
+Kash body scope includes the lexical scope of the declaration, module
+definitions and imports, target arguments, target captures, and the rule
+context. The rule context names `inputs`, `outputs`, `changed-inputs` and
+`args` follow the contracts in `005-evaluation.md` and are ordinary expression
+references; they are not template expansions. Definitions and branch scopes
+keep ordinary lazy semantics.
 
-Authored text, expression results, argv values, and captured output must never
-be implicitly reparsed as source. There is no template layer to escape through:
-`\@(...)`, template directives such as `@if`, and legacy `@(...)` boundaries
-are invalid as Kash structural syntax. Diagnostics identify the authored span
-and suggest the corresponding expression or Kash control statement.
-
-Document templates remain explicit data passed to `render`. A caller that
-deliberately constructs executable text can pass it to `(kash TEXT)`; this is
-an explicit compilation boundary, not an implicit recipe transformation.
-Ordinary argument data is never compiled. External-shell recipes still use
-the template contract of `016-templates.md`.
+Authored text, expression results, argv values, and captured output are never
+implicitly reparsed as source. There is no template layer: `@` has no meaning
+in Kash command words, and template directives such as `@if` are not Kash
+statements. Document templates are explicit data passed to `render`. `eval TEXT`
+parses one expression only (`055` §13); no operation compiles text into a Kash
+program. Foreign-shell recipes use the template contract of `016-templates.md`.
 
 ## References, expressions, and commands
 
-Kash has three value/process boundaries:
+Kash has these value/process boundaries:
 
 | Form | Meaning |
 | --- | --- |
-| `$reference` / `${reference}` | Look up a Kame binding; never implicitly read the environment |
-| `(function arguments...)` | Evaluate an ordinary Kame application, standalone or as an unquoted word fragment |
-| `$(command arguments...)` | Run a Kash process graph and capture stdout |
+| `$name`, `${REFERENCE}` | Reference resolved in expression position (`055` §6), including the environment fallback for uppercase names |
+| `(EXPR)` | Evaluate an expression, standalone or as an unquoted word fragment |
+| `$(COMMAND)` | Run a Kash process graph and capture stdout |
+| `$?(COMMAND)` | Run a Kash process graph or function invocation and return its outcome record |
 
-Parenthesized expressions are legal as statements, typed command arguments,
-definition values, setup values, redirection operands, and control operands.
-Within raw words they can adjoin other unquoted or quoted fragments, as in
-`biome --config-path=(js-biome-config)`, `emit (name).json`,
-`:cwd ./build/(variant) tool` and `tool > ./out/(name).txt`. Their complete
-parentheses belong to the shared expression grammar, so a single name calls
-without arguments. Mixed words require scalar or nil fragments, nil reading as
-empty text, and produce one value; only standalone unquoted argv substitutions retain list-splicing behavior.
-This applies equally to argv, redirection paths and scalar stage setup, with
-ordinary per-context validation. Typed `:env` records and definition values do
-not become scalar words. Raw path-shaped words accept the same fragments;
-Kame path atoms inside expressions retain their distinct interpolation grammar.
-Kash double-quoted literal parentheses do not start expression fragments.
-`$reference` / `${reference}` remain the reference forms; braces alone do not
-provide another interpolation grammar. `017-kash.md` defines word composition,
-literal escaping, definition detection and formatting preservation.
-Kash delegates them to the shared Kame expression parser. Expressions inside
-the boundary use Kame names, not `$` wrappers:
+The right-hand sides of `let`, `set` and `return`, and the conditions of `if`,
+`elif` and `while`, are expressions; they use expression names, not `$`
+wrappers. Parenthesized expressions are legal as typed command arguments,
+redirection operands, and stage setup values. Within raw words they can adjoin
+other unquoted or quoted fragments, as in
+`biome --config-path=(js-biome-config ())`, `emit (name).json`,
+`:cwd ./build/(variant) tool` and `tool > ./out/(name).txt`. Parentheses only
+group, so `(name)` reads `name` and `(f ())` calls `f` without arguments. Mixed
+words require scalar or nil fragments, nil reading as empty text, and produce
+one value; only standalone unquoted argv substitutions keep list-splicing
+behavior. This applies equally to argv, redirection paths and scalar stage
+setup, with ordinary per-context validation. Typed `:env` records do not become
+scalar words. Raw path-shaped words accept the same fragments; path atoms inside
+expressions keep their distinct interpolation grammar. Kash double-quoted
+literal parentheses do not start expression fragments. `017-kash.md` defines
+word composition, literal escaping and formatting preservation; Kash delegates
+fragments to the shared expression parser.
 
 ```kash
-package = (get manager packages)
+let package = get manager packages
 printf "%s\n" (str "manager: " manager)
-revision = $(git rev-parse HEAD)
+let revision = $(git rev-parse HEAD)
 
-if (= manager "auto")
+if manager == "auto"
 	(fail! "Select a package manager explicitly")
 
-match $manager
-	case "deb"
+match manager
+	"deb" =>
 		sudo apt-get install $package
+	else =>
+		printf "unsupported: %s\n" $manager
 ```
 
-A statement beginning with a parenthesized Kame expression evaluates that
-expression and discards its returned value. Nil, records, and process-result
-records are valid results; they are not treated as executables. Expression
-statements may span lines and do not implicitly print their value.
+A statement consisting of a parenthesized expression evaluates that expression
+and discards its value. Nil, records, and outcome records are valid results;
+they are not treated as executables. Expression statements may span lines while
+a delimiter is open and do not implicitly print their value. A command
+statement whose head resolves to a lexical function calls it with its words as
+arguments (`055` §7.2); the standard library is not consulted in command
+position, so a library operation used as a statement is written as a
+parenthesized expression or with its `std/NAME` head.
 
-To execute a command whose executable is computed by a Kame application, use a
-reference at the command head:
+To execute a command whose executable is computed by an expression, bind it and
+use a reference at the command head:
 
 ```kash
-command = (get manager commands)
+let command = get manager commands
 $command --version
 ```
 
-This avoids interpreting a statement-leading application ambiguously as either
-a function call or an executable. Parentheses do not introduce shell subshells.
-A parenthesized condition uses Kame truth; a command condition uses process
-exit status. `$(...)` contains one process graph, not an arbitrary statement
-sequence. Capture, recovery, async ownership, and cancellation otherwise retain
-`017-kash.md` semantics.
+Parentheses never introduce shell subshells. Conditions use expression truth
+(only `nil` and `false` are false); a command is tested through its outcome,
+`if $?(test -f ./ready).ok`. `$(…)` and `$?(…)` contain one process graph or
+command list, not blocks. Capture, recovery, async ownership, and cancellation
+otherwise keep `017-kash.md` and `055` §8 semantics.
 
-Unquoted standalone argument expressions or references splice flat lists.
-Scalars contribute one argument without splitting, globbing, or source parsing.
-Quoted or mixed words require scalars. Executable heads require one nonempty
-string/path without NUL; a list does not implicitly become a command prefix.
-Use `$...command` to explicitly spread a flat argv list: its first item supplies
-the executable and the remaining items precede any following authored arguments.
-The list must be nonempty at command position. `$...reference` and the braced
-`$...{reference}` spelling are standalone unquoted argv words, not scalar
-interpolation or source generation; ordinary `$command` semantics are unchanged.
+Unquoted standalone argument expressions or references splice flat lists only
+when spread: `$...flags` or `$...{REFERENCE}`. Scalars contribute one argument
+without splitting, globbing, or source parsing. Quoted or mixed words require
+scalars. Executable heads require one nonempty string or path without NUL; a
+list does not implicitly become a command prefix. `$...command` explicitly
+spreads a flat argv list at command position: its first item supplies the
+executable and the remaining items precede any following authored arguments.
+The list must be nonempty. `$...` words are standalone unquoted argv words, not
+scalar interpolation or source generation.
 
-Kash quoted words use Kash reference and capture rules, not document
-interpolation. Expression strings inside Kame expressions retain the ordinary
-Kame string contract; verbatim strings protect template-looking data. Delimiter
-balancing must account for strings, captures, expressions, and interpolated
-path atoms, not textual parenthesis matching.
+An unbraced `$` reference stops at `/`: `$dir/file.txt` is `$dir` followed by
+`/file.txt`. Qualified references need braces: `${env/HOME}`, `${x/aws}`.
+
+Kash quoted words use Kash reference and capture rules, not template
+interpolation. Strings inside expressions keep the expression string contract,
+including `@{EXPR}` interpolation; raw `'…'` strings and verbatim strings protect
+template-looking data. Delimiter balancing accounts for strings, captures,
+expressions, and interpolated path atoms; it is never textual parenthesis
+matching.
 
 ## Automatic executable dependencies
 
 Every reached Kash process stage resolves its executable head through the
 existing tool resolver. This includes literal commands, reference-derived
-commands, explicit paths, pipelines, captures, and background work. An explicit
-`(tool "aws")` call is not necessary to track `aws`:
+commands, explicit paths, `x/NAME` heads, pipelines, captures, and background
+work. An explicit `tool "aws"` call is not necessary to track `aws`:
 
 ```kash
 aws sts get-caller-identity
-command = "aws"
+let command = "aws"
 $command sts get-caller-identity
-identity = $(aws sts get-caller-identity)
+let identity = $(aws sts get-caller-identity)
 ```
 
-Bare names use the driver's startup PATH and `--tool NAME=PATH` overrides.
-Explicit paths resolve against the stage working directory. Process-stage
-environment PATH changes affect the child environment, not executable lookup.
-Resolution records both tool identity and selected executable file identity
-before launch. Missing/non-executable tools report `TOOL_MISSING` at the head.
-Internal executable metadata checks do not widen user read capabilities;
-execution still requires ordinary run authority.
+Bare executable names resolve through the environment store's `PATH` of the
+current process-like unit (`055` §5.3) and the `--tool NAME=PATH` overrides.
+`set env/PATH = …` therefore changes lookup for later stages in the same unit; a
+per-command `:env` override changes only the child environment, not lookup.
+Explicit paths resolve against the stage working directory. Resolution records
+both tool identity and selected executable file identity before launch.
+Missing or non-executable tools report `TOOL_MISSING` at the head. Internal
+executable metadata checks do not widen user read capabilities; execution still
+requires ordinary run authority.
 
-The `x/NAME` namespace remains an explicit way to obtain a resolved, tracked
-executable value. Kash accepts `$x/aws` as that namespace reference and
-`${x/aws}` as its braced spelling. Bare `aws` and `$x/aws` at a command head
-resolve the same tool identity and honor the same override. A value already
-resolved through `x/NAME` retains its provenance; using it must not lose the
-named override identity or resolve it under a different PATH. `(tool NAME)`
-remains available for computed lookup outside command position, not as a
-requirement for ordinary command tracking.
+The `x/NAME` namespace is the explicit way to name a resolved, tracked
+executable, bypassing lexical bindings and builtins. At a command head it is
+written `x/aws`; as a value it is `x/aws` in expressions and `${x/aws}` in
+command words. Bare `aws` and `x/aws` at a command head resolve the same tool
+identity and honor the same override. A value obtained through `x/NAME` keeps
+its provenance; using it never loses the named override identity or resolves it
+under a different `PATH`. `tool NAME` remains available for computed lookup in
+expressions.
 
 Only reached stages acquire runtime tool dependencies. Static inspection may
-list literal heads in all branches as declared candidates, but must distinguish
-them from observed dependencies and must not reject an unavailable tool in an
+list literal heads in all branches as declared candidates, but distinguishes
+them from observed dependencies and does not reject an unavailable tool in an
 unreached branch. Dynamic heads are deferred unless their values can be resolved
 with read-only authority. Tool-check commands may explicitly validate declared
 candidates without running them.
@@ -205,108 +214,102 @@ representations without separators. Strings and paths contribute their text;
 numbers use deterministic decimal text, booleans use `true`/`false`, and nil
 uses `nil`. Zero arguments return an empty string. Lists, records, bytes,
 patterns, resources, and callables are rejected rather than silently serialized.
-Binary decoding remains explicit through `text`; collection joining remains
+Binary decoding stays explicit through `text`; collection joining stays
 explicit through `join`.
 
 ```kame
-(str "hello " name)
-(str "count=" 3)
-(json [name: "example" enabled: :true])
+greeting = str "hello " name
+counter = str "count=" 3
+manifest = json {name: "example", enabled: true}
 ```
 
 `json VALUE` accepts exactly one JSON-compatible value and encodes valid,
 deterministic JSON. String scalars are quoted and escaped. Lists and records
-are recursive; record key order retains the existing stable contract. Nil is
-`null`, booleans are JSON booleans, and finite numbers are JSON numbers.
-Nonfinite numbers, bytes, callables, resource handles, and other non-JSON values
-are rejected. There is no implicit action or output. `parse-json` remains the
-inverse for JSON-compatible value kinds.
+are recursive; record key order keeps the stable contract. Nil is `null`,
+booleans are JSON booleans, and finite numbers are JSON numbers. Nonfinite
+numbers, bytes, callables, resource handles, and other non-JSON values are
+rejected. There is no implicit action or output. `parse-json` is the inverse for
+JSON-compatible value kinds. `fmt VALUE` (`055` §13) is the separate operation
+that renders a value as expression source.
 
-`cat` is not a Kame string operation. In Kash command position `cat` remains
-the ordinary tracked external executable. `concat` retains collection semantics;
-canonical CLI value display remains separate from both `str` and `json`.
+`cat` is not a Kame string operation. In Kash command position `cat` is the
+ordinary tracked external executable. `concat` keeps collection semantics;
+canonical CLI value display is separate from `str`, `json` and `fmt`.
 
 ## Interpolated paths and globs
 
-An explicit path atom beginning with `/`, `./`, or `../` may contain
-`@{REFERENCE}` segments and `@`-prefixed parenthesized expressions, sharing the
-boundaries in `004-language.md` and `016-templates.md`. An atom beginning with
-either expansion followed immediately by a path separator is also an
-interpolated path atom:
+A path atom (`055` §3.4) beginning with `/`, `./`, `../` or `~/` may contain
+`@{EXPR}` segments, sharing the interpolation boundary of `016-templates.md`. An
+atom beginning with an interpolation followed immediately by `/` is also a path
+atom:
 
 ```kame
-SOURCES = @{PATH_SRC}/sh/**/*.sh
-FILTERED_SOURCES = (wildcard :+files :-symlinks @{PATH_SRC}/sh/**/*.sh)
-OUTPUT = (nop ./build/@{component}/main.js)
-COMPUTED_OUTPUT = (nop @(output-root)/main.js)
+SOURCES = files @{PATH_SRC}/sh/**/*.sh
+FILTERED_SOURCES = wildcard :+files :-symlinks @{PATH_SRC}/sh/**/*.sh
+OUTPUT = ./build/@{component}/main.js
+computed-output = @{output-root ()}/main.js
 ```
 
-The parser retains static fragments and expression children in one path AST
+The parser keeps static fragments and expression children in one path AST
 node. It does not terminate the path at whitespace inside an interpolation.
 Children evaluate through the shared evaluator once per accepted evaluation,
-with normal suspension/dependency retention. Their string/path values are
+with normal suspension and dependency retention. Their string or path values are
 inserted as data without lexing them again. Nil, lists, records, bytes, NUL,
-and nontext values are invalid path segments.
+and other non-text values are invalid path segments.
 
 Whitespace, quotes, dollar signs, parentheses, and template-looking bytes in a
-value remain path data. Slashes in values contribute path components;
-`PATH_SRC` may be a relative or absolute root. The materialized result must be
-an explicit filesystem path; a leading value `src` requires an authored `./`
-if the result otherwise lacks an explicit root. Relative paths use evaluation
-cwd, not the including source's directory. This extension is path-atom syntax,
-not a reintroduction of Kash's standalone template boundaries. `@{ROOT}` alone
-is not a Kash reference word, nor is `@(root)` a Kash call word; use `$ROOT` and
-`(root)` there. The leading path separator after an expansion distinguishes a
-path atom. Bare `{capture}` groups keep their existing pattern/capture meaning.
+value stay path data. Slashes in values contribute path components; `PATH_SRC`
+may be a relative or absolute root. The materialized result must be an explicit
+filesystem path; a leading value `src` requires an authored `./` if the result
+otherwise lacks an explicit root. Relative paths resolve against the root
+directory (`055` §9.2), not the including source's directory. Inside Kash
+command words `@` has no meaning: `@{ROOT}/x` is literal text there, and the
+same path is written `$ROOT/x` or `(ROOT)/x`. Bare `{capture}` groups keep their
+pattern/capture meaning.
 
-In a wildcard interpolated path, glob metacharacters in authored static
-fragments retain pattern meaning. Metacharacters contributed by expression
-values are literal filename data, not additional glob syntax. This provenance
-must survive until matching. When evaluated as a Kame expression, an unquoted
-path with authored glob syntax produces a tracked path list without requiring a
-`wildcard` wrapper (`004-language.md`, `023-wildcard-sources.md`). A path with
-no authored glob syntax remains a literal path even if an inserted value
-contains metacharacters. Capture-pattern groups retain their distinct grammar.
+Path atoms have the kinds of `055` §9.1. An atom with authored glob syntax or
+matcher groups is a `PathPattern`; one with only `{name}` groups is a
+`PathTemplate`; otherwise it is a `Path`. A `PathPattern` is a value, not a file
+list: discovery is explicit through `files`, `dirs` or `wildcard`, which return
+tracked path lists (`055` §9.4, `023-wildcard-sources.md`). A `PathTemplate`
+produces a path only through `bind TEMPLATE CAPTURES`. Kinds never convert
+implicitly.
 
-Expression path atoms can construct capture patterns with interpolated literal
-prefixes and suffixes. Authored groups take precedence over filesystem globs:
-`@{ROOT}/{name:*}.@{EXT}` is a match pattern. Rooted paths with only reference
-groups, such as `@{OUT}/{name}` or `./out/{name}`, instead lower authored
-`{name}`/`{_N}` groups to lexical string lookups. They return path strings,
-report `REF_MISSING` for unbound names, and share ordinary path operand retention
-and literal-data escaping. Rootless expansion patterns remain pattern values;
-use `(pattern TEXT)` when a rooted expansion pattern value is required.
-Matcher interpolations return an owned pattern value, not a path list.
-Inserted braces, backslashes, glob/regex punctuation and template-looking bytes
-remain literal pattern data and cannot introduce groups or matching syntax.
+In an interpolated pattern, glob metacharacters in authored static fragments
+keep pattern meaning. Metacharacters contributed by expression values are
+literal filename data, not additional glob syntax, and this provenance survives
+until matching. Authored groups take precedence over filesystem globs:
+`@{ROOT}/{name:*}.@{EXT}` is a matcher pattern. Inserted braces, backslashes,
+glob or regex punctuation and template-looking bytes stay literal pattern data
+and cannot introduce groups or matching syntax. A path with no authored glob
+syntax or groups is a `Path` even if an inserted value contains
+metacharacters.
 
-Each capture/reference group, including its name and matcher/regex content,
-must be fully authored in one static segment. Interpolation inside a group,
-such as `./{@{NAME}:*}` or `./{name:@{MATCHER}}`, is a source error. Use the
-explicit `(pattern TEXT)` boundary to deliberately compile constructed pattern
-syntax. Interpolated strings remain strings; raw Kash words keep their separate
-grammar. Unquoted computed prerequisite paths share expression path parsing,
-with rule captures supplied as lexical bindings; quoted prerequisites retain
-string interpolation semantics. The decoded computed path must still satisfy
+Each capture group, including its name and matcher or regex content, must be
+fully authored in one static segment. Interpolation inside a group, such as
+`./{@{NAME}:*}` or `./{name:@{MATCHER}}`, is a source error. `pattern TEXT` is
+the explicit boundary for compiling constructed pattern text into a
+`PathPattern`. Interpolated strings stay strings; raw Kash words keep their
+separate grammar. Rule header inputs share expression path parsing, with
+output captures supplied as template bindings (`055` §10.1); quoted header
+items keep string interpolation semantics. A computed path must still satisfy
 the explicit-root, text-only and no-NUL rules above.
 
-A caller can deliberately supply a complete string pattern to `wildcard`; that
-argument retains its ordinary pattern-string contract. `wildcard` also accepts
-already-expanded path lists without interpreting their member text again, and
-applies its kind flags to the combined matches. Rule headers retain their
-separate template/capture grammar. Structural path interpolation applies to
-expression and Kash path atoms; implicit glob evaluation applies to Kame
-expressions, not raw Kash command words.
+`wildcard` accepts `PathPattern` values, complete pattern strings, and
+already-expanded path lists, without interpreting list member text again, and
+applies its kind flags to the combined matches. Structural path interpolation
+applies to expression and Kash path atoms; discovery happens only through the
+discovery operations, never implicitly in raw Kash command words.
 
 ## Signed symbol flags and wildcard kinds
 
 Symbol grammar admits `:+NAME` and `:-NAME`, with `NAME` following ordinary
-name syntax. Like other nonboolean symbols, their values are their text without
-the colon: `+files`, `-files`, and so on. They are ordinary values, not global
-side effects or arbitrary keyword arguments. Operations declare which signed
-flags they accept. ASTs and formatting preserve their signed spelling.
+name syntax. Like other symbols, their values are their text without the colon:
+`+files`, `-files`, and so on. They are ordinary values, not global side
+effects or arbitrary keyword arguments. Operations declare which signed flags
+they accept. ASTs and formatting preserve their signed spelling.
 
-`wildcard` accepts one or more string patterns or expanded path lists and these
+`wildcard` accepts one or more patterns or expanded path lists and these
 operation-wide flags:
 
 | Flag | Meaning |
@@ -322,10 +325,10 @@ flags subtract named kinds. Flag position does not matter; duplicate identical
 flags are idempotent. Opposite flags for the same kind and unknown signed flags
 report `EXPR_INVALID`. A call without any pattern or path-list operand is
 invalid. Flags are scalar operands, not reinterpreted list members. Computed flag
-values follow the same validation as authored flags. Since ordinary symbols
-materialize as text, whole argument values beginning with `+` or `-` are reserved
-for flag validation; a filename/pattern with that initial character must use
-an explicit path such as `./+files`, rather than the flag-shaped value `+files`.
+values follow the same validation as authored flags. Since symbols materialize
+as text, whole string arguments beginning with `+` or `-` are reserved for flag
+validation; a filename or pattern with that initial character must use an
+explicit path such as `./+files`.
 
 Classification uses the entry itself, equivalent to `lstat`, not its target.
 A link to a file or directory is a symlink, not also a file or directory;
@@ -338,18 +341,18 @@ Filtering changes emitted matches, not traversal through ordinary directories.
 For example, `:+files` still discovers files under nested directories:
 
 ```kame
-(files @{PATH_SRC}/sh/**/*.sh)
-(dirs ./assets/*)
-(wildcard :+files :+symlinks ./assets/**)
-(wildcard :-dir :-symlinks ./assets/**)
+scripts = files @{PATH_SRC}/sh/**/*.sh
+asset-dirs = dirs ./assets/*
+assets = wildcard :+files :+symlinks ./assets/**
+plain-assets = wildcard :-dir :-symlinks ./assets/**
 ```
 
-`(files PATTERNS...)` and `(dirs PATTERNS...)` are fixed-kind shorthands for
+`files PATTERNS...` and `dirs PATTERNS...` are fixed-kind shorthands for
 `wildcard` with `:+files` and `:+dir`. They accept the same patterns and
 expanded path lists, track the same membership, and reject kind flags. A union
-or exclusion still uses `wildcard`.
+or exclusion uses `wildcard`.
 
-Results retain canonical paths, sorted duplicate-free union semantics, and
+Results keep canonical paths, sorted duplicate-free union semantics, and
 tracking for empty patterns. Traversal sources may be shared across filter sets,
 but filtered consumer identity includes the normalized mask. Entry-kind and
 symlink-existence changes invalidate consumers even when path names are
@@ -358,49 +361,48 @@ failures rather than treating them as absent entries.
 
 ## Action names and phase policy
 
-`!` marks an explicit action or control effect. It is not a substitute for
-operation metadata, capability checks, phase checks, or callback effect tracking.
-Every registered standard operation must declare its category, required
-capabilities, allowed phases, and dependency/publication behavior. Registry
-validation and acceptance coverage must account for all operations, including
-aliases and template primitives, rather than inferring effects from suffixes.
+`!` marks an explicit action or control effect in a library operation name. It
+is not a substitute for operation metadata, capability checks, phase checks, or
+callback effect tracking. Every registered standard operation declares its
+category, required capabilities, allowed phases, and dependency/publication
+behavior. Registry validation and acceptance coverage account for all
+operations, including template primitives, rather than inferring effects from
+suffixes.
 
 | Category | Canonical operations | Contract |
 | --- | --- | --- |
-| Pure computation/construction | `str`, `json`, collections, lexical paths, `kash` | No host action merely from construction |
-| Tracked observations | `read`, `exists?`, `stat`, `wildcard`, `files`, `dirs`, `env`, `tool`, `render`, `await` | Retain dependency/phase contracts; render can read templates; await joins already-started work |
-| File/output actions | `write!`, `yield!`, `out!`, `err!` | Mutation/publication/output under existing authority and publication contracts |
-| Process actions | `run!`, `pipe!`, `sh!`, `shell-template!` | Preserve existing process grants, results, ownership, and failure semantics |
+| Pure computation/construction | `str`, `json`, `fmt`, collections, lexical paths, `capture`, `bind`, `pattern` | No host action merely from construction or evaluation |
+| Tracked observations | `read`, `exists?`, `stat`, `wildcard`, `files`, `dirs`, environment reads (`env/NAME`), `tool`, `render`, `await` | Keep dependency/phase contracts; `render` can read templates; `await` joins already-started work |
+| File/output actions | `write!`, `out!`, `err!` | Mutation/publication/output under existing authority and publication contracts |
+| Process actions | `run!`, `pipe!`, `sh!`, `shell-template!` | Keep existing process grants, results, ownership, and failure semantics |
 | Control effect | `fail!` | Raise an authored diagnostic and abort the current computation |
-| Volatile observations | `now`, `monotonic` | Unsuffixed; existing planning/resolution restrictions still apply |
+| Volatile observations | `now`, `monotonic` | Unsuffixed; planning/resolution restrictions apply |
 
-The old action names (`write`, `yield`, `out`, `err`, `run`, `pipe`, `shell`,
-`sh`, `shellrun`, `shell-template`, `fail`) and expression concatenator `cat`
-are not canonical aliases. They produce migration diagnostics when used as
-library operations; external command names are unaffected. `shell-template!`
-retains the existing executing tagged-shell-template contract, not a new pure
-constructor. `await` does not launch a new process but retains joined work's
-failure and cancellation semantics.
+`out!` and `err!` are also Kash command builtins (`055` §6). `shell-template!` keeps
+the executing tagged-shell-template contract; it is not a pure constructor.
+`await` does not launch a new process but keeps joined work's failure and
+cancellation semantics. `cat` is not a library operation.
 
 Effectful user callables should use `!`, but effects propagate through arbitrary
-callable names, `map`, `reduce`, lazy definitions, and Kash callables regardless
-of spelling. Pure functions can still fail validation without carrying `!`.
+callable names, `map`, `reduce`, lazy definitions, and Kash `def` functions
+regardless of spelling. Pure functions can still fail validation without
+carrying `!`.
 
 `fail!` is usable in pure validation, declaration registration, planning, and
 runtime evaluation. It requires no host authority and is not deferred to
 publication. An unselected branch containing `fail!` does not fail. Other
-actions retain their phase restrictions: a suffix grants no permission to
-execute processes or publish files during read-only inspection.
+actions keep their phase restrictions: a suffix grants no permission to execute
+processes or publish files during read-only inspection.
 
-Kash commands and `$(...)` are process actions through syntax; no bang is added
-to external executable names. Calling a constructed Kash callable executes its
-program under the caller's phase and authority.
+Kash commands, `$(…)` and `$?(…)` are process actions through syntax; no `!` is
+added to external executable names. Calling a Kash `def` function runs its body
+under the caller's phase and authority.
 
 ## Inspection, freshness, and publication
 
-Direct Kash ASTs retain authored spans across nested expressions and captures.
-Diagnostics do not point into serialized argument text. Static parse/format
-performs no host requests or actions.
+Direct Kash ASTs keep authored spans across nested expressions, word fragments,
+and captures. Diagnostics never point into serialized argument text. Static
+parse and format perform no host requests or actions.
 
 Planning and dry-run do not launch processes, emit authored output effects,
 mutate files, or evaluate a diagnostic merely because it occurs in an unreached
@@ -410,57 +412,63 @@ explicit deferred boundaries, not fabricated values that select a branch.
 Ordinary capability and validation failures are not hidden.
 
 Recipe identity covers interpreter selection, authored Kash structure, reached
-helper definitions, configuration/target arguments read, file/glob facts, and
-resolved executable identities. Runtime-discovered dependencies remain available
-for persisted freshness and watch invalidation. Typed argv does not replace
-opaque process environment tracking.
+helper definitions, configuration and target arguments read, file and glob
+facts, environment reads, and resolved executable identities.
+Runtime-discovered dependencies remain available for persisted freshness and
+watch invalidation. Typed argv does not replace opaque process environment
+tracking.
 
 Effects and completed operands survive suspension without replay. File effects
-retain atomic publication and failure cleanup. Async graphs belong to their
-recipe/service/call invocation and are joined or cancelled under the existing
-process and service contracts. There is no extra template/eval pass during
+keep atomic publication and failure cleanup. Async graphs belong to their
+rule, service or call invocation and are joined or cancelled under the existing
+process and service contracts. There is no template or evaluation pass during
 publication or retry.
 
 ## Acceptance criteria
 
-- Standalone Kash, callables, authored/generated rules, and services interpret
-  equivalent source with the same typed semantics.
+- `.kash` sources, `def` functions, authored and generated rules, and services
+  interpret equivalent source with the same typed semantics.
 - Expression conditions and `fail!` in unselected branches need no escaping;
-  only reached branches run or acquire runtime dependencies.
-- Direct recipes reject template directives/legacy escaped boundaries with
-  authored-span migration diagnostics; external-shell templates still work.
-- Expression statements accept nil/record/process results without executing a
-  result or printing an unsolicited final value.
-- Multiple arguments, spaces, newlines, quotes, `$`, `@(...)`, and `{(...)}` in
+  only reached branches run or acquire runtime dependencies. Commands are tested
+  through `$?(…)` outcomes.
+- Kash bodies are never template-expanded; `@` in command words is literal
+  text; foreign-shell templates still interpolate `@{…}` and pass `$` through.
+- Expression statements accept nil, record and outcome results without executing
+  a result or printing an unsolicited value; library operations are not resolved
+  in command position.
+- Multiple arguments, spaces, newlines, quotes, `$`, `@{…}`, and `$(…)` in
   runtime data survive without serialization helpers or source injection.
 - Mixed Kash expression fragments preserve one scalar argument, authored spans,
-  retained operands, phase/capability checks and dependencies. Standalone list
-  splicing, quoted literal parentheses and statement-leading expressions keep
+  retained operands, phase/capability checks and dependencies. Explicit `$...`
+  list spreading, quoted literal parentheses and expression statements keep
   their distinct semantics across parse/format round trips.
+- `(name)` reads a value and `(f ())` calls; `$dir/file` stops the reference at
+  `/`; `${env/HOME}` and `${x/aws}` resolve their namespaces.
 - Redirection paths and scalar setup values use the same composition as argv,
   including path-shaped raw words and leading expression operands. Validation
-  retains the destination's type/path constraints, prelaunch grants and file
-  safety; typed environment records retain their existing non-conversion rules.
+  keeps the destination's type/path constraints, prelaunch grants and file
+  safety; typed environment records keep their non-conversion rules.
 - Literal, dynamic, explicit-path, and `x/NAME` command heads track executable
-  identity; overrides, PATH, scoped authority, missing tools, and unreached
+  identity; overrides, the environment store's `PATH` after `set env/PATH`,
+  per-command `:env` overrides, scoped authority, missing tools, and unreached
   branches behave consistently on native and WASM hosts.
 - Changing a used executable invalidates freshness without making an unavailable
   unused branch tool an observed dependency.
 - `str` concatenates scalar text and rejects collection serialization; `json`
   quotes scalars and round-trips nested JSON-compatible values.
-- Interpolated paths remain one atom, preserve spans/dependencies, accept roots
+- Interpolated paths stay one atom, preserve spans and dependencies, accept roots
   containing spaces, and distinguish literal dynamic glob metacharacters.
-- Path interpolation uses `@{REFERENCE}` for lookup and `@(function)` for a
-  zero-argument call, consistently with strings/templates/headers. Bare capture
-  groups remain authored patterns; standalone template boundaries are not Kash
-  argv substitutions.
-- Unquoted interpolated globs evaluate to tracked lists without a wrapper;
-  explicit `wildcard` retains union/kind-filter behavior without re-globbing
-  dynamic filename bytes, and raw Kash words remain literal.
+- Path interpolation uses `@{EXPR}` consistently with strings, templates and
+  headers, `@{f ()}` for a zero-argument call. Bare capture groups stay authored
+  patterns; `@{…}` is not a Kash word form.
+- Glob path atoms are `PathPattern` values; `files`, `dirs` and `wildcard`
+  return tracked lists with union/kind-filter behavior without re-globbing
+  dynamic filename bytes; `{name}`-only atoms are `PathTemplate` values used
+  with `bind`; raw Kash words stay literal.
 - Filter tests cover positive/negative combinations, contradictory/unknown flags,
   duplicates, empty matches, symlink targets/dangling links, traversal, entry-kind
   changes, and shared-source filtered watch invalidation.
-- Action renaming preserves grants, phase restrictions, once-only publication,
+- Action names keep grants, phase restrictions, once-only publication,
   callback effects, async lifetime, cancellation, and failure cleanup.
 - Parse/format round trips preserve semantics and are idempotent on both hosts,
   including multiline expressions and interpolated path atoms.

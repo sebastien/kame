@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Diagnostics and Error Reporting
 
 ## Purpose
@@ -21,7 +25,7 @@ evaluator, planner, runtime, host, and CLI code construct or enrich one
 structured diagnostic. Human, plain, and JSON output render that same value.
 
 New and revised messages should identify established constraints: arity failures
-give expected and actual counts, type failures give the actual kind, and missing selector contexts
+give expected and actual counts, type failures give the actual kind, and missing rule contexts
 name the required input, output or argument context. An EOF delimiter failure
 names the missing delimiter without an additional whitespace error. A recognized
 outer-language mismatch names the appropriate language rather than suggesting
@@ -135,7 +139,9 @@ meaning by themselves.
 | --- | --- | --- |
 | `PARSE_ERR` | error | Invalid syntax; recovery may lower it to warning. Malformed pattern groups instead leave the token plain |
 | `REF_MISSING` | error | Unknown reference or missing record component |
-| `SEL_NO_CONTEXT` | error | Selector used without a matching context |
+| `ENV_VAR_MISSING` | error | A bare uppercase reference fell back to the environment and the variable is unset (`055`) |
+| `DISCOVERY_OVERLAP` | error | A declaration-time discovery pattern overlaps a declared output (`055`) |
+| `SEL_NO_CONTEXT` | error | Rule context binding (`inputs`, `outputs`, `changed-inputs`) or argument frame used without a matching context |
 | `SEL_INDEX_INVALID` | error | Invalid index or slice |
 | `OP_UNKNOWN` | error | Unknown operation |
 | `TOOL_UNKNOWN` | error | Tool reference used without a tool resolver |
@@ -178,7 +184,7 @@ meaning by themselves.
 | `FS_EXISTS` | error | No-clobber publication found an existing destination entry; staging is preserved |
 | `FS_UNSUPPORTED` | error | The resource, host, or filesystem cannot provide the required safe publication primitive |
 | `FS_PUBLISHED` | error | Publication already committed but subsequent work failed; `cause.published` and `cause.stagedRemoved` preserve the outcome, not permission to retry or roll back |
-| `RES_INVALID` | error | Invalid resource identity, URI or protocol use |
+| `RES_INVALID` | error | Invalid resource identity, URI or protocol use, or an unresolvable or disallowed module source path |
 | `PLUGIN_CONFIG` | error | Invalid or conflicting plugin declarations |
 | `PLUGIN_PROTOCOL` | error | Invalid plugin request/response shape, identity or value |
 | `PLUGIN_LIMIT` | error | Plugin request or response exceeds its byte limit |
@@ -217,8 +223,8 @@ not portable runtime diagnostics; they are documented with the embedding API.
   executable fragments, or a `default` definition also uses `TGT_NO_DEFAULT`,
   with available definition names rather than invented build targets.
   Expression-statement and empty-program runs do
-  not require a default (`009-cli.md`). Removed `do expr` and `do kash` commands
-  use `CMD_UNKNOWN` with the appropriate `do run` migration spelling.
+  not require a default (`009-cli.md`). `do expr` is not a command and uses
+  `CMD_UNKNOWN` with help naming `do run --lang expr`.
 - File and inline fragments in execution mode are not an `OPT_CONFLICT`.
   Conflicts discovered while compiling the combined scope retain their existing
   definition/rule codes and source spans; diagnostics identify the originating
@@ -292,27 +298,29 @@ evaluated values and environment contents are not included to illustrate errors.
 
 | Failure | Required explanation and recovery |
 | --- | --- |
-| Rendering a callable (`EXPR_INVALID`) | Identify the actual callable kind, not a record/bytes conversion failure. For `@{name}`, suggest `@(name)` when invocation is intended; never invoke it implicitly. |
-| Applying a noncallable (`EXPR_INVALID`) | Identify the actual head kind and authored call. If the head is a reference being rendered with `@(name)`, suggest `@{name}` for lookup; never fall back to that interpretation. |
-| Invalid reference expansion (`PARSE_ERR`) | State that `@{...}` requires a reference; point at the invalid body and show `@(function args...)` for a call when applicable. |
+| Rendering a callable (`EXPR_INVALID`) | Identify the actual callable kind, not a record/bytes conversion failure. For `@{name}`, suggest `@{name ()}` or `@{name ARG…}` when invocation is intended; a bare name is the function value and is never invoked implicitly. |
+| Applying a noncallable (`EXPR_INVALID`) | Identify the actual head kind and authored application. If the head is a value applied to arguments, such as `@{name x}`, suggest `@{name}` for lookup or grouping the intended callee; never fall back to that interpretation. |
+| Invalid interpolation (`PARSE_ERR`) | State that `@{...}` holds exactly one expression; point at the invalid body and name the missing delimiter or unexpected token. |
 | Invalid mixed Kash word (`EXPR_INVALID`) | Name the destination (argument, command head, redirection or setup key), actual fragment kind, and scalar constraint. Explain that list splicing is only valid for standalone unquoted argv substitutions. |
-| Missing/invalid selector context (`SEL_NO_CONTEXT`, `SEL_INDEX_INVALID`) | Identify the required frame or invalid bound. In template text, also explain `\@` for a literal at-sign when the authored spelling may be literal, such as `--mtime=@0`; do not guess from an external executable name. |
+| Missing/invalid rule context (`SEL_NO_CONTEXT`, `SEL_INDEX_INVALID`) | Identify the required frame or invalid bound. In template text and foreign-shell recipes, also explain `@@` for a literal at-sign when the authored `@{` may have been meant literally; do not guess from an external executable name. |
 | Missing explicit file prefix (`PARSE_ERR`, or `TGT_NO_RULE` where applicable) | Distinguish a logical name from a file path and suggest `./` when a file path is plausible. Never silently reclassify a name or modify source. |
-| Denied environment read (`CAP_DENIED`) | Identify environment-read authority and, when known, the name. Explain rule `authority` `read` or the scoped `--allow-env=NAME` grant; definition configuration, `export`, and child environment settings do not grant that read. |
-| Invalid rule settings placement (`PARSE_ERR`) | When the malformed metadata placement is recognizable, show `target : inputs ; [shell: kash]`, or `target : ; [shell: kash]` with no inputs. Do not imply valid metadata is unsupported. |
-| Template syntax in direct Kash (`PARSE_ERR`) | Name the direct Kash boundary and show `$name` / `${name}` for a reference or `(function args...)` for a call, without adding an implicit template pass. |
-| Unquoted literal at-sign inside a Kash word (`PARSE_ERR`) | When reserved at-sign syntax is the established cause, explain quoting the literal word, such as `"--mtime=@0"`. Do not apply template-recipe selector rules or treat shell quotes as protection from a template pass. |
-| Removed `--define-value` option (`OPT_UNKNOWN`) | Show `--set NAME=LITERAL` for closed typed data; `NAME=TEXT` and `--define` remain strings. No compatibility alias or type inference is offered. |
+| Denied environment read (`CAP_DENIED`) | Identify environment-read authority and, when known, the name. Explain rule `authority` `read` or the scoped `--allow-env=NAME` grant; definition configuration, `set env/NAME`, and child environment settings do not grant that read. |
+| Unset environment variable (`ENV_VAR_MISSING`) | Name the bare uppercase reference and state that no lexical binding or standard operation matched before the environment fallback. Suggest `NAME ?? DEFAULT` or `env/NAME` (which yields `nil`) when absence is intended; never print environment contents. |
+| Invalid rule settings placement (`PARSE_ERR`) | When the malformed metadata placement is recognizable, show `rule ./out : ./in ; {shell: "bash"}`, or `task name ; {env: {MODE: mode}}` with no inputs. Do not imply valid metadata is unsupported. |
+| Interpolation syntax in a Kash command word (`PARSE_ERR`) | Name the action-context boundary and show `$name` / `${ns/name}` for a reference or `(function args...)` for a value fragment, without adding an implicit template pass. Other `@` text in a word, such as `--mtime=@0`, is literal and is not diagnosed. |
+| Overlapping discovery (`DISCOVERY_OVERLAP`) | Name the `files` pattern and the declared output it overlaps, with both authored locations; suggest narrowing the pattern or moving the generated outputs. Never drop either declaration silently. |
+| Unknown `--define-value` option (`OPT_UNKNOWN`) | Show `--set NAME=LITERAL` for closed typed data; `NAME=TEXT` and `--define` remain strings. No compatibility alias or type inference is offered. |
 
 Recognized unclosed expressions/references name their missing delimiter without
-extra separator errors. Literal parentheses in raw Kash words can be quoted or
-escaped; quoted literal parentheses must not be diagnosed as calls. A pipe is
-not diagnosed as noncanonical merely because it has application-equivalent
-semantics. Valid selector use and deliberately literal brace text are not errors.
+extra separator errors. Literal parentheses in Kash words can be quoted or
+escaped; quoted literal parentheses must not be diagnosed as value fragments. A
+`|>` stage is not diagnosed as noncanonical merely because it is equivalent to a
+nested application. Valid rule-context bindings and deliberately literal brace
+text are not errors.
 
 Grant tips do not broaden authority automatically or suppress phase failures.
 They must not imply `--env NAME=VALUE`, `NAME=VALUE`, `KAME_NAME` or `--set`
-authorizes `(env NAME)`. Where a tip names an explicit grant, it must respect
+authorizes `env/NAME` or a bare `ENV-NAME` read. Where a tip names an explicit grant, it must respect
 `009-cli.md`'s replacement policy rather than suggesting that all default grants
 will remain enabled.
 
@@ -480,11 +488,11 @@ not a reduced summary. Existing schema-1 fields remain stable:
     "code": "RECIPE_FAIL",
     "severity": "error",
     "message": "recipe exited unsuccessfully",
-    "source": "Makefile.kmk",
+    "source": "Makefile.km",
     "span": { "start": 84, "end": 101 },
     "notes": ["output was not produced"],
-    "related": [{ "message": "declared here", "source": "Makefile.kmk", "span": { "start": 42, "end": 47 } }],
-    "frames": [{ "kind": "rule", "label": "build", "source": "Makefile.kmk", "span": { "start": 42, "end": 101 } }],
+    "related": [{ "message": "declared here", "source": "Makefile.km", "span": { "start": 42, "end": 47 } }],
+    "frames": [{ "kind": "rule", "label": "build", "source": "Makefile.km", "span": { "start": 42, "end": 101 } }],
     "target": "build",
     "targetStack": ["all", "build"],
     "tips": ["check that the compiler is installed"],
@@ -524,8 +532,10 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 - Language-boundary failures retain their codes and authored spans while naming
   the actual kind/context and exposing the recovery above consistently in human,
   plain and JSON output. Coverage includes callable rendering, noncallable calls,
-  reference bodies, scalar word destinations, literal selector collisions,
-  explicit path prefixes, environment grants and misplaced rule metadata.
+  interpolation bodies, scalar word destinations, literal at-sign text,
+  explicit path prefixes, environment grants, unset bare environment references
+  (`ENV_VAR_MISSING`), overlapping discovery (`DISCOVERY_OVERLAP`) and misplaced
+  rule metadata.
 - Tips never invoke a value, reinterpret syntax, grant capabilities, modify
   source, infer command-specific template semantics or expose evaluated secrets.
 - Duplicate-definition diagnostics name the binding, locate the conflicting and

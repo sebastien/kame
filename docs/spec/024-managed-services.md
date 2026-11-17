@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Managed service rules
 
 ## Scope
@@ -12,7 +16,7 @@ semantics do not change.
 The service recipe body is the start command. It runs under the rule's existing
 shell, environment, grant, cwd, and authored-source policy. A service body may
 emit bounded stdout and stderr, but cannot yield file content, publish outputs,
-or use cached-task identity. It is valid for the process to run indefinitely.
+or use `task cached` identity. It is valid for the process to run indefinitely.
 
 ## Typed configuration
 
@@ -20,13 +24,13 @@ The existing rule metadata record accepts the following additional service-only
 fields:
 
 ```kame
-service api : ./bin/api ; [
-  ready: [argv: ["./bin/api" "ready"] interval-ms: 100 timeout-ms: 15000]
-  health: [argv: ["./bin/api" "health"] interval-ms: 1000 failures: 3]
-  restart: [attempts: 3 backoff-ms: 250]
-  stop: [grace-ms: 5000]
-  log-bytes: 65536
-]
+service api : ./bin/api ; {
+	ready: {argv: ["./bin/api", "ready"], interval-ms: 100, timeout-ms: 15000},
+	health: {argv: ["./bin/api", "health"], interval-ms: 1000, failures: 3},
+	restart: {attempts: 3, backoff-ms: 250},
+	stop: {grace-ms: 5000},
+	log-bytes: 65536,
+}
 	./bin/api serve
 ```
 

@@ -1,70 +1,119 @@
+---
+revision: 2
+---
+
 # Value-producing rule bodies
 
-This specification supersedes build-template effect behavior in specifications
-005, 006, 007, 016 and 038. Standalone evaluation and direct Kash actions retain
-their execution contracts.
+This specification defines how a rule body produces its output's content as a
+value instead of writing it through a process. It refines the rule body forms
+of `055-unified-kame-kash-language.md` §10.1 and governs build-time content
+publication in `005`, `006`, `007`, `016` and `038`. Standalone evaluation and
+Kash actions keep their execution contracts.
 
 ## Producer selection
 
-A recipe has one explicit interpretation: external-shell script, direct Kash
-program, or Kame content expression. Never infer its language from body text.
+A body has exactly one interpretation, selected syntactically and by the
+resolved `shell` setting, never by inspecting body text:
+
+| Body | Interpretation |
+| --- | --- |
+| `= EXPR` in the header | **Expression body**: `EXPR` is the output content |
+| Indented block, `shell` unset or naming Kash | **Kash body**: an action block; it may publish with `return VALUE` |
+| Indented block, `shell` naming an external shell | **Foreign-shell body**: a document template rendered to one script (`016`) |
 
 ```kame
-./greeting.txt : ./name.txt ; [shell: kame]
-	(str "Hello, " (strip (text (read @<))) "!\n")
+rule ./greeting.txt : ./name.txt = str "Hello, " (strip (text (read inputs.0))) "!\n"
+
+rule ./build/config.json : ./config.km = json config
+
+rule ./build/version.txt : ./VERSION
+	let version = strip (text (read inputs.0))
+	let revision = $(git rev-parse --short HEAD)
+	return "@{version}+@{revision}\n"
 ```
 
-`shell` selects the producer and resolves with the other recipe settings, before
-prerequisite execution. The name `kame`, including a computed name, selects a
-content expression. `SHELL = kame` selects it for rules without a per-rule
-`shell`. The string `"kame"` remains an external executable, not this selector.
-Content bodies require exactly one file output and local publication; tasks,
-services, grouped outputs and remote execution are rejected.
+`shell` resolves with the other rule settings, before prerequisite execution;
+it may be per-rule metadata (`; {shell: "bash"}`) or a build-wide `SHELL`
+definition. `shell` applies only to block bodies. An expression body whose
+per-rule `shell` names an external shell is rejected when the declaration is
+loaded; a build-wide `SHELL` does not apply to expression bodies.
 
-## Content computation
+Publishing bodies require exactly one file output and local publication. An
+expression body on a task, service, grouped-output rule, or remotely executed
+rule is rejected when the declaration is loaded. A Kash body on such a rule may
+use `return` without a value, or `return nil`; returning any other value fails
+the invocation at the `return` statement.
 
-The authored body is exactly one Kame expression, not a document template or Kash
-program. Multiline expressions, lazy definitions, captures and rule selectors use
-ordinary expression semantics. Syntax errors retain authored source spans.
-The shared recipe indentation prefix is structural and is removed from
-multiline string content; additional indentation remains data.
+## Expression bodies
 
-The result must be a string or raw bytes. Publish exactly those bytes, including
-an empty value and every trailing newline. Do not implicitly serialize numbers,
-collections, nil, callables or resources. Use `json` explicitly for structured
-data. A failed computation leaves an existing artifact untouched.
+The body is exactly one expression (`055` §4), not a document template or a
+Kash block. It may continue onto following lines under the expression
+continuation rules; lazy definitions, captures and the rule context (`inputs`,
+`outputs`, named captures) use ordinary expression semantics. Syntax errors
+retain authored source spans. Multiline string content keeps its authored bytes;
+the rule's structural indentation is not part of the expression.
 
-Tracked reads, glob membership, environment lookups and explicit `render` calls
-remain available and participate in dependency discovery and content freshness.
-Discovered generated inputs complete before computation resumes. Publication uses
-the existing ownership, atomic write, output verification and forwarding paths;
-no shell process is needed. Dry-run computes available values but never publishes
-content; unavailable generated reads remain deferred.
+The expression is evaluated in a read-only phase (see below). It closes over
+its lexical scope like any rule body.
 
-## Read-only expansion
+## Kash `return` publication
 
-Kame content computation and external-shell template expansion reject output
-actions (`out!`, `err!`, `yield!`, `write!`), process execution and clock reads with
-`PHASE_INVALID`. Reached helpers, callbacks and lazy definitions inherit the same
-restriction; indirection cannot turn rendering into runtime execution. Unreached
-branches remain lazy. Capability grants do not override this phase boundary.
+A Kash body runs as an action block with the rule's ordinary process, write and
+capability authority. When its invocation completes through `return VALUE` and
+`VALUE` is not `nil`, that value is the output content and is published under
+this specification. `return` may appear anywhere a block statement may; the
+reached `return` decides. A body that completes without a `return`, or with
+`return nil`, publishes nothing: its output must have been written by the body
+itself under the ordinary output contract.
 
-Shell interpolation still computes command text; the shell itself performs its
-actions. Direct Kash executes its authored program, including explicit action
-statements such as `(yield! CONTENT)`, without template expansion. A Kame body
-returns content rather than invoking that action.
+When a value is published, the body's own writes to the output path are not the
+result: the published content replaces the output through the atomic publication
+path after the body completes. A body that fails, is cancelled, or ends with
+`exit` publishes nothing; `exit 0` ends the body without a return value.
 
-Existing `@(yield! CONTENT)` bodies must migrate explicitly to
-`[shell: kame]` with `CONTENT` as their expression, or to direct Kash if their
-intent is an action program. Formatting does not perform this migration.
-Preflight guards and standard-operation versions invalidate older accepted
-renders, so cached outputs cannot silently preserve the removed expansion behavior.
+## Content
+
+The published value must be a `String` or `Bytes`. Publish exactly those bytes,
+including an empty value and every trailing newline. Numbers, collections,
+paths, callables and resources are not serialized implicitly and are
+`EXPR_INVALID`; use `json`, `fmt`, `str` or `render` explicitly. A failed
+computation leaves an existing artifact untouched.
+
+Tracked reads, discovery (`files`, `dirs`, `wildcard`), environment lookups and
+explicit `render` calls remain available and participate in dependency
+discovery and content freshness. Discovered generated inputs complete before
+computation resumes. Publication uses the existing ownership, atomic write,
+output verification and forwarding paths; an expression body needs no process.
+Dry-run computes available expression values but never publishes content and
+never runs a Kash body; unavailable generated reads remain deferred.
+
+Rule identity includes the producer kind, so changing a body between expression,
+Kash and foreign-shell forms invalidates previously accepted outputs.
+
+## Read-only evaluation
+
+Expression bodies and foreign-shell template rendering reject output actions
+(`out!`, `err!`, `write!`), process execution (including `$(…)` and
+`$?(…)`) and clock reads with `PHASE_INVALID`. Reached helpers, callbacks and
+lazy definitions inherit the same restriction; indirection cannot turn
+evaluation into runtime execution. Unreached branches remain lazy. Capability
+grants do not override this phase boundary.
+
+Foreign-shell interpolation computes script text; the shell itself performs its
+actions. A Kash body executes its authored program, including explicit action
+statements, without template expansion, and publishes only through
+`return VALUE` or its own writes. An expression body returns content and never
+performs actions.
 
 ## Verification
 
-- `tests/T044-01-runtime-kame-rule-bodies.sh`: native/WASM publication, exact binary and
-  empty output, dry-run, freshness, tracked templates and forbidden indirect effects.
+- `tests/T044-01-runtime-kame-rule-bodies.sh`: native/WASM publication, exact
+  binary and empty output, dry-run, freshness, tracked templates and forbidden
+  indirect effects.
 - `program/test/kame_recipes.go`: result types, producer validation, multiline
   expression parsing, content reuse and failure preserving existing artifacts.
-- Existing file-input and WASM publication tests exercise dynamic reads, generated
-  prerequisites, content invalidation and host completion failures.
+- Kash `return` publication: string and bytes results, `return nil` and bare
+  `return`, non-nil returns from ineligible rules, `exit` and failure before
+  publication, and replacement of body-written output.
+- Existing file-input and WASM publication tests exercise dynamic reads,
+  generated prerequisites, content invalidation and host completion failures.

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Output ownership and variable membership
 
 ## Existing mechanisms

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Kame Scoped Finalization
 
 ## Purpose and scope
@@ -15,17 +19,15 @@ ambient finalizer registration, temporary-resource API or runtime output invento
 ## Public operation
 
 ```kame
-(finally! BODY CLEANUP)
-(finally! [timeout-ms: MILLISECONDS] BODY CLEANUP)
+finally! BODY CLEANUP
+finally! {timeout-ms: MILLISECONDS} BODY CLEANUP
 ```
 
 `BODY` and `CLEANUP` are callable values accepting zero arguments. Existing
 lambda syntax supplies them without evaluating their bodies prematurely:
 
 ```kame
-(finally! [timeout-ms: 2000]
-  ([] "result")
-  ([] (out! "cleanup\n")))
+finally! {timeout-ms: 2000} (() => "result") (() => out! "cleanup\n")
 ```
 
 This expression emits `cleanup` and returns `"result"` when both callbacks
@@ -40,8 +42,8 @@ effects performed while computing its operands or acquiring resources earlier.
 
 Validate call arity, callback callability and acceptance of zero arguments, and
 all options before invoking either callback. Invalid operands use `EXPR_INVALID`
-at the offending operand. An explicit options operand must be a record; `[]`
-is a list, not an empty options record. The only option is `timeout-ms`, a positive
+at the offending operand. An explicit options operand must be a record; a list
+such as `[]` is not an options record. The only option is `timeout-ms`, a positive
 integer from 1 through 60000 inclusive, defaulting to 5000 when omitted. Unknown
 or duplicate keys, nil, booleans, floats, zero, negatives and larger values fail
 without printing rejected values. The timeout applies to finalization, not the
@@ -119,7 +121,7 @@ Previously committed effects are never rolled back. Callback failure does not
 retroactively commit its unaccepted effects. No cleanup effect may be silently
 lost merely because the enclosing body failed. A context that can only collect
 effects for a later recipe cannot provide this ordering: reject it rather than
-flushing unrelated queues or changing `write!`/`yield!` timing. Ordinary operation
+flushing unrelated queues or changing `write!`/`out!` timing. Ordinary operation
 and recipe effect semantics outside the scope are unchanged.
 
 Parsing and formatting never execute callbacks. Dry-run may validate available

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Job and CLI presentation contract
 
 A job is a requested target; a

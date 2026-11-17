@@ -1,25 +1,30 @@
+---
+revision: 2
+---
+
 # Kash scripting and safe publication
 
-## Status and purpose
+## Purpose
 
-Implemented contract for the additions below. Structured iteration and the pure
-operations share native/WASM code. Publication is host-backed: native POSIX and
-Node implement it; in-memory hosts and Windows reject it explicitly. Tests in
-`tests/T046-01-kash-scripting.sh` exercise Linux native and WASM/Node behavior,
-not certification of other platforms. This specification extends `017-kash.md` and
-`038-direct-kash-and-values.md`, and complements `042-kash-streaming.md` and
-`043-kame-finalization.md`.
+Structured iteration and the pure operations share native/WASM code.
+Publication is host-backed: native POSIX and Node implement it; in-memory hosts
+and Windows reject it explicitly. Tests in `tests/T046-01-kash-scripting.sh`
+exercise Linux native and WASM/Node behavior, not certification of other
+platforms. This specification extends `017-kash.md` and
+`038-direct-kash-and-values.md`, complements `042-kash-streaming.md` and
+`043-kame-finalization.md`, and uses the surface syntax of
+`055-unified-kame-kash-language.md`.
 
 The goal is to support ordinary file-processing scripts without generated shell
 source: iterate over typed paths, parse repeated command-line options, replace
 literal tokens, and publish completed files without overwriting another writer.
 These are separate contracts, not an implicit filesystem transaction.
 
-Existing support remains valid:
+Related facilities:
 
 - Kash has `if`/`elif`/`else` and `match` statements.
-- `(map ([file] (run! "checker" file)) files)` performs ordered per-item effects
-  and stops on failure. An authored Kash callable supports multi-command bodies.
+- `files |> map (file => run! "checker" file)` performs ordered per-item effects
+  and stops on failure. A block-bodied `def` supports multi-command bodies.
 - Streaming `|(each)` receives records on stdin and prepares argv once. It is
   not a list loop with a per-item argument binding.
 - The portable regex grammar explicitly rejects lookaround. Backslash quotes
@@ -36,62 +41,71 @@ for source in fonts
 	converter $source
 	verifier $source
 
-while probe --pending
+while $?(probe --pending).ok
 	worker --one
 
-while (pending? queue)
-	(process-one! queue)
+while pending? queue
+	process-one! queue
 ```
 
-These are Kash block forms. Indentation, comments, source spans, and
-whole-script parsing follow existing conditional blocks. `for` takes one binding
-name, the keyword `in`, and one Kame expression. A bare reference such as `fonts`
-uses expression grammar here, not command-word grammar. `while` takes the same
-condition forms as `if`: a command graph or a parenthesized Kame expression.
-`$(...)` is not a condition form. Example command and operation names above are
-illustrative application code, not new standard-library operations.
+These are block statements (`055` §5.2). Indentation, comments, source spans,
+and whole-script parsing follow conditional blocks; headers have no trailing
+`:`. `for` takes one binding name, the keyword `in`, and one expression. A bare
+reference such as `fonts` uses expression grammar here, not command-word
+grammar. `while` takes one expression condition, like `if`. A command is tested
+through its outcome, `$?(CMD).ok`; `$(CMD)` in a condition yields captured text,
+which is true even when empty. Example command and function names above are
+illustrative application code, not standard-library operations.
 
-Loop headers are reserved statement forms rather than external command names.
-An executable named `for` or `while` remains accessible through an explicit path
-or a computed command head. No migration rewrites are implicit.
+`for`, `in` and `while` are reserved words. An executable with such a name is
+run as `x/for` or `x/while`, or through an explicit path.
 
 ### List iteration
 
 The iterable is evaluated once per reached loop invocation, including across
-suspension. It must produce a list; nil, strings, and other values are errors,
-not implicit lists. An empty list executes no body. Items retain their types;
-ordinary command argument validation still applies when an item is used in argv.
+suspension. It must produce a list or a `Stream`; `nil`, strings, and other
+values are errors, not implicit lists. An empty list or an immediately ended
+stream executes no body. Items retain their types; ordinary command argument
+validation still applies when an item is used in argv.
 
-Items are visited sequentially in list order. Each iteration creates a fresh
-lexical scope containing its item binding and lazy body-local definitions.
-The binding follows existing definition-name validation, including reserved
-names. Body definitions cannot redeclare the item binding. An item binding may
+List items are visited sequentially in list order. A stream, such as the result
+of calling a generator (`012`), is pulled one element per iteration, so the
+generator body and the loop body alternate. Leaving the loop early (`break`,
+`return`, `exit`, or a failure) cancels the stream and runs the generator's
+`defer` cleanup before control continues; this cancellation is not a failure.
+
+Each iteration creates a fresh lexical scope containing its item binding and
+the iteration's `let` bindings and nested `def`s. The binding follows ordinary
+name validation, including reserved words. A body `let` of the same name
+shadows the item binding for the rest of the iteration. An item binding may
 shadow an outer name; it does not alter that outer binding. Loop-local names
 never escape, and nested loops retain their enclosing lexical scopes.
 
-The loop does not collect body results and returns nil. Failure stops later
-statements and iterations unless existing recovery explicitly handles it.
+The loop does not collect body results. Failure stops later statements and
+iterations unless recovery explicitly handles it.
 
 ### Conditional iteration and lazy values
 
 `while` evaluates its condition before each iteration and stops before the body
-when false. Expression truth follows Kame: only nil and false are false.
-Command conditions use the existing `if` success/failure classification;
-capability denial, cancellation, and fatal execution failures are not false.
+when false. Only `nil` and `false` are false. A command condition written as
+`$?(CMD).ok` is false for any process or function failure of `CMD`; capability
+denial and cancellation propagate instead of yielding an outcome.
 
-Every condition visit is a fresh evaluation occurrence: command conditions launch
-fresh work, and function applications are invoked again. A resumed condition
-continues its current occurrence instead of launching it twice. Every true
-condition creates a fresh body scope.
+Every condition visit is a fresh evaluation occurrence: `$?(…)` and `$(…)` in a
+condition launch fresh work, and function applications are invoked again. A
+resumed condition continues its current occurrence instead of launching it
+twice. Every true condition creates a fresh body scope.
 
-This does not make definitions mutable or invalidate memoized outer bindings:
+This does not refresh bindings or invalidate memoized definitions:
 
 ```kash
-# The definition is lazy, not an automatically refreshed probe.
-pending = $(probe --pending)
+# Evaluated once when reached, not an automatically refreshed probe.
+let pending = $(probe --pending)
 ```
 
-Repeated lookup of `pending` is not repeated process execution. Likewise,
+Repeated lookup of `pending` is not repeated process execution, and the same
+holds for a lazy top-level `NAME = EXPR` definition in a Kame program, which is
+memoized. Use `set` to assign a new value explicitly. Likewise,
 re-evaluating a filesystem expression does not promise bypassing dependency or
 host observation caches. For a live external condition, use a command condition
 or an application whose operation explicitly provides fresh runtime observations.
@@ -109,8 +123,8 @@ an iteration count. Parsing and formatting execute neither headers nor bodies.
 
 `defer` continues to register with the enclosing Kash invocation, in execution
 order, for LIFO cleanup. Iteration does not create a new finalization lifetime.
-Use an explicitly called Kash callable or `finally!` when cleanup must finish
-before the next item. Deferred actions retain their iteration's lexical scope.
+Call a function, whose invocation owns its own `defer` cleanup, or use
+`finally!` when cleanup must finish before the next item. Deferred actions retain their iteration's lexical scope.
 
 Async graphs remain invocation-owned. Sequential iteration orders statement
 execution; an explicitly asynchronous body command may overlap later iterations.
@@ -119,32 +133,33 @@ accumulate deferred actions or explicitly started jobs; they are not advertised
 as constant-memory streaming operators. Cancellation must be checked even in
 loops whose expressions never suspend.
 
-Initial scope excludes assignment, `break`, `continue`, loop `else`, index
-bindings, implicit parallelism, and destructuring.
-Eager immutable bindings, loop transfers, and incremental record iteration are
-defined separately in [practical scripting](048-kash-practical-scripting.md).
+Loops have no `else` clause, index bindings, implicit parallelism, or
+destructuring. `let`, `set`, `break` and `continue` follow `055` §5.2;
+incremental record iteration and loop transfers are refined in
+[practical scripting](048-kash-practical-scripting.md).
 
 ## 2. Pure command-line option parsing
 
 ### API
 
 ```kame
-(parse-args SCHEMA ARGV)
+parse-args SCHEMA ARGV
 ```
 
 The operation is pure, requires no capability, and is available to all expression
 surfaces. It does not read process arguments or the environment implicitly.
-`ARGV` is a list of strings, normally Kash's `args`.
+`ARGV` is a list of strings, normally Kash's `args`. It is the last operand, so
+`args |> parse-args schema` is equivalent.
 
 ```kash
-schema = [
-	fonts: [names: ["-f" "--fonts"] arity: :many repeat: :append]
-	css: [names: ["-c" "--css"] arity: :many repeat: :append]
-	check: [names: ["--check"] arity: :flag repeat: :replace]
-]
-options = (parse-args schema args)
-fonts = options.options.fonts
-stylesheets = options.options.css
+let schema = {
+	fonts: {names: ["-f", "--fonts"], arity: :many, repeat: :append},
+	css: {names: ["-c", "--css"], arity: :many, repeat: :append},
+	check: {names: ["--check"], arity: :flag, repeat: :replace},
+}
+let options = parse-args schema args
+let fonts = options.options.fonts
+let stylesheets = options.options.css
 ```
 
 Each schema field names one result field. Its descriptor requires `names`,
@@ -159,9 +174,9 @@ per occurrence). Repeat policy is `:reject`, `:replace`, or `:append`; append is
 invalid for flags. No abbreviations, bundled short options, implicit coercions,
 defaults, required-option validation, or implicit environment reads are supplied.
 
-The result is `[options: RECORD operands: LIST]`. All schema fields are present:
-absent flags are false, absent value options are empty lists. Present flags are
-true; value options always contain lists, including `:one`. Append preserves
+The result is `{options: RECORD, operands: LIST}`. All schema fields are
+present: absent flags are `false`, absent value options are empty lists. Present
+flags are `true`; value options always contain lists, including `:one`. Append preserves
 occurrence and value order; replace retains only the latest occurrence's values;
 reject fails on a second occurrence.
 
@@ -195,7 +210,7 @@ host process; scripts choose their own reporting and application validation.
 ### API and boundaries
 
 ```kame
-(sub-token FROM TO TEXT)
+sub-token FROM TO TEXT
 ```
 
 All operands are strings and `FROM` must be nonempty. The result replaces every
@@ -224,7 +239,7 @@ unchanged. Wrong operand kinds and empty `FROM` report `EXPR_INVALID`.
 The operation is pure and does not change regex grammar, `sub`, `resub`, or
 anchored pattern semantics. It is textual substitution, not a CSS parser: matching
 text in comments, strings, and URLs is not excluded. Mapping multiple replacement
-pairs is explicitly sequential unless a future operation specifies simultaneous
+pairs is explicitly sequential unless another operation specifies simultaneous
 replacement semantics.
 
 ## 4. Atomic no-clobber publication
@@ -232,7 +247,7 @@ replacement semantics.
 ### API and minimum guarantee
 
 ```kame
-(publish! STAGED DESTINATION)
+publish! STAGED DESTINATION
 ```
 
 This is a runtime file operation for one completed staged regular file. The
@@ -241,7 +256,7 @@ redirection, a deferred `write!`, or a multi-file transaction. It executes when
 demanded, rejects planning/read-only computation/expansion phases, and must not
 run during dry-run. Normal lazy-definition rules apply.
 
-The initial operation supports local `file:` resources only. It requires read
+The operation supports local `file:` resources only. It requires read
 and write authority for the staged path and write authority for the destination,
 including the namespace changes performed during publication. Grant validation
 must precede mutation and use the actual resolved resource identities.
@@ -255,7 +270,7 @@ outcome even if a later action fails. Custom callbacks are subject to the same
 grants and must acknowledge the publication outcome before cancellation retires
 their work.
 
-On success, it returns `[published: :true stagedRemoved: :true]`. The destination
+On success, it returns `{published: true, stagedRemoved: true}`. The destination
 becomes visible with the completed staged contents at one atomic namespace
 operation, and no existing destination entry is overwritten. Existing regular
 files, directories, symlinks, and dangling symlinks all cause `FS_EXISTS`.
@@ -283,7 +298,7 @@ another authorized writer from later removing or replacing the destination.
 
 Stable directory handles and no-follow traversal are required to claim resistance
 to malicious parent-directory substitution. A final-component `lstat` check alone
-does not provide that guarantee. The initial contract assumes trusted parent
+does not provide that guarantee. The contract assumes trusted parent
 directories; hosts and documentation must state this limitation. It does not
 constitute a filesystem sandbox for external commands.
 
@@ -292,7 +307,7 @@ constitute a filesystem sandbox for external commands.
 Failures before publication leave the staged entry available and the destination
 unchanged by this operation. After a successful publication, staging unlink or
 other post-publication work may fail. Such failures report `FS_PUBLISHED` with
-structured `published: :true` and `stagedRemoved` state, never an ordinary
+structured `published: true` and `stagedRemoved` state, never an ordinary
 pre-publication failure suggesting retry is safe. If cancellation arrives during
 the publication step, the host must reconcile its outcome before reporting it;
 it must not report definitely unpublished when publication may have occurred.
@@ -303,9 +318,10 @@ based on a prior existence check. Existing recipe output verification and output
 ownership rules still apply. Publishing one file does not commit sibling outputs
 or make invocation failure transactional.
 
-Atomic visibility is not crash durability. The initial API makes no persistence
-guarantee across power loss and adds no durability option. A future durable mode
-must specify file and directory synchronization and post-publication sync errors.
+Atomic visibility is not crash durability. The API makes no persistence
+guarantee across power loss and adds no durability option. A durable mode
+requires a separate contract specifying file and directory synchronization and
+post-publication sync errors.
 
 ### Input consistency is separate
 
@@ -329,12 +345,16 @@ must remain tied to executable checks; parsing alone is not execution evidence.
 Required checks include:
 
 - Nested and empty `for`, invalid iterables, lexical shadowing, fresh body-local
-  definitions, ordered effects, failure, and suspension without effect replay.
-- Initially false and repeated command/expression `while` conditions, memoized
-  outer bindings, fresh calls, deadline/cancellation in non-suspending bodies,
-  invocation-owned async work, and iteration-specific deferred captures.
-- Parse/format/AST coverage for loops in files, constructed callables, and direct
-  recipes; malformed headers/indentation fail before any effect executes.
+  bindings, ordered effects, failure, and suspension without effect replay.
+- `for` over a generator stream: alternating generator and loop bodies, and
+  early loop exit cancelling the generator and running its cleanup without
+  failing.
+- Initially false and repeated `$?(…).ok` and expression `while` conditions,
+  bindings that are not refreshed, fresh calls, deadline/cancellation in
+  non-suspending bodies, invocation-owned async work, and iteration-specific
+  deferred captures.
+- Parse/format/AST coverage for loops in files, functions, and rule bodies;
+  malformed headers/indentation fail before any effect executes.
 - Repeated mixed aliases, multiple values, replace/reject policies, attached
   values, empty values, spaces/newlines, missing values, unknown options, `--`,
   and variadic-option/operand boundaries. Verify diagnostic value redaction.
@@ -351,7 +371,7 @@ Required checks include:
   operation semantics, and relevant cache identities stay aligned.
 
 Strong hostile-directory protection, durability, and input compare-and-publish
-remain separate future contracts, not implied acceptance claims. Publication
+are outside this contract and are not implied acceptance claims. Publication
 failures expose structured outcome fields in the diagnostic's `cause` record.
-In direct recipes, `write!` retains its existing deferred-output contract; use a
+In Kash rule bodies, `write!` retains its existing deferred-output contract; use a
 completed external writer for staging before an immediate `publish!`.

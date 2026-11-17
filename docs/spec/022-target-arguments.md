@@ -1,31 +1,36 @@
+---
+revision: 2
+---
+
 # Named arguments for build targets
 
 ## Rule declarations
 
-A named rule may declare zero or more standalone argument blocks after its
-single target name:
+A task may declare zero or more standalone argument blocks after its single
+target name:
 
 ```kame
-deploy {environment} {region=us-east} : configure @{environment} @{region}
-	ship @{environment} @{region}
+task deploy {environment} {region=us-east} : configure ./config/@{environment}/@{region}.json
+	ship $environment $region
 ```
 
-After an optional `task` prefix, the first token is the literal target name
-and every following standalone brace block is an argument declaration. A
-leading target-template block such as `task {name}` retains its existing
-meaning as a template output.
+After `task` or `task cached`, the first token is the literal target name and
+every following standalone brace block is an argument declaration. A leading
+target-template block such as `task {name}` is a template output, not an
+argument declaration.
 
 `{name}` declares a required argument. `{name=literal}` declares an optional
 argument with a literal string default. The declaration is part of the target
 header, not an additional output or a target-template capture. It is valid only
-on a single named task target; file targets and multi-output rules keep their
-existing capture semantics. Argument names follow definition identifier rules,
+on a single named task target; file rules and multi-output rules use only
+capture semantics. Argument names follow definition identifier rules,
 are unique within the declaration, and cannot collide with target captures or
 reserved selectors.
 
-Defaults are literal text and are not evaluated as expressions. Empty defaults
-are allowed; names and values cannot contain whitespace or NUL. A declaration
-without arguments preserves the current rule grammar and behavior.
+Defaults are literal text and are not evaluated as expressions; `@{…}` is not
+recognized inside an argument block. Empty defaults are allowed; names and
+values cannot contain whitespace or NUL. A declaration without arguments follows
+the ordinary rule grammar of `055` §10.1.
 
 ## Invocation
 
@@ -37,7 +42,7 @@ kame deploy environment=production
 ```
 
 An assignment-only primary invocation selects `default` and binds its declared
-arguments. `env.NAME=value` is an explicit CLI process-environment override,
+arguments. `env/NAME=value` is an explicit CLI process-environment override,
 not a task argument; a bare assignment naming a global definition overrides
 that definition rather than becoming a task argument.
 
@@ -50,18 +55,20 @@ but cannot contain whitespace or NUL. They do not become CLI options, target
 names, or program arguments.
 
 A target assignment token is consumed as an argument only when it follows a
-single explicitly selected target that declares the matching name. Existing
-multiple-target invocations and targets containing `=` retain their current
-behavior when no matching declaration applies. Inspection and watch commands
+single explicitly selected target that declares the matching name.
+Multiple-target invocations and operands containing `=` that match no
+declaration are interpreted by `009-cli.md`. Inspection and watch commands
 use the same binding rules as execution. Plan JSON exposes resolved values in
 an `arguments` object. `--dry-run` validates the same bindings without running
 recipes.
 
 ## Scope and identity
 
-Bound arguments are immutable string symbols in the selected rule's scope. They
-are available while resolving dependencies, rendering inputs and outputs,
-selecting tools, computing cache identity and evaluating the recipe. A local
+Bound arguments are immutable string bindings in the selected rule's lexical
+scope: `$environment` in a Kash body, `environment` in an expression body or
+metadata record, and `@{environment}` in header interpolation and foreign-shell
+recipes. They are available while resolving dependencies, rendering inputs and
+outputs, selecting tools, computing cache identity and evaluating the body. A local
 argument shadows a global definition only when the declaration explicitly uses
 the same name; that collision is rejected to keep
 configuration unambiguous. File-pattern captures and named target arguments
@@ -89,8 +96,8 @@ without exposing unrelated environment values.
   equivalent values share one prerequisite and one task execution.
 - Rule captures and target arguments remain distinct in selectors, plans,
   diagnostics, inspection and cache records.
-- Multiple targets, `do run` program arguments, CLI options, and legacy literal
-  targets keep their existing interpretation.
+- Multiple targets, `do run` program arguments, CLI options, and literal
+  operands containing `=` follow `009-cli.md` when no declaration matches.
 - Native and WASM execution, watch invalidation and JSON output agree.
 - Native and WASM watch preserve argument values across invalidation; dry-run
   and plan JSON report or validate the same bindings without effects.

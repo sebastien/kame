@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Kash session authority
 
 ## Purpose
@@ -11,8 +15,8 @@ unchanged.
 
 This is not Bash compatibility. It does not mutate the host environment, replace
 the Kame process, grant ambient environment access, or define job suspension,
-terminal-attribute restoration, word splitting, or globbing. Bash export quoting
-and vendor installer protocols are not part of this contract.
+terminal-attribute restoration, word splitting, or globbing. Bash `export`
+quoting and vendor installer protocols are not part of this contract.
 
 The two clauses are independent. An implementation may provide environment
 authority without terminal handoff, or the reverse. A host that cannot provide
@@ -22,9 +26,11 @@ one clause rejects that clause before launch; it does not weaken the other.
 
 - An **authority policy** is a record of environment names a recipe may observe
   or remove. It does not contain environment values.
-- The **child overlay** is the environment a scope's children inherit. It starts
-  as the invocation child environment after existing rule `env` assignments. It
-  is not the host process environment and not Kame's `env` namespace.
+- The **child overlay** is the environment store of the recipe's process-like
+  unit (`055` §5.3): the environment its children inherit, read through
+  `env/NAME`, bare `ENV-NAME` references and `$NAME` words, and written with
+  `set env/NAME = …`. It starts as the invocation child environment after
+  existing rule `env` assignments. It is not the host process environment.
 - A **foreground handoff** attaches one foreground process graph to the
   controlling terminal and, when requested, moves that terminal's foreground
   process group for the duration of the wait.
@@ -39,11 +45,11 @@ Rule metadata gains three keys, valid for every rule kind. They do not replace
 `shell` or `env`, and they are not service or executor keys.
 
 ```kame
-ENV_PROJECT = [read: ["PATH" "PYTHONPATH" "NODE_PATH"]]
-ENV_AWS_SSO = [unset: ["AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SESSION_TOKEN" "AWS_SECURITY_TOKEN"]]
+ENV_PROJECT = {read: ["PATH", "PYTHONPATH", "NODE_PATH"]}
+ENV_AWS_SSO = {unset: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN"]}
 
-shell : ; [authority: ENV_PROJECT tty: :true foreground: :true]
-aws-shell {account=auto} : ; [authority: ENV_AWS_SSO tty: :true foreground: :true]
+task shell ; {authority: ENV_PROJECT, tty: true, foreground: true}
+task aws-shell {account=auto} ; {authority: ENV_AWS_SSO, tty: true, foreground: true}
 ```
 
 `authority` evaluates to a record whose only keys are `read` and `unset`. Each
@@ -55,17 +61,17 @@ planning policy, before prerequisite recipes execute. The expression must not
 read environment values, launch processes, or write files. A reference to a
 policy definition is an ordinary planning demand.
 
-`tty` and `foreground` are booleans. Only `:true` and `:false` are valid;
-absence is `:false`. `foreground: :true` without `tty: :true` in the same
+`tty` and `foreground` are booleans. Only `true` and `false` are valid;
+absence is `false`. `foreground: true` without `tty: true` in the same
 metadata record is `EXPR_INVALID` before prerequisites run. These flags
 authorize a handoff. They do not grant environment reads or removal.
 
 Authority is recipe-scoped and additive. It does not pass through `--allow-env`
 and does not replace the session capability set. Read, write, and run grants
 already held by a build recipe remain. A direct `do run` session has no rule
-metadata: this specification grants it neither unset nor a terminal.
+metadata: this specification grants it neither removal nor a terminal.
 `--allow-env` remains a named read grant only, with its existing replacement
-policy, and does not authorize `unset` or a handoff.
+policy, and does not authorize removal or a handoff.
 
 Child processes are not sandboxed. Authority constrains Kash observation and
 overlay edits. A launched executable still receives the effective child overlay
@@ -73,66 +79,71 @@ and may read any name that overlay still contains.
 
 ## Environment authority
 
-`export` and `unset` are statement keywords at statement start, like `let`.
-A quoted, escaped, or path-qualified `export` or `unset` is a command, not a
-statement.
+Environment writes use the block statement `set env/NAME = EXPR` (`055` §5.2).
+It is a statement only at statement start; a quoted or escaped `set`, or
+`x/set`, is a command.
 
 ```kash
-export PATH = (join ":" [(str run "/bin") (env "PATH")])
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+set env/PATH = join ":" ["@{run}/bin", PATH]
+set env/AWS_ACCESS_KEY_ID = nil
+set env/AWS_SECRET_ACCESS_KEY = nil
+set env/AWS_SESSION_TOKEN = nil
 ```
 
-Each `export` has one name, `=`, and one value. The value uses
-stage-environment value grammar: a string without NUL, with no implicit
-conversion, splitting, or globbing. `unset` takes one or more names and no
-values. Validate every name before changing the overlay; one denied or invalid
-name changes nothing.
+Each statement writes one name. A non-nil value must be a scalar (string,
+number or path) and is stored as its text, without NUL, implicit splitting, or
+globbing. Other values are `EXPR_INVALID`. `nil` removes the name. Validate the
+name, the value and the authority before changing the overlay; a denied or
+invalid statement changes nothing.
 
 | Operation | Authority | Effect |
 | --- | --- | --- |
-| `export NAME = VALUE` | none for a computed value | Set `NAME` in the current scope overlay. |
-| `(env NAME)` or `$env.NAME` | `read` contains `NAME`, or an existing session read grant | Observe the effective value. |
-| `unset NAME` | `unset` contains `NAME` | Remove `NAME` from the current scope overlay. |
+| `set env/NAME = VALUE` (non-nil) | none for a computed value | Set `NAME` in the unit's overlay. |
+| `env/NAME`, bare `NAME`, `$NAME`, or `${env/NAME}` | `read` contains `NAME`, or an existing session read grant | Observe the effective value. |
+| `set env/NAME = nil` | `unset` contains `NAME` | Remove `NAME` from the unit's overlay. |
 
-An `export` value expression that reads the environment uses the read rule
-above. Export does not itself require the name to be listed. Replacing `PATH`
+A value expression that reads the environment uses the read rule above.
+Setting a name does not itself require the name to be listed. Replacing `PATH`
 with a computed string is grant-free; prepending to the current `PATH` is a
-read. Unset does not observe the removed value. Empty string remains a present
-value, not removal. A missing name and a removed name both read as nil when the
-read is authorized. An unauthorized read or unset is `CAP_DENIED` before the
-overlay changes and before any child launches. Denial is not recoverable by
-`?` or `??`.
+read. Removal does not observe the removed value. Empty string remains a
+present value, not removal. A missing name and a removed name both read as
+`nil` through `env/NAME` when the read is authorized; a bare `ENV-NAME`
+reference to either fails with `ENV_VAR_MISSING`. An unauthorized read or
+removal is `CAP_DENIED` before the overlay changes and before any child
+launches. Denial is not recoverable by `CMD ?` acceptance or `??`.
 
 Stage `:env` and `:KEY` overrides are unchanged. They apply to one stage, do
-not modify the scope overlay, and do not authorize a later read. `with :env`
-merges its record over the overlay already in force for that block only.
+not modify the overlay, and do not authorize a later read. `with :env` merges
+its record over the overlay already in force for that block's stages only.
 
-Overlay statements belong to the execution scope that reaches them:
+The overlay belongs to the process-like unit that owns it (`055` §5.3, §8.4):
 
-- The recipe body and each `with` block or function call starts from the
-  enclosing effective overlay. Nested mutations end when that scope ends,
-  including by failure, return, exit, `break`, and `continue`.
-- A function does not mutate its caller's overlay. Children it launches see the
-  function overlay.
-- Cleanup sees the overlay of the scope that registered the deferred action.
-- Dry-run does not evaluate export values, read environment values, or edit an
-  overlay. Planning evaluates only the authority name lists.
+- A recipe body is one unit. Every function call and `with` block in it reads
+  and writes that unit's overlay; a write is visible to all later statements,
+  lookups and processes in the unit, including after the function that
+  performed it returns.
+- A `$(…)` or `$?(…)` capture is its own unit. It starts from the overlay in
+  force when it starts, and its writes end with it.
+- Writes never reach the parent unit, another recipe attempt, the host process
+  environment, or Kame's own process environment.
+- Cleanup sees the unit's overlay as it is when the cleanup runs.
+- Dry-run does not evaluate `set env/…` values, read environment values, or
+  edit an overlay. Planning evaluates only the authority name lists.
 
-`(env NAME)` observes the effective overlay: an assignment in an enclosing
-scope, otherwise the invocation environment, otherwise nil after an enclosing
-unset. Export and unset do not write the host environment, the parent scope, or
-the `env` namespace seen by another recipe attempt. Kame's process environment
-is unchanged.
+`env/NAME` observes the effective overlay: an earlier write in the unit,
+otherwise the invocation environment, otherwise `nil` after a removal. Writing
+the overlay is not a host environment mutation and needs no environment-write
+grant.
 
 ## Lookup
 
-Outside an overlay that has changed `PATH`, bare-name resolution remains the
-startup `PATH` and `--tool` overrides. Stage `:PATH` still affects only that
+Executable lookup in command position uses the overlay's `PATH` (`055` §6).
+Until the unit writes `PATH`, that is the invocation `PATH`, so resolution is
+the startup `PATH` and `--tool` overrides. Stage `:PATH` still affects only that
 child, not resolution of that stage's executable.
 
-Inside a scope whose effective `PATH` differs from the invocation `PATH`,
-bare-name resolution for commands reached in that scope uses the effective
-`PATH`. `--tool NAME=PATH` still wins. Resolution happens before stage
+After the unit sets or removes `PATH`, bare-name resolution for commands
+reached later in that unit uses the effective `PATH`. `--tool NAME=PATH` still wins. Resolution happens before stage
 environment overrides are applied to the child, so a stage `:PATH` does not
 select the executable. Track the resolved executable by the existing tool
 observation. An overlay does not make a scoped run grant accept bare names;
@@ -147,9 +158,9 @@ terminal. Interactive data stdin is not a handoff.
 When the metadata authorizes `tty` and no stage in the recipe sets `:tty`, each
 sequential foreground process graph of that attempt is a handoff. When any
 stage sets `:tty`, metadata only authorizes: a stage attaches if and only if it
-sets `:tty :true`. `:tty :false` opts that stage out. The same rule applies to
+sets `:tty true`. `:tty false` opts that stage out. The same rule applies to
 `:foreground`. A stage that requests either facility without metadata
-authorization is `CAP_DENIED` before launch. A stage `:foreground :true` whose
+authorization is `CAP_DENIED` before launch. A stage `:foreground true` whose
 effective tty is false is `EXPR_INVALID` before launch.
 
 A handoff applies to the unique foreground graph of one statement. Pipeline
@@ -185,26 +196,26 @@ that cannot open a controlling terminal and move its foreground group, reports
 `FEATURE_UNSUP` before spawn. Environment authority does not depend on that
 primitive and remains available.
 
-### Implementation notes
+### Resolved choices
 
-The native host implements the terminal clause; environment authority is not
-yet implemented. Where this specification leaves a choice open:
+Where the contract above leaves a choice open:
 
 - "Any stage in the recipe sets `:tty`" (or `:foreground`) is decided from the
   recipe's own Kash text. Stages inside library functions it calls are covered
   by the metadata default and their explicit settings, not by that scan.
 - Stages keep separate process groups, as the existing containment contract
   kills a group when its leader is reaped. At most one stage per graph takes the
-  foreground: the stage setting `:foreground :true`, otherwise the last attached
+  foreground: the stage setting `:foreground true`, otherwise the last attached
   stage writing to the terminal, otherwise the first attached stage reading it.
-  Only that stage reads the terminal. Two `:foreground :true` stages in one
+  Only that stage reads the terminal. Two `:foreground true` stages in one
   graph, or a foreground stage without effective tty, are `EXPR_INVALID`.
-- An explicit `:tty :true` or `:foreground :true` on a capture, background
+- An explicit `:tty true` or `:foreground true` on a capture, background
   graph, cleanup, or record-fed graph is `EXPR_INVALID`.
 - The previous foreground group is the terminal's foreground group when the
   handoff opens, which need not be Kame's own group. Terminal modes saved at
   that point are also restored, beyond this contract.
-- A non-Kash recipe body (shell text or a Kame expression) authorizing `tty` is
+- A non-Kash recipe body (a foreign-shell recipe or an `= EXPR` expression
+  body) authorizing `tty` is
   `FEATURE_UNSUP` at planning; a rule without a body ignores it.
 - The interactive session of `052-kash-interactive.md` lends the terminal to
   foreground statements without metadata, keeps pipes when no terminal exists,
@@ -215,7 +226,7 @@ yet implemented. Where this specification leaves a choice open:
 Authority name lists are source. Evaluating them records no environment value.
 
 A read that resolves to the invocation environment records that name and value
-under the existing named-read observation. A read that resolves to an assignment
+under the existing named-read observation. A read that resolves to a value
 this attempt wrote records no external environment input. A read that resolves
 to a name this attempt removed records absence and must not persist the
 invocation value. Digests never store plaintext.
@@ -237,13 +248,13 @@ the name. They omit values, overlay contents, and terminal attributes.
 
 | Failure | Code | When |
 | --- | --- | --- |
-| Unauthorized read, unset, or handoff | `CAP_DENIED` | Before overlay edits or spawn. Not recoverable. |
+| Unauthorized read, removal, or handoff | `CAP_DENIED` | Before overlay edits or spawn. Not recoverable. |
 | Malformed policy, boolean, or conflicting handoff | `EXPR_INVALID` | Planning for metadata; before launch for a stage. |
 | Capable host, no controlling terminal, or restore failure | `HOST_FAIL` | Before spawn, or after reap if restore fails. |
 | Host has no handoff primitive | `FEATURE_UNSUP` | Before spawn. |
 
 A denied read tip identifies rule `authority` `read`, or `--allow-env=NAME` for
-a direct session. Child `env` assignments, `export`, and definition
+a direct session. Child `env` assignments, `set env/NAME`, and definition
 configuration do not grant that read. A tip must not imply that an explicit CLI
 grant preserves the default capability set.
 
@@ -261,7 +272,7 @@ The following are outside this contract:
 - Implicit word splitting, globbing, and alias expansion.
 - Saving or restoring terminal attributes, and managing suspended jobs.
 - Sandboxing an executable's own environment reads.
-- Redefining metadata `env`, or spelling records with braces.
+- Redefining metadata `env`.
 
 ## Conformance
 
@@ -274,8 +285,8 @@ weaker handoff.
 | Contract | Required executable checks |
 | --- | --- |
 | Policy shape | Missing keys, empty lists, duplicate names, invalid names, unknown keys, non-booleans, foreground without tty, planning-time environment read denied, prerequisites not started after a malformed policy. |
-| Grants | Additive to build read/write/run; no effect on another rule; direct session unset and tty denied; `--allow-env` does not unset or attach a terminal and still replaces the default set when explicit. |
-| Overlay | Computed export without a read grant; prepend requires read; unset without observing the value; empty string is present; unauthorized multi-name unset changes nothing; nested `with` and function mutations do not escape; host environment and a later recipe are unchanged; dry-run performs none of these effects. |
-| Lookup | Scope `PATH` selects the bare name; startup `PATH` remains outside that scope; stage `:PATH` does not select the executable; `--tool` wins; scoped run grants still reject bare names. |
+| Grants | Additive to build read/write/run; no effect on another rule; direct session removal and tty denied; `--allow-env` does not authorize removal or attach a terminal and still replaces the default set when explicit. |
+| Overlay | Computed `set env/NAME` without a read grant; prepend requires read; `set env/NAME = nil` without observing the value; empty string is present; unauthorized removal changes nothing; non-scalar values rejected; function writes visible to the caller after return; capture writes do not escape the capture; host environment and a later recipe are unchanged; dry-run performs none of these effects. |
+| Lookup | A written `PATH` selects the bare name for later commands in the unit; startup `PATH` remains in other units; stage `:PATH` does not select the executable; `--tool` wins; scoped run grants still reject bare names. |
 | Handoff | Metadata applies only when no stage sets `:tty`; explicit stage request requires authority; capture, background, and cleanup do not attach; missing terminal is `HOST_FAIL` with no child; group restored after success, failure, and cancellation; parent process remains; no terminal-attribute claim. |
-| Freshness | Invocation read recorded; self-export read records no external value; unset-then-read does not persist the removed value; process digest changes when a name is removed; diagnostic text contains no value. |
+| Freshness | Invocation read recorded; reading a self-written value records no external value; remove-then-read does not persist the removed value; process digest changes when a name is removed; diagnostic text contains no value. |

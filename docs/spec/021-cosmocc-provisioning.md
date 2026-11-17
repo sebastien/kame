@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Retired Cosmopolitan Toolchain
 
 The Go migration retires Cosmopolitan/APE artifacts and compiler provisioning.

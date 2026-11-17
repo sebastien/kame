@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Kash history
 
 ## Purpose
@@ -46,8 +50,9 @@ does not create copies or a separate global persistence scope.
 
 `history scope local` and `history scope global` select the session's recall
 view. `history scope` reports the selected view and current local root without
-printing command text. These are terminal session commands, not executables or
-Kame functions. They are not themselves recorded. Switching views preserves
+printing command text. These are forms of the interactive `history` builtin
+(`055` §6), not executables or Kame functions; the builtin is `PARSE_ERR` in a
+script or rule body. They are not themselves recorded. Switching views preserves
 unsubmitted input and changes both navigation and incremental history search.
 Neither switching nor recall executes an entry.
 

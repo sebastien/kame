@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Streams and Batches
 
 ## Purpose
@@ -16,6 +20,8 @@ wins for source, batch, and stream behavior.
 - **Batch:** zero or more chunks committed as one immutable list value.
 - **Stream:** a finite or open-ended sequence of atoms and batches.
 - **Source:** a resumable producer of stream protocol atoms.
+- **`Stream` value:** the language-level lazy stream returned by a generator
+  (`yield`), realized as a source and consumed element by element.
 
 An operation may return an atom, a batch, or a stream. These are one protocol,
 not three unrelated asynchronous APIs:
@@ -174,6 +180,53 @@ one-atom source. Collection operations may use a finite batch source. Host and
 service operations use waiting sources. No operation needs to implement its own
 subscriber replay, dependency graph, or asynchronous iterator wrapper.
 
+## Generator Streams
+
+A `def` whose body contains `yield` is a generator (`055` §8.3). Calling it
+returns a lazy `Stream` value instead of running the body:
+
+```kash
+def changed-sources root
+	for path in files @{root}/**/*.c
+		if $?(git diff --quiet -- $path).ok
+			continue
+		yield path
+
+for source in changed-sources ./src
+	compile $source (object-path source)
+```
+
+The generator is realized as a resumable source under this protocol. Its source
+state holds the body's lexical scope, statement position and pending cleanup,
+allocated so that it outlives every wait.
+
+- **Pulling.** Each pull resumes the body until the next `yield EXPR`, which
+  emits one `Atom(value)`, or until the body ends, which emits `EndStream`. A
+  bare `return` inside a generator ends the stream; `return EXPR` there is
+  `PARSE_ERR`. Host work inside the body returns `waiting` exactly as any other
+  source does, and resumes only from a matching copied completion.
+- **Consumers.** Streams are consumed by `for`, by `|>` stages whose operation
+  accepts a stream, and by the stream operations of `042`. Each element is
+  delivered once, in yield order, to exactly one consumer. A stream is not a
+  `Value` that can be duplicated, interpolated or published as a node value;
+  consuming it twice, or passing it where a materialized value is required, is
+  `EXPR_INVALID`. No operation materializes a stream into a list implicitly; an
+  operation that does so explicitly publishes the result as one batch.
+- **States.** While waiting for its consumer to pull, the invocation's state is
+  `:suspended`. It becomes `:completed` after `EndStream`, `:failed` after
+  `Failed(diagnostic)`, and `:cancelled` when the consumer stops early.
+- **Early stop.** When a consumer stops before `EndStream` (`break`, an early
+  return, a failure in the consumer, or a closed downstream stage), the engine
+  cancels the source: the body's pending `defer` cleanup runs in LIFO order and
+  `free` is called exactly once. A cancelled generator is treated as a broken
+  pipe and does not fail an enclosing pipeline (`049`).
+- **Separate channels.** A generator's yielded values and its stdout bytes are
+  separate channels. `|` connects only stdout bytes; yielded values reach only
+  value consumers. Neither converts into the other.
+- **Effects.** The body runs under the phase and grants of the invocation that
+  pulls it. Pulling in a phase that forbids processes makes any process in the
+  body fail with `PHASE_INVALID`; it does not defer the work.
+
 ## Ownership Summary
 
 | Object | Owner | Release point |
@@ -184,11 +237,12 @@ subscriber replay, dependency graph, or asynchronous iterator wrapper.
 | Published latest value | Node | Replacement, invalidation, or node free |
 | Subscriber event value | Subscription queue | Pop transfer, coalescing, unsubscribe, or engine free |
 | Host completion copy | Engine message queue | Source consumption or stale-message discard |
+| Generator scope and pending cleanup | Generator source state | `EndStream`, failure, or cancellation after cleanup runs |
 
 ## Acceptance Tests
 
 - A scalar source publishes one scalar value and completes.
-- A source with chunks `1`, `2`, `EndBatch` publishes `[1 2]` as one value.
+- A source with chunks `1`, `2`, `EndBatch` publishes `[1, 2]` as one value.
 - `EndBatch` with no chunks publishes an empty list.
 - A nonempty batch is committed by `EndStream`; no empty implicit final batch is
   emitted.
@@ -206,6 +260,14 @@ subscriber replay, dependency graph, or asynchronous iterator wrapper.
   from being processed.
 - Repeated atom, batch, nested-source, cancellation, and stale-completion tests
   using `mem.Tracker` leak no source state, builder, value, or message payload.
+- A generator yields its elements in order, one per pull, and a bare `return`
+  ends its stream; `return EXPR` in a generator is `PARSE_ERR`.
+- A consumer that stops early cancels the generator, runs its `defer` cleanup
+  exactly once, frees its source once, and does not fail an enclosing pipeline.
+- A generator's yielded values never appear on its stdout, and its stdout never
+  appears as yielded values.
+- Consuming a stream twice, or using it where a materialized value is required,
+  fails with `EXPR_INVALID`.
 
 CLI stream publication must remain observable while the process is running.
 Native C stdio streams are flushed after event drains, including JSON records.

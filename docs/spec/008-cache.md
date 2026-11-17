@@ -1,8 +1,12 @@
+---
+revision: 2
+---
+
 # Cached Tasks and Fingerprints
 
 ## Purpose
 
-Cached tasks skip successful repeated work when their implementation and every
+Cached tasks, declared with `task cached NAME`, skip successful repeated work when their implementation and every
 observed input remain equivalent. Caching is a runtime feature, not a generic
 virtual filesystem.
 
@@ -103,7 +107,7 @@ change detection rather than authentication.
 
 Order-only prerequisites still materialize before lookup, but their content,
 values and task outcomes do not enter the input or dynamic content sections.
-An order-only bare task does not by itself disable caching. Normal occurrences
+An order-only phony task does not by itself disable caching. Normal occurrences
 or explicit expression reads upgrade an edge to a content dependency. The
 selected authored rule declaration remains part of the fingerprint, including
 its prerequisite syntax.
@@ -132,7 +136,7 @@ does not consume content; intentional metadata reads have their own aspect.
   Environment snapshots use canonical assignment order and are stored as digests.
   Pure/declarative tasks consume only their direct and indirect Kame environment reads.
 
-An ordinary bare task is never a cacheable dependency. A cached task depending
+A phony task is never a cacheable dependency. A cached task depending
 on one is therefore always stale.
 
 Engine hashing is incremental; current host content transport buffers a whole
@@ -252,7 +256,7 @@ share the host backend's limit.
   operation version, and shell changes each invalidate a record.
 - A modification-time change that leaves the bytes alone does not invalidate.
   A content change invalidates even when the modification time is unchanged.
-- A bare task dependency prevents a cache hit.
+- A phony task dependency prevents a cache hit.
 - A failed task reruns and does not replace an earlier successful record for a
   different fingerprint.
 - `kame do cache list` reports managed records consistently on native and WASM.

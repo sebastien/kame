@@ -1,12 +1,17 @@
+---
+revision: 2
+---
+
 # Kash shell options
 
-## Session command
+## Builtin
 
-`option [-l|--local|-g|--global] [NAME [VALUE]]` is a whole-entry session
-command, available in interactive input, interactive initialization, and login
-profiles. It is not an executable, expression, or batch-script statement.
-Parsing/formatting recognizes it without effects; batch execution rejects
-session commands before executing earlier statements.
+`option [-l|--local|-g|--global] [NAME [VALUE]]` is an interactive builtin
+(`055` §6), available as a whole entry in interactive input, interactive
+initialization, and login profiles. It is not an executable or expression.
+Parsing/formatting recognizes it without effects; like every interactive-only
+builtin it is `PARSE_ERR` in a script or rule body, so no earlier statement
+runs.
 
 Local means the running shell, never a project directory. Local is the default;
 global means persistent user defaults. Scope flags are mutually exclusive.
@@ -64,7 +69,7 @@ and vi/emacs feature switches are separate follow-up work.
 ## Global storage
 
 Use `$XDG_CONFIG_HOME/kash/options`, falling back to `~/.config/kash/options`.
-The path is fixed for the invocation; session `cd` and `export` do not move it.
+The path is fixed for the invocation; session `cd` and `set env/NAME` do not move it.
 Do not rewrite authored `init.kash` or profiles.
 
 The file is UTF-8 text, one `name: value` per line. Blank lines and whole-line

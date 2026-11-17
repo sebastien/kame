@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Wildcard dependency sources
 
 `038-direct-kash-and-values.md` extends this contract with interpolated glob
@@ -5,34 +9,50 @@ atoms and signed entry-kind filters. Filter masks participate in consumer
 identity, and entry-kind changes invalidate filtered membership even when path
 names are unchanged. Symlinks are classified without following their targets.
 
-An unquoted explicit path containing authored, unescaped `*`, `?`, or a bracket
-character class is a glob expression wherever Kame accepts an expression, not
-only in rule inputs (`004-language.md`). Valid capture/expansion pattern groups
-take precedence and never initiate filesystem enumeration. Quoted paths and
-wildcard bytes contributed by interpolation remain literal data. Raw Kash
-command words retain their literal semantics; Kash definition values and
-embedded Kame expressions use ordinary glob-expression evaluation.
+A path atom containing authored, unescaped `*`, `**`, `?` or a bracket
+character class is a `PathPattern` value (`055` §9.1). Valid capture groups
+(`{name}`, `{name:**}` and the other group forms of `014`/`029`/`041`) also make
+a `PathPattern`, but never initiate filesystem enumeration. Wildcard bytes
+contributed by `@{…}` interpolation and wildcard characters inside quoted
+strings remain literal data. A `PathPattern` never converts implicitly into a
+list of paths: membership is observed through a wildcard source, either as a
+rule input or through an explicit discovery operation.
 
 ```kame
-SOURCES_JOURNAL = ./journal/*
-PRODUCT_BY_NAME = (sub ./journal/{name:*} "@{name}" SOURCES_JOURNAL)
+sources-journal = files ./journal/*
+product-by-name = sub ./journal/{name:*} "@{name}" sources-journal
 ```
 
-Glob expressions and explicit `wildcard` calls use the same dependency-tracked
-filesystem source. A glob expression always produces a list: zero matches give
-`[]`, and one match remains a one-item list. `(wildcard ./journal/*)` accepts
-the already-expanded list without interpreting its filenames as new patterns.
+`files`, `dirs` and `wildcard` (`007-library.md`) are the discovery
+operations. Each returns a sorted, duplicate-free `List[Path]`: zero matches give
+`[]`, and one match remains a one-item list. `wildcard` also accepts a list of
+already-discovered `Path` values without interpreting their names as new
+patterns. As a rule input, a wildcard path atom names the dynamic membership of
+its pattern; the rule depends on that membership as described below.
+
+Kash command words are not expression atoms: `ls ./journal/*` passes the
+literal text `./journal/*` as one argv entry. A command that needs discovered
+paths spreads an explicit list:
+
+```kash
+let journal = files ./journal/*
+ls $...journal
+```
+
 All reached scans retain ordinary read authorization, phase policy and authored
 diagnostic spans; glob syntax does not confer host authority. Parsing and
 formatting never scan, and unused definitions or unselected branches do not
-request a source.
+request a source. In declaration context a discovery result is a snapshot taken
+at planning time, and a discovery pattern that overlaps a declared output is
+rejected with `DISCOVERY_OVERLAP` (`055` §9.4).
 
 Each authored pattern has one shared glob resource key in the program engine,
 including patterns whose current result is empty. Evaluation is lazy: a source
 is requested only when the selected plan or runtime reaches it. Results are
-sorted, duplicate-free, cwd-relative paths. The dependency records the pattern
-membership, not only the files returned by the current scan, so adding or
-removing a matching path invalidates consumers.
+sorted, duplicate-free paths relative to the root directory (`055` §9.2). The
+dependency records the pattern membership, not only the files returned by the
+current scan, so adding or removing a matching path invalidates consumers,
+including declarations that consumed a declaration-time snapshot.
 
 On native and WASM watch sessions, an invalidated glob source is reevaluated and
 its retained consumers rebuild from the latest membership. Multiple consumers
@@ -43,13 +63,18 @@ portable runtime.
 ## Acceptance
 
 - Recursive and empty patterns retain one shared lazy dependency source.
-- Glob expressions expand in definitions, application arguments, containers and
+- `files`, `dirs` and `wildcard` discover in definitions, application arguments,
+  containers and declaration-time loops, and wildcard path atoms discover as
   rule inputs, preserving empty/singleton list shape and sorted order.
-- Quoted/escaped wildcard bytes and dynamic interpolation bytes remain literal;
-  capture patterns do not scan, and parse/format performs no filesystem access.
-- Explicit `wildcard` calls preserve equivalent membership and flags without
-  re-globbing already-expanded filenames.
+- A `PathPattern` value is never implicitly enumerated or converted to a list.
+- Quoted wildcard text and dynamic interpolation bytes remain literal; capture
+  patterns do not scan, and parse/format performs no filesystem access.
+- `wildcard` over already-discovered lists preserves equivalent membership and
+  flags without re-globbing filenames.
 - Denied or phase-forbidden glob reads issue no host request; unused definitions
   and unselected branches acquire no glob dependency.
-- Membership additions and removals invalidate retained consumers on native and
-  WASM watch sessions without starting unrelated recipes.
+- Declaration-time discovery overlapping a declared output fails with
+  `DISCOVERY_OVERLAP`, naming the pattern and the output declaration.
+- Membership additions and removals invalidate retained consumers, including
+  declarations built from a discovery snapshot, on native and WASM watch
+  sessions without starting unrelated recipes.

@@ -1,9 +1,14 @@
+---
+revision: 2
+---
+
 # Kash output ports, command lists, and exit fidelity
 
-## 1. Purpose and status
+## 1. Purpose
 
-**Implemented contract.** This specification extends [017 Kash](017-kash.md),
-[042 Kash streaming](042-kash-streaming.md), and [009 CLI](009-cli.md). Existing
+This specification extends [017 Kash](017-kash.md),
+[042 Kash streaming](042-kash-streaming.md), and [009 CLI](009-cli.md), using
+the surface syntax of [055](055-unified-kame-kash-language.md). Existing
 behavior remains authoritative except where explicitly extended below. The
 focused native and Node/WASM acceptance suite is
 `tests/T047-01-kash-output-ports-and-command-lists.sh`.
@@ -23,8 +28,9 @@ completed outcomes. Output ports remain distinct from named data channels.
 
 Initial scope excludes arbitrary descriptor duplication (`2>&1`), routing a
 stage's own stderr into a graph/file, subshells, heredocs, backtick substitution,
-process replacement, asynchronous compound command lists, and mutable bindings.
-`$(...)` remains the sole command-substitution syntax. Grants do not change.
+process replacement, and asynchronous compound command lists. `$(...)` is the
+sole command-substitution syntax and `$?(...)` the sole outcome-inspection
+syntax. Grants do not change.
 
 [Practical scripting](048-kash-practical-scripting.md) extends these boundaries
 with a restricted stderr-routing subset and selected ordinary exit acceptance;
@@ -51,7 +57,7 @@ A graph inherits output/error sinks from its execution context:
 - Ordinary execution supplies the invocation's stdout/stderr presentation sinks.
 - Command substitution replaces the output sink with its bounded capture sink,
   leaving the error sink unchanged.
-- Nested Kash callables inherit these sinks; helpers do not bypass capture.
+- Called functions inherit these sinks; helpers do not bypass capture.
 - Presentation may use structured host events rather than raw OS descriptors.
 
 Consequently, `$(printf "hello" >&out)` captures `"hello"`, while
@@ -131,16 +137,16 @@ existing acceptance or graph recovery. Binding order, tightest first:
 Thus `A | B && C` means `(A | B) && C`; `A || B && C` means
 `(A || B) && C`; and `A ? B && C` means `(A ? B) && C`. A recovery operand ends
 before a command-list operator. These parentheses explain binding; they do not
-introduce authored grouping syntax. Use a Kash helper for compound control that
+introduce authored grouping syntax. Use a function for compound control that
 needs another grouping boundary.
 
 Operators require operands and are recognized outside quoted/escaped data and
-embedded Kame expressions. A newline immediately after `&&` or `||` continues
+`(…)` value fragments. A newline immediately after `&&` or `||` continues
 the list; a newline before an operator does not. Formatting preserves that
 distinction. Existing word-composition and process-group comma boundaries remain
 unchanged. A list may not appear as a process-group member, filter branch, or
 live producer operand: those positions require one concurrent graph. Lists in
-`$(...)` are explicitly allowed below.
+`$(...)` and `$?(...)` are explicitly allowed below.
 
 ### Selection and preparation
 
@@ -159,7 +165,7 @@ The entire source, including skipped operands, is still parsed and statically
 validated. Each selected graph retains `042`'s complete prelaunch preparation;
 short-circuiting does not weaken validation within that graph.
 
-| Outcome | Eligible for `||`? |
+| Outcome | Eligible for `\|\|`? |
 | --- | --- |
 | Ordinary nonzero executable exit | Yes |
 | Process signal exit, including SIGPIPE | Yes |
@@ -168,8 +174,10 @@ short-circuiting does not weaken validation within that graph.
 | Argument/evaluation error | No |
 | Capability denial or cancellation | Never |
 
-This follows command-condition classification, not the broader recovery contract
-of `? ELSE`. Existing graph recovery remains available for its documented launch,
+This classification is the ordinary process-exit failure class, not the broader
+recovery contract of `? ELSE`. A function operand is eligible exactly when its
+failure was caused by an eligible process exit; its derived status is then that
+process's status. Other function failures are not eligible. Existing graph recovery remains available for its documented launch,
 timeout, and graph-error categories. Mixed outcomes retain the graph's existing
 failure-policy precedence: a fatal graph error cannot become an eligible exit
 merely because a cancelled peer also reports a signal.
@@ -183,16 +191,17 @@ if the list ultimately propagates the failure.
 Explicit acceptance changes failure propagation, not recorded exit status:
 
 ```kash
-probe? && report
+probe ? && report
 ```
 
-`report` runs after an accepted exit even if the accepted result retains
-`.status = 7`. Selection uses the evaluator's effective success/failure outcome,
-not a numeric field in an arbitrary returned record. A helper that handles an
-internal failure does not fail again because it returns that completion record.
+`report` runs after an accepted exit even if the accepted outcome retains
+`status` 7. Selection uses the evaluator's effective success/failure outcome,
+not a field of an arbitrary returned value. A function that inspects an internal
+failure with `$?(…)` and returns that outcome record does not fail again: its
+return value is data, and its own outcome is `:completed`.
 
 The list returns the result and effective outcome of its last executed operand.
-No implicit combined Result or unbounded operand history is introduced. Existing
+No implicit combined outcome or unbounded operand history is introduced. Existing
 events may report each executed graph independently.
 
 | List (names indicate executable exit codes) | Executed operands | Final outcome |
@@ -205,19 +214,33 @@ events may report each executed graph independently.
 
 A failed list at ordinary statement position stops later statements unless an
 enclosing recovery handles it. `probe && publish` therefore fails the script if
-`probe` fails; use an `if` block when skipping work should allow later statements.
+`probe` fails; test the outcome when skipping work should allow later statements:
+
+```kash
+if $?(probe).ok
+	publish
+```
 This is Kash failure propagation, not Bash's context-sensitive `errexit` behavior.
 
 ### Conditions, capture, async, and cleanup
 
-Command conditions in `if`, `elif`, and `while` may contain lists. Existing
-restrictions remain: no explicit acceptance/recovery or async syntax. The final
-eligible process-exit failure means false; other failures propagate.
+Conditions are expressions. A list is tested through its outcome:
+
+```kash
+if $?(git diff --quiet && git diff --cached --quiet).ok
+	echo clean
+```
+
+`$?(LIST)` returns the outcome of the last executed operand. A final eligible
+process-exit failure yields `ok: false` with `state: :failed`; a list stopped by
+a non-eligible failure, such as a launch failure, also yields `state: :failed`
+with that failure in `error`. Capability denial and cancellation propagate out of
+`$?(…)`. Terminal async `&` is not valid inside `$?(…)`.
 
 Command substitution may contain a list:
 
 ```kash
-text = $(primary || fallback)
+let text = $(primary || fallback)
 ```
 
 Executed operands write into one capture sink and share one cumulative capture
@@ -232,9 +255,10 @@ Separate sequential statements such as `A &; B && C` remain valid; existing
 invocation ownership and eventual async joins apply.
 
 Direct compound lists after `defer` are also rejected, preserving its restricted
-grammar. A deferred Kash helper may contain an ordinary synchronous list. Lists
-introduce no scope or cleanup lifetime: reached deferred actions belong to the
-enclosing Kash invocation, retaining lexical context under existing rules.
+grammar. A deferred function call may run an ordinary synchronous list in its
+body. Lists introduce no scope or cleanup lifetime: reached deferred actions
+belong to the enclosing invocation, retaining lexical context under existing
+rules.
 
 ## 4. Exit-status fidelity
 
@@ -243,14 +267,17 @@ CLI exit code:
 
 - Ordinary executable exit: preserve its status.
 - Signal exit: retain the established `128 + signal` mapping.
+- Unhandled function failure: its derived status, which is the causing process
+  exit's status when a process failure caused it.
+- `exit N`: N, under the unwinding rules of `048`.
 - Successful handled/accepted execution: exit zero, regardless of retained
   completion records.
 - Language, capability, launch, timeout, and internal failures: retain their
   documented CLI mappings.
 
-Preserve typed failure provenance through evaluation, callables, session work,
-finalization, and CLI adaptation. Never infer status from diagnostic text or an
-arbitrary record field. An executable exit `42` must not become `1` merely because
+Preserve typed failure provenance through evaluation, function calls, session
+work, finalization, and CLI adaptation. Never infer status from diagnostic text
+or an arbitrary record field. An executable exit `42` must not become `1` merely because
 another `kame do run` wraps it. Process failure selected by a list or graph uses
 the existing deterministic aggregate status, not whichever peer exits last.
 
@@ -281,8 +308,8 @@ substitution to decide a short-circuit branch.
 Native and Node/WASM implement the same selection, capture, status, and cleanup
 contracts. Unsupported host routing fails explicitly before launch or truncation,
 never falls back to a system shell. The affected clauses in `017`, `042` (including
-§12), and `009` are updated; focused cross-backend coverage is registered in
-`Makefile.kmk`.
+§12), and `009` agree with this specification; focused cross-backend coverage
+is registered in `Makefile.km`.
 
 Acceptance requires shared native and Node/WASM cases covering:
 
@@ -300,8 +327,9 @@ Acceptance requires shared native and Node/WASM cases covering:
    failures and incidental returned records do not become new failures.
 7. `||` handles ordinary/signal exits but not launch, timeout, capture, capability,
    operator, or evaluation errors, including mixed-failure graphs.
-8. Conditions use the final effective outcome; final unhandled list failures stop
-   later statements and emit only the appropriate unhandled diagnostic.
+8. `$?(LIST).ok` uses the final effective outcome; final unhandled list
+   failures stop later statements and emit only the appropriate unhandled
+   diagnostic.
 9. Sequential capture retains failed-operand bytes, shares a cumulative limit,
    and never selects fallback after capture overflow.
 10. Compound async/direct defer rejection before effects; unchanged ownership for

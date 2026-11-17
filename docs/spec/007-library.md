@@ -1,10 +1,14 @@
+---
+revision: 2
+---
+
 # Standard Library
 
 ## Purpose
 
 `038-direct-kash-and-values.md` refines standard operation contracts and owns
 canonical action names, text/JSON separation, and wildcard kind filters. Those
-requirements take precedence over older operation spellings below.
+requirements take precedence over the operation descriptions below.
 
 The standard library provides ordinary operations over materialized values.
 Reactive lifting, dependency tracking, authorization, and stream scheduling are
@@ -42,21 +46,21 @@ inline evaluation in that phase. Tool metadata tracking does not confer user
 read authority. Service, dry-run, and publication restrictions remain independent.
 
 Callback-bearing operations (`apply`, `map`, `flatmap`, `filter`, `filter-out`,
-`reduce`, `finally!`, and template application) explicitly propagate reached
+`reduce`, `finally!`, `sub`, and template application) explicitly propagate reached
 callable behavior. A computation category on the enclosing operation does not
 declare its callbacks pure.
 `render` also evaluates template expressions under the caller's authority and
-phase. Processes and `await` implemented as syntax obey the same contracts even
-though they are not ordinary registry calls.
+phase. Syntax that is not a registry call (`match`, `$(…)`, `$?(…)`, `wait`)
+obeys the same contracts.
 
 An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
 the run allocator unless explicitly transferred to the engine.
 
-An explicitly specified staged operand is the exception: pattern `sub`/`replace`
+An explicitly specified staged operand is the exception: pattern `sub`
 retains its replacement expression for evaluation after matching, as defined in
-`014-patterns.md` and `005-evaluation.md`. This does not make `replace` a reserved
-special form or change ordinary literal-string replacement.
+`014-patterns.md` and `005-evaluation.md`. This does not make `sub` a reserved
+word or change ordinary literal-string replacement.
 
 Pure operations must not read clocks, environment, global mutable state, files,
 or processes. Effectful operations register dependencies and effects through
@@ -64,24 +68,37 @@ the context.
 
 ## General Operations
 
-Public transformations use `(f PARAMS VALUE)`, with all configuration, including
-optional operands, before the subject. Value pipes append their input, so direct
-calls and `(VALUE | f PARAMS)` have identical meaning. This is a breaking contract:
-operations do not detect or accept the former subject-first order. Comparisons
-keep conventional `(gt? LEFT RIGHT)` semantics; variadic combiners retain authored
-operand order. Special forms and internal template primitives are separate.
+Operations are called with ordinary application (`055` §4.2): `count xs`,
+`join ", " names`, `now ()`. A bare operation name is the operation value and can
+be passed to callbacks: `map basename paths`. Every operation is also reachable
+as `std/NAME` when a lexical binding shadows it. Operations are not consulted in
+command position (`055` §6): in a Kash block, `basename $f` runs the executable,
+whereas `(basename f)` in a word or `let b = basename f` calls the operation.
 
-Canonical changed signatures are `(nth INDEX VALUE)`, `(slice START [END] VALUE)`,
-`(join SEPARATOR LIST)`, `(split SEPARATOR TEXT)`, `(includes? PART TEXT)`,
-`(starts? PREFIX TEXT)`, `(ends? SUFFIX TEXT)`, `(reduce FUNCTION [INITIAL] LIST)`,
-`(apply FUNCTION LIST)`, and `(relpath BASE TARGET)`. `map` and `flatmap` accept only
-`(FUNCTION SUBJECT)`; `reduce` callbacks receive `(accumulator item)`, plus the
-item's position when they declare a third parameter.
-`(sh! [OPTIONS] COMMAND)` also puts its subject last.
+Public transformations are **data-last**: `f PARAMS VALUE`, with all
+configuration, including optional operands, before the subject. The value pipe
+appends its input as the last argument, so `f PARAMS VALUE` and
+`VALUE |> f PARAMS` have identical meaning. Comparisons keep conventional
+`gt? LEFT RIGHT` semantics; variadic combiners retain authored operand order.
+Keywords (`match`, `if`, `and`, `or`) and internal template primitives are not
+operations.
 
-Migration: rename `set-field` to `set`, `regex-replace` to `resub`, and
-`shell!`/`shellrun!` to `sh!`. The old names are removed and report migration
-diagnostics; they are not aliases. Other operation names are unchanged.
+In the signatures below, an uppercase operand followed by `?` is optional and one
+followed by `...` is a rest operand. The data-last signatures are
+`nth INDEX VALUE`, `slice START END? VALUE`, `join SEPARATOR LIST`,
+`split SEPARATOR TEXT`, `includes? PART TEXT`, `starts? PREFIX TEXT`,
+`ends? SUFFIX TEXT`, `reduce FUNCTION INITIAL? LIST`, `apply FUNCTION LIST`,
+`relpath BASE TARGET`, `put KEY VALUE RECORD`, `get KEY DEFAULT? RECORD`,
+`capture PATTERN SUBJECT`, `bind TEMPLATE CAPTURES` and
+`sh! OPTIONS? COMMAND`. `map` and `flatmap` accept only `FUNCTION SUBJECT`;
+`reduce` callbacks receive the accumulator and the item, plus the item's
+position when they declare a third parameter.
+
+```kame
+names = sources |> map basename |> sorted
+listing = join "\n" names
+c-names = names |> filter (ends? ".c" _)
+```
 
 The general operations are:
 
@@ -89,24 +106,27 @@ The general operations are:
 | --- | --- |
 | `not` | Boolean negation using language truth rules |
 | `bool` | Convert to language truth value |
+| `neg` | `neg NUMBER`: arithmetic negation of a computed number (negative literals are written `-1`) |
 | `str` | Concatenate zero or more scalar textual values; reject implicit collection serialization |
 | `json` | Encode exactly one JSON-compatible value, including quoted scalar strings |
 | `count` | Length of string code points, bytes, list, or record |
-| `get` | `(get KEY [DEFAULT] RECORD)`: computed string key; missing keys return nil or DEFAULT |
-| `first` | First list item or string code point, equivalent to `(nth 0 VALUE)`; empty input returns nil |
+| `get` | `get KEY DEFAULT? RECORD`: computed string key; missing keys return nil or DEFAULT |
+| `first` | First list item or string code point, equivalent to `nth 0 VALUE`; empty input returns nil |
 | `nth` | Indexed list or string item with negative indexes |
-| `apply` | `(apply FUNCTION LIST)` always spreads list elements as positional arguments, regardless of callable kind or arity |
-| `finally!` | Execution-only `(finally! [OPTIONS] BODY CLEANUP)`: zero-argument callbacks with bounded finalization under `043-kame-finalization.md` |
+| `apply` | `apply FUNCTION LIST` always spreads list elements as positional arguments, regardless of callable kind or arity |
+| `finally!` | Execution-only `finally! OPTIONS? BODY CLEANUP`: zero-argument callbacks with bounded finalization under `043-kame-finalization.md` |
 | `list` | Return arguments as a list |
-| `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
-| `set` | `(set KEY VALUE RECORD)`: immutable field replacement/insertion |
-| `merge` | `(merge RECORD...)`: shallow, right-biased immutable record merge |
+| `items` | `items RECORD`: ordered `{key: STRING, value: VALUE}` entries |
+| `put` | `put KEY VALUE RECORD`: immutable field replacement/insertion |
+| `merge` | `merge RECORD...`: shallow, right-biased immutable record merge |
 | `nil?` / `bool?` / `int?` / `float?` / `string?` / `bytes?` / `list?` / `record?` / `callable?` / `resource?` / `pattern?` / `process?` | Exact outer-kind tests on any value, without serialization |
 | `number?` | True for int or float, false for every other kind |
 | `empty?` | True exactly for zero-length strings, bytes, lists, or records; false for nil and all other kinds |
-| `has-key?` | `(has-key? KEY RECORD)` tests presence, including a field whose value is nil |
-| `success?` | `(success? RESULT)` tests integer `status` and `signal` fields for zero; malformed records/fields are `EXPR_INVALID` |
-| `digest` | `(digest ALGORITHM BYTES-OR-STRING)`: raw SHA digest as lowercase hexadecimal |
+| `has-key?` | `has-key? KEY RECORD` tests presence, including a field whose value is nil |
+| `success?` | `success? RESULT` tests integer `status` and `signal` fields for zero; malformed records/fields are `EXPR_INVALID` |
+| `digest` | `digest ALGORITHM BYTES-OR-STRING`: raw SHA digest as lowercase hexadecimal |
+| `fmt` | `fmt VALUE`: canonical, parseable expression source for a value (`055` §13) |
+| `eval` | `eval TEXT`: parse one expression and evaluate it in value context in the current lexical scope and phase (`055` §13) |
 
 `json` uses deterministic JSON for compatible scalars, lists and records with
 stable record key order. `str` performs textual conversion/concatenation only;
@@ -119,30 +139,30 @@ and callable ownership intact. An invalid record/key type is `EXPR_INVALID`.
 Records can replace families of computed configuration names:
 
 ```kame
-modes = [debug: "-O0" release: "-O2"]
+modes = {debug: "-O0", release: "-O2"}
 selected = "release"
-flags = (get selected modes)
+flags = get selected modes
 ```
 
 The operation is pure and works in definitions, input headers, and planning.
 
-Presence and value lookup are separate: `(has-key? "key" [key: :nil])` is true,
+Presence and value lookup are separate: `has-key? "key" {key: nil}` is true,
 whereas `get` returns nil for both a missing key and a present nil value. Presence
 requires a string key and a record with unique keys. It does not evaluate a
-fallback. Keep `get` defaults eager; use ordinary lazy `if` with `has-key?` when
-computing a default may fail or perform effects. No new implicit lazy operand or
-lookup special form is introduced.
+fallback. `get` defaults are eager; use a lazy `if` expression with `has-key?`,
+or `r.key ?? FALLBACK` for a literal field name (`055` §4.5), when computing a
+default may fail or perform effects.
 
-`apply` has one argument-spreading contract for lexical functions, native Kash
+`apply` has one argument-spreading contract for lexical functions, Kash `def`
 functions, registered operations, and variadic callables. Thus
-`(apply uppercase ["hello"])` is `(uppercase "hello")`, and
-`(apply ([xs...] xs) [1 2])` returns `[1 2]`. To pass a list as one argument, nest
-it once, e.g. `(apply count [[1 2]])`, or call `(count [1 2])` directly. Empty
-argument lists call with zero arguments and retain normal arity errors. The
-former unary-function whole-list heuristic is removed, not detected dynamically.
+`apply uppercase ["hello"]` is `uppercase "hello"`, and
+`apply (xs... => xs) [1, 2]` returns `[1, 2]`. To pass a list as one argument,
+nest it once, e.g. `apply count [[1, 2]]`, or call `count [1, 2]` directly. Empty
+argument lists call with zero arguments and retain normal arity errors. Argument
+spreading at a call site is also written directly: `f ...args`.
 
 Public named predicates use `?`; logical `not`, truth conversion `bool`, and
-symbolic comparison operators are deliberate exceptions. Predicates retain
+the comparison operators are deliberate exceptions. Predicates retain
 their documented domains: `nil?` and the kind tests accept every value, whereas
 `in?`, `has-key?`, and `success?` validate their collection/result operands.
 `empty?` is not absence or broad whitespace detection; `blank?` keeps its existing
@@ -163,32 +183,34 @@ cancellation, execution-only effect ordering and host requirements. It adds no
 ### Typed record traversal and updates
 
 `items` returns a list in stored field order, not sorted or serialized order.
-Each entry contains exactly `key` and `value`. Empty records yield an empty list;
-`[]` remains a list and is not accepted as a record. `set` requires a string
-key: replacement preserves the field's position; a new key appends. An empty key
-is valid, and setting nil stores a present nil field rather than removing it.
+Each entry contains exactly `key` and `value`. Empty records (`{}`) yield an
+empty list; `[]` is a list and is not accepted as a record. `put` requires a
+string key: replacement preserves the field's position; a new key appends. An
+empty key is valid, and putting nil stores a present nil field rather than
+removing it.
 
 `merge` processes records left to right. The last value for a repeated key wins,
 while the key retains its first-seen position. The merge is shallow: a nested
 record is replaced, not recursively combined. Zero arguments produce an empty
 record. These operations do not mutate their operands and preserve all nested
 value kinds, including bytes, resources and callable ownership. Invalid operand
-types and records with duplicate keys produce `EXPR_INVALID`. They replace
-JSON/template round trips:
+types and records with duplicate keys produce `EXPR_INVALID`. Record literals
+with `...` spreads (`{...settings, version: "new"}`) build records directly;
+`put` and `merge` serve computed keys and records:
 
 ```kame
-settings = [version: "old" nested: [enabled: :true]]
-updated = (set "version" "new" settings)
-entries = (items updated)
-combined = (merge settings [version: "new" extra: 3])
+settings = {version: "old", nested: {enabled: true}}
+updated = settings |> put "version" "new"
+entries = items updated
+combined = merge settings {version: "new", extra: 3}
 ```
 
 The kind predicates return booleans for every value, including empty data, and
 inspect only the outer kind. A pattern is not a string, bytes are not strings,
 and a record/list containing callables remains a record/list. No JSON-prefix
 test, truth conversion, or implicit parsing occurs. SDK `object?` and `array?`
-wrappers can delegate to `record?` and `list?`; local serialization-based `items`,
-`set`, and `string?` definitions should be removed to expose native calls.
+wrappers delegate to `record?` and `list?` rather than defining
+serialization-based equivalents.
 
 ### Raw digests
 
@@ -200,35 +222,35 @@ decoding, normalization, trimming, value framing, or build-fingerprint salt is
 applied. Results have respectively 40, 64, or 128 lowercase hexadecimal digits.
 
 `digest` is pure and identical on native and WASM hosts. Hashing a file composes
-with a tracked read: `(digest "sha512" (read ./asset))`. The read retains its
+with a tracked read: `read ./asset |> digest "sha512"`. The read retains its
 ordinary capability, phase, and dependency rules; hashing does not bypass them.
 Do not substitute resource/value/build fingerprints for these interoperable
-digests. SHA-1 is only for legacy compatibility identifiers, not a
+digests. SHA-1 is only for interoperating with existing SHA-1 identifiers, not a
 collision-resistant security claim or password derivation.
 
 ## Comparison Operations
 
-Comparison operations compare materialized values. The spelled names are
-canonical; the symbolic aliases are equivalent and parse as expression atoms per
-`004-language.md`.
+Comparison operations compare materialized values. Each comparison exists as a
+named operation and as an infix operator (`055` §4.1) with the identical
+contract. The operators are syntax, not names: to pass a comparison as a value,
+use the named operation in a section (`filter (eq? "x" _) xs`) or an operator
+section (`filter (_ == "x") xs`). `=` is never an operator.
 
-| Name | Alias | Contract |
+| Name | Operator | Contract |
 | --- | --- | --- |
-| `eq?` | `=`, `==` | Strict, kind-aware equality |
+| `eq?` | `==` | Strict, kind-aware equality |
 | `ne?` | `!=` | Negation of `eq?` |
 | `lt?` | `<` | Ascending order |
 | `gt?` | `>` | Descending order |
 | `gte?` | `>=` | Order at or after |
 | `lte?` | `<=` | Order at or before |
 
-`eq?` and `ne?` support nil, boolean, number, string, bytes, lists, and records.
-The former names `eq`, `is`, `ne`, `lt`, `gt`, `gte`, and `lte` remain compatibility
-aliases with identical contracts, including first-class callable use. New examples
-use canonical predicate names or symbolic operators. `is` is not identity; no
-additional `is?` family is introduced. Both equality symbols resolve to `eq?`.
-The contract is recursive:
+`gt? LEFT RIGHT` is `LEFT > RIGHT`, and likewise for the other names.
+Comparison operators do not chain: `a < b < c` is `PARSE_ERR`. `eq?` and `ne?`
+support nil, boolean, number, string, bytes, lists, and records. Equality is not
+identity. The contract is recursive:
 
-- Nil and booleans compare by value; `:nil` and `:false` are distinct.
+- Nil and booleans compare by value; `nil` and `false` are distinct.
 - Integers compare exactly, even outside the exact `float64` integer range.
   Integer/float equality requires an exactly matching integral float:
   `9007199254740993` does not equal `9007199254740992.0`. Floats use IEEE equality:
@@ -251,13 +273,12 @@ The contract is recursive:
   parsing/signature limits. Cyclic host-created containers are therefore rejected
   rather than compared as cyclic graphs.
 
-Comparison never serializes or mutates the data. Replace textual workarounds
-such as `(eq (str A) (str B))` with `(eq A B)` to preserve kinds and binary data.
-Reordered records now compare equal, unlike their printed representations.
-`ne`/`!=` negates successful equality; unsupported-value errors still propagate.
-Boolean negation remains `not`.
+Comparison never serializes or mutates the data: `a == b` preserves kinds and
+binary data where `str a == str b` would not. Reordered records compare equal,
+unlike their printed representations. `ne?`/`!=` negates successful equality;
+unsupported-value errors still propagate. Boolean negation is `not`.
 
-Ordering (`lt?`, `gt?`, `gte?`, `lte?`, and their aliases) accepts two numbers or
+Ordering (`lt?`, `gt?`, `gte?`, `lte?`, and their operators) accepts two numbers or
 two strings. Integer/integer ordering is exact across all int64 values, without
 float conversion. Integer/float ordering compares mathematical values without
 rounding the integer to float64, including fractional floats, signed zero,
@@ -278,8 +299,9 @@ The collection operations are:
 | `flatmap` | Map a list and flatten one level, with the same callback arguments |
 | `filter` | Keep list items or record fields for which a predicate is true, passing the item and its key |
 | `filter-out` | Remove list items or record fields for which a predicate is true, with the same callback arguments |
-| `in?` | `(in? ITEM LIST)` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
+| `in?` | `in? ITEM LIST` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
 | `reduce` | Fold a list from left to right, passing the accumulator, the item, and its position |
+| `indexed` | `indexed LIST`: `[[0, x0], [1, x1], …]`, pairing each item with its zero-based position |
 | `concat` | Concatenate lists or append scalar values |
 | `slice` | Half-open list or string slice |
 | `sorted` | Stable ascending scalar sort |
@@ -297,17 +319,22 @@ position for a callable declaring three or more parameters.
 `map`, `filter`, and `filter-out` also accept a record with unique keys as
 their subject and return a record: `map` keeps every field in order with the
 callback result as its value, and `filter`/`filter-out` keep the selected
-fields in order. `flatmap`, `reduce`, and the membership operations accept
-lists only.
+fields in order. `flatmap`, `reduce`, `indexed`, and the membership operations
+accept lists only.
 
-`has?` remains a compatibility alias for list membership; it does not test record
-keys. Use `in?` for list membership, `has-key?` for record presence, and `includes?`
+Use `in?` for list membership, `has-key?` for record presence, and `includes?`
 for text substrings. The three domains are explicit and do not silently coerce.
 
-`filter` and `filter-out` accept `(PREDICATE SUBJECT)`,
-or `(VALUE SUBJECT)` as an equality shorthand. The shorthand retains or removes
-items equal to `VALUE`, respectively, using the same recursive equality contract
-as `eq`, including bytes, lists, and records. Unsupported values remain errors.
+`filter` and `filter-out` accept `PREDICATE SUBJECT`, or `VALUE SUBJECT` as an
+equality shorthand. The shorthand retains or removes items equal to `VALUE`,
+respectively, using the same recursive equality contract as `eq?`, including
+bytes, lists, and records. Unsupported values remain errors.
+
+```kame
+objects = sources |> map (s => ./build/@{basename s}.o)
+headers = files ./include/*.h |> filter-out ./include/config.h
+total = sizes |> reduce (acc n => acc + n) 0
+```
 
 `blank?` is true exactly for nil or an empty string. False, zero, whitespace-only
 strings, empty lists/records, patterns, and other kinds are not blank. This does
@@ -325,13 +352,14 @@ The text operations are:
 | `join` | Join a list of scalar strings with a separator |
 | `split` | Split text by a nonempty literal separator, preserving empty fields (`""` produces `[""]`) |
 | `strip` | Trim Unicode whitespace |
-| `line` | `(line TEXT)` removes exactly one terminal LF from a string, if present |
+| `line` | `line TEXT` removes exactly one terminal LF from a string, if present |
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
 | `sub` | Substitute literal occurrences, or evaluate a capture-scoped expansion while preserving nonmatches per `041-pattern-predicates-and-substitution.md` |
-| `replace` | Deprecated alias for `sub`, with identical behavior |
 | `match?` | Anchored boolean pattern matching, directly or as a unary predicate |
+| `capture` | `capture PATTERN SUBJECT`: anchored match returning a capture record, or nil on no match |
+| `bind` | `bind TEMPLATE CAPTURES`: build a value from a template and a capture record |
 | `uppercase` | Unicode uppercase conversion supported by Solod |
 | `lowercase` | Unicode lowercase conversion supported by Solod |
 | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
@@ -347,15 +375,15 @@ conversion first. It is callable and usable in value pipes like other ordinary
 text operations.
 
 ```kame
-(line "")          # ""
-(line "name")      # "name"
-(line " name \n")  # " name "
-(line "name\n\n")  # "name\n"
-(line "name\r\n")  # "name\r"
+line ""             # ""
+line "name"         # "name"
+line " name \n"     # " name "
+line "name\n\n"     # "name\n"
+line "name\r\n"     # "name\r"
 ```
 
 Command capture remains lossless. Consumers opt into framing with, for example,
-`(line $(mktemp -d ./workspace.XXXXXX))`; `strip` remains the broader Unicode
+`line $(mktemp -d ./workspace.XXXXXX)`; `strip` remains the broader Unicode
 whitespace conversion and is not a substitute when whitespace is data.
 
 Terminal style operations are pure string functions. They always include their
@@ -366,19 +394,44 @@ value display and ordinary text conversion never add terminal escapes.
 Portable regular-expression matching and replacement are specified in
 `029-pattern-extensions.md`.
 
-### Pattern Substitution
+### Pattern Matching, Capture and Substitution
 
-Per `041-pattern-predicates-and-substitution.md`, `sub` is canonical, `replace` is
-a deprecated alias, nonmatching strings are preserved, and `match?` provides
-boolean pattern predicates.
+Pattern dispatch over ordered arms is the `match` keyword (`055` §4.5), not a
+library operation. The operations below cover single-pattern use. Per
+`041-pattern-predicates-and-substitution.md`, `sub` preserves nonmatching
+strings and `match?` provides boolean pattern predicates.
 
-`sub` accepts two or three arguments. `(sub FROM TO TEXT)` with plain
+`capture PATTERN SUBJECT` matches a `PathPattern` against a `Path`, or a string
+pattern against a string, anchored. It returns a record of the named captures,
+or nil when there is no match. Repeated named captures must agree.
+`bind TEMPLATE CAPTURES` fills a `PathTemplate` (returning a `Path`) or a string
+template (returning a string) from a capture record. It fails with
+`PAT_INVALID` on absent or incompatible captures. Both keep path kinds
+(`055` §9.3); neither converts between paths and text:
+
+```kame
+captures = ./src/lib/math/vector.c |> capture ./src/{path:**}/{name}.c
+# {path: "lib/math", name: "vector"}
+output = captures |> bind ./build/{path}/{name}.o
+# ./build/lib/math/vector.o
+```
+
+Regex matching and selection of positional or named regex captures
+(`regex-match`, `regex-group`) are specified in `029-pattern-extensions.md`.
+
+`sub` accepts two or three arguments. `sub FROM TO TEXT` with plain
 strings replaces literal occurrences and retains ordinary eager evaluation.
 Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named
 captures bound locally; `./{name}`, `"@{name}"`, `name`, and `(uppercase name)`
-can all use `{name:*}`. With two operands it returns a callable of arity one
+can all use `{name:*}`:
+
+```kame
+stems = sources |> sub ./src/{name:*}.c name
+```
+
+ With two operands it returns a callable of arity one
 that defers the replacement until applied by `map`, a pipe, or a direct call.
 A string subject produces the replacement string or the original string on no
 match; a list subject maps in order and preserves nonmatching entries. Invalid
@@ -389,7 +442,10 @@ are specified in `014-patterns.md`.
 
 ## Path Operations
 
-Path operations are lexical and use slash-separated Kame paths:
+Path operations are lexical and use slash-separated Kame paths. They accept
+`Path` values and strings. A path-valued result keeps the kind of its primary
+operand: a `Path` operand yields a `Path`, a string operand yields a string.
+`basename` and `ext` always return strings.
 
 | Name | Contract |
 | --- | --- |
@@ -399,7 +455,7 @@ Path operations are lexical and use slash-separated Kame paths:
 | `ext` | Final extension |
 | `joinpath` | Join and clean path components, preserving an explicit relative anchor |
 | `relpath` | Path relative to a base |
-| `abspath` | Path resolved against evaluation cwd |
+| `abspath` | Path resolved against the root directory (`055` §9.2) |
 
 These operations do not access the filesystem and create no dependencies.
 `splitext` treats a leading dot on a basename as part of the name unless another
@@ -407,10 +463,12 @@ dot follows.
 
 `joinpath` preserves a leading `./` when its first nonempty part is `.` or
 begins with `./`, so a computed file path does not become a bare task name.
-For example `(joinpath ./sdk "src")` is `"./sdk/src"`; a result at the anchor
-itself is `"./"`. Parent traversal still normalizes: `(joinpath ./sdk ".." "..")`
-is `".."`, not a fabricated parent prefix. Unanchored and absolute inputs retain
-their ordinary cleaned spelling.
+For example `joinpath ./sdk "src"` is `./sdk/src`; a result at the anchor
+itself is `./`. Parent traversal still normalizes: `joinpath ./sdk ".." ".."`
+is `..`, not a fabricated parent prefix. Unanchored and absolute inputs retain
+their ordinary cleaned spelling. A module reaches files beside its own source
+with `joinpath module/dir "templates"` or the path atom
+`@{module/dir}/templates`.
 
 ## Filesystem Operations
 
@@ -424,9 +482,9 @@ Filesystem operations issue host requests and require capabilities:
 | `stat` | `read` | Return stable metadata record |
 | `lstat` | `read` | Inspect the final path component without following its symlink |
 | `readlink` | `read` | Return the final symlink's exact UTF-8 target text, without resolving it |
-| `wildcard` | `read` | Return the sorted, duplicate-free union of one or more filesystem patterns |
-| `files` | `read` | `wildcard` restricted to regular files: `(files PATTERNS...)` is `(wildcard :+files PATTERNS...)` |
-| `dirs` | `read` | `wildcard` restricted to directories: `(dirs PATTERNS...)` is `(wildcard :+dir PATTERNS...)` |
+| `wildcard` | `read` | Return the sorted, duplicate-free `List[Path]` union of one or more filesystem patterns |
+| `files` | `read` | `wildcard` restricted to regular files: `files PATTERNS...` is `wildcard :+files PATTERNS...` |
+| `dirs` | `read` | `wildcard` restricted to directories: `dirs PATTERNS...` is `wildcard :+dir PATTERNS...` |
 
 `read`, `stat`, and `wildcard` register file or glob dependencies before
 returning. `exists?` also registers a dependency so creation or removal can
@@ -467,23 +525,28 @@ including when its current result is empty. The dependency tracks membership,
 so watch invalidation reevaluates the same source and its consumers when a match
 is added or removed. See `023-wildcard-sources.md`.
 
-Relative paths resolve against evaluation cwd. `wildcard` supports `*`, `?`,
-character classes, and recursive `**`. Results are canonical cwd-relative paths
-with `./` prefixes where possible, sorted by raw UTF-8 bytes. String pattern
-operands each retain their own glob dependency, including empty members.
-For example, `(wildcard ./src/**/*.go ./glue/**/*.c ./glue/**/*.h)`
-combines source extensions without shell discovery.
+Relative paths resolve against the root directory (`055` §9.2). Pattern
+operands are `PathPattern` values written as path atoms; `wildcard` supports
+`*`, `?`, character classes, and recursive `**`. A computed pattern is built
+with interpolation in a path atom (`./@{dir}/*.c`), whose inserted bytes stay
+literal. Strings are not patterns: a string operand is `EXPR_INVALID`. Results
+are `Path` values relative to the root, with `./` prefixes where possible, sorted
+by raw UTF-8 bytes. Each pattern operand retains its own glob dependency,
+including empty members. For example,
+`files ./src/**/*.go ./glue/**/*.c ./glue/**/*.h` combines source extensions
+without shell discovery.
 
-Unquoted path globs are themselves list-valued expressions (`004-language.md`).
-`wildcard` also accepts flat lists of path strings as already-expanded members,
-so `(wildcard ./journal/*)` remains valid and can be combined with quoted or
-computed string patterns. Lists are unioned without globbing their member text
-again; filenames containing metacharacters remain data. An empty list is valid
-and contributes no members; nested lists and non-string members are
-`EXPR_INVALID`. Originating glob dependencies remain tracked, and
-entry-kind flags apply to the combined matches under
-`038-direct-kash-and-values.md`. This changes neither `map`'s list requirement
-nor the literal semantics of quoted strings outside `wildcard`.
+A `PathPattern` is never enumerated implicitly (`023-wildcard-sources.md`);
+discovery is always an explicit `wildcard`, `files` or `dirs` call or a rule
+input. `wildcard` also accepts flat lists of `Path` values as already-discovered
+members, so `wildcard (files ./journal/*)` is valid and can be combined with
+pattern operands. Lists are unioned without globbing their members again;
+filenames containing metacharacters remain data. An empty list is valid and
+contributes no members; nested lists and non-path members are `EXPR_INVALID`.
+Originating glob dependencies remain tracked, and entry-kind flags apply to the
+combined matches under `038-direct-kash-and-values.md`. In declaration context
+the result is a planning-time snapshot, and a pattern overlapping a declared
+output fails with `DISCOVERY_OVERLAP` (`055` §9.4).
 
 Recursive discovery does not descend into directory symlinks encountered among
 directory entries. An explicitly named directory symlink in the literal prefix
@@ -492,24 +555,27 @@ is traversed, so `./linked/**/*.js` can enumerate its target, while
 retain the authored lexical path. This prevents recursive symlink cycles; name
 linked roots explicitly rather than expanding recursive traversal implicitly.
 
-`write!` is immediate only in explicit expression execution. In direct Kash
-recipes it becomes a deferred effect committed during execution. It is invalid
-during planning, shell-template expansion, and value-producing Kame bodies.
+`write!` is immediate only in explicit expression execution. In Kash rule
+bodies it becomes a deferred effect committed during execution. It is invalid
+during planning, foreign-shell recipe rendering, and expression rule bodies
+(`rule … = EXPR`).
 
 ## Build Effects
 
 | Name | Contract |
 | --- | --- |
-| `out!` | In direct Kash or standalone evaluation, emit stdout |
-| `err!` | In direct Kash or standalone evaluation, emit stderr |
-| `yield!` | In direct Kash, append bytes or text to one declarative file output |
+| `out!` | In Kash bodies or standalone evaluation, emit stdout |
+| `err!` | In Kash bodies or standalone evaluation, emit stderr |
 | `nop` | Return its final argument, or nil |
 
-During standalone evaluation, `out!` and `err!` both emit their arguments and
-return their concatenated output (text unless any argument is bytes). `yield!`
-emits to the evaluation output context and returns nil. Shell-template expansion
-and value-producing Kame rule bodies reject these actions with `PHASE_INVALID`.
-Kame bodies return artifact content instead; see `044-value-producing-rule-bodies.md`.
+`out!` and `err!` both emit their arguments' exact text or bytes and return
+their concatenated output (text unless any argument is bytes). They are also
+Kash command builtins (`055` §6), so in command position they write to the
+stage's stdout or stderr and take part in pipes and redirection:
+`out! $content > $outputs.0`. Foreign-shell recipe rendering and expression
+rule bodies reject them with `PHASE_INVALID`. A rule publishes artifact content
+with an expression body or a Kash `return VALUE` (`044-value-producing-rule-bodies.md`),
+or by writing its output with a command or `write!`.
 
 Effect output is not scalar `str` conversion: it accepts raw bytes and text
 conversion of nil, booleans, numbers, strings, patterns, lists and records.
@@ -517,43 +583,47 @@ Collection output uses the output encoder's JSON-like text, not a guarantee of
 JSON compatibility or reparsable Kame display. Callables and resources are
 rejected. Use `json` when a consumer requires JSON.
 
-Effects record their source position. Direct Kash recipes retain their deferred
+Effects record their source position. Kash rule bodies retain their deferred
 publication contract. The runtime commits content once for the accepted generation.
 Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
 
-Recipes may refer to an executable with `@{x/NAME}`. Kame resolves `NAME`
-against the build driver's startup `PATH` (not the recipe's configured PATH)
-only when the reference is reached while rendering a selected rule. Missing or
+Kash bodies name an executable explicitly with the `x/NAME` head
+(`x/git status`), and foreign-shell recipes interpolate it with `@{x/NAME}`.
+Kame resolves `NAME` against the build driver's startup `PATH` (not the
+recipe's configured PATH) only when the reference is reached while running or
+rendering a selected rule. Missing or
 non-executable tools use `TOOL_MISSING` at the authored reference; tools in
 unused rules never block planning or execution. The reference renders the
 resolved executable path and records that file as a dynamic dependency of the
 using rule. `kame do tools` reports the global tool set and resolved paths,
 including an empty path for an unavailable tool. `kame do tools check TARGETS...`
 validates tools in selected dependency plans without executing recipes.
-Ordinary command names remain shell-resolved.
+Unqualified command heads in Kash bodies follow command-position resolution
+(`055` §6); in foreign-shell recipes they are resolved by that shell.
 
 Interactive/login Kash sessions are the exception to startup-PATH lookup:
-their `tool` and `x/NAME` references use the current session PATH, as specified
-in `052-kash-interactive.md`. Recipe lookup policy is unchanged.
+their `tool` and `x/NAME` references use the session's environment-store
+`PATH` (`055` §5.3), as specified in `052-kash-interactive.md`. Recipe lookup
+uses the startup `PATH` as above.
 
-Normal recipes are the primary shell interface. One explicit `sh!` operation
-is provided for expressions that need collected process results. It requires
+Rule bodies, `$(…)` and `$?(…)` are the primary process interface. One explicit
+`sh!` operation is provided for expressions that need collected results from a
+POSIX shell script. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:
 
 ```kame
-[status: 0 stdout: "..." stderr: "..."]
+{status: 0, stdout: "...", stderr: "..."}
 ```
 
-The signature is `(sh! [OPTIONS] COMMAND)`: COMMAND is a script string and
-OPTIONS, when present, must be an empty record (for example `(parse-json "{}")`).
-Nonempty options are rejected with `EXPR_INVALID` until options are supported.
-Streaming process
-events remain available through runtime execution, not as a list accumulated by
-the operation. `sh!` is allowed in explicit expression execution and direct Kash
-recipes, but it is invalid during planning, resolution, shell-template expansion,
-and value-producing Kame bodies with `PHASE_INVALID`. A lazy definition inherits
+The signature is `sh! OPTIONS? COMMAND`: COMMAND is a script string and
+OPTIONS, when present, must be the empty record `{}`. Nonempty options are
+rejected with `EXPR_INVALID`. Streaming process events remain available through
+runtime execution, not as a list accumulated by the operation. `sh!` is allowed
+in explicit expression execution and Kash bodies, but it is invalid during
+planning, resolution, foreign-shell recipe rendering, and expression rule
+bodies with `PHASE_INVALID`. A lazy definition inherits
 the phase of the computation that demands it. When a Kash recipe is bound to a
 target, its collected shell calls inherit that environment and retain the
 invocation run policy. Declaration registration never launches them.
@@ -571,18 +641,19 @@ interpreted as an option or path by the invoked program.
 
 The constructed script is submitted and collected like `sh!`: it requires
 `run`, returns the same status/stdout/stderr record, inherits a target's
-environment, and is invalid during planning, shell-template expansion, and
-value-producing Kame bodies. Dry-run submits no process and returns an empty string. Invalid
+environment, and is invalid during planning, foreign-shell recipe rendering, and
+expression rule bodies. Dry-run submits no process and returns an empty string. Invalid
 list types, non-string elements, or fragment/value count mismatch return
 `EXPR_INVALID` without submitting a process.
 
 ## Clock Operations
 
 Clock operations read the host clocks. They are effectful: they submit host
-requests and are invalid during planning, resolution, shell-template expansion,
-and value-producing Kame bodies with `PHASE_INVALID`, because those phases must
-not depend on the time at which they ran. They are allowed in explicit expression
-execution and direct Kash recipes.
+requests and are invalid during planning, resolution, foreign-shell recipe
+rendering, and expression rule bodies with `PHASE_INVALID`, because those phases
+must not depend on the time at which they ran. They are allowed in explicit
+expression execution and Kash bodies. Both take no arguments: `now ()`,
+`monotonic ()`.
 
 | Name | Contract |
 | --- | --- |
@@ -595,13 +666,18 @@ two readings are meaningful. Neither requires a capability grant.
 
 ## Environment
 
-An `env` operation requires the `env` capability and reads one named variable.
-It registers the variable name and observed value as a dynamic dependency.
-Reading the entire environment at once is not a supported operation.
+Environment reads use `env/NAME`, which yields nil when the variable is unset,
+or a bare `ENV-NAME` reference, which fails with `ENV_VAR_MISSING` when unset
+and no lexical binding of that name exists (`055` §3.2, §6). Either form requires
+the `env` capability and reads one named variable from the current unit's
+environment store. It registers the variable name and observed value as a
+dynamic dependency. Reading the entire environment at once is not a supported
+operation. Writes are the `set env/NAME = VALUE` statement (`055` §5.3), not a
+library operation.
 
 ## Tool configuration
 
-`(tool NAME)` accepts one nonempty string and returns the resolved executable
+`tool NAME` accepts one nonempty string and returns the resolved executable
 path. It requires a build or source session. The operation registers a shared
 `tool` dependency and a file dependency for the selected executable; it is not
 a pure operation. Resolution performs no process execution and is cached per
@@ -617,12 +693,17 @@ executable metadata checks do not grant access to user read operations.
 
 ## Acceptance Tests
 
-- Canonical named predicates end in `?`, including `in?`; compatibility aliases
-  and symbolic comparisons preserve behavior and callable/phase contracts. `not`
-  and `bool` retain logical/conversion names without pretending to be kind tests.
+- Canonical named predicates end in `?`, including `in?`; comparison operators
+  and their named operations agree in behavior and phase contracts, and only the
+  named forms are callable values. `not` and `bool` retain logical/conversion
+  names without pretending to be kind tests.
 - `apply` spreads argument lists regardless of arity, with normal arity errors,
   typed/rest argument binding, callable ownership, and once-only host suspension.
 - `first` and `nth 0` agree on empty/nonempty lists and Unicode strings.
+- Every data-last operation gives the same result called directly and through
+  `|>`, including with `_` placement.
+- `put` replaces in place or appends, stores nil as a present field, and never
+  mutates its operand.
 - Kind tests and `nil?` accept every core value kind, including opaque/callable
   values. `empty?` detects empty text/bytes/lists/records only. `blank?` is unchanged.
 - `in?` preserves recursive membership validation. `has-key?` detects present nil
@@ -636,7 +717,7 @@ executable metadata checks do not grant access to user read operations.
 - Every operation validates arity and value kinds without mutating arguments.
 - Pure operations issue no host request and register no dependency.
 - Collection callbacks preserve input order.
-- `filter` and `filter-out` accept `(PREDICATE LIST)` and the `(VALUE LIST)`
+- `filter` and `filter-out` accept `PREDICATE LIST` and the `VALUE LIST`
   equality shorthand, including mixed-kind inequality and numeric int/float
   equality, binary equality, and recursive list/record equality; opaque values
   remain `EXPR_INVALID`, including behind an earlier mismatch.
@@ -649,16 +730,20 @@ executable metadata checks do not grant access to user read operations.
   ordinary unanchored paths. Joined concrete artifact paths retain file
   classification as computed outputs/prerequisites in planning/materialization,
   including basenames that would otherwise be valid logical task names.
-- Wildcard results are sorted and recursive `**` crosses directories.
+- Wildcard results are sorted `Path` values and recursive `**` crosses
+  directories.
 - `files` and `dirs` match `wildcard` with `:+files` and `:+dir`. They reject kind flags; unions and exclusions stay on `wildcard`.
-- Unquoted glob expressions and explicit `wildcard` calls agree for empty,
-  singleton and multiple matches; unioning expanded lists never re-globs their
-  filenames or loses their membership dependencies.
+- `wildcard` rejects string patterns; a `PathPattern` value is never enumerated
+  outside a discovery call or rule input. Empty, singleton and multiple matches
+  keep list shape; unioning discovered lists never re-globs their filenames or
+  loses their membership dependencies.
+- `capture` and `bind` round-trip path captures, keep `Path`/`PathPattern`/
+  `PathTemplate` kinds, return nil on nonmatch and fail on missing captures.
 - Reads and globs register canonical dynamic dependencies.
 - Denied read, write, run, or environment access performs no host action.
-- Direct Kash `yield!` and `write!` effects retain their accepted-generation
-  publication contract. Rule content computation and shell-template expansion
-  reject output actions; they never rerender actions into command text.
+- Kash-body `out!`, `err!` and `write!` effects retain their accepted-generation
+  publication contract. Expression rule bodies and foreign-shell recipe
+  rendering reject output actions; they never rerender actions into command text.
 - `sh!` captures status and separate byte-bounded stdout/stderr, enforces run
   capability and phase restrictions, and rejects nonempty options records.
 - `shell-template!` requires one more trusted fragment than dynamic string
@@ -672,7 +757,7 @@ executable metadata checks do not grant access to user read operations.
   trailing spaces, multiple terminal LFs, embedded newlines, CR-only and CRLF
   input. Arity and non-string errors, callable aliases, and value pipes agree on
   native and WASM; capture and `strip` behavior remain unchanged.
-- Pattern `sub` (and its deprecated `replace` alias) matches anchored, expands
+- Pattern `sub` matches anchored, expands
   references, preserves the original string without a match, and accepts a
   callable through `map` and pipes. `resub` retains its separate
   nil-on-nonmatch contract in `029-pattern-extensions.md`.
@@ -680,9 +765,11 @@ executable metadata checks do not grant access to user read operations.
   replacement dependencies/effects on nonmatches, and leave literal-string
   replacement unchanged.
 - Operation tests using `mem.Tracker` leak no returned container or string.
-- `eq`/`=` and `is`/`==` share one strict, kind-aware comparison; `ne`/`!=` is
-  its negation and `not` remains boolean negation.
-- `eq` treats values of different kinds as unequal; `:nil` and `:false` are
+- `eq?`/`==` share one strict, kind-aware comparison; `ne?`/`!=` is its
+  negation and `not` remains boolean negation. `=` is not an operator.
+- `eq?` treats values of different kinds as unequal; `nil` and `false` are
   distinct; numbers compare numerically across integer and float.
-- `lt`/`gt`/`gte`/`lte` order numbers and strings and reject mixed-kind or
-  non-scalar arguments with `EXPR_INVALID`.
+- `lt?`/`gt?`/`gte?`/`lte?` and `<`/`>`/`>=`/`<=` order numbers and strings and
+  reject mixed-kind or non-scalar arguments with `EXPR_INVALID`.
+- `fmt` output round-trips through `eval` with value kinds preserved; `eval`
+  rejects statements, declarations and commands.

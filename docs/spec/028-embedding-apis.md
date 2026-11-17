@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Embedding APIs
 
 ## Scope
@@ -80,7 +84,7 @@ dependency is required.
 
 The Python client uses Kame's configured CLI host services. It forwards explicit
 grants and follows the CLI's documented default grant policy. Its watch API
-currently accepts `.kmk` rule programs and yields the CLI's copied JSON events.
+currently accepts Kame programs (`.km`, `.kame`) that declare rules and yields the CLI's copied JSON events.
 User-provided asynchronous host request callbacks are a JavaScript API
 feature; the Python client does not claim to execute arbitrary callbacks inside
 the WASM runtime.

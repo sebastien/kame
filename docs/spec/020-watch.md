@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Retained native and WASM watch sessions
 
 ## Contract

@@ -1,10 +1,16 @@
+---
+revision: 2
+---
+
 # Language Evaluation
 
 ## Purpose
 
 Evaluation turns language AST values into reactive core values. It is explicit,
 allocator-aware, asynchronous through engine requests, and independent of
-native threads or promises.
+native threads or promises. The surface syntax is specified in
+`055-unified-kame-kash-language.md` and `004-language.md`; this specification
+defines how that syntax evaluates.
 
 ## Evaluation Context
 
@@ -18,7 +24,7 @@ Every evaluation receives a context containing:
 - Operation registry.
 - Granted capabilities.
 - Execution phase and available host services/request queue.
-- Working directory, configured process environment, timeout and capture policy.
+- Working directory, environment store, timeout and capture policy.
 - Execution ownership, cancellation, and request generation/attempt correlation.
 - Dynamic dependency and effect channels.
 - Diagnostic source and frame stack.
@@ -26,91 +32,170 @@ Every evaluation receives a context containing:
 Operations receive this context explicitly. There is no thread-local or
 async-local evaluation state.
 
-These fields define the execution context shared by Kame effects, Kash, and
-embedded `$(...)` processes (`017-kash.md`). Lexical scope governs name lookup;
-it does not confer authority. Embedded processes inherit the caller's policy,
-and nested configuration cannot broaden grants or relax caller limits. Lazy
-definition nodes use their owning program's explicitly configured policy, never
-an unrelated caller's broader grants. Unselected or unused computations perform
-no host effects.
+These fields define the execution context shared by Kame values, Kash actions,
+and embedded `$(…)`/`$?(…)` process graphs (`017-kash.md`). Lexical scope
+governs name lookup; it does not confer authority. Embedded processes inherit
+the caller's policy, and nested configuration cannot broaden grants or relax
+caller limits. Lazy definition nodes use their owning program's explicitly
+configured policy, never an unrelated caller's broader grants. Unselected or
+unused computations perform no host effects.
+
+The working directory and environment store belong to the current process-like
+unit (055 §5.3, §8.4): the script, a rule body, a `$(…)`/`$?(…)` capture, or an
+interactive entry's session. A unit inherits both from its parent when it starts.
+`cd` and `set env/NAME = EXPR` change them for later statements, lookups and
+processes of the same unit, including after the function that performed the
+change returns, and never reach the parent unit. Per-command `:env` and `:cwd`
+overrides apply to one command and leave the store unchanged. Writing the store
+is not a host environment mutation and needs no environment-write grant.
+
+Parsing is context-independent: it never depends on grants, host availability,
+bindings or execution phase. Context and phase decide whether a resolved
+operation may run, and a denied operation fails before its effect. A demanded
+process substitution requires both a phase permitting process execution and the
+applicable run grant. Declaration loading, generation, resolution and rendering
+fail with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`; authorized but
+unavailable host services fail with `HOST_FAIL`. Redirections and environment
+reads require their own grants. Capability denial and cancellation are
+protected failures: neither `??` nor Kash recovery operators recover them.
+`??` recovers only missing-lookup failures (see "Fallback"); operational
+failures remain errors (`049-process-inspection.md`).
+
+## Phases
+
+Evaluation runs in one of these phases. Each phase has its own authority, and
+runtime grants cannot widen it:
+
+| Phase | Permitted work |
+| --- | --- |
+| Declaration loading | Pure computation, tracked read-only discovery, declaration construction and registration |
+| Tracked generation | As declaration loading, within one transactional `generate` statement (`025`) |
+| Target selection | Pure computation over the registered declaration index |
+| Dependency resolution | Pure computation and tracked reads needed to resolve inputs |
+| Action execution | Processes, writes and other granted effects |
+| Output publication | Publication of rule results under `044` |
+
+- Pure computations may be memoized by their arguments.
+- Tracked reads record dependencies on the current node.
+- Process execution and writes are possible only in action execution.
+- Template rendering, interpolation and `$(…)` reached during planning cannot
+  launch processes; they fail with `PHASE_INVALID` before any effect.
+
+The four contexts of `055` map onto these phases. Value context computes in
+whichever phase demands it. Declaration context (the top level of a Kame
+program and its top-level `if`/`for` blocks) runs during declaration loading or
+generation. Action context (rule, task and service bodies, block `def` bodies,
+the `.kash` top level, and `$(…)`/`$?(…)`) performs effects only during action
+execution. A block-valued top-level definition (`NAME =` followed by a block)
+takes the context of the phase that demands it: commands in it are context
+errors unless it is evaluated during action execution.
 
 ### Named execution context
 
-The ordinary names `inputs`, `outputs`, `inputs/changed`, and `args` expose typed
+The ordinary names `inputs`, `outputs`, `changed-inputs`, and `args` expose typed
 lists from the current evaluation context. Lexical bindings take precedence,
-preserving existing user definitions and parameters with these names. Without
-a lexical binding they are aliases of `@<*`, `@>*`, `@<?`, and `@*`, respectively.
-Their availability, ordering, nearest-frame selection, and errors are identical
-to those selectors; they do not read files or launch processes by themselves.
+preserving user definitions and parameters with these names. They do not read
+files or launch processes by themselves.
 
-`inputs` includes normal prerequisites, excluding order-only prerequisites.
-`outputs` includes declared output identities, including a named task's logical
-output name, not just file artifacts. Both require a rule frame. `inputs/changed`
-requires a file-rule frame at recipe evaluation/rendering time; it is unavailable
-during planning/resolution or in task/service frames. Unavailable context reports
-`SEL_NO_CONTEXT`, and changed-input access in a disallowed phase reports
-`PHASE_INVALID`. Empty available lists are values, not missing context.
+| Name | Value | Frame |
+| --- | --- | --- |
+| `inputs` | Normal prerequisites in declaration order, excluding order-only prerequisites | Nearest rule frame |
+| `outputs` | Declared output identities, including a named task's logical output name, not just file artifacts | Nearest rule frame |
+| `changed-inputs` | Unique normal file inputs whose content digest differs from the recorded digest | Nearest file-rule frame, at recipe evaluation/rendering time |
+| `args` | The nearest function or Kash-call argument list, or the script invocation's literal operands outside a call | Nearest call frame, else the invocation |
 
-`args` is the nearest function/Kash-call argument list, or the script invocation's
-literal operands when outside a call. Build invocations without operands expose
-an empty argument list. Named target parameters remain their existing bindings;
-they are not silently converted into `args`. Pure expression evaluators without
-an argument frame report `SEL_NO_CONTEXT`. Named values support ordinary list
-references such as `args.0` and `inputs/changed.0` with normal index diagnostics.
+`changed-inputs` is unavailable during planning/resolution and in task/service
+frames. Unavailable context reports `SEL_NO_CONTEXT`, and changed-input access
+in a disallowed phase reports `PHASE_INVALID`. Empty available lists are values,
+not missing context. Build invocations without operands expose an empty `args`
+list. Named target parameters remain their own bindings; they are not silently
+converted into `args`. Pure expression evaluators without an argument frame
+report `SEL_NO_CONTEXT` for `args`.
 
-Slash-separated reference names such as `inputs/changed` are not paths. Filesystem
-paths still require `/`, `./`, or `../`. Lazy scoped definitions and suspended or
-async evaluations retain the same frames as compact selectors.
-
-Parsing is context-independent. A demanded process substitution requires both
-a phase permitting process execution and the applicable run grant. Planning,
-resolution and rendering fail with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`;
-authorized but unavailable host services fail with `HOST_FAIL`. Redirections
-and explicit environment lookups require their own grants. Capability denial
-and cancellation are not recoverable through Kash fallback operators. Existing
-Kame `?` handles only unprotected `REF_MISSING` and `TOOL_MISSING` failures
-(spec 049); operational failures remain errors.
+These names support ordinary field access such as `args.0`, `inputs.-1` and
+`changed-inputs.0` with normal index diagnostics: indexes are zero-based,
+negative indexes count from the end, and an index outside the list is
+`SEL_INDEX_INVALID`. In Kash words they are referenced as `$inputs.0`,
+`$...inputs` and `$...changed-inputs`; in foreign-shell recipes as
+`@{inputs.0}` and `@{outputs.0}`. Lazy scoped definitions and suspended or
+async evaluations retain the same frames.
 
 ## Output Registration Context
 
-Computed rule outputs (`004-language.md`) are demanded before target selection
-in a pure context, like generated declarations. They may use lexical definitions,
-pure operations/functions, and configured overrides, but cannot issue host
-requests or effects, even when invocation grants would otherwise permit them.
-Restrictions propagate through lazy definitions and helper calls. Unrelated
-unused definitions remain lazy. Current-rule captures, target arguments, and
-input/output selectors are unavailable: the target index must exist before
-those bindings can be established. Output-resolution failures reject
-registration before recipe effects and retain the authored output location.
+Computed rule outputs (`004-language.md`, 055 §10) are evaluated before target
+selection in declaration context, like generated declarations. They may use
+lexical definitions, pure operations/functions, configured overrides, and
+tracked read-only discovery (`files PATTERN`); they cannot run processes,
+perform writes or untracked reads, or issue any other host effect, even when
+invocation grants would otherwise permit it. Restrictions propagate through
+lazy definitions and helper calls. Unrelated unused definitions remain lazy.
+Current-rule captures, target arguments, `inputs` and `outputs` are unavailable:
+the target index must exist before those bindings can be established.
+Output-resolution failures reject registration before recipe effects and retain
+the authored output location.
 
 ## Truth and emptiness
 
-Only nil and boolean false are false. Integer/float zero and empty strings,
-bytes, lists, and records are true. Expression conditions, `bool`/`not`, and
-predicate filtering use this same truth contract. `and`/`or` short-circuit and
-return the deciding operand without boolean coercion. Source-composition `if`
-conditions use this same truthiness; process exit status has a separate contract.
+Only `nil` and `false` are false. Integer/float zero and empty strings,
+bytes, lists, and records are true. `if` expressions and statements, `elif`,
+`while`, `bool`/`not`, and predicate filtering use this same truth contract.
+`and`/`or` short-circuit and return the deciding operand without boolean
+coercion. Declaration-time `if` conditions use this same truthiness. Process
+exit status has a separate contract: a condition tests a command through its
+outcome, as in `if $?(test -f ./ready).ok`.
 
 Emptiness must be tested explicitly with `count` on strings, bytes, lists, or
 records; zero count does not make the original value false. Missing optional
-data must be checked for nil before counting it. Numeric zero comparisons are
+data must be checked for `nil` before counting it. Numeric zero comparisons are
 not collection emptiness checks. Whitespace, nil-valued list items, and
 nil-valued record fields still count as data.
 
-## Scope
+Unless an operation or expression form explicitly defers an operand, operands
+evaluate left to right for deterministic diagnostics and effects. Independent
+dependency nodes discovered by those operands may execute in parallel.
+
+## Scope and Name Resolution
 
 A scope is a parent-linked map of names to bindings. A binding is a value,
-lexical function, operation, or lazy definition.
+lexical function, operation, or lazy definition. Namespaces (`x/`, `env/`,
+`std/`, `module/` and import aliases) live in a separate table, so a binding
+named `x` does not conflict with the `x/` namespace.
 
-Lookup searches the current scope and then parents, then the operation registry.
-Ordinary registered operations are callable values, including plugin operations:
-`(map uppercase ["a" "b"])`, `(filter exists? FILES)`, and
-`predicate = exists?` need no lambda wrapper. Lexical bindings shadow operation
-names. Comparison aliases (`=`, `==`, `!=`, `<`, `>`, `<=`, `>=`) also resolve to
-their canonical predicate callables (`eq?` for both equality symbols, `ne?`,
-`lt?`, `gt?`, `lte?`, `gte?`); their existing application-head syntax is
-unchanged. Unknown lookup is `REF_MISSING`; a missing application-head operation
-is `OP_UNKNOWN`, and a known non-callable head is `EXPR_INVALID`.
+**Expression position** (value, declaration and template contexts, and value
+operands in action context) resolves a name in this order:
+
+1. Lexical bindings: block bindings, parameters, module definitions and
+   imported names, searching the current scope and then its parents.
+2. The standard library. `std/NAME` names a library operation explicitly and
+   bypasses lexical bindings.
+3. For an `ENV-NAME` only (`[A-Z][A-Z0-9_]*`): the environment store of the
+   current unit, as a tracked, capability-checked read. Lowercase names never
+   fall back to the environment.
+4. Otherwise `REF_MISSING`.
+
+An unset variable reached through step 3 fails with `ENV_VAR_MISSING`, so typos
+are caught; write `NAME ?? default` to supply a default. `env/NAME` reads the
+store directly and yields `nil` when unset; an empty variable yields an empty
+string. Both forms require the environment-read grant, record the same named
+dependency and retain phase restrictions. Parsing, formatting, unused
+definitions and unselected branches do not read the variable. A lexical
+binding with an uppercase name shadows the environment within its scope.
+
+**Command position** (the head of a command statement in action context)
+resolves lexical callable bindings, then the closed set of Kash builtins, then
+executables through the tool resolver using the store's `PATH` (055 §6). A
+lexical binding to a non-callable at a command head is `EXPR_INVALID`; it never
+falls through to an executable. The standard library is not consulted in command
+position. In value and declaration contexts the executable step is never
+attempted, so an unknown command fails before any effect.
+
+Registered operations are callable values, including plugin operations:
+`map uppercase ["a", "b"]`, `filter exists? sources`, and `predicate = exists?`
+need no lambda wrapper. Lexical names shadow operation names only within their
+scope. Infix comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) evaluate
+through the canonical predicates `eq?`, `ne?`, `lt?`, `gt?`, `lte?`, and `gte?`;
+the operator symbols are syntax, not names, so pass the predicate name to use
+one as a value. Applying a non-callable value is `EXPR_INVALID`.
 
 Operation callables are immutable, invocation-owned references. They may appear
 in lazy definitions, lists, records, and local bindings, without capturing a
@@ -121,78 +206,187 @@ observations, dependency tracking, effects, diagnostics and host suspension.
 They cannot be invoked through another program or serialized as persistent
 cache values; ordinary closure publication restrictions remain unchanged.
 
-Special forms consume expression syntax, not already-evaluated arguments:
-`?`, `let`, `def`, `eval`, `if`, `and`, `or`, `with`, `match`, `run!`, `pipe!`, and
-`await`. They are not registry operations or callable values. Referencing an
-unbound special form as a value fails `EXPR_INVALID`; use a lambda to adapt its
-syntax. Registry/plugin registration rejects these reserved operation names.
-The built-in `kash` constructor remains an ordinary invocation-owned callable.
+Expression forms that control evaluation of their operands are syntax, not
+registry operations or callable values: `if … then … else`, `match`, `and`,
+`or`, `??`, `|>`, lambdas, placeholder sections, `$(…)`, `$?(…)`, `eval`, and
+the block statements `let`, `set`, `def`, `return`, `yield` and `exit`. The
+process forms `run!`, `pipe!` and `await` likewise consume expression syntax
+(`012-streams.md`, `017-kash.md`). Registry/plugin registration rejects these
+reserved operation names. Adapting one of these forms to a callable uses a
+lambda or section.
 
-Contribution diagnostics follow the same syntax/registration/demand boundaries
-as ordinary definitions: malformed headers, function-shaped `+=` headers and
-Kash `+=` are parse errors; contributing to an existing function or redeclaring
-a registered value fails `DEF_INVALID` during registration. Non-list operands
-fail `EXPR_INVALID`, and cycles fail `DEP_CYCLE`, only when the aggregate is
-demanded. Registration never evaluates operands merely to validate their kinds.
+## Definitions
 
-Top-level value definitions are lazy. First access starts one engine node for
-the definition, and concurrent accesses share it. Definition cycles are
-reported as dependency cycles. Invalidation clears the definition generation,
-not the definition AST.
+### Top-level definitions
+
+At the top level of a Kame program, and in the module scope of a `.kash`
+source:
+
+```kame
+version = "1.0"
+sources = files ./src/**/*.c
+def greeting name = "Hello @{name}!"
+```
+
+`NAME = EXPR` declares a **lazy, memoized**, order-independent value. First
+access starts one engine node for the definition, and concurrent accesses
+share it. A definition may refer to definitions that appear later in the
+source. Definition cycles are reported as `DEP_CYCLE` with definition frames.
+Invalidation clears the definition generation, not the definition AST.
+`NAME =` followed by an indented block computes the lazy value from a block of
+`let`, `set`, control statements and `return`; the block runs at first demand,
+in the context of the demanding phase.
+
+Top-level `NAME = EXPR` is not valid inside blocks. In a `.kash` source,
+top-level statements form an action block and module definitions are written
+with `def`.
 
 Program functions and their defining top-level scopes are program-owned.
 Call-local scopes and lambdas are run-owned and cannot be published as node
 values or stored in cacheable containers. Attempting to return such a callable
 across the run boundary is `EXPR_INVALID`.
 
-### Value-program execution
+### Contributions
 
-An executable `.km` program composes lazy definitions with top-level expression
-statements (`004-language.md`). Register definitions before demanding selected
-work so expressions may refer to later definitions. A named-entry run requests
-only the selected definitions; an expression-statement run evaluates statements
-in source order and returns the final value. The definitions-only `default`
-convention, empty-program behavior, and CLI result presentation are defined in
-`009-cli.md`.
+`NAME += EXPR` contributes a list to a top-level value binding (`004-language.md`).
+Contribution diagnostics follow the same syntax/registration/demand boundaries
+as ordinary definitions: malformed headers, `def`-shaped contribution headers
+and `+=` inside blocks or `.kash` sources are `PARSE_ERR`; contributing to an
+existing function or redeclaring a registered value fails `DEF_INVALID` during
+registration. Non-list operands fail `EXPR_INVALID`, and cycles fail
+`DEP_CYCLE`, only when the aggregate is demanded. Registration never evaluates
+operands merely to validate their kinds.
 
-Statement sequencing does not make all definitions eager. Every statement and
-selected definition uses the owning program's argument frame, cwd, grants,
-generation correlation, and dependency/effect channels. A failure stops the
-selected sequence; output already committed is not rolled back. Resumption
-must not replay an accepted earlier statement or consume another statement's
-host completion. Named entries share one engine and lazy dependency nodes.
+### Block bindings
 
-### Composed execution sessions
+Inside a block, `let NAME = EXPR` evaluates `EXPR` **eagerly** when the
+statement is reached and binds the value immutably for the rest of the block. A
+later `let` of the same name shadows the earlier binding from that point on;
+it does not change values already computed from it. Each block has its own
+lexical scope, and so does each loop iteration; block bindings never leak into
+the enclosing scope.
 
-Source-composition forms are selected before final compilation, not evaluated
-as statements. Conditions use a pure scope containing only earlier selected
-definitions/contributions and explicit configured overrides, with environment
-configuration subject to caller authority. They cannot use host reads, globs,
-processes or effects, including indirectly through lazy definitions or helpers.
-Later definitions remain invisible to selection, but retain normal forward lazy
-visibility in the final runtime program. Inactive conditions are not demanded;
-reserved include heads and composition body shapes are nevertheless validated
-in every authored branch. See `004-language.md` for literal paths and placement.
-Capability/effect failures explain the pure-condition restriction rather than
-suggesting runtime grants that cannot authorize selection. Their primary location
-is the authored condition. Configuration frame labels remain useful context,
-but carry no source/span until the synthetic prefix and isolated predicate have
-an authored origin map; runtime execution's normal source mapping is unchanged.
+`set NAME = EXPR` evaluates `EXPR` and assigns a `let` binding of an enclosing
+block in the same invocation. `set` cannot create a binding: assigning a name
+with no enclosing `let` in the same invocation is `PARSE_ERR`, as is assigning
+a binding captured by a lambda or nested `def`. `set env/NAME = EXPR` writes the
+environment store; the value must be a string, number or path, and `nil` removes
+the variable. A statement is a binding only when it starts with `let` or `set`.
 
-The runner can load multiple sources and inline fragments in command-line order.
-Parse all inputs and register their shared top-level scope before any demanded
-work executes. Named-entry and expression-statement behavior above applies to
-each fragment, with definitions-only value fragments contributing bindings
-without demanding a default when later work is present. Source order sequences
-statements and target checkpoints, not lazy definition registration or visibility.
+In pure expressions, local names are introduced with a block-bodied definition
+or a nested `def`.
 
-All fragments use one engine and owning program context. In particular, an
-expression appended after a rule or Kash file can demand that file's definitions
-with the same policy and host services. A language boundary does not reset cwd,
-args, invocation limits, or grants; changing parser cannot broaden authority.
-The first source establishes the default policy, and explicit grants configure
-the session as a whole. Pure value sessions do not implicitly gain process
-authority by appending a Kash file.
+## Functions
+
+A lexical function stores parameter names, optional rest parameter, body, and
+defining scope. Calling it creates a child scope of the defining scope and binds
+arguments.
+
+- `def NAME PARAM… = EXPR` and a lambda `(PARAM… => EXPR)` evaluate their body
+  expression and return its value.
+- `def NAME PARAM…` with an indented block runs the block in action context.
+  `return EXPR` ends the invocation with that value; `return` alone and falling
+  off the end return `nil`. There is no implicit last-statement value, and
+  functions never return integer statuses.
+- A `def` whose body contains `yield` is a generator: calling it returns a lazy
+  `Stream`, and its body runs as the consumer pulls elements (055 §8.3).
+
+A nested `def` and a lambda close over their lexical scope. Too many arguments
+are `EXPR_INVALID`. Its primary span is the function's parameter list when that
+list is authored in the source being evaluated, otherwise the call. Missing
+arguments are dynamic: every declared parameter without a supplied argument
+binds `nil`. A rest parameter (`rest...`) receives a list, including an empty
+list. A parameter name repeated in one parameter list is `DEF_INVALID`, and so
+are invalid names and malformed parameter lists. Zero-parameter lambdas are
+written `(() => EXPR)` and called with `f ()`.
+
+Placeholder sections (`014-patterns.md`) lower to ordinary lexical functions. A
+placeholder atom evaluates by reading its indexed argument from the enclosing
+section call without name lookup; a binding named `_0` cannot shadow it. A
+missing section argument reads as `nil`. Section arity and argument-count
+diagnostics follow the ordinary function rules.
+
+Top-level, nested and block-bodied `def`, lambdas and sections share one
+callable representation.
+
+## Invocation Outcomes
+
+Every invocation, of a function or of a process, has an outcome record with the
+fields `state`, `ok`, `status`, `signal`, `value`, `error` and `stages`
+(055 §8.1). An application `f a b` in expression position yields the return
+value and raises on failure. `$(CMD)` yields the process graph's captured stdout
+and raises on failure. `$?(CMD)` yields the outcome record and never raises for
+a process or function failure; protected failures (capability denial,
+cancellation of the caller) still propagate. A typed return value is never
+converted to stdout: `$(f x)` captures what `f` writes, not what it returns.
+
+When a function's status is needed, as a pipeline stage, a recipe or a script
+entry point, it is derived: `:completed` is 0; `:failed` is the failing
+process's status when a process failure caused it, otherwise 1; `:cancelled` is
+treated as a broken pipe and is not a pipeline failure. A cancelled generator
+runs its `defer` cleanup. `exit N` ends the innermost process-like unit with
+status `N` after running the pending cleanup of every invocation it unwinds.
+
+## Program Execution
+
+### Kame programs
+
+A Kame program (`.km`, `.kame`) holds top-level definitions, imports, includes,
+contributions and declarations. Register definitions before demanding selected
+work, so selections may refer to later definitions. A run selects declared
+targets or definitions by name (`009-cli.md`) and demands only what they reach;
+unselected definitions stay lazy. The `default` convention, empty-program
+behavior, and CLI result presentation are defined in `009-cli.md`.
+
+Every selected definition, target and inline expression uses the owning
+program's argument frame, cwd, environment store, grants, generation
+correlation, and dependency/effect channels. A failure stops the selected
+sequence; output already committed is not rolled back. Resumption must not
+replay an accepted earlier selection or consume another selection's host
+completion. Named entries share one engine and lazy dependency nodes.
+
+A Kash program (`.kash`, `.ksh`) runs its top level as an action block in
+statement order, with module definitions registered first.
+
+### Declaration-time control flow
+
+Top-level `if`/`elif`/`else` and `for` blocks in a Kame program run in
+declaration context during declaration loading (055 §10.3). Their conditions
+and iterated values are evaluated in a scope containing the definitions and
+contributions registered earlier in source order, including those of active
+earlier includes, and explicit configured overrides; environment reads are
+subject to caller authority. They may use pure computation and tracked
+read-only discovery, but not processes, writes or untracked reads, including
+indirectly through lazy definitions or helpers. Later definitions remain
+invisible to these conditions but retain normal forward lazy visibility in the
+final program.
+
+Inactive branches register nothing and are not demanded; their includes are not
+read, tracked or cycle-checked. Every authored branch is still parsed and its
+`include` operands and declaration shapes validated. Registration order follows
+source order and iteration order, and each declaration closes over its own
+iteration scope. Capability/effect failures explain the declaration-context
+restriction rather than suggesting runtime grants that cannot authorize it.
+Their primary location is the authored condition. Configuration frame labels
+remain useful context but carry no source span until they have an authored
+origin map; runtime execution's normal source mapping is unchanged.
+
+### Composed sessions
+
+The runner can load multiple sources and inline expression fragments in
+command-line order. Parse all inputs and register their shared top-level scope
+before any demanded work executes. Definitions-only fragments contribute
+bindings without demanding a default when later work is present. Source order
+sequences inline expressions and target checkpoints, not lazy definition
+registration or visibility.
+
+All fragments use one engine and owning program context. An expression
+appended after a Kame or Kash file can demand that file's definitions with the
+same policy and host services. A language boundary does not reset cwd, the
+environment store, args, invocation limits, or grants; changing parser cannot
+broaden authority. The first source establishes the default policy, and
+explicit grants configure the session as a whole. Pure value sessions do not
+implicitly gain process authority by appending a Kash file.
 
 Compile-time failure in any fragment prevents the sequence from starting.
 Runtime failure stops later fragments without rolling back earlier effects.
@@ -201,100 +395,77 @@ invocation/callback correlation; identical inline text in distinct fragments is
 not the same host call. Completed fragments do not replay when later work resumes.
 
 The unified runner is a host entry point, not a new evaluator. Single-expression
-mode uses the same expression parser and evaluation context directly; removing
-the CLI `do expr` command does not remove expression evaluation APIs.
+evaluation uses the same expression parser and evaluation context directly.
 
-## Values and Truth
+## Discovery and Path Values
 
-Evaluation uses the value kinds from `002-engine.md`. Only false and nil are
-false in predicates. Zero, empty strings, empty lists, and empty records are
-true.
+Path atoms evaluate to typed values (`014-patterns.md`): a `Path`, a
+`PathPattern`, or a `PathTemplate`. Evaluating a path atom never reads the
+filesystem; a `PathPattern` such as `./src/**/*.c` is a value and does not
+enumerate files. `@{…}` interpolations inside a path atom evaluate, left to
+right, when the atom is evaluated.
 
-Unless an operation contract explicitly defers an operand, arguments evaluate
-left-to-right for deterministic diagnostics and effects.
-Independent dependency nodes discovered by those arguments may execute in
-parallel.
-
-### Glob expressions
-
-A demanded unquoted path glob (`004-language.md`) evaluates through the same
-tracked filesystem source as `wildcard`, producing a list even for zero or one
-match. It uses evaluation cwd, read authorization, phase policy, and ordinary
-host suspension. It is forbidden wherever host reads are forbidden, including
-pure output registration and source-selection predicates. Parsing, unused
-definitions, and unselected branches do not request a glob or acquire its edges.
+`files PATTERN` is the discovery operation. It evaluates through the shared
+tracked filesystem source of `wildcard`, returning a sorted, duplicate-free
+`List[Path]` even for zero or one match. It uses the root directory (or `-C`),
+read authorization, phase policy, and ordinary host suspension. It is forbidden
+wherever host reads are forbidden. Parsing, unused definitions, and unselected
+branches do not request discovery or acquire its edges.
 
 The current node retains the pattern's membership dependency, including an
 empty result. Invalidation and resumed evaluation observe the latest accepted
 membership under `023-wildcard-sources.md`. Matching does not implicitly read
-the returned files' contents. Strings, including computed strings and literal
-interpolation values, are never retrospectively treated as glob expressions.
+the returned files' contents. Strings are never reinterpreted as patterns.
+
+In declaration context the result is a snapshot taken at planning time; a change
+in membership invalidates the declarations that consumed it. A declaration-time
+discovery pattern that overlaps any declared output is rejected with
+`DISCOVERY_OVERLAP`, naming both the pattern and the overlapping output
+declaration. As a rule input, a wildcard path keeps the dynamic membership
+semantics of `023`.
 
 ## Value Display
 
-When a materialized value is written to stdout — a `do run` result or a
-definition value selected as a target — it uses
-one canonical display notation. For the representable subset described below,
-this is also a valid Kame expression:
+When a materialized value is written to stdout (a run result or a definition
+value selected as a target) it uses the canonical source notation of `fmt`
+(055 §13). For representable values this is a valid expression:
 
 | Kind | Notation |
 | --- | --- |
-| nil | `:nil` |
-| boolean | `:true` / `:false` |
-| integer | decimal digits |
+| nil | `nil` |
+| boolean | `true` / `false` |
+| integer | decimal digits, with a leading `-` when negative |
 | float | shortest `%g`; negative zero is written `0` |
-| string | double-quoted, with `\"`, `\\`, `\n`, `\r`, and `\t` escapes |
-| pattern | double-quoted canonical pattern text |
-| list | `[ITEM ...]`, items space-separated |
-| record | `[KEY: VALUE ...]`, keys bare names, pairs space-separated |
+| string | double-quoted, with `\"`, `\\`, `\n`, `\r`, and `\t` escapes and `@` written `@@` |
+| symbol | `:name` |
+| path, path pattern, path template | the canonical path atom, or `pattern "TEXT"` for rootless patterns |
+| list | `[ITEM, ...]` |
+| record | `{KEY: VALUE, ...}`; keys that are not names are quoted; `{}` when empty |
 
 For representable values, evaluating the displayed text and displaying the
-result again yields the same bytes. Kind preservation is a separate property:
-an integral float re-evaluates as an integer, and a pattern-looking string may
-re-evaluate as a pattern. Strings containing interpolation openers are also
-outside the inert-string round-trip guarantee. Non-finite numbers have no
-ordinary numeric literal. Record display writes keys as bare names, but runtime
-records can have arbitrary string keys, including empty keys; those keys are
-not necessarily expressible with `NAME:` syntax. Empty records likewise have no
-distinct literal (`[]` is a list). The round-trip guarantee therefore applies
-only to values whose displayed atoms and nested containers are representable;
-it is not a general serialization contract. Use `json` for JSON-compatible
-arbitrary-key data or typed API results to preserve runtime kinds.
+result again yields the same bytes, and value kinds are preserved: paths stay
+paths and patterns stay patterns. An integral float re-evaluates as an integer.
+Non-finite numbers have no numeric literal and are outside the round-trip
+guarantee. Use `json` for JSON-compatible data or typed API results.
 
 Bytes are written raw and resources as their name; the grammar has no literal
-for either, so they are outside the notation. This notation is distinct from the
-`str` operation (`007-library.md`), which concatenates only textual scalars
-(nil, booleans, numbers and strings), rejecting patterns and collections.
-`json` explicitly encodes JSON-compatible values, including quoted strings.
-Template rendering and effect output have their own conversion contracts;
-neither is defined by `str`. `--json` emits structured values in its event schema instead of this
-notation. Human `do cat` definition values use a different contract
-(`009-cli.md`): text and bytes stay raw while every other JSON-native value
-prints as plain JSON, so other programs can parse `cat` output directly.
-
-## Functions
-
-A lexical function stores parameter names, optional rest parameter, body AST,
-and defining scope. Calling it creates a child scope, binds arguments, and
-evaluates body expressions in order. The final expression is returned; an empty
-body returns nil.
-
-Too many arguments are `EXPR_INVALID`. Its primary span is the function's
-parameter list when that list is authored in the source being evaluated,
-otherwise the call. Missing arguments are dynamic: every declared parameter
-without a supplied argument binds nil. A rest argument receives a list,
-including an empty list.
-
-Placeholder sections lower to ordinary lexical functions. A placeholder atom
-evaluates by reading its indexed argument from the enclosing section call
-without name lookup; user definitions named `_0` cannot shadow it. A missing
-section argument reads as nil. Section arity and argument-count diagnostics
-follow the ordinary function rules.
-
-Function definitions in script and `(def ...)` use the same callable
-representation.
+for either, so they are outside the notation. Runtime-only values (callables,
+processes, handles, streams, rules) have no notation; `fmt` rejects them with
+`EXPR_INVALID`. This notation is distinct from the `str` operation
+(`007-library.md`), which concatenates only textual scalars (nil, booleans,
+numbers and strings), rejecting patterns and collections. `json` explicitly
+encodes JSON-compatible values, including quoted strings. Template rendering and
+effect output have their own conversion contracts; neither is defined by `str`.
+`--json` emits structured values in its event schema instead of this notation.
+Human `do cat` definition values use a different contract (`009-cli.md`): text
+and bytes stay raw while every other JSON-native value prints as plain JSON, so
+other programs can parse `cat` output directly.
 
 ## Applications and Operations
+
+`f a b` evaluates the head, then the arguments left to right, then applies.
+`f ()` applies with zero arguments. `f ...xs` evaluates `xs` once at that
+position, requires a list, and passes its elements as separate arguments.
 
 An operation registry entry contains:
 
@@ -307,20 +478,29 @@ An operation registry entry contains:
 The evaluator validates arity and capability before calling an operation.
 Operation failures attach the current expression and call frames.
 
-Pattern `sub`/`replace` is an exception to eager operand evaluation
-(`014-patterns.md`): evaluate
-the match operand, retain the replacement expression without evaluating it,
-and evaluate that expression in a capture child scope only after a successful
-subject match. A two-argument call retains the expression and enclosing lexical
-scope in its invocation-owned callable. Capture scopes, reached dependencies,
-and accepted operands/effects follow ordinary suspension and cancellation
-ownership; resumption must not replay a completed replacement or its effects.
+Pattern `sub` is an exception to eager operand evaluation (`014-patterns.md`,
+`041-pattern-predicates-and-substitution.md`): evaluate the match operand,
+retain the replacement expression without evaluating it, and evaluate that
+expression in a capture child scope only after a successful subject match. A
+two-argument call retains the expression and enclosing lexical scope in its
+invocation-owned callable. Capture scopes, reached dependencies, and accepted
+operands/effects follow ordinary suspension and cancellation ownership;
+resumption must not replay a completed replacement or its effects.
 
-This policy belongs to the selected built-in operation, including expression
-calls through an operation alias; a user binding named `replace` still follows
-normal lexical lookup. `replace` is not a reserved special form. Calls with
-already-materialized arguments use constant or expansion-pattern values and
-cannot retroactively defer earlier argument evaluation.
+This policy belongs to the built-in operation, whether it is reached by its
+name or as `std/sub`; a user binding named `sub` follows normal lexical lookup.
+`sub` is not a reserved form. Calls with already-materialized arguments use
+constant or path-template values and cannot retroactively defer earlier
+argument evaluation.
+
+### Value pipelines
+
+`VALUE |> STAGE` evaluates `VALUE` exactly once, then applies the stage. If the
+stage's top level contains `_`, each `_` reads that value; otherwise the value
+is appended as the last argument, so `xs |> map f` evaluates as `map f xs`.
+Lowering a pipe never changes evaluation order or multiplicity, and special
+forms in a stage keep their own evaluation control. `|>` never connects process
+streams, and `|` never transforms values.
 
 ### Scoped finalization
 
@@ -363,122 +543,138 @@ request, or publish a stream of values. Nested lists and records are ordinary
 values; the evaluator does not recursively interpret streams hidden inside
 containers.
 
-## Special Forms
+## Expression Forms
 
 ### Fallback
 
-`(? expression...)` evaluates operands in order and returns the first that does
-not fail with `REF_MISSING`. No other failure is suppressed. Nil is a successful
-value. With no operands it returns nil.
-
-### Let
-
-`(let [name value...] body...)` requires an even binding list. Bindings evaluate
-sequentially, and each later binding can reference earlier ones. The body runs
-in that child scope and returns its final value.
-
-### Def
-
-`(def name value)` evaluates and binds a value in the current scope.
-`(def name [parameters...] body...)` binds a lexical function without first
-evaluating its body. Invalid names or parameter lists are `DEF_INVALID`.
-
-### Eval
-
-`(eval text)` parses and evaluates expression text in the current lexical scope.
-`eval` does not load filesystem paths or complete scripts.
+`A ?? B` evaluates `A`. It yields `A` unless `A` is `nil` or fails with a
+missing-lookup failure: `REF_MISSING`, `TOOL_MISSING`, `ENV_VAR_MISSING`, or a
+missing record field. In those cases it evaluates and yields `B`; otherwise `B`
+is never evaluated. `??` is right-associative, so `a ?? b ?? c` tries each
+operand in turn. No other failure is suppressed: protected failures
+(capability denial, cancellation) and operational failures propagate. `false`
+is a successful value and is not replaced. Optional tool lookup retains its
+tracked resolver observations.
 
 ### If
 
-`(if TEST THEN [TEST THEN]... [ELSE])` evaluates operands left to right in test
-order. It evaluates the then-body of the first true test, or the trailing else,
-and returns that value; with no true test and no else it returns nil. An even
-operand count has no else; an odd operand count ends in else. Zero or one
-operand is `EXPR_INVALID`. Exactly one branch evaluates, so a branch may
-reference a name that is valid only when selected. Truth follows "Values and
-Truth": only false and nil are false.
+`if C then A elif D then B else E` evaluates conditions left to right and
+evaluates only the arm of the first true condition, or the `else` arm, and
+yields its value. The expression form always has an `else` arm. Exactly one arm
+evaluates, so an arm may reference a name that is valid only when selected.
+Truth follows "Truth and emptiness".
+
+The statement form (`if`/`elif`/`else` blocks) runs the block of the first true
+condition, or the `else` block, or nothing.
 
 ### And and Or
 
-`(and EXPR...)` evaluates operands left to right and returns the first false
-operand, or the last operand when every operand is true; `(and)` is `:true`.
-`(or EXPR...)` returns the first true operand, or the last operand when every
-operand is false; `(or)` is `:false`. Evaluation stops at the deciding operand,
-so later operands are never evaluated and their dependencies and effects do not
-run. A single operand is returned without further evaluation.
+`A and B` evaluates `A`; if it is false, the result is `A` and `B` is never
+evaluated; otherwise the result is `B`. `A or B` evaluates `A`; if it is true,
+the result is `A`; otherwise the result is `B`. Chains such as `a and b and c`
+associate left and stop at the deciding operand, so later operands are never
+evaluated and their dependencies and effects do not run.
 
 ### Match
 
-`(match SUBJECT CLAUSE...)` evaluates `SUBJECT` once and requires a string, path,
-or pattern; a `Bytes` subject is `EXPR_INVALID` and must be converted with `text`
-first. Each clause `[PATTERN BODY...]` begins with a match pattern parsed at
-parse time: a path or string with matcher groups matches with the anchored
-semantics of `014-patterns.md`, while a path or string with no groups matches by
-exact text. The first matching clause is selected, and its body evaluates in a
-run-owned child scope where each named capture binds as a name, with the
-enclosing scope as parent. Anonymous `{*}` and `{**}` captures match but bind no
-name, and a reused capture name must match the same text. `[:else BODY...]` is
-optional and terminal; when no clause matches and there is no else, the result is
-nil. Only the selected body evaluates. A malformed clause is `EXPR_INVALID`;
-pattern misuse, such as a clause pattern that is a pure expansion pattern, is
-`PAT_INVALID`.
+`match SUBJECT` evaluates `SUBJECT` once and dispatches it against ordered
+`PATTERN => EXPR` arms:
 
-### With
+```kame
+def object-path source = match source
+	./src/{path:**}.c => ./build/@{path}.o
+	./gen/{name}.c    => ./build/gen/@{name}.o
+	else              => fail "not a source: @{source}"
+```
 
-`(with RECORD BODY...)` evaluates `RECORD`, requires a record, creates a
-run-owned child scope whose parent is the caller, binds each field key as a name,
-and evaluates the body in that scope, returning the body's final value. A
-duplicate key re-binds, so the last field wins. An empty body returns nil.
-Capture bindings and `with` bindings cannot escape the run that created them,
+The subject must be a string, a `Path`, or a literal value (number, boolean,
+symbol, `nil`); a `Bytes` subject is `EXPR_INVALID` and must be converted with
+`text` first. Arm patterns are parsed at parse time and take the matcher role:
+
+- A path atom with groups or glob syntax matches the subject's text with the
+  anchored semantics of `014-patterns.md`; `{name}` captures as `{name:*}`.
+- A path atom without groups or glob syntax, a string, or another literal
+  matches by equality of kind and text or value.
+
+The first matching arm is selected, and only its expression evaluates, in a
+run-owned child scope where each named capture binds as a string, with the
+enclosing scope as parent. Anonymous `{*}`, `{**}` and glob wildcards match but
+bind no name, and a reused capture name must match the same text. `else => EXPR`
+is optional and must be the last arm; when no arm matches and there is no
+`else`, the result is `nil`. A malformed arm is `PARSE_ERR`; pattern misuse,
+such as an arm containing a positional reference `{_N}`, is `PAT_INVALID`.
+
+The statement form `match EXPR` in a block uses `PATTERN =>` arms followed by
+indented blocks, with the same selection and capture scoping.
+
+### Eval
+
+`eval TEXT` parses `TEXT` as one expression and evaluates it in value context in
+the current lexical scope and phase. It does not parse statements, declarations
+or commands, load filesystem paths, or widen authority. No other operation parses
+generated text as Kame or Kash source.
+
+### Record scopes
+
+Template `@with RECORD` (`016-templates.md`) evaluates `RECORD`, requires a
+record, creates a run-owned child scope whose parent is the caller, binds each
+field key as a name, and renders its block in that scope. A duplicate key
+re-binds, so the last field wins. An empty block renders nothing. Capture
+bindings and record-scope bindings cannot escape the run that created them,
 consistent with lexical scopes.
 
 ## Containers and References
 
-List values evaluate their elements left-to-right. Record values evaluate
-values left-to-right and retain source key order for formatting; lookup does not
-depend on order.
+List values evaluate their elements left to right. Record values evaluate
+field values left to right and retain source key order for formatting; lookup
+does not depend on order. A shorthand field `name` evaluates the name `name`.
 
-For a list spread (`004-language.md`), evaluate its operand once at that entry's
-position, require a list, and append its elements without recursively flattening
-them. Empty lists append nothing; nil, strings, bytes, records, and other
-non-lists fail `EXPR_INVALID` at the spread operand. Nil and container elements
-inside the spread list remain ordinary elements. A failing entry prevents later
-entries from being evaluated.
+For a list spread `[a, ...xs]`, evaluate its operand once at that entry's
+position, require a list, and append its elements without recursively
+flattening them. Empty lists append nothing; nil, strings, bytes, records, and
+other non-lists fail `EXPR_INVALID` at the spread operand. Nil and container
+elements inside the spread list remain ordinary elements. A record spread
+`{...r, k: v}` evaluates its operand once, requires a record, and inserts its
+fields at that position; a later field with the same key replaces the earlier
+value. A failing entry prevents later entries from being evaluated.
 
 Spread uses the ordinary scope, authority, phase, and dependency channels. It
-does not reinterpret elements as source, paths, globs, or argv. Unused definitions
-and unselected branches remain lazy. Across suspension, retain completed entries
-and operand evaluation state so a spread never repeats an accepted effect or
-duplicates inserted elements. Result ownership follows ordinary list values;
-spreading does not invalidate or mutate the operand list.
+does not reinterpret elements as source, paths, patterns, or argv. Unused
+definitions and unselected branches remain lazy. Across suspension, retain
+completed entries and operand evaluation state so a spread never repeats an
+accepted effect or duplicates inserted elements. Result ownership follows
+ordinary values; spreading does not invalidate or mutate the operand.
 
-Reference components resolve from left to right:
+Field access components resolve from left to right:
 
-- Name accesses a record key.
-- Integer accesses a list or string code point.
-- Slice returns a list or UTF-8 string slice with half-open bounds.
-- Selection returns a record containing the requested keys in request order.
+- `r.name` and `r."key"` access a record key.
+- `xs.N` accesses a list element or string code point; negative indexes count
+  from the end.
 
-Negative indexes and bounds count from the end. Missing keys and invalid type
-access are `REF_MISSING`; invalid indexes and slices are `SEL_INDEX_INVALID`.
+Slices use the `slice` operation and computed keys use `get` (`007-library.md`).
+Missing keys and invalid type access are `REF_MISSING`, a missing-lookup failure
+that `??` recovers; invalid indexes are `SEL_INDEX_INVALID`.
 
-## Templates and Selectors
+## Interpolation
 
-String template segments evaluate in source order and concatenate into an owned
-string. Expression and reference values stringify according to
-`004-language.md`. Selector lookup uses the nearest matching frame:
-
-- Input/output selectors use the enclosing rule frame.
-- Argument selectors use the nearest function call frame.
+`@{EXPR}` segments in strings, path atoms, templates and foreign-shell recipes
+evaluate in source order, in value context, and concatenate into an owned
+string or path. Scalars and paths render as text. Lists, records and other
+non-scalars are `EXPR_INVALID` unless an explicit operation (`join`, `json`,
+`fmt`) renders them. `nil` renders as an empty string. Interpolation never
+applies escaping or quoting implicitly. Rule-context names resolve against the
+nearest rule frame and `args` against the nearest call frame.
 
 ## Dynamic Dependencies
 
 Filesystem and resource operations register dependencies through the evaluation
 context before returning their result. Dependency registration uses the current
 node and generation. The engine may suspend evaluation until the dependency is
-current.
+current. Environment reads through `env/NAME` or an uppercase name register a
+named environment dependency.
 
-Pure text, collection, and path operations do not create resource edges.
+Pure text, collection, and path operations, including pattern matching,
+`capture` and `bind`, do not create resource edges.
 
 ## Capabilities
 
@@ -486,57 +682,79 @@ Capability names are `read`, `write`, `run`, and `env`. A grant is unrestricted
 or contains allowed canonical roots/names. Authorization occurs before any host
 request. Denial is `CAP_DENIED` and has no side effect.
 
-Path authorization resolves relative paths against the evaluation working
-directory and rejects traversal outside granted roots after normalization.
-This check is lexical and is not a filesystem sandbox: symlinks may resolve
-outside an allowed root. Untrusted build execution requires host-level
-containment, which is outside the language capability model.
+Path authorization resolves relative paths against the root directory, or the
+unit's working directory for process-relative operations, and rejects traversal
+outside granted roots after normalization. This check is lexical and is not a
+filesystem sandbox: symlinks may resolve outside an allowed root. Untrusted
+build execution requires host-level containment, which is outside the language
+capability model.
 
 ## Acceptance Tests
 
-- Top-level definitions are lazy and shared by two consumers.
-- Composition conditions share `if` truthiness, see only earlier selected
-  bindings, preserve override/environment authority and forbid indirect host
-  effects; final runtime forward references remain lazy and valid.
+- Top-level definitions are lazy, order-independent and shared by two consumers.
+- `let` evaluates eagerly when reached; shadowing does not change earlier
+  derived values; bindings do not leak into the parent block.
+- `set` assigns an existing, uncaptured `let` in the same invocation; assigning
+  an unknown or captured binding is `PARSE_ERR`.
+- `set env/NAME` and `cd` are visible to later statements, lookups and
+  processes of the same unit, including after the setting function returns, and
+  never reach the parent unit; `set env/NAME = nil` unsets.
+- Declaration-time conditions share `if` truthiness, see only earlier
+  registered bindings, preserve override/environment authority, allow tracked
+  discovery and forbid processes and writes; inactive branches read no includes;
+  final runtime forward references remain lazy and valid.
 - Invalidating a definition causes one reevaluation on next access.
 - A definition cycle reports `DEP_CYCLE` with definition frames.
-- Lexical functions capture their defining scope and bind rest arguments.
+- Lexical functions capture their defining scope and bind rest arguments;
+  block-bodied functions return `nil` when falling off the end.
 - Placeholder sections read their indexed arguments without name lookup; a
   definition named `_0` does not shadow a placeholder.
-- Lexical names override operation names only within their scope.
+- Expression position resolves lexical, then standard library, then uppercase
+  environment names; lowercase names never read the environment; an unset bare
+  `ENV-NAME` is `ENV_VAR_MISSING`, and `env/NAME` is `nil` when unset.
+- Lexical names override operation names only within their scope; `std/NAME`
+  bypasses them.
+- Value and declaration contexts never launch an unknown command.
 - Arguments produce deterministic left-to-right diagnostics.
-- List spreads preserve entry order, empty lists, nil members, and nested
-  containers without mutating their operands. Non-list operands fail only when
-  demanded, stop later entries, and preserve ordinary phase/capability checks.
-  Suspended spread operands resume without repeated effects or duplicated items.
-- Glob expressions retain read/phase checks, empty membership dependencies and
-  lazy selection; multiple consumers share their source on native and WASM.
-- Pattern replacement binds captures only while evaluating its selected
-  replacement, including aliased calls, and retains scope and once-only effects
+- List and record spreads preserve entry order, empty lists, nil members, and
+  nested containers without mutating their operands. Wrong-kind operands fail
+  only when demanded, stop later entries, and preserve ordinary
+  phase/capability checks. Suspended spread operands resume without repeated
+  effects or duplicated items.
+- Path atoms never enumerate files; `files` retains read/phase checks, empty
+  membership dependencies and lazy selection; multiple consumers share their
+  source on native and WASM; declaration-time discovery overlapping a declared
+  output is `DISCOVERY_OVERLAP`.
+- Pattern `sub` binds captures only while evaluating its selected replacement,
+  including calls through `std/sub`, and retains scope and once-only effects
   across suspension without leaking bindings or replaying completed list items.
+- `xs |> f a` evaluates `xs` once and equals `f a xs`; a stage with `_` places
+  the value there.
 - A lifted operation reruns once with the newest arguments after coalesced
   updates.
 - A stale operation completion is not published.
-- Empty lists and strings are true; false and nil are false.
-- `?` suppresses only unprotected `REF_MISSING` and `TOOL_MISSING` failures,
-  preserves successful values including nil and false, and returns nil if all
-  operands are missing. Optional tool lookup retains tracked resolver observations.
-- `if` evaluates exactly one branch and returns the first true then-body, the
-  trailing else, or nil; a missing operand count is `EXPR_INVALID`.
+- Empty lists and strings are true; `false` and `nil` are false.
+- `??` recovers `nil` and missing-lookup failures only, preserves successful
+  values including `false`, never evaluates its right operand otherwise, and
+  propagates capability denial and cancellation.
+- `if` evaluates exactly one arm.
 - `and` and `or` short-circuit and return the deciding operand; an unselected
   operand's failing `read` never runs.
-- `match` selects the first matching clause, binds named captures in a
-  run-owned child scope, returns nil on no match without else, and never
-  evaluates an unselected arm.
-- `with` binds record fields in a child scope, last duplicate wins, and the
+- `match` selects the first matching arm, binds named captures in a run-owned
+  child scope, returns `nil` on no match without `else`, and never evaluates an
+  unselected arm.
+- `@with` binds record fields in a child scope, last duplicate wins, and the
   bindings do not leak into the parent.
-- `let` bindings see previous bindings but do not leak into their parent.
-- Reference indexes, negative indexes, slices, and selections work on valid
-  values and diagnose invalid bounds.
-- Rule and argument selectors choose the nearest correct frame.
+- `$(…)` raises on failure; `$?(…)` returns an outcome with the same fields for
+  functions and processes; derived function statuses apply in pipelines.
+- Field access, negative indexes, and missing fields behave as specified, and
+  invalid indexes are diagnosed.
+- Rule-context names and `args` choose the nearest correct frame.
 - A filesystem read records a dependency on its canonical file resource.
 - Denied operations create no host request.
-- The value display of nil, booleans, numbers, strings, patterns, lists, and
-  records re-parses as a Kame expression and displays identically; nested values
-  use the same notation as top-level values.
+- The value display of nil, booleans, numbers, strings, symbols, paths,
+  patterns, lists, and records re-parses as an expression, displays identically
+  and preserves kinds; nested values use the same notation as top-level values.
+- `eval` evaluates one expression and rejects statements and unauthorized
+  effects.
 - Evaluation teardown under `mem.Tracker` leaks no scope, closure, or value.

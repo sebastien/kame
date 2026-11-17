@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Kash Streaming, Channels, and Multiplexing
 
 ## 1. Purpose and scope
@@ -5,14 +9,15 @@
 Kash extends familiar byte pipelines into bounded, asynchronous process graphs:
 explicit fan-in/fan-out, conditional decomposition and rejoin, named channels,
 and live stream arguments. It is not a message broker, a graph-editor format,
-or a replacement for Kame value pipes.
+or a replacement for the value pipeline `|>`.
 
 This specification is normative. It extends [017 Kash](017-kash.md) and
 [038 Direct Kash and values](038-direct-kash-and-values.md) for process grouping,
 graph connections, redirection ownership, capture, and lifecycle. Other value,
-capability, phase, recovery, and argument rules remain unchanged. Process
-channels are distinct from [012 reactive streams](012-streams.md) and build
-dependency edges. Host process contracts remain subject to
+capability, phase, recovery, and argument rules remain unchanged. The surface
+syntax is that of [055 Unified Kame/Kash language](055-unified-kame-kash-language.md).
+Process channels are distinct from [012 reactive streams](012-streams.md),
+from generator `Stream` values, and from build dependency edges. Host process contracts remain subject to
 [003 POSIX process](003-posix-process.md) and
 [035 Native Windows CLI](035-native-windows-cli.md), with the host boundaries
 in §10.
@@ -24,7 +29,7 @@ output truncation. Undecided extensions are confined to §12.
 
 | Term | Meaning |
 | --- | --- |
-| Stage | An external executable or a native Kash stream operation. |
+| Stage | An external executable, a function invocation, or a native Kash stream operation. |
 | Channel | A bounded, closeable byte or framed-item connection with exactly one writer and one reader. |
 | Port | A stage/operator connection point: stdin, stdout, a live argument, or an operator input/output. |
 | Graph | Stages, operators, edges, and explicit external/presentation sinks, constructed before launch. |
@@ -58,6 +63,17 @@ descriptor, as under a POSIX shell.
 The whole graph owns backpressure, cancellation, and completion. Streams must
 not be secretly captured, materialized, spooled, or reparsed as code. Stages are
 long-running nodes; only an explicit `each` operation starts executables per item.
+
+A stage whose command head resolves to a function (`055` §6, §7.2) is a
+function stage. Its stdin and stdout are byte ports like a process's: commands
+in its body read the stage input and write the stage output, and its stderr
+follows the stage's error disposition. Its return value is discarded, and the
+values it yields as a generator are a separate channel that never enters the
+graph. Its status is derived (`055` §8.2): 0 when completed, the failing
+process's status or 1 when failed. A function stage cancelled because its
+reader closed early is treated as a broken pipe and does not fail the graph.
+`|` connects only byte or framed process ports; `|>` is a value operator and is
+never a graph connection.
 
 ## 3. Syntax and graph construction
 
@@ -125,11 +141,12 @@ The parser must distinguish Kash process syntax from embedded Kame syntax:
 | `>&`, `>@` | Final conditional-branch disposition: next/otherwise rejoin. |
 | terminal `&` | Async execution of the whole graph, not fan-out. |
 
-Nested commas inside quotes, expressions, collections, arguments, or `<(...)`
-do not discriminate groups. A single `(A)` remains a Kame expression, not a
-subshell/group; square brackets remain Kame collections. `$reference`,
-`${reference}`, `(EXPRESSION)`, `$(graph)`, and typed argv/list splicing retain
-their existing meanings. `$(...)` captures; `<(...)` streams.
+Nested commas inside quotes, expressions, lists, records, arguments, or `<(...)`
+do not discriminate groups. A single `(A)` remains a value fragment, not a
+subshell/group; `[…]` and `{…}` remain list and record literals. `$reference`,
+`${reference}`, `$...list`, `(EXPRESSION)`, `$(graph)`, `$?(graph)`, and typed
+argv splicing retain their meanings. `$(...)` captures stdout, `$?(...)` yields
+the invocation outcome, and `<(...)` streams.
 
 Binding order, tightest to loosest:
 
@@ -140,7 +157,7 @@ Binding order, tightest to loosest:
 5. Terminal async `&`, covering the recovered graph.
 6. Statement separators `;` and newline.
 
-Existing separator, quoting, and `??` value-recovery rules remain authoritative.
+Separator, quoting, and `??` value-recovery rules remain authoritative.
 Other numeric descriptors must be rejected, never silently interpreted as Bash
 descriptor duplication. The stderr subset is defined by
 [practical scripting](048-kash-practical-scripting.md). Output bytes, argument values, and Kame values are never reparsed
@@ -228,10 +245,11 @@ requires bytes; encode, filter, balance, and each require framed input.
 
 ### 4.2 Predicate contract
 
-Evaluate `filter P` once per complete item using the shared Kame evaluator in
-the filter's lexical scope, with a fresh `item` binding. `item` is the decoded
-string without its terminating LF or CRLF; a callable predicate receives that
-same string as its argument. The result must be Boolean, not general Kame
+Evaluate `filter P` once per complete item in value context, using the shared
+evaluator in the filter's lexical scope, with a fresh `item` binding. `P` is one
+expression. `item` is the decoded string without its terminating LF or CRLF.
+When `P` evaluates to a callable, including a placeholder section such as
+`(starts? "#" _)`, it is applied to that same string. The result must be Boolean, not general Kame
 truthiness (`KASH_PREDICATE_BOOLEAN` otherwise).
 
 Predicates must be pure and nonblocking: no host observations, process/tool
@@ -466,7 +484,10 @@ descriptors, and temporary resources. No implicit daemons remain.
 Default `fail-fast` fails and cancels the graph on a nonzero exit, signal
 (including SIGPIPE), launch/capability failure, mux I/O error, predicate/framing/
 buffer failure, timeout, or cancellation. There is no implicit acceptance of
-early readers or closed children.
+early readers or closed external children. A failed function stage contributes
+its derived status. A function stage, including a generator, that is cancelled
+because its reader closed early is not a failure: its `defer` cleanup runs, its
+stage outcome has state `:cancelled`, and it contributes no failing status.
 
 `:failure collect` on any merge/broadcast/balance selects an **owner-wide**
 policy, not branch isolation. Omitted annotations inherit it; all explicit
@@ -486,8 +507,8 @@ retain the existing `128 + signal` convention. An accepted failure retains its
 failing node metadata. External exit codes must not be mistaken for reserved
 native operator diagnostics.
 
-Existing `?`, graph recovery, value recovery, and owned async observation retain
-their contracts at whole-graph scope. Predicate, framing, and buffer failures
+Terminal `?`, graph recovery, `??` value recovery, `$?(…)` outcome inspection,
+and owned async observation retain their contracts at whole-graph scope. Predicate, framing, and buffer failures
 participate in graph recovery, not exit acceptance. Capability denial and
 cancellation remain unhandleable. Recovery follows cancellation/reaping or
 collection, never leaves old graph work detached, and cannot silently convert
@@ -496,7 +517,9 @@ an unaccepted nonzero result into success.
 ### 8.3 Capture and presentation
 
 `$(graph)` captures the graph's terminal stdout and explicit `>&out` presentation
-ports under existing UTF-8 and capture bounds; stderr remains live. Explicit
+ports under existing UTF-8 and capture bounds; stderr remains live. `$?(graph)`
+captures nothing: it runs the graph with its ordinary presentation and returns
+its outcome record (`049`). Explicit
 `>&err` and file redirections are noncapture dispositions. More than one output
 directed to the capture sink is `KASH_AMBIGUOUS_CAPTURE`: explicitly merge or
 redirect unrelated outputs. Never silently concatenate, discard, or bypass
@@ -527,7 +550,8 @@ remain diagnosable with authored spans.
 
 ### 9.2 Terminal graph metadata
 
-One aggregate Result retains independent per-node outcomes and terminal
+One aggregate Result, returned in the outcome record of `$?(graph)` or `wait`,
+retains independent per-node outcomes in `stages` and terminal
 `graph.nodes`/`graph.edges`, with `graph.terminal: true` and effective
 `graph.failure`. Nodes retain prepared `id` (including adapters), `kind`,
 tracked executable `program`, terminal `state`, and `status`/`signal`/`outcome`.
@@ -642,7 +666,7 @@ Acceptance must cover the following contracts:
 
 | Area | Required checks | Related tests |
 | --- | --- | --- |
-| Compatibility/topology | Ordinary byte pipelines, Kame expressions/value pipes, typed argv, captures, recovery and async retain semantics; group discrimination/cardinality, no Bash duplication; invalid graphs launch/truncate nothing. | `tests/T042-01-kash-topology.sh`, `T017-*`, parser/evaluator suites |
+| Topology | Ordinary byte pipelines, function stages with derived status, value fragments and `\|>` value pipelines, typed argv, captures, outcomes, recovery and async keep their semantics; group discrimination/cardinality, no Bash duplication; invalid graphs launch/truncate nothing. | `tests/T042-01-kash-topology.sh`, `T017-*`, parser/evaluator suites |
 | Framing/branches | Exact LF/CRLF/partial EOF, empty input, UTF-8 and exact byte limits; Boolean host-free predicates; nested lexical next/otherwise joins, missing destinations and framed/raw mismatch; changed predicate context invalidates build reuse. | `tests/T042-02-kash-framing.sh`, stream-predicate tests |
 | Channels | One lexical writer/reader in one graph, inherited/body-local declarations, alias framing, terminal readers, duplicate/missing endpoints and cycles. | `tests/T042-03-kash-channels.sh` |
 | Tee | Exact copy to PATH with presentation preserved, truncate versus `:append`, missing/empty/NUL paths and denied `write` authority rejected before any file is opened or truncated, and upstream status unchanged. | `tests/T048-01-kash-stderr.sh`, evaluator suites |

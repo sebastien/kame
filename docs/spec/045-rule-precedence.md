@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Rule precedence
 
 ## Purpose
@@ -6,14 +10,15 @@ Permit a specialized file-output namespace to override a general template
 without making producer selection depend on source existence or source order.
 
 ```kame
-./www/{path:**}.html : ./build/html/{path}.html
-	...
+rule ./www/{path:**}.html : ./build/html/{path}.html
+	cp $inputs.0 $outputs.0
 
-./www/xml/{path:**}.html : ./build/xml/{path}.html
-	...
+rule ./www/xml/{path:**}.html : ./build/xml/{path}.html
+	cp $inputs.0 $outputs.0
 ```
 
-Requesting `./www/xml/feed.html` selects the second rule with `path = feed`.
+Requesting `./www/xml/feed.html` selects the second rule with the capture
+record `{path: "feed"}`.
 The first rule remains available for outputs outside that specialized namespace.
 
 ## Selection contract
@@ -31,7 +36,7 @@ Planning, execution, inspection and target lookup share this selection algorithm
 
 ## Supported specificity relation
 
-This version defines structural specificity for file templates containing exactly
+Structural specificity is defined for file templates containing exactly
 one capture, whose matcher is `*` (including `{name}`) or `**`. Capture names and
 anonymous versus named spelling do not affect precedence.
 
@@ -52,10 +57,11 @@ But `./out/xml/{p:**}` and `./out/{p:**}.html` are incomparable, even when
 one has more literal bytes. A third template specializing both can resolve
 their intersection; ambiguity must not be reported before all matches are known.
 
-Multiple captures, regex captures, character classes and other glob matchers
-retain existing ambiguity behavior. No general regex/glob inclusion solver,
+Templates with multiple captures, regex captures, character classes or other
+glob matchers have no specificity relation; competing matches among them are
+`TGT_AMBIG`. No general regex/glob inclusion solver,
 numeric priority, declaration-order tie-breaker or source probing is introduced.
-Logical-task template selection is unchanged.
+Task-name template selection (`task {name}`) does not use this relation.
 
 ## Rule instances and grouped outputs
 
@@ -72,7 +78,7 @@ the broader group and overwrite a specialized output. Groups are not split and
 their recipes are not partially executed.
 
 Generated concrete declarations keep their registration-time collision checks.
-This change does not relax duplicate literal ownership.
+Precedence does not relax duplicate literal ownership.
 
 ## Verification
 

@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Practical non-interactive Kash
 
 ## 1. Purpose and approach
@@ -11,35 +15,42 @@ This specification extends [Kash](017-kash.md),
 [direct execution](038-direct-kash-and-values.md),
 [streaming](042-kash-streaming.md), [finalization](043-kame-finalization.md),
 [scripting](046-kash-scripting-and-publication.md), and
-[output ports and exit fidelity](047-kash-output-ports-and-command-lists.md).
-Its clauses take precedence for the additions below. Existing contracts remain
-unchanged elsewhere; in particular, `NAME = RHS` remains lazy.
+[output ports and exit fidelity](047-kash-output-ports-and-command-lists.md),
+using the surface syntax of [055](055-unified-kame-kash-language.md). Its
+clauses take precedence for the additions below. Other contracts are unchanged;
+in particular, a top-level `NAME = EXPR` definition is lazy.
 
-The approach is to complete standard-stream handling, add explicitly sequenced
+The approach is to complete standard-stream handling, define sequenced
 bindings and control transfers, and compose scripts through local libraries and
 owned execution scopes. Incremental record iteration uses the same execution and
 finalization machinery, not capture followed by splitting a whole string.
 
 This is not Bash source compatibility. Interactive facilities, implicit word
-splitting/globbing, mutable global cwd/environment, arbitrary descriptors,
-detached jobs, package discovery, implicit retries, and transactional external
-effects are outside this contract. Authorized child-environment overlay and
-foreground terminal handoff are `051-kash-session-authority.md`; they do not
-mutate the host environment. Separate structured stdout/stderr capture,
+splitting/globbing, mutation of the host process's cwd or environment, arbitrary
+descriptors, detached jobs, package discovery, implicit retries, and
+transactional external effects are outside this contract. The environment store
+and working directory of a process-like unit (`set env/NAME`, `cd`) are
+`055` §5.3; foreground terminal handoff is `051-kash-session-authority.md`.
+Neither mutates the host environment. Separate structured stdout/stderr capture,
 byte-valued argv, live graph producers in loop headers, and accepted early-consumer
 SIGPIPE policies require separate contracts.
 
 ## 2. Execution model and vocabulary
 
-- An **execution boundary** is an ordered runner session, one recipe attempt, or
-  an embedding execution request. It receives the terminal outcome of `exit`.
-- An **execution scope** owns a lexical scope, effective cwd/child environment,
-  asynchronous work, and deferred cleanup. Functions and `with` blocks establish
-  such lifetimes; ordinary branches and loop iterations do not.
+- An **execution boundary** is a process-like unit (`055` §8.4): an ordered
+  runner session running a script, one rule-body attempt, one `$(…)` or `$?(…)`
+  capture, an embedding execution request, or an interactive entry. It owns the
+  environment store and working directory and receives the terminal outcome of
+  `exit`.
+- An **execution scope** owns a lexical scope, asynchronous work, and deferred
+  cleanup. Function invocations and `with` blocks establish such lifetimes;
+  ordinary branches and loop iterations do not. A `with` block additionally
+  applies a cwd/environment overlay to the work it runs.
 - **Invocation input** is the data-input stream supplied at the boundary. It is
   not source text, a filename, a replayable value, or an implicit broadcast.
-- An **eager binding** is an immutable value initialized by a reached `let`
-  statement. A **lazy definition** retains the existing demand/memoization rules.
+- An **eager binding** is a value bound by a reached `let` statement; only an
+  explicit `set` reassigns it. A **lazy definition** (top-level `NAME = EXPR`)
+  keeps the demand/memoization rules of `055` §5.1.
 - An **effective outcome** determines failure propagation. Raw process status
   remains inspectable even when explicitly accepted.
 
@@ -53,7 +64,7 @@ For example, each reached acquisition below runs before its cleanup registration
 the nested scope finishes its work before the enclosing cleanup removes staging:
 
 ```kash
-let workspace = (line $(mktemp -d))
+let workspace = line $(mktemp -d)
 defer rm -rf $workspace
 with :cwd $workspace
 	generator > ./output 2> ./errors
@@ -93,8 +104,8 @@ needed. Current-stream operands retain `042`'s closed-stdin rule for the receive
 | Recipe or embedding without supplied data input | Closed |
 | Session containing a stdin source fragment | Closed; stdin is reserved for loading source |
 
-Functions and `with` inherit the current input policy; they do not recover an
-input stream closed by capture, cleanup, or a record-loop body. `run!` and
+Function calls and `with` inherit the current input policy; they do not recover
+an input stream closed by capture, cleanup, or a record-loop body. `run!` and
 `pipe!` obey the same policy as corresponding authored graphs. Closed policies
 take precedence over foreground-root selection. A foreground graph inside an
 embedding or recipe may inherit explicitly supplied input at its primary root.
@@ -160,56 +171,65 @@ Only unquoted, unescaped `2` immediately adjacent to the operator selects stderr
 Other attached numeric descriptor forms, including `3>`, `1>&2`, and `2>&-`, are
 `PARSE_ERR`, not an argument silently followed by a different redirection.
 
-## 4. Eager immutable bindings
+## 4. Eager bindings
 
 ```kash
-let revision = (line $(git rev-parse HEAD))
+let revision = line $(git rev-parse HEAD)
 announce --revision $revision
 ```
 
-`let NAME = RHS` is a statement using the existing Kash definition RHS grammar,
-including typed expressions, reference wrappers, capture, and `??`. It evaluates
-when reached even if `NAME` is never read. It retains the result across suspension
-and subsequent statements; initializer failure stops execution normally. It does
-not print its value, collect a result, permit reassignment, or force a fresh
-filesystem observation from operations with cached/tracked observation semantics.
+`let NAME = EXPR` evaluates one expression in value context, including `$(…)`,
+`$?(…)`, function calls and `??`. It evaluates when reached even if `NAME` is
+never read. It retains the result across suspension and subsequent statements;
+initializer failure stops execution normally. It does not print its value,
+collect a result, or force a fresh filesystem observation from operations with
+cached/tracked observation semantics. `set NAME = EXPR` assigns an existing
+uncaptured `let` binding under the rules of `055` §5.2; nothing else reassigns
+it.
 
-Reserve the binding's name on entry to its lexical statement sequence, without
-evaluating its initializer. Reads before initialization report
-`BINDING_UNINITIALIZED`, including indirect reads through lazy definitions and
-functions. Reading cannot trigger initialization or fall back to a shadowed outer
-binding. Self-reference in an initializer is therefore an uninitialized read.
-Each reached function call or iteration has fresh slots; unselected branches
-create none. Initializer work executes once per reached occurrence, not once per
-resumption. Captured scopes retain initialized values under normal ownership rules.
+A `let` binding is in scope from the statement after it to the end of its block,
+or until a later `let` of the same name in that block shadows it. Its initializer
+sees the bindings in effect before the statement, so `let count = count + 1`
+reads the previous `count`. Nested `def`s declared in a block are visible
+throughout that block and close over the whole block scope. When such a function
+reads a name bound by a `let` of the same block that has not yet been reached,
+the read reports `BINDING_UNINITIALIZED`. Reading cannot trigger initialization
+or fall back to a shadowed outer binding. Each reached function call or
+iteration has fresh slots; unselected branches create none. Initializer work
+executes once per reached occurrence, not once per resumption. Captured scopes
+retain initialized values under normal ownership rules.
 
 `BINDING_UNINITIALIZED` is a nonrecoverable binding-validation failure, not
-`REF_MISSING`. Kash acceptance/recovery, `??`, and Kame's missing-lookup `?`
-cannot suppress it or select a fallback, including through lazy definitions or
-functions. Command conditions propagate it rather than treating it as false.
-Ordinary lazy failure memoization remains unchanged.
+`REF_MISSING`. Terminal `?`, graph recovery and `??` cannot suppress it or select
+a fallback, including through functions. `$?(…)` does not convert it into an
+outcome; it propagates.
 
-Eager bindings share the ordinary definition namespace, name validation, and
-parameter/item collision rules. Duplicate eager/lazy/function declarations in one
-scope are errors; nested scopes may shadow outer names. `--define`, `--set`, and
-`KAME_NAME` configure ordinary declarations, not eager bindings; explicit overrides
-targeting only an eager binding are rejected as invalid configuration. Unrelated
-environment configuration retains its existing ignore policy.
+`let` bindings share name validation and parameter/item collision rules with
+other lexical bindings. A `let` and a nested `def` of the same name in one
+block, or two nested `def`s of the same name, are errors; a later `let` may
+shadow an earlier `let`, and nested blocks may shadow outer names. `--define`,
+`--set`, and `KAME_NAME` configure top-level definitions, not `let` bindings;
+explicit overrides targeting only a `let` binding are rejected as invalid
+configuration. Unrelated environment configuration retains its ignore policy.
 
-Kame's expression `(let ...)`, lazy `NAME = RHS`, and configurable defaults remain
-unchanged. Kash `let` is runtime-only. Dry-run does not evaluate its initializer or
-invent a value for dependent work.
+Top-level lazy `NAME = EXPR` definitions and configurable defaults are
+unaffected. A `let` in an action block evaluates at run time; a `let` in a
+declaration-context block (`055` §10.3) evaluates during declaration loading
+under declaration-context restrictions. Dry-run does not evaluate an
+action-block initializer or invent a value for dependent work.
 
 ## 5. Structured transfers
 
 ### Loop transfers
 
-`break` exits the nearest lexically enclosing list, conditional, or record loop;
-`continue` proceeds to that loop's next iteration/condition. Neither takes an
-operand, numeric depth, label, process operator, or redirection. Transfers pass
-through nested branches and execution scopes, but cannot cross a function or
-constructed-script boundary. Outside a matching loop they are `PARSE_ERR`, even
-in unused code. A nested function cannot transfer to its caller's loop.
+`break` exits the nearest lexically enclosing `for` (over a list, a stream or
+records) or `while` loop; `continue` proceeds to that loop's next
+iteration/condition. Neither takes an operand, numeric depth, label, process
+operator, or redirection. Transfers pass through nested branches and execution
+scopes, but cannot cross a function boundary. Outside a matching loop they are
+`PARSE_ERR`, even in unused code. A nested function cannot transfer to its
+caller's loop. Leaving a loop over a generator stream cancels the generator and
+runs its cleanup (`012`).
 
 Statements after a transfer do not execute. A crossed `with` scope finishes its
 owned work and cleanup before control reaches the loop. Existing invocation-owned
@@ -220,26 +240,29 @@ success. Normal cancellation and deadlines remain enforced.
 ### Script exit
 
 ```kash
-if (empty? args)
+if empty? args
 	printf "usage: process FILE...\n" >&err
 	exit 64
 ```
 
-`exit STATUS` evaluates one existing Kash value operand once; it must be an
-integer from 0 through 255. Missing operands are `PARSE_ERR`; invalid values are
-`EXPR_INVALID`. There is no implicit last-status operand or terminal acceptance
-modifier. `return STATUS` retains its nearest-function meaning.
+`exit EXPR` evaluates its value operand once; it must be an integer from 0
+through 255. A missing operand means 0. Invalid values are `EXPR_INVALID`. There
+is no implicit last-status operand or terminal acceptance modifier. `return`
+ends the nearest `def` invocation with a value and never sets a status.
 
-Exit propagates to the nearest host-established execution boundary, through native
-functions, constructed Kash helpers, branches, loops, and execution scopes.
-Functions/scopes do not create exit boundaries. It stops the complete ordered
-runner session, including later fragments; in a recipe it stops that attempt,
-not the enclosing build scheduler. An embedding receives a terminal outcome,
-never an unconditional host-process exit. Without a boundary, exit is
-`PHASE_INVALID`.
+Exit ends the innermost process-like unit, propagating through function calls,
+branches, loops, and execution scopes; functions and `with` scopes do not
+create exit boundaries. In a script it stops the complete ordered runner
+session, including later fragments. In a rule body it stops that attempt, not
+the enclosing build scheduler. In a `$(…)` or `$?(…)` capture it ends only the
+capture: its graph completes with status N, so `$(…)` raises for a nonzero N and
+`$?(…)` returns an outcome with that status. In an interactive entry it ends the
+session (`052`). An embedding receives a terminal outcome, never an
+unconditional host-process exit. Outside any process-like unit, such as in
+declaration context, exit is `PHASE_INVALID`.
 
-Exit is control flow, not a failure selected by `?`, `??`, fallback, or condition
-truth conversion while unwinding. No synthetic process or executable dependency
+Exit is control flow, not a failure selected by `?`, `??`, fallback, or outcome
+inspection while unwinding within its unit. No synthetic process or executable dependency
 is created. Preserve its typed status through finalization and CLI/embedding
 adaptation; never infer it from diagnostic text or an arbitrary record.
 
@@ -273,17 +296,19 @@ their own local loops and function returns.
 ## 6. Local libraries and source identity
 
 ```kash
-(include ./lib/checks.kash)
-let config = (joinpath (source-dir) "./defaults.json")
-(check-config config)
+include ./lib/checks.kash
+let config = @{module/dir}/defaults.json
+check-config $config
 ```
 
-Extend literal, file-backed `(include PATH)` composition to top-level Kash.
-Included files are parsed as Kash regardless of suffix and may contain comments,
-lazy value/function definitions, `def` definitions, and further top-level includes.
-Top-level eager bindings, commands, expression statements, and control blocks are
-invalid in a library; bodies of declared functions retain ordinary Kash syntax.
-This is definition composition, not execution of another script at load time.
+`include PATH` (`055` §11) is valid at the top level of a file-backed Kash
+source. Included files are parsed as Kash regardless of suffix and may contain
+comments, `def` definitions, `import`/`from` statements, and further top-level
+includes. Top-level `let` bindings, commands, and control blocks are invalid in
+a library; bodies of declared functions retain ordinary Kash syntax. This is
+definition composition, not execution of another script at load time.
+`import` and `from … import` bind a library's exported names as a namespace or
+directly without splicing its definitions (`050-kash-libraries.md`).
 
 Resolve includes relative to the containing source, expand depth-first, and parse
 all selected sources before execution. Reuse existing source-loading authority,
@@ -293,27 +318,29 @@ Definitions share the including sequence's namespace and forward visibility.
 Diagnostics retain included source spans and include frames. Libraries cannot
 broaden grants, change cwd, or supply their own implicit execution policy.
 
-Lazy library definitions may perform effects when demanded under runtime rules;
-inclusion neither demands them nor certifies them as pure. Includes are not
-permitted inside Kash bodies, inline/stdin sources, or generated text without a
-file-backed loading base. Computed paths, search paths, optional/conditional
-Kash inclusion or package discovery are not introduced here. Kash library module
-fields and their limited exports are specified in `050-kash-libraries.md`.
+Library functions may perform effects when called under runtime rules;
+inclusion neither calls them nor certifies them as pure. `include` is not
+permitted inside blocks, in inline/stdin sources, or in any text without a
+file-backed loading base. Include operands are literal paths; `include?` skips a
+missing file only. Computed paths, search paths, and package discovery are not
+provided. Kash library module fields and their exports are specified in
+`050-kash-libraries.md`.
 
-`(source-dir)` takes no arguments and returns the absolute lexical directory of
-the file-backed source containing that authored call. It uses source metadata,
-not cwd, a caller's source, a filesystem probe, or physical symlink resolution.
-An included function therefore resolves assets beside its own source. Inline,
-stdin, and constructed text without file-backed source metadata report
-`SEL_NO_CONTEXT`; embedding display labels alone do not establish a loading base.
-The operation itself needs no filesystem grant; later reads retain normal grants.
-It does not change ordinary cwd-relative path semantics or create a script loader.
+`module/dir` is the absolute lexical directory of the file-backed source
+containing that authored reference, as a `Path`; `module/file` is that source
+file. They use source metadata, not cwd, a caller's source, a filesystem probe,
+or physical symlink resolution. An included function therefore resolves assets
+beside its own source. Inline, stdin, and other text without file-backed source
+metadata report `SEL_NO_CONTEXT`; embedding display labels alone do not
+establish a loading base. Reading `module/dir` needs no filesystem grant; later
+reads retain normal grants. It does not change root-relative path semantics or
+create a script loader.
 
 ## 7. Owned execution scopes
 
 ```kash
-exports = [MODE: "release"]
-with :cwd ./project :env $exports
+let overrides = {MODE: "release"}
+with :cwd ./project :env $overrides
 	configure
 	compile
 	verify
@@ -323,9 +350,10 @@ with :cwd ./project :env $exports
 Its header occupies its own line. Accepted pairs are `:cwd VALUE` and `:env VALUE`,
 each at most once, in either order. Reuse scalar cwd composition and typed
 environment-record grammar from stage setup; no second value parser is added.
-Unknown or duplicate setup keys are errors. Block `:timeout`, ambient exports,
-and shorthand arbitrary environment keys are not introduced here. Scope
-`export` and `unset` are `051-kash-session-authority.md`.
+Unknown or duplicate setup keys are errors. Block `:timeout` and shorthand
+arbitrary environment keys are not provided. Unit-wide changes use
+`set env/NAME = VALUE` and `cd` (`055` §5.3); `with` confines its overlay to the
+block.
 
 Evaluate setup operands left to right once in the enclosing context, retaining
 completed work across suspension. Validate all values/grants before entering the
@@ -338,10 +366,10 @@ effective cwd, not the boundary's original directory. With boundary cwd `/repo`,
 `with :cwd ./project` containing `:cwd ./build pwd` runs `pwd` in
 `/repo/project/build`.
 
-Kame's explicit environment-read namespace and startup-PATH/tool resolution are
-unchanged by `with`. An authorized scope overlay is
-`051-kash-session-authority.md`. Context does not refresh a memoized definition, rebase an already
-materialized resource, change a dependency's established evaluation context, or
+The overlay applies to processes started within the block; it does not write the
+unit's environment store. `env/NAME` and bare `ENV-NAME` reads, and executable
+lookup through the store's `PATH`, are unchanged by `with`. Context does not
+refresh a memoized definition, rebase an already materialized resource, change a dependency's established evaluation context, or
 alter authored source identity. Newly executed work must retain the effective
 context in its execution identity rather than reuse work from another cwd/env.
 
@@ -352,9 +380,9 @@ Cleanup executes with the scope's effective context, including deferred
 expressions, before the enclosing context resumes. The host's global cwd and
 environment are never mutated.
 
-Normal completion, `break`, `continue`, successful return, and successful exit
-join scope-owned work before LIFO cleanup. Failure, nonzero unaccepted return,
-nonzero exit, timeout, and cancellation cancel/reap it first. Cleanup failure
+Normal completion, `break`, `continue`, `return`, and successful exit join
+scope-owned work before LIFO cleanup. Failure, nonzero exit, timeout, and
+cancellation cancel/reap it first. Cleanup failure
 prevents an otherwise successful completion, loop transfer, or return. A pending
 exit remains terminal even when its status changes through finalization.
 Borrowing/awaiting an outer handle does not adopt its work. Reuse the finalization
@@ -362,19 +390,18 @@ driver, grants, primary-failure rules, and shared unwind deadlines from `043`;
 blocks cannot restart an active cleanup budget. Parsing and dry-run acquire no
 execution scope or resources.
 
-After successful joins and cleanup, normal completion returns the body's ordinary
-Kash final-statement value without printing or collecting results. Expression
-statements retain their discard policy, and cleanup values are ignored. An
-accepted nonzero Result remains effective success; its raw status does not create
-a new failure. A pending transfer propagates after finalization instead of
-returning a body value, subject to the cleanup-failure rules above.
+A `with` block is a statement and produces no value; there is no implicit
+last-statement value. Command statement return values are discarded, and cleanup
+values are ignored. An accepted nonzero outcome remains effective success; its
+raw status does not create a new failure. A pending transfer propagates after
+finalization, subject to the cleanup-failure rules above.
 
 ## 8. Incremental record iteration
 
 ```kash
 for line from :stdin :lines
-	let event = (parse-json line)
-	if (= event.kind "release")
+	let event = parse-json line
+	if event.kind == "release"
 		deploy $event.name
 
 for path from ./paths.list :nul
@@ -382,8 +409,8 @@ for path from ./paths.list :nul
 ```
 
 `for NAME from SOURCE FRAME` is distinct from materialized `for NAME in LIST`.
-`SOURCE` is literal `:stdin`, or one Kame expression/standalone Kash reference
-producing a nonempty local path string or `file:` resource. It does not accept
+`SOURCE` is literal `:stdin`, or one expression producing a nonempty local
+`Path`, path string, or `file:` resource. It does not accept
 `??`, raw command text, live operands, lists, or arbitrary resource protocols.
 `FRAME` is literal `:lines` or `:nul`. Headers, binding names, indentation, lexical
 visibility, and body/item collision rules follow ordinary list iteration.
@@ -409,8 +436,8 @@ Invalid UTF-8 reports `KASH_FRAME_ENCODING`; excess size reports
 support for invalid-UTF-8 filenames or bytes in argv. NUL in a line record remains
 data and is rejected later if an argv/environment boundary forbids it.
 
-Visit records sequentially with fresh iteration-local bindings, returning nil
-without collecting body results. Body commands receive closed default stdin so
+Visit records sequentially with fresh iteration-local bindings, without
+collecting body results. Body commands receive closed default stdin so
 they cannot steal subsequent records; explicit independent inputs remain valid.
 `break` stops without draining the source; file readers close on every loop exit.
 Stdin releases its reader claim without closing the caller's original stream or
@@ -440,9 +467,12 @@ report `EXPR_INVALID` before graph launch or output opening. Evaluate reached
 operands once with ordinary runtime grants; skipped stages perform no evaluation.
 
 An ordinary executable exit in the set is effective success. Preserve raw stage
-status/signal and established raw aggregate accounting; accepted nonzero Results
-need not satisfy `success?`. `&&`, `||`, command conditions, fail-fast/collect
-policy, and the invocation join use effective outcomes, not those raw numbers.
+status/signal and established raw aggregate accounting: an accepted nonzero
+outcome has `state: :completed` and `ok: false`, with `effectiveStatus` 0
+(`049`). `&&`, `||`, fail-fast/collect policy, and the invocation join use
+effective outcomes, not those raw numbers. A condition that should treat an
+accepted exit as success tests `$?(…).state == :completed`; `$?(…).ok` tests the
+raw status.
 Acceptance is stage-local and never hides an unaccepted peer failure.
 
 Retain separate typed effective-failure provenance for finalization, summaries,
@@ -465,8 +495,8 @@ introduces no retry, signal policy, or permission to ignore broken pipes.
 ## 10. Grammar, inspection, and host boundaries
 
 Statement keyword recognition must not reinterpret ordinary definition headers.
-Quote/escape an external command head or use an explicit/computed executable to
-invoke tools named `let`, `with`, `break`, `continue`, or `exit`. Keywords inside
+Use `x/NAME` or an explicit path to invoke executables named `let`, `set`,
+`with`, `break`, `continue`, `exit`, or any other reserved word. Keywords inside
 quoted argument data retain their literal meaning. Whole-source validation covers
 unused functions, unselected branches, and libraries before any execution effect.
 
@@ -503,12 +533,12 @@ supported operations. Unsupported-host cases assert rejection, not weaker result
 | --- | --- |
 | Input ownership | File/inline versus stdin sources; remaining-byte handoffs and host read-ahead; linear/unique-root fan-out, multiple sources, anonymous producers, capture, async, cleanup and embedding defaults; no competing implicit readers, broadcast or cached opaque-input reuse. |
 | Stderr | Replace/append, both redirection orders, alias into pipe/capture/channel, single-stage alias cardinality, multi-stage ambiguity, stdout conflicts, numeric-token boundaries and rejection before effects. |
-| Eager bindings | Unused initializer ordering, typed values, failures, indirect/self uninitialized reads, shadowing, duplicate/configuration rejection, fresh calls/iterations, and suspension without replay. |
-| Transfers | Nested loops/branches, function boundaries, invalid unused code, cleanup before transfer, successful joins, nonzero cancellation, exact status through nested runners, later-fragment suppression and embedding survival. |
-| Libraries | Different caller cwd, nested/cyclic/repeated includes, shared-name duplicates, definition-only rejection, load authority, no load-time effects, include frames, and authored source-relative assets. |
-| Execution scopes | Setup evaluation/validation, cwd/env inheritance and stage overrides, unchanged env reads/tool lookup, nested LIFO cleanup, borrowed versus owned jobs, body/nil/accepted-result values, every transfer path, cleanup failure and shared deadlines. |
+| `let` bindings | Unused initializer ordering, typed values, failures, initializers reading the previous binding, uninitialized reads through nested `def`s, `let` shadowing, `set` assignment, duplicate `def`/configuration rejection, fresh calls/iterations, and suspension without replay. |
+| Transfers | Nested loops/branches, loops over generator streams, function boundaries, invalid unused code, cleanup before transfer, successful joins, nonzero cancellation, `exit` with and without an operand, `exit` inside `$(…)`/`$?(…)` ending only the capture, exact status through nested runners, later-fragment suppression and embedding survival. |
+| Libraries | Different caller cwd, nested/cyclic/repeated includes, `include?` of a missing file, shared-name duplicates, definition-only rejection, load authority, no load-time effects, include frames, and `module/dir`-relative assets. |
+| Execution scopes | Setup evaluation/validation, cwd/env overlay and stage overrides, unchanged `env/` reads, store and tool lookup, nested LIFO cleanup, borrowed versus owned jobs, accepted outcomes, every transfer path, cleanup failure and shared deadlines. |
 | Records | Empty/consecutive/trailing delimiters, CRLF/partial EOF, NUL and embedded newlines, UTF-8/size errors, reader conflicts, unread-byte preservation, source failure, bounded working state and per-record cleanup. |
-| Accepted exits | Empty/invalid policies, retained raw status versus effective selection and CLI status, earlier unaccepted/later accepted peer and per-record exits, fail-fast/collect, signals, launch/timeout/capture errors, grants and cancellation. |
+| Accepted exits | Empty/invalid policies, retained raw status and `ok: false` versus effective selection and CLI status, earlier unaccepted/later accepted peer and per-record exits, fail-fast/collect, signals, launch/timeout/capture errors, grants and cancellation. |
 
 Cross-feature checks must also cover:
 
@@ -519,9 +549,9 @@ Cross-feature checks must also cover:
 - A stable input identity does not permit cache reuse that changes the remaining
   bytes seen after a record reader breaks. Check handoffs both within a boundary
   and to the embedding caller after it returns.
-- Direct and indirect uninitialized reads retain `BINDING_UNINITIALIZED` through
-  `??`, missing-lookup recovery, and command conditions without running fallback
-  effects or treating the error as false; include lazy proxies and self-reference.
+- Uninitialized reads through nested `def`s retain `BINDING_UNINITIALIZED`
+  through `??`, graph recovery, and `$?(…)` without running fallback effects or
+  yielding an outcome.
 - Relative stage cwd overrides compose with nested `with` scopes for authored
   graphs and `run!`, rather than rebasing at the invocation directory.
 

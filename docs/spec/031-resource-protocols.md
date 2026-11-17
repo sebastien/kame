@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Resource protocols
 
 ## Purpose
@@ -34,7 +38,7 @@ process-global store.
 
 ## Language and dependency behavior
 
-`(resource URI)` parses and validates a URI and returns a resource value. Invalid
+`resource URI` parses and validates a URI and returns a resource value. Invalid
 syntax or an unsupported scheme is `RES_INVALID` at the URI expression. A
 resource value may be used wherever a file resource is accepted, including
 rule inputs and dynamic dependencies. Existing string paths keep their current

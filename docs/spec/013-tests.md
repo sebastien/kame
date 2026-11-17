@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # End-to-End Test Suite
 
 ## Purpose
@@ -237,21 +241,24 @@ Native/WASM conformance covers:
   checks distinguish emptiness from absence and preserve nil-valued members.
 - Lossless capture of whitespace, embedded line endings, CRLF, newline-only and
   empty stdout; typed reuse adds no splitting/reparse. Consumer conversion tests
-  distinguish broad `strip` from `(line TEXT)`, which removes exactly one terminal
+  distinguish broad `strip` from `line TEXT`, which removes exactly one terminal
   LF and preserves a preceding CR and all other whitespace.
 - List spread with empty and multiple operands, nested and nil members, invalid
   operand kinds, lazy selection, and suspension. Parse/format/clone/AST inspection
   preserves spread syntax, and resumed operands neither replay effects nor append
-  duplicate elements. Record and call-argument spread remain invalid.
+  duplicate elements. Spreads into lists, records and application arguments
+  keep their kinds; a record spread into a list or argument position, and a
+  list spread into a record, remain invalid.
 - Indented `def` functions with fixed/rest arguments, lexical capture, forward
   references, fresh call-local definitions, nested calls, and unused bodies.
-  `return` unwinds only its own call through branches and loops; status validation,
-  accepted/unaccepted nonzero results, and call-local deferred cleanup agree on
-  both hosts. Invalid headers, empty bodies, duplicate bindings, and misplaced
+  `return VALUE` unwinds only its own call through branches and loops; returned
+  values (default `nil`), `$?(f x)` outcome records, derived function statuses
+  in pipelines, `exit` ending the enclosing process-like unit, and call-local
+  deferred cleanup agree on both hosts. Invalid headers, empty bodies, duplicate bindings, and misplaced
   returns fail before effects. Suspension never replays completed body statements
   or return operands, and cleanup failures retain the primary failure.
 
-- Direct `.km`, `.kmk`, `.kash`, and `.ksh` execution versus `do run` equivalence.
+- Direct `.km`, `.kame`, `.kash`, and `.ksh` execution versus `do run` equivalence.
 - Inline/stdin language selection and unknown-suffix validation without effects.
 - Repeated/interleaved files and `-c` fragments: compile the whole sequence before
   execution, then share definitions and run work in input order. Include a rule
@@ -287,7 +294,7 @@ Native/WASM conformance covers the contracts in 004, 009, 011 and 018:
 
 - Authored defaults, `KAME_NAME` strings, ordered `--define`/`--set` options and
   final-precedence bare assignments; ordinary `=` values remain configurable.
-- False versus the string `":false"`, empty lists, and list elements containing
+- False versus the string `"false"`, empty lists, and list elements containing
   spaces. Overrides replace complete contributed aggregates without demanding
   their original operands; authored contributions preserve order and duplicates.
 - A valid literal with an invalid setting shape is accepted by the CLI but fails
@@ -298,8 +305,9 @@ Native/WASM conformance covers the contracts in 004, 009, 011 and 018:
   nested includes. Conflicts locate both definitions and include sites; skipped
   defaults and valid repeated contributions are not diagnosed as conflicts.
   Formatting preserves this declaration order.
-- Quoted literal `"--mtime=@0"` in direct Kash retains argv bytes and formats
-  idempotently, while unquoted reserved syntax reports the correct boundary.
+- Literal `--mtime=@0` in direct Kash, quoted or unquoted, retains argv bytes
+  and formats idempotently, while `@{…}` in a command word reports the
+  action-context boundary.
 
 ### Artifact identity requirements
 

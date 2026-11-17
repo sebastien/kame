@@ -1,3 +1,7 @@
+---
+revision: 2
+---
+
 # Program Runtime
 
 ## Purpose
@@ -147,11 +151,12 @@ values and dynamically parsed `eval` expressions use ordinary reevaluation.
 
 A file rule is a function of its declared inputs and of the dependencies
 discovered while rendering and executing it. Naming an interpreter does not
-widen that set. `SHELL = kash`, `SHELL = /bin/bash`, a per-rule `shell`, and
-the implicit `/bin/sh -c` use one dependency rule.
+widen that set. A Kash body, an expression body, `SHELL = "bash"`, a per-rule
+`shell`, and the implicit `/bin/sh -c` use one dependency rule.
 
 Pure/declarative rules depend only on environment names read by Kame, through
-`(env "NAME")`, `env.NAME` in Kame or Kash, or the same operation reached indirectly
+`env/NAME`, a bare `ENV-NAME` reference, `$NAME` or `${env/NAME}` in Kash words,
+or the same operation reached indirectly
 from a definition or function. Process-executing rules additionally consume the complete
 effective child environment after rule overrides. This includes `PATH`, loader
 variables such as `LD_LIBRARY_PATH` and `LD_PRELOAD`, `LANG`, `LC_ALL`, `LC_*`,
@@ -170,9 +175,9 @@ that set with the outputs:
 
 - A header input or reference/expression expansion records the resolved file
   path set.
-- `(read PATH)`, `(render PATH)`, and a template include record that file.
-- `(wildcard PATTERN)` and any glob evaluated while rendering record the pattern
-  and the sorted member paths.
+- `read PATH`, `render PATH`, and a template `@include` record that file.
+- `files PATTERN`, `wildcard PATTERN` and any glob evaluated while rendering
+  record the pattern and the sorted member paths.
 - An environment read records the name and the value read. A read satisfied by
   an overlay assignment or removal in the same attempt follows
   `051-kash-session-authority.md` and does not persist that attempt's own value.
@@ -192,8 +197,8 @@ remain data dependencies.
 A shell script that opens a path never named in the recipe does not introduce
 a Kame file dependency. Kame does not infer filesystem reads inside opaque shell
 scripts or binaries. Environment access is covered conservatively by the complete
-child snapshot; `env.NAME` additionally records its named read as a Kame
-operation, as specified in `004-language.md` and `017-kash.md`.
+child snapshot; `env/NAME` and bare `ENV-NAME` references additionally record
+their named read as a Kame operation, as specified in `004-language.md` and `017-kash.md`.
 
 ## Content identity
 
@@ -231,7 +236,7 @@ Engine hashing is incremental; current host transport buffers a whole file.
 
 Do not render when all of the following hold:
 
-- The rule has no `always` prefix and the invocation is not `--force`.
+- The rule is not `rule always` and the invocation is not `--force`.
 - The recipe source that determines the dependency set is unchanged.
 - Every recorded file still has its recorded content digest.
 - Declared path sets and glob memberships are unchanged, and each member's
@@ -268,7 +273,7 @@ retain their read-only phase; registration never launches these calls.
 
 A file rule is fresh when the saved dependency set matches:
 
-- It has no `always` prefix.
+- It is not declared `rule always`.
 - It has at least one output, and every output's content digest matches the
   successful run.
 - Every declared and discovered file input exists and its content digest matches.
@@ -278,10 +283,10 @@ A missing record is evaluated after dependency-discovering render. A file rule
 with no declared or discovered dependency is always stale.
 
 A standalone `|` separates order-only prerequisites, for example
-`./out : ./input | prepare ./directory`. Both sections must finish before the
+`rule ./out : ./input | prepare ./directory`. Both sections must finish before the
 recipe runs, and failures in either section block execution. Order-only inputs
-are excluded from accepted content observations and input
-selectors such as `@<*`. An explicit expression read or a normal occurrence of
+are excluded from accepted content observations and from the `inputs` and
+`changed-inputs` body bindings. An explicit expression read or a normal occurrence of
 the same dependency makes it a content dependency. Ordering alone does not
 satisfy the file-input requirement for freshness. Plans and graph inspection
 retain all prerequisites; schema-2 inspection dependency records carry their
@@ -290,7 +295,7 @@ Quoted pipe characters remain literal input text. Empty and repeated order-only
 sections are parse errors. Environment inheritance applies to both sections.
 
 Whitespace-separated prerequisites form a parallel scheduling group. A comma
-separates groups, for example `final : prepare index, compile, package`:
+separates groups, for example `task final : prepare index, compile, package`:
 `prepare` and `index` may run independently, then `compile` is requested after
 both finish, then `package` after `compile`. Comma groups are a graph-demand
 barrier, not an extra order-only edge or a recipe effect sequence. Each
@@ -298,7 +303,7 @@ prerequisite retains its normal content or order-only semantics, and a failure
 in one group prevents later groups and the parent recipe from running. Kash
 statement sequencing remains separately defined in `017-kash.md`.
 
-An `always` file rule, for example `always ./stamp : ./input`, bypasses
+An always-stale file rule, for example `rule always ./stamp : ./input`, bypasses
 freshness every time it is reached from a new requested-root epoch. It remains
 a file resource: output paths, multi-output aliases, captures, publication
 checks and `do cat` work as for an ordinary file rule. It has no cache lookup.
@@ -309,16 +314,17 @@ or cancelled prior generation may be retried by a new root.
 
 Before execution, the runtime creates parent directories for explicit relative
 and absolute filesystem outputs. After successful execution, every declared
-file output must exist unless the rule used `yield` for its single output.
+file output must exist unless the rule published a value (an expression body
+or a Kash `return VALUE`) to its single output.
 Missing output is `OUTPUT_MISSING`.
 
 ## Tasks
 
-A bare task is always stale and executes whenever reached from a requested root.
-It may have dependencies but no file artifact.
+A `task` is phony: it is always stale and executes whenever reached from a
+requested root. It may have dependencies but no file artifact.
 
-A `task` rule is cached according to `008-cache.md`. Parsing preserves its
-cached kind; it must not silently execute with bare-task reuse semantics.
+A `task cached` rule is cached according to `008-cache.md`. Parsing preserves
+its cached kind; it must not silently execute with phony-task reuse semantics.
 
 Services parse into plans and use the managed lifecycle contract in
 `024-managed-services.md`; they are not ordinary task rules.
@@ -335,20 +341,21 @@ sibling ownership is `TGT_AMBIG` before execution (`045-rule-precedence.md`).
 
 ## Yield and Effects
 
-`shell` selects one producer. `[shell: kame]` or `SHELL = kame` selects one Kame
-expression. It returns text or bytes, and the rule atomically publishes those
-bytes to its single local file output. No process is started. Tasks, services,
-grouped outputs and remote execution are rejected. See
-`044-value-producing-rule-bodies.md`.
+The body form selects one producer. An expression body, `rule ./out : ./in =
+EXPR`, evaluates one Kame expression. It returns text or bytes, and the rule
+atomically publishes those bytes to its single local file output. No process is
+started. Tasks, services, grouped outputs and remote execution are rejected. A
+Kash body that ends with `return VALUE`, where `VALUE` is not `nil`, publishes
+the same way. See `044-value-producing-rule-bodies.md`.
 
-`[shell: kash]` or `SHELL = kash` executes the authored body as Kash. In that
-program, `(yield! ...)` appends bytes for exactly one file output. It is an
-execution action, not a template expansion. `(out! ...)` and `(err! ...)` are
-likewise Kash actions.
+An indented body without a foreign `shell` setting executes as Kash. In that
+program `out!` and `err!` are execution actions, not template expansions. A
+body writes an output with a command, for example `out! $content > $outputs.0`,
+or publishes one by returning a value.
 
 An external-shell recipe expands its body as a read-only template, then runs one
 shell process. Expansion and Kame content computation reject `out!`, `err!`,
-`yield!`, `write!`, process execution and clock reads with `PHASE_INVALID`,
+`write!`, process execution and clock reads with `PHASE_INVALID`,
 including through reached helpers and lazy definitions. The shell performs its
 own actions after expansion. Dry-run computes available Kame content but does
 not publish it. A failed computation leaves an existing artifact untouched.
@@ -374,9 +381,9 @@ Direct streams are not truncated. Retained logs follow the configured byte cap.
 
 ## Scoped Recipe Environments
 
-`target : prerequisites ; env "NAME=value" ...` attaches literal child-process
-environment assignments to a rule. The equivalent record surface is
-`; [env: [NAME: value]]`, whose string values may be pure Kame expressions.
+`rule TARGET : PREREQUISITES ; {env: {NAME: value}}` attaches child-process
+environment assignments to a rule; the same metadata applies to `task` and
+`service`. The string values may be pure Kame expressions.
 Record settings cannot launch processes or perform host effects during their
 planning evaluation. Resolved definition dependencies are tracked by the rule.
 A record may also contain `shell`, selecting that rule's interpreter as specified
@@ -398,9 +405,10 @@ Interpreter identity is the effective selection, independent of
 whether it was selected explicitly or implicitly.
 Plan and AST JSON expose authored assignments, without publishing the ambient
 environment. This surface scopes shell/Kash recipes and their prerequisite
-recipes. Direct `env` reads in recipe templates and structured recipes use the
-effective target snapshot after checking environment grants; absent names return
-nil, including in an empty snapshot. Lazy definitions and functions reached from
+recipes. Direct environment reads in recipe templates and structured recipes
+use the effective target snapshot after checking environment grants; absent names
+read through `env/NAME` return nil, including in an empty snapshot, and bare
+`ENV-NAME` references to absent names fail with `ENV_VAR_MISSING`. Lazy definitions and functions reached from
 recipes or dynamic prerequisites evaluate against the same target environment.
 A target's `KAME_NAME` assignment overrides a declared value definition `NAME`;
 explicit CLI configuration wins over that assignment under `009-cli.md`.
@@ -464,7 +472,7 @@ Reasons cover:
 - Missing or modified declared outputs.
 - Changed implementation or source/context guards, resolved settings, and
   recorded environment dependencies.
-- Explicit bypasses such as `--force`, `always`, and uncached tasks.
+- Explicit bypasses such as `--force`, `rule always`, and phony tasks.
 
 A source/context guard mismatch explains why reevaluation is needed; it does not
 assert that recipe behavior or output changed. Reevaluation may establish an
@@ -626,14 +634,16 @@ bytes is a separate operation used by `cat`.
 - Equivalent assignment order shares a prerequisite. Changing a recorded
   environment read or consumed child snapshot invalidates a cached task.
   Unchanged recorded values reuse the record.
-- Bare tasks run every time; cached task syntax remains distinguishable.
+- `task` runs every time; `task cached` remains distinguishable.
 - Whitespace prerequisite groups schedule independently; comma-separated
   groups wait for all prior prerequisites, preserve failure blocking, and retain
   normal/order-only input semantics on native and WASM.
 - Requests for two sibling outputs share one rule-instance execution.
-- `[shell: kame]` publishes exact text or bytes for one local file output and does not start a process.
+- An expression body (`rule ./out : ./in = EXPR`) and a Kash body ending in
+  `return VALUE` publish exact text or bytes for one local file output; an
+  expression body does not start a process.
 - Shell-template expansion and Kame content computation reject output actions, processes and clocks with `PHASE_INVALID`.
-- Direct Kash `yield!` writes one file output and rejects tasks or multiple outputs.
+- Direct Kash `return VALUE` publishes one file output and rejects tasks or multiple outputs.
 - Command failure prevents dependent execution and carries mapped source span.
 - Cancelling a target leaves no process group running.
 - A representative project builds and then skips its unchanged file target on
@@ -641,13 +651,14 @@ bytes is a separate operation used by `cat`.
 
 ## Newer-input selection
 
-In a file recipe, `@<?` is the list of unique normal declared file inputs whose
+In a file recipe, the body binding `changed-inputs` is the list of unique
+normal declared file inputs whose
 content digest differs from the digest recorded for the successful run. If any
 output is absent, or no record exists, it selects all normal file inputs. It
 preserves input order and authored path spelling; order-only prerequisites and
 named tasks are omitted. A recipe with no normal file inputs gets an empty list.
 Forced execution does not invent changed inputs. Input planning rejects this
-selector with `PHASE_INVALID`; a task recipe or evaluation without a file-rule
+binding with `PHASE_INVALID`; a task recipe or evaluation without a file-rule
 frame gets `SEL_NO_CONTEXT`.
 
 The snapshot is taken after prerequisites finish and before rendering; repeated
@@ -657,6 +668,8 @@ may skip its next invocation. Changing the recipe source renders again so a new
 read can be discovered. An unread environment value only invalidates when the
 rule consumes a process environment snapshot.
 
-Make's `$?` maps to `@<?`. Pattern stems use explicit captures, for example
-`./build/{stem}.o` and `@{stem}` in its recipe. Output and first-input directories
-use `@(dirname @>)` and `@(dirname @<)`.
+Make's `$?` corresponds to `changed-inputs`. Pattern stems use explicit
+captures, for example `./build/{stem}.o` with `$stem` in a Kash body or
+`@{stem}` in a foreign-shell recipe. Output and first-input directories are
+`dirname outputs.0` and `dirname inputs.0`, written `(dirname outputs.0)` as a
+Kash word fragment and `@{dirname outputs.0}` in a foreign-shell recipe.
