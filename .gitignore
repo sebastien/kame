@@ -9,3 +9,4 @@
 src/go/kame/kame
 __pycache__/
 *.egg-info/
+/deps/readline

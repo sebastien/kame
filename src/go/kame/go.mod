@@ -10,6 +10,7 @@ require (
 
 require github.com/rivo/uniseg v0.4.7 // indirect
 
-// Fork of v1.3.0 keeping keys typed while the cursor position is probed;
-// see ../third_party/readline/KAME-PATCHES.md.
+// Fork with performance fixes proposed upstream (reeflective/readline#125-#128):
+// the kame branch of github.com/sebastien/readline, checked out by git-deps in
+// deps/readline (see .gitdeps) and linked from ../third_party/readline.
 replace github.com/reeflective/readline => ../third_party/readline

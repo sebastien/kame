@@ -15,6 +15,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      # deps/ is managed by git-deps; fetch each dependency at the commit
+      # pinned in .gitdeps, over HTTPS.
+      - name: Fetch dependencies
+        shell: bash
+        run: |
+          while read -r path url branch commit; do
+            git clone --quiet "https://github.com/${url#git@github.com:}" "$path"
+            git -C "$path" checkout --quiet "$commit"
+          done < .gitdeps
       - uses: actions/setup-go@v7
         with:
           go-version-file: src/go/kame/go.mod
