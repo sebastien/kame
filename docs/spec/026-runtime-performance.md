@@ -72,3 +72,33 @@ portable-runtime results are recorded separately.
 Prepared lexical scopes and resource indexes resolve repeated lookups without
 tracked allocation. Allocation checks cover both wide and deep scopes and at
 least 512 indexed resource lookups, preserving lexical shadowing and node identity.
+
+Interactive entry tests require independent source storage and bounded completed
+statement nodes, operation states, callable cleanup scopes, transient syntax and
+queued work. They also verify that reclaiming entries preserves escaped
+callables, deferred work and source diagnostics without replaying lazy effects.
+`BenchmarkInteractiveEntries`
+measures parse-and-execute cost in one retained session; it excludes the terminal
+editor and prompt rendering. Retained declarations and genuinely live jobs are
+separate from completed command history.
+
+Repeated interactive rebinding of a fixed set of names must not grow the
+binding table or parsed declaration history. Tests retain direct and nested
+callable aliases, rebind while a call is suspended, and cancel a call whose
+deferred cleanup still reads its old local definitions. These owners must keep
+old code alive only for as long as it is needed.
+Rejecting a transient callable as a statement result must also release its
+captures, so a failed publication cannot pin a replaced function body.
+`BenchmarkInteractiveRebinding` measures repeated `let` and function replacement
+without retaining unused declaration history.
+
+`BenchmarkInteractiveAsync` measures repeated process launches and collection.
+Completed jobs must release task contexts, operation progress and launcher
+statements rather than making subsequent launches scan session history. Stable
+process IDs are not retained task-array indices. Retained handles own only
+completion snapshots after collection; genuinely live consumers and unreported
+failures remain valid owners. Cancellation tests must assert that nodes survive
+until the host acknowledges physical reaping, then disappear after collection.
+Native CLI tests cover failure observation, terminal job control and a PTY
+response probe before and after 1,000 entries. The probe reports latency without
+a machine-dependent timing threshold.

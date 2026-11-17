@@ -84,7 +84,8 @@ type Value struct {
 	// CallableSignature is present only for callables with a stable semantic identity.
 	// Its storage is owned by CallableOwner and outlives published values.
 	CallableSignature *Signature
-	// Process is opaque and borrowed from its invocation owner, never serialized.
+	// Process is an opaque invocation-scoped handle, never serialized. Completed
+	// handles retain Go-owned snapshots rather than keeping execution graphs live.
 	Process any
 	// Module is an opaque invocation-owned library; its owner outlives snapshots.
 	Module          any

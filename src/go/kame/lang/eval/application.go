@@ -7,10 +7,22 @@ import (
 	"kame/lang/expr"
 	"kame/lang/source"
 	"path"
+	"slices"
 
 	"strconv"
 	"strings"
 )
+
+type functionCallState struct {
+	Head kashControlState
+}
+
+func freeFunctionCallState(a mem.Allocator, value any) {
+	state := value.(*functionCallState)
+	freeCallables(a, &state.Head.Value)
+	freeKashControlState(a, &state.Head)
+	mem.Free(a, state)
+}
 
 func (p *Program) application(scope *Scope, expression *expr.Expr, context *Context) Result {
 	if len(expression.Items) == 0 {
@@ -70,7 +82,21 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 			return missingOperation(context, head.Text, head.Span, false)
 		}
 	}
-	callee := p.evaluate(context.Engine, scope, head, context)
+	var retained *functionCallState
+	if p.Scope.replaceBindings && context.Engine != nil {
+		start, end := context.operationStart, context.operationEnd
+		context.operationStart, context.operationEnd = expression.Span.Start, expression.Span.End
+		retained, _ = context.OperationState().(*functionCallState)
+		context.operationStart, context.operationEnd = start, end
+	}
+	before, beforePaths := len(context.Effects), len(context.WritePaths)
+	var callee Result
+	if retained != nil {
+		callee.Value = borrowValue(context.Run, retained.Head.Value)
+		replayControlEffects(&retained.Head, context)
+	} else {
+		callee = p.evaluate(context.Engine, scope, head, context)
+	}
 	if callee.Waiting || callee.Diagnostic.Code != "" {
 		if callee.Diagnostic.Code == "REF_MISSING" && head.Kind == expr.Name && scope.lookup(head.Text) == nil && p.Registry != nil {
 			// Kash reserves bare env for its namespace, but (env NAME) remains
@@ -117,7 +143,32 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return result
 	}
 	context.Scope = scope
+	if retained == nil && p.Scope.replaceBindings && context.Engine != nil &&
+		function.Kind != FunctionOperation && function.Kind != FunctionInvocation && function.NativeCall == nil {
+		retained = mem.Alloc[functionCallState](p.Alloc)
+		retained.Head.Value = borrowValue(p.Alloc, callee.Value)
+		for _, effect := range context.Effects[before:] {
+			effect.Data = slices.Clone(effect.Data)
+			retained.Head.Effects = append(retained.Head.Effects, effect)
+		}
+		for _, name := range context.WritePaths[beforePaths:] {
+			retained.Head.WritePaths = append(retained.Head.WritePaths, owned(p.Alloc, name))
+		}
+		start, end := context.operationStart, context.operationEnd
+		context.operationStart, context.operationEnd = expression.Span.Start, expression.Span.End
+		context.SetOperationState(retained, freeFunctionCallState)
+		context.operationStart, context.operationEnd = start, end
+	}
+	if retained != nil {
+		function = retained.Head.Value.Callable.(*Function)
+	}
 	result := p.call(function, expression.Items[1:], context, expression.Span)
+	if retained != nil && !result.Waiting {
+		start, end := context.operationStart, context.operationEnd
+		context.operationStart, context.operationEnd = expression.Span.Start, expression.Span.End
+		context.ClearOperationState()
+		context.operationStart, context.operationEnd = start, end
+	}
 	freeCallables(context.Run, &callee.Value)
 	return result
 }
@@ -420,6 +471,10 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		return arityFailure(context.Run, functionAritySpan(function, context, span), name, len(values), fixed, fixed)
 	}
 	child := newScope(context.Run, function.Scope)
+	child.sourceStorage = function.storage
+	if child.sourceStorage != nil {
+		child.sourceStorage.References++
+	}
 	defer child.Free()
 	if function.Section {
 		// The section scope owns clones of the arguments so a closure that
@@ -518,7 +573,11 @@ func attachNamedFrame(result *Result, context *Context, span source.Span, kind s
 			return
 		}
 	}
-	result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	frame := diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}}
+	if context.EntrySource != nil && frame.Source == context.EntrySource.Name {
+		frame.SourceText = context.EntrySource.Text
+	}
+	result.Diagnostic.Frames = append(result.Diagnostic.Frames, frame)
 }
 
 // functionAritySpan points arity diagnostics at the authored parameter list
@@ -529,14 +588,34 @@ func functionAritySpan(function *Function, context *Context, fallback source.Spa
 	}
 	start := function.Parameters[0].Span.Start
 	end := function.Parameters[len(function.Parameters)-1].Span.End
+	text := ""
+	if context != nil && context.EntrySource != nil {
+		var authored *expr.Expr
+		switch {
+		case function.Definition != nil:
+			authored = function.Definition.Expression
+		case function.AST != nil:
+			authored = function.AST
+		case function.Expression != nil:
+			authored = function.Expression
+		case len(function.Body) != 0:
+			authored = function.Body[0]
+		}
+		if authored == nil || authored.EntrySource != context.EntrySource {
+			return fallback
+		}
+		text = context.EntrySource.Text
+	}
 	if context != nil && context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
 		part := context.Program.SourceParts[context.SourceOrigin-1]
 		if part.Module || start < part.Start || end > part.End {
 			return fallback
 		}
 	}
-	if context != nil && context.Program != nil && context.Program.Script != nil {
-		text := context.Program.Script.Source.Text
+	if text == "" && context != nil && context.Program != nil && context.Program.Script != nil {
+		text = context.Program.Script.Source.Text
+	}
+	if text != "" {
 		if start >= 0 && end >= start && end <= len(text) {
 			if open := strings.LastIndexByte(text[:start], '['); open >= 0 {
 				if close := strings.IndexByte(text[end:], ']'); close >= 0 {

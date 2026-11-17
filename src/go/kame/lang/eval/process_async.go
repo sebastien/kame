@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/expr"
+	"slices"
 
 	"strconv"
 )
@@ -22,6 +23,49 @@ type processTask struct {
 	Prepared         *captureState
 	Context          Context
 	Observed         bool
+	Index            int
+	Handle           *ProcessHandle
+}
+
+// ProcessHandle is an opaque invocation-owned handle. Pass its pointer, not a
+// struct copy. Once execution is retired, only immutable result data remains;
+// saved handles keep that data alive through Go's GC, not the execution graph.
+type ProcessHandle struct {
+	owner      *Program
+	task       *processTask
+	done       bool
+	state      core.NodeState
+	value      core.Value
+	diagnostic diagnostic.Diagnostic
+	observed   bool
+}
+
+func (h *ProcessHandle) Root() *core.Root {
+	if h.task != nil {
+		return h.task.Root
+	}
+	return nil
+}
+
+func (h *ProcessHandle) State() core.NodeState {
+	if h.task != nil {
+		return h.task.Node.State
+	}
+	return h.state
+}
+
+// Diagnostic is borrowed; clone it before retaining or modifying it.
+func (h *ProcessHandle) Diagnostic() diagnostic.Diagnostic {
+	if h.task != nil {
+		return h.task.Node.Diagnostic
+	}
+	return h.diagnostic
+}
+
+func (h *ProcessHandle) Observed() bool { return h.observed }
+
+func (task *processTask) observe() {
+	task.Observed, task.Handle.observed = true, true
 }
 
 func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState) Result {
@@ -37,7 +81,8 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.Context.InputClosed = true
 	task.Prepared = clonePreparedProcess(p.Alloc, prepared)
 
-	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(len(p.Processes))+">")
+	task.Index = p.nextProcess
+	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(task.Index)+">")
 	task.Node = p.Engine.Add(key, runProcessTask, task)
 	key.Free(p.Alloc)
 	if task.Node == nil {
@@ -45,13 +90,18 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 		return failure(c.Run, "HOST_FAIL", e.Span, "cannot schedule async process")
 	}
 	task.Root = p.Engine.RequestRoot(task.Node)
+	task.Handle = &ProcessHandle{owner: p, task: task}
 	if c.finalizer == nil {
 		task.LauncherRoot = c.Engine.RetainRoot()
 	}
 	p.Processes = append(p.Processes, task)
+	p.nextProcess++
+	if p.ProcessStarted != nil {
+		p.ProcessStarted(task.LauncherID, task.Handle)
+	}
 	// Queue startup before the caller can advance to its next statement.
 	p.Engine.DispatchRoot(task.Node)
-	return Result{Value: core.Value{Kind: core.Process, Process: task}}
+	return Result{Value: core.Value{Kind: core.Process, Process: task.Handle}}
 }
 
 func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
@@ -115,24 +165,26 @@ func (p *Program) awaitProcess(e *expr.Expr, c *Context) Result {
 		r.Free(c.Run)
 		return Result{Value: core.Value{Kind: core.Nil}}
 	}
-	var task *processTask
-	for i := range p.Processes {
-		if r.Value.Process == p.Processes[i] {
-			task = p.Processes[i]
-			break
-		}
-	}
+	handle, ok := r.Value.Process.(*ProcessHandle)
 	r.Free(c.Run)
-	if task == nil {
+	if !ok || handle == nil || handle.owner != p || (!handle.done && (handle.task == nil || handle.task.Handle != handle)) {
 		return failure(c.Run, "EXPR_INVALID", e.Span, "process handle belongs to another invocation")
 	}
 	if c.Engine == nil {
 		return failure(c.Run, "HOST_FAIL", e.Span, "await requires an execution host")
 	}
+	if handle.done {
+		handle.observed = true
+		if handle.diagnostic.Code != "" {
+			return Result{Diagnostic: handle.diagnostic.Clone(c.Run)}
+		}
+		return Result{Value: handle.value.Clone(c.Run)}
+	}
+	task := handle.task
 	if !c.Engine.TryDependency(task.Node.Key) {
 		return Result{Waiting: true}
 	}
-	task.Observed = true
+	task.observe()
 	if d := c.Engine.DependencyDiagnostic(task.Node.Key); d.Code != "" {
 		return Result{Diagnostic: d.Clone(c.Run)}
 	}
@@ -152,6 +204,7 @@ func (p *Program) joinProcesses(c *Context) Result {
 		if !c.Engine.TryDependency(task.Node.Key) {
 			return Result{Waiting: true}
 		}
+		task.observe()
 		if d := c.Engine.DependencyDiagnostic(task.Node.Key); d.Code != "" {
 			return Result{Diagnostic: d.Clone(c.Run)}
 		}
@@ -304,24 +357,58 @@ func clonePreparedProcess(a mem.Allocator, prepared *captureState) *captureState
 	return s
 }
 
-// AsyncProcessCount and AsyncProcess expose async graphs, oldest first, for
-// interactive job control (052): the node whose evaluation started each one
-// and its own root, nil once released.
-func (p *Program) AsyncProcessCount() int { return len(p.Processes) }
+// AsyncProcessCount is the next stable ID, not the number of live tasks.
+// AsyncProcess exposes a launcher's ID and root, nil after retirement.
+// ProcessStarted avoids rescanning historical IDs for interactive job control.
+func (p *Program) AsyncProcessCount() int { return p.nextProcess }
+
+func (p *Program) asyncProcess(i int) *processTask {
+	for _, task := range p.Processes {
+		if task.Index == i {
+			return task
+		}
+	}
+	return nil
+}
 
 func (p *Program) AsyncProcess(i int) (int64, *core.Root) {
-	return p.Processes[i].LauncherID, p.Processes[i].Root
+	if task := p.asyncProcess(i); task != nil {
+		return task.LauncherID, task.Root
+	}
+	return 0, nil
 }
 
 // ObserveAsyncProcess marks async graph i as observed by its job's report,
 // so the session join does not raise its outcome again (052).
-func (p *Program) ObserveAsyncProcess(i int) { p.Processes[i].Observed = true }
+func (p *Program) ObserveAsyncProcess(i int) {
+	if task := p.asyncProcess(i); task != nil {
+		task.observe()
+	}
+}
+
+func (p *Program) ObserveProcess(handle *ProcessHandle) {
+	if handle != nil && handle.owner == p {
+		handle.observed = true
+		if handle.task != nil && handle.task.Handle == handle {
+			handle.task.observe()
+		}
+	}
+}
 
 // CancelAsyncProcess discards async graph i, cancelling it if still running,
 // as an owning lifetime that does not join it.
 func (p *Program) CancelAsyncProcess(i int) {
-	task := p.Processes[i]
-	task.Observed = true
+	if task := p.asyncProcess(i); task != nil {
+		p.CancelProcess(task.Handle)
+	}
+}
+
+func (p *Program) CancelProcess(handle *ProcessHandle) {
+	if handle == nil || handle.owner != p || handle.task == nil || handle.task.Handle != handle {
+		return
+	}
+	task := handle.task
+	task.observe()
 	if task.Root != nil {
 		p.Engine.Release(task.Root)
 		task.Root = nil
@@ -329,5 +416,66 @@ func (p *Program) CancelAsyncProcess(i int) {
 	if task.LauncherRoot != nil {
 		p.Engine.Release(task.LauncherRoot)
 		task.LauncherRoot = nil
+	}
+}
+
+// RetireProcesses runs only at a driver boundary, after host events have been
+// drained. The quiet callback must acknowledge physical reaping, not just
+// cancellation. Unreported failures remain owned by the invocation join.
+func (p *Program) RetireProcesses(quiet func(any, int64, int64) bool, state any) {
+	if quiet == nil {
+		return
+	}
+	for {
+		removed := false
+		for i := len(p.Processes) - 1; i >= 0; i-- {
+			task := p.Processes[i]
+			node := task.Node
+			if node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
+				continue
+			}
+			if !task.Observed && node.State != core.NodeComplete {
+				continue
+			}
+			if !quiet(state, node.ID, node.Generation) {
+				continue
+			}
+			if task.Root != nil {
+				p.Engine.Release(task.Root)
+				task.Root = nil
+			}
+			if task.LauncherRoot != nil {
+				p.Engine.Release(task.LauncherRoot)
+				task.LauncherRoot = nil
+			}
+			if node.Interest != 0 || len(node.Dependents) != 0 || len(node.Subs) != 0 {
+				continue
+			}
+			value := node.Latest.CloneOwned(mem.System)
+			d := node.Diagnostic.Clone(mem.System)
+			id, status := node.ID, node.State
+			if !p.Engine.Retire(node) {
+				value.Free(mem.System)
+				d.Free(mem.System)
+				continue
+			}
+			handle := task.Handle
+			handle.task, handle.done, handle.state = nil, true, status
+			handle.value, handle.diagnostic = value, d
+			p.retireProgress(id, "", nil)
+			freeProcessTask(p.Alloc, task)
+			p.Processes = slices.Delete(p.Processes, i, i+1)
+			removed = true
+		}
+		for i := len(p.releasedStatements) - 1; i >= 0; i-- {
+			node := p.releasedStatements[i]
+			if quiet(state, node.ID, node.Generation) && p.retireStatement(node) {
+				p.releasedStatements = slices.Delete(p.releasedStatements, i, i+1)
+				removed = true
+			}
+		}
+		if !removed {
+			return
+		}
 	}
 }

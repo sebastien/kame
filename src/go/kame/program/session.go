@@ -39,6 +39,7 @@ type SessionWork struct {
 	Raw             bool
 	ImplicitDefault bool
 	entryGroup      int
+	transient       bool // Stays marked after Expression transfers to a statement node.
 }
 
 // Session owns one compiled program; work is sequenced by its host driver.
@@ -50,8 +51,9 @@ type Session struct {
 	active         int
 	JoinExpression expr.Expr
 	Deferred       *eval.DeferScope
-	retained       []*core.Root
+	retained       map[*core.Node]*core.Root
 	Exit           diagnostic.Termination
+	nextStatement  int
 }
 
 // JSON sessions share the build event encoder, including binary-safe streams.
@@ -137,10 +139,10 @@ func (s *Session) Free() {
 		return
 	}
 	a := s.Program.Alloc
-	for i := range s.retained {
-		s.Program.Engine.Release(s.retained[i])
+	for _, root := range s.retained {
+		s.Program.Engine.Release(root)
 	}
-	mem.FreeSlice(nil, s.retained)
+	s.retained = nil
 	freeSessionWork(a, s.Work)
 	s.Program.Free()
 	mem.Free(a, s)
@@ -366,11 +368,15 @@ type statementState struct {
 	Primary    diagnostic.Diagnostic
 	Finishing  bool
 	Effects    []eval.Effect
+	Owned      bool
 }
 
 func freeSessionWork(a mem.Allocator, work []SessionWork) {
 	for i := range work {
 		mem.FreeString(a, work[i].Target)
+		if work[i].transient {
+			expr.Free(a, work[i].Expression)
+		}
 	}
 	mem.FreeSlice(nil, work)
 }
@@ -379,6 +385,9 @@ func freeStatement(a mem.Allocator, value any) {
 	state := value.(*statementState)
 	state.Primary.Free(a)
 	eval.FreeEffects(a, state.Effects)
+	if state.Owned {
+		expr.Free(a, state.Expression)
+	}
 	mem.Free(a, state)
 }
 
@@ -388,6 +397,7 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	p := state.Program
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
 	context.Deferred = state.Deferred
+	context.CloneCallableAST = state.Owned
 	var r eval.Result
 	if !state.Finishing {
 		r = p.Eval.EvaluateWith(state.Expression, &context)
@@ -441,6 +451,17 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 		r.Free(c.Allocator())
 		return core.ProducerCompleted
 	}
+	if r.Value.HasTransientCallable() {
+		r.Free(c.Allocator())
+		span := state.Expression.Span
+		location := p.Eval.LocateSource(context.Source, span)
+		d := diagnostic.Diagnostic{Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "callable is invocation-scoped; apply it immediately instead of publishing it", Source: location.Source, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}
+		if entry := state.Expression.EntrySource; entry != nil {
+			d.Source, d.SourceText, d.Span = entry.Name, entry.Text, diagnostic.Span{Start: span.Start, End: span.End}
+		}
+		c.Fail(d)
+		return core.ProducerFailed
+	}
 	if state.Raw && r.Value.Kind == core.String {
 		raw := core.NewBytes(c.Allocator(), []byte(r.Value.Text))
 		r.Value.Free(c.Allocator())
@@ -466,6 +487,9 @@ func (s *Session) Start(index int) HandleStart {
 		s.JoinExpression.Kind = expr.InvocationJoin
 		w.Expression = &s.JoinExpression
 	}
+	if w.transient && w.Expression == nil {
+		return HandleStart{Diagnostic: failure(s.Program.Alloc, "HOST_FAIL", "statement has already been started")}
+	}
 	if w.Expression == nil {
 		return s.Program.Start(w.Target)
 	}
@@ -474,13 +498,18 @@ func (s *Session) Start(index int) HandleStart {
 	state.Program, state.Expression, state.Raw = p, w.Expression, w.Raw
 	state.Deferred = s.Deferred
 	state.Session = s
+	state.Owned = w.transient
 
-	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(index)+">")
+	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(s.nextStatement)+">")
+	s.nextStatement++
 	node := p.Engine.AddOwned(key, runStatement, state, freeStatement)
 	key.Free(p.Alloc)
 	if node == nil {
 		mem.Free(p.Alloc, state)
 		return HandleStart{Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot schedule statement")}
+	}
+	if w.transient {
+		s.Work[index].Expression = nil
 	}
 	h := mem.Alloc[Handle](p.Alloc)
 	h.Program, h.Node, h.Root, h.Target = p, node, p.Engine.RequestRoot(node), cloneText(p.Alloc, "<statement>")
@@ -489,14 +518,23 @@ func (s *Session) Start(index int) HandleStart {
 	return HandleStart{Handle: h}
 }
 
-// Releasing each statement used to cancel its lazy dependencies, replaying
-// effectful definitions at the next statement. Hold completed roots through the
-// invocation (including finalizers), without pinning active/cancelled work.
+// Keep live lazy dependencies, not their completed consumers. Dropping the last
+// interest in a published definition cancels its source and would replay effects.
 func (h *Handle) retainSessionStatement() {
 	if h.Session == nil || h.Node == nil || !h.Node.Current || h.Node.State == core.NodeFailed || h.Node.State == core.NodeCancelled {
 		return
 	}
 	s := h.Session
-	s.retained = append(s.retained, s.Program.Engine.RequestRoot(h.Node))
-	h.Session = nil
+	if s.retained == nil {
+		s.retained = make(map[*core.Node]*core.Root)
+	}
+	retain := func(dependencies []*core.Node) {
+		for _, node := range dependencies {
+			if node.Current && node.HasActiveSource() && s.retained[node] == nil {
+				s.retained[node] = s.Program.Engine.RequestRoot(node)
+			}
+		}
+	}
+	retain(h.Node.Static)
+	retain(h.Node.Dynamic)
 }

@@ -330,6 +330,23 @@ func TestNativeInteractiveKashAsyncGraphTerminal(t *testing.T) {
 	}
 }
 
+func TestNativeInteractiveKashNestedAsyncAttribution(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
+	s.waitFor("S0J0> ")
+	s.send("let job = (run! :async :true \"/bin/sleep\" (if (run! :async :true \"/bin/false\") \"0.1\" \"0.1\"))\r")
+	s.send("wait %+\r")
+	s.waitFor("S1J0> ")
+	// Only the outer handle is saved. The inner failure belongs to the same job,
+	// was consumed by wait, and must not be raised again by the invocation join.
+	s.send("let result = (await job)\r")
+	s.waitFor("let result = (await job)\r\r\nS0J0> ")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("nested async outcome was lost or repeated: status=%d out=%q", status, s.text())
+	}
+}
+
 // wait observes a job's status; %+ and %- select the current and previous
 // jobs, which jobs marks; a job cancelled by kill is listed as killed.
 func TestNativeInteractiveKashWaitAndJobSelectors(t *testing.T) {

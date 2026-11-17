@@ -109,12 +109,12 @@ func SetScriptSourceOrigin(parsed *script.Script, start int, end int, origin int
 		if item.Span.Start < start || item.Span.End > end {
 			continue
 		}
-		setExpressionOrigin(item.Expression, origin)
+		setExpressionOrigin(item.Expression, origin, nil)
 		if item.Definition != nil {
-			setExpressionOrigin(item.Definition.Expression, origin)
+			setExpressionOrigin(item.Definition.Expression, origin, nil)
 		}
 		if item.Rule != nil {
-			setExpressionOrigin(item.Rule.Metadata, origin)
+			setExpressionOrigin(item.Rule.Metadata, origin, nil)
 			for j := range item.Rule.Outputs {
 				setTemplateSourceOrigin(item.Rule.Outputs[j].Expansion, origin)
 			}
@@ -122,7 +122,7 @@ func SetScriptSourceOrigin(parsed *script.Script, start int, end int, origin int
 				setTemplateSourceOrigin(item.Rule.Inputs[j].Template, origin)
 			}
 			if item.Rule.BodyDoc != nil {
-				setExpressionOrigin(item.Rule.BodyDoc.Root, origin)
+				setExpressionOrigin(item.Rule.BodyDoc.Root, origin, nil)
 			}
 			for j := range item.Rule.Body {
 				setTemplateSourceOrigin(item.Rule.Body[j].Template, origin)
@@ -134,29 +134,43 @@ func SetScriptSourceOrigin(parsed *script.Script, start int, end int, origin int
 func setTemplateSourceOrigin(value *template.String, origin int) {
 	if value != nil {
 		for i := range value.Parts {
-			setExpressionOrigin(value.Parts[i].Expr, origin)
+			setExpressionOrigin(value.Parts[i].Expr, origin, nil)
 		}
 	}
 }
 
-func setExpressionOrigin(e *expr.Expr, origin int) {
+// Interactive ASTs share immutable provenance without pinning completed entries
+// in SourceParts. The view survives the parser and is collected with its users.
+func SetInteractiveSource(parsed *script.Script) {
+	entry := &source.Source{Name: parsed.Source.Name, Text: parsed.Source.Text}
+	for _, item := range parsed.Items {
+		setExpressionOrigin(item.Expression, 0, entry)
+		if item.Definition != nil {
+			setExpressionOrigin(item.Definition.Expression, 0, entry)
+		}
+	}
+}
+
+func setExpressionOrigin(e *expr.Expr, origin int, entry *source.Source) {
 	if e == nil {
 		return
 	}
 	e.SourceOrigin = origin
+	e.EntrySource = entry
 	for i := range e.Items {
-		setExpressionOrigin(e.Items[i], origin)
+		setExpressionOrigin(e.Items[i], origin, entry)
 	}
 	for i := range e.Body {
-		setExpressionOrigin(e.Body[i], origin)
+		setExpressionOrigin(e.Body[i], origin, entry)
 	}
 	for i := range e.Fields {
-		setExpressionOrigin(e.Fields[i].Value, origin)
+		setExpressionOrigin(e.Fields[i].Value, origin, entry)
 	}
 	for i := range e.Parts {
-		setExpressionOrigin(e.Parts[i].Expr, origin)
+		setExpressionOrigin(e.Parts[i].Expr, origin, entry)
 	}
-	setExpressionOrigin(e.AuthoredPipe, origin)
+	setExpressionOrigin(e.AuthoredPipe, origin, entry)
+	setExpressionOrigin(e.CapturePolicy, origin, entry)
 }
 
 func (c *Context) SourceDirectory() Result {
@@ -189,7 +203,7 @@ func (p *Program) LocateSource(name string, span source.Span) Location {
 	for i := len(p.SourceParts) - 1; i >= 0; i-- {
 		part := p.SourceParts[i]
 		if part.Module {
-			// Module spans are in a separate parsed source; only SourceOrigin
+			// Independent spans belong to separate sources; only SourceOrigin
 			// may select them, never a combined-script offset lookup.
 			continue
 		}

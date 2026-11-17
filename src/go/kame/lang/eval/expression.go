@@ -22,11 +22,18 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	context.evaluationDepth++
 	previousEnv := context.ReserveEnv
 	previousOrigin := context.SourceOrigin
+	previousSource, previousEntry := context.Source, context.EntrySource
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 	context.Engine = engine
 	if expression != nil {
 		context.ReserveEnv = expression.Kash
 		context.SourceOrigin = expression.SourceOrigin
+		context.EntrySource = expression.EntrySource
+		if expression.EntrySource != nil {
+			context.Source = expression.EntrySource.Name
+		} else if expression.SourceOrigin > 0 && p.Script != nil {
+			context.Source = p.Script.Source.Name
+		}
 		context.observeExpressionSource(expression)
 	}
 	result := p.evaluateExpression(engine, scope, expression, context)
@@ -44,6 +51,7 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	context.evaluationDepth--
 	attachSource(&result, context)
 	context.SourceOrigin = previousOrigin
+	context.Source, context.EntrySource = previousSource, previousEntry
 	return result
 }
 

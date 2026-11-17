@@ -1,5 +1,17 @@
 package program
 
+// CollectProcesses releases completed async execution state after the host has
+// acknowledged reaping. Saved handles retain immutable completion snapshots.
+func (p *Program) CollectProcesses() {
+	if p.collectingProcesses {
+		return
+	}
+	p.collectingProcesses = true
+	defer func() { p.collectingProcesses = false }()
+	p.Eval.RetireProcesses(finalizationQuiet, p)
+	p.drainCancellations()
+}
+
 func finalizationNow(state any) int64 {
 	p := state.(*Program)
 	return p.Host.Monotonic()

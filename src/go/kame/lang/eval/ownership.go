@@ -42,7 +42,8 @@ const (
 	// FunctionBorrowed is a value-owned wrapper copied from a binding. It
 	// retains the captured Scope and shares parameters, body, and Native
 	// state with its source. It releases its wrapper, scope hold, and owned
-	// payload share; authored ASTs remain owned by the source scope/program.
+	// payload share; compiled ASTs remain program-owned, while replaceable
+	// definitions and their parameters share the retained payload.
 	//
 	// Native state and dynamic AST storage have an independent retained owner.
 	FunctionBorrowed
@@ -80,6 +81,7 @@ type Function struct {
 	ParameterNamesOwned bool
 	BodyOwned           bool
 	Definition          *definition.Definition
+	DefinitionOwned     bool
 	// Section marks a placeholder section. Positional arguments bind to the
 	// call scope for placeholder lookup instead of parameter names.
 	Section bool
@@ -93,15 +95,19 @@ type Function struct {
 	NativeFree func(a mem.Allocator, state any)
 }
 
-// Lazily shared only when a callable with owned payload is borrowed. Scopes
-// remain separate holds so the existing lexical cycle breaker can see them.
+// Lazily shared when a callable with owned payload is borrowed. Captured-scope
+// holds stay separate; call scopes can also pin this code for delayed cleanup.
 type FunctionStorage struct {
-	Alloc      mem.Allocator
-	References int
-	Native     any
-	Free       func(a mem.Allocator, state any)
-	AST        *expr.Expr
-	Expression *expr.Expr
+	Alloc               mem.Allocator
+	References          int
+	Native              any
+	Free                func(a mem.Allocator, state any)
+	AST                 *expr.Expr
+	Expression          *expr.Expr
+	Definition          *definition.Definition
+	Parameters          []expr.Parameter
+	ParameterNamesOwned bool
+	Body                []*expr.Expr
 }
 
 // BorrowValue copies storage and gives every callable leaf an independent
@@ -136,7 +142,7 @@ func borrowFunction(a mem.Allocator, source *Function) *Function {
 	if source.Kind == FunctionInvocation || source.Kind == FunctionOperation {
 		return source
 	}
-	if source.storage == nil && (source.NativeFree != nil || source.AST != nil || source.ExpressionOwned) {
+	if source.storage == nil && (source.NativeFree != nil || source.AST != nil || source.ExpressionOwned || source.DefinitionOwned || source.ParametersOwned || source.BodyOwned) {
 		payloadAlloc := source.PayloadAlloc
 		if payloadAlloc == nil {
 			payloadAlloc = a
@@ -146,6 +152,15 @@ func borrowFunction(a mem.Allocator, source *Function) *Function {
 		storage.Native, storage.Free, storage.AST = source.Native, source.NativeFree, source.AST
 		if source.ExpressionOwned {
 			storage.Expression = source.Expression
+		}
+		if source.DefinitionOwned {
+			storage.Definition = source.Definition
+		}
+		if source.ParametersOwned {
+			storage.Parameters, storage.ParameterNamesOwned = source.Parameters, source.ParameterNamesOwned
+		}
+		if source.BodyOwned {
+			storage.Body = source.Body
 		}
 		source.storage = storage
 	}
@@ -266,16 +281,7 @@ func freeBorrowedWrapper(a mem.Allocator, function *Function) {
 func freeFunctionStorage(a mem.Allocator, function *Function) {
 	storage := function.storage
 	if storage != nil {
-		storage.References--
-		if storage.References != 0 {
-			return
-		}
-		if storage.Free != nil {
-			storage.Free(storage.Alloc, storage.Native)
-		}
-		expr.Free(storage.Alloc, storage.AST)
-		expr.Free(storage.Alloc, storage.Expression)
-		mem.Free(storage.Alloc, storage)
+		releaseFunctionStorage(storage)
 		return
 	}
 	if function.PayloadAlloc != nil {
@@ -288,6 +294,49 @@ func freeFunctionStorage(a mem.Allocator, function *Function) {
 	if function.ExpressionOwned {
 		expr.Free(a, function.Expression)
 	}
+	if function.DefinitionOwned {
+		definition.Free(a, function.Definition)
+	}
+	if function.ParametersOwned {
+		freeFunctionParameters(a, function.Parameters, function.ParameterNamesOwned)
+	}
+	if function.BodyOwned {
+		for _, e := range function.Body {
+			expr.Free(a, e)
+		}
+		mem.FreeSlice(nil, function.Body)
+	}
+}
+
+func releaseFunctionStorage(storage *FunctionStorage) {
+	if storage == nil {
+		return
+	}
+	storage.References--
+	if storage.References != 0 {
+		return
+	}
+	if storage.Free != nil {
+		storage.Free(storage.Alloc, storage.Native)
+	}
+	expr.Free(storage.Alloc, storage.AST)
+	expr.Free(storage.Alloc, storage.Expression)
+	definition.Free(storage.Alloc, storage.Definition)
+	freeFunctionParameters(storage.Alloc, storage.Parameters, storage.ParameterNamesOwned)
+	for _, e := range storage.Body {
+		expr.Free(storage.Alloc, e)
+	}
+	mem.FreeSlice(nil, storage.Body)
+	mem.Free(storage.Alloc, storage)
+}
+
+func freeFunctionParameters(a mem.Allocator, parameters []expr.Parameter, namesOwned bool) {
+	if namesOwned {
+		for _, parameter := range parameters {
+			mem.FreeString(a, parameter.Name)
+		}
+	}
+	mem.FreeSlice(nil, parameters)
 }
 
 // wouldStrandCapture reports whether storing value in scope would strand a

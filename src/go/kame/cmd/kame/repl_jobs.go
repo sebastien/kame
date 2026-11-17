@@ -6,6 +6,7 @@ import (
 	"io"
 	"kame/core"
 	"kame/host/posix"
+	"kame/lang/eval"
 	"kame/program"
 	"slices"
 	"strconv"
@@ -33,10 +34,11 @@ type replJob struct {
 	id         int    // 0 until the entry becomes a numbered job
 	text       string // listed text: the first line, ... when there are more
 	next, end  int    // work items: the next to start, end exclusive
+	first      int    // first queue slot owned by this entry
 	index      int    // work item of handle
 	handle     *program.Handle
 	pending    []int64 // host nodes pending when handle started, for interrupts
-	async      []int   // async graphs it started, as eval indices
+	async      []*eval.ProcessHandle
 	state      replJobState
 	signal     int // stopping signal
 	status     int
@@ -61,7 +63,7 @@ func replJobText(text string) string {
 // newJob makes work items [first, len(Work)) the next job.
 func (s *replSession) newJob(text string, first int, background bool) *replJob {
 	s.started++
-	j := &replJob{text: replJobText(text), next: first, end: len(s.run.Session.Work), background: background, startedAt: time.Now().UnixNano(), seq: s.started}
+	j := &replJob{text: replJobText(text), first: first, next: first, end: len(s.run.Session.Work), background: background, startedAt: time.Now().UnixNano(), seq: s.started}
 	s.jobs = append(s.jobs, j)
 	if background && s.jobControl {
 		s.number(j)
@@ -89,9 +91,8 @@ func (s *replSession) roots(j *replJob) []*core.Root {
 	if j.handle != nil && j.handle.Root != nil {
 		roots = append(roots, j.handle.Root)
 	}
-	eval := s.run.Session.Program.Eval
-	for _, i := range j.async {
-		if _, root := eval.AsyncProcess(i); root != nil {
+	for _, process := range j.async {
+		if root := process.Root(); root != nil {
 			roots = append(roots, root)
 		}
 	}
@@ -100,12 +101,9 @@ func (s *replSession) roots(j *replJob) []*core.Root {
 
 // asyncDone reports whether every & graph j started has finished.
 func (s *replSession) asyncDone(j *replJob) bool {
-	eval := s.run.Session.Program.Eval
-	for _, i := range j.async {
-		if _, root := eval.AsyncProcess(i); root != nil {
-			if state := root.Node().State; state != core.NodeComplete && state != core.NodeFailed && state != core.NodeCancelled {
-				return false
-			}
+	for _, process := range j.async {
+		if state := process.State(); state != core.NodeComplete && state != core.NodeFailed && state != core.NodeCancelled {
+			return false
 		}
 	}
 	return true
@@ -114,15 +112,14 @@ func (s *replSession) asyncDone(j *replJob) bool {
 // attributeAsync assigns new & graphs to the job whose running statement
 // started them. Graphs of preloaded sources and the startup file belong to
 // no job.
-func (s *replSession) attributeAsync() {
+func (s *replSession) attributeAsync(launcher int64, process *eval.ProcessHandle) {
 	p := s.run.Session.Program
-	for ; s.asyncSeen < p.Eval.AsyncProcessCount(); s.asyncSeen++ {
-		launcher, _ := p.Eval.AsyncProcess(s.asyncSeen)
-		node := p.Engine.LookupID(launcher)
-		for _, j := range s.jobs {
-			if j.handle != nil && j.handle.Root.Reaches(node) {
-				j.async = append(j.async, s.asyncSeen)
-				break
+	node := p.Engine.LookupID(launcher)
+	for _, j := range s.jobs {
+		for _, root := range s.roots(j) {
+			if root.Reaches(node) {
+				j.async = append(j.async, process)
+				return
 			}
 		}
 	}
@@ -147,7 +144,6 @@ func (s *replSession) advance(j *replJob) {
 		}
 		// & graphs are attributed while the statement that started them,
 		// freed once it is done, still reaches them.
-		s.attributeAsync()
 		done, status, stop := run.pollWork(j.index, j.handle)
 		if !done {
 			return
@@ -166,10 +162,10 @@ func (s *replSession) advance(j *replJob) {
 // asyncStatus is the status of an evaluated job: that of its last failed &
 // graph, as for a statement, otherwise its own.
 func (s *replSession) asyncStatus(j *replJob) int {
-	status, eval := j.status, s.run.Session.Program.Eval
-	for _, i := range j.async {
-		if _, root := eval.AsyncProcess(i); root != nil && root.Node().State == core.NodeFailed {
-			status = processExitStatus(root.Node().Diagnostic, s.run.Inv.Name == "run")
+	status := j.status
+	for _, process := range j.async {
+		if !process.Observed() && process.State() == core.NodeFailed {
+			status = processExitStatus(process.Diagnostic(), s.run.Inv.Name == "run")
 		}
 	}
 	return status
@@ -187,14 +183,15 @@ func (s *replSession) finish(j *replJob, status int, stop bool) {
 		j.handle.Free()
 		j.handle = nil
 	}
+	s.run.Session.DiscardWork(j.first, j.end)
 	j.state, j.status, j.stop = jobDone, status, stop
 	if j.id != 0 {
-		eval := s.run.Session.Program.Eval
-		for _, i := range j.async {
-			eval.ObserveAsyncProcess(i)
+		for _, process := range j.async {
+			s.run.Session.Program.Eval.ObserveProcess(process)
 		}
 		j.notify = j.background
 	}
+	s.run.Session.Program.CollectProcesses()
 	if j.id == 0 {
 		s.forget(j)
 	}
@@ -228,8 +225,8 @@ func (s *replSession) resume(j *replJob, foreground bool) {
 // cancel ends a job as an interrupt ends the foreground entry.
 func (s *replSession) cancel(j *replJob) {
 	eval := s.run.Session.Program.Eval
-	for _, i := range j.async {
-		eval.CancelAsyncProcess(i)
+	for _, process := range j.async {
+		eval.CancelProcess(process)
 	}
 	j.cancelled = true
 	s.finish(j, 130, false)
@@ -267,7 +264,6 @@ func (s *replSession) tick(wait int) {
 	run, p := s.run, s.run.Session.Program
 	tickCLIProgram(p, wait, run.Err, run.Inv.JSON)
 	drainEvents(p, run.Out, run.Err, run.Inv.JSON, &run.Progress)
-	s.attributeAsync()
 	s.handleStops()
 	s.advanceAll()
 }
@@ -320,7 +316,6 @@ func (s *replSession) foreground(j *replJob, resumed bool) (int, bool) {
 			s.cancelJobs()
 			return run.endForTimeout(h)
 		}
-		s.attributeAsync()
 		s.advanceAll()
 		if j.state != jobRunning {
 			break
@@ -754,7 +749,7 @@ func (s *replSession) read(reader lineReader, prompt string) (replEntry, error) 
 			continue
 		default:
 		}
-		if s.running() {
+		if s.running() || len(s.run.Session.Program.Pending) != 0 {
 			s.tick(10)
 			continue
 		}

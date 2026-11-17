@@ -209,6 +209,43 @@ func (s *terminalSession) finish() int {
 	return -1
 }
 
+func TestNativeInteractiveKashPersistentLatency(t *testing.T) {
+	s := startTerminalSession(t, nativeCLIBinary(t), t.TempDir(), nil, "do", "run", "-i")
+	s.waitFor("kash ")
+	measure := func(label string) time.Duration {
+		t.Helper()
+		s.waitReading()
+		before := len(s.raw())
+		start := time.Now()
+		s.send("(out! (str \"latency-\" \"" + label + "\\n\"))\r")
+		marker := []byte("latency-" + label + "\r\n")
+		for {
+			s.mu.Lock()
+			done := bytes.Contains(s.output.Bytes()[before:], marker)
+			s.mu.Unlock()
+			if done {
+				break
+			}
+			if time.Since(start) > 10*time.Second {
+				t.Fatalf("terminal stopped responding after %s: %q", label, s.text())
+			}
+			time.Sleep(time.Millisecond)
+		}
+		return time.Since(start)
+	}
+	cold := measure("cold")
+	for i := 0; i < 10; i++ {
+		s.send(strings.Repeat("(nop)\r", 100))
+	}
+	s.send("(out! (str \"warmup-\" \"done\\n\"))\r")
+	s.waitFor("warmup-done\r\n")
+	warm := measure("after-1000")
+	t.Logf("PTY response (1ms polling): cold=%s after 1000 entries=%s", cold, warm)
+	if status := s.finish(); status != 0 {
+		t.Fatalf("persistent terminal session exited %d", status)
+	}
+}
+
 // Interactive Kash on a terminal lends it to foreground commands: they see a
 // terminal on every standard stream and own the foreground group, captures
 // keep pipes, Ctrl-C reaches only the command, typed-ahead lines run, and

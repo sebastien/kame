@@ -404,6 +404,7 @@ func (p *Program) PrepareWork() WorkObservation {
 }
 
 func (p *Program) tick(wait int) {
+	defer p.CollectProcesses()
 	if p.workPrepared && !p.workDispatching {
 		if p.workIndex < len(p.workReady) {
 			node := p.workReady[p.workIndex]

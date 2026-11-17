@@ -4,30 +4,30 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"strings"
 )
 
 // AppendKash parses one interactive Kash entry into the live session and
-// queues its statements after the existing work. AST spans index the session
-// source, which grows by the entry text; earlier ASTs keep borrowing the
-// previous text because Go owns the storage. The entry becomes a source part
-// named name, so diagnostics locate it as its own source. On failure the
+// queues its statements after the existing work. Each entry owns independent
+// source storage and spans; appending never copies earlier entries. Provenance
+// travels with retained syntax, not a growing source table. On failure the
 // session is unchanged, no work is queued, and diagnostics are entry-relative.
 // It returns the index of the first new work item; the caller starts items
 // from there through len(s.Work)-1.
 func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagnostic) {
 	p := s.Program
-	src := p.Parsed.Source
-	first, start := len(s.Work), len(src.Text)
-	src.Text += text + "\n"
-	part := script.ParseFragment(p.Alloc, src, "kash", start, start+len(text))
+	first := len(s.Work)
+	part := script.ParseKash(p.Alloc, name, text)
+	eval.SetInteractiveSource(part)
 	var diagnostics []diagnostic.Diagnostic
 	located := func(code string, span source.Span, message string) diagnostic.Diagnostic {
-		return diagnostic.Diagnostic{Source: name, Code: code, Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start - start, End: span.End - start}}
+		return diagnostic.Diagnostic{Source: name, SourceText: text, Code: code, Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}}
 	}
 	for _, d := range part.Diagnostics {
 		if d.Severity == source.Error {
@@ -48,26 +48,49 @@ func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagno
 		diagnostics = p.Eval.RegisterInteractive(definitions)
 		for i := range diagnostics {
 			diagnostics[i].Source = name
-			diagnostics[i].Span.Start -= start
-			diagnostics[i].Span.End -= start
+			diagnostics[i].SourceText = text
 		}
 	}
 	if len(diagnostics) != 0 {
 		part.Free()
-		src.Text = src.Text[:start]
 		return first, diagnostics
 	}
-	for _, item := range part.Items {
+	for i, item := range part.Items {
 		if item.Kind == script.Definition && item.Definition.Eager {
-			s.Work = append(s.Work, SessionWork{Expression: item.Definition.Expression})
+			s.Work = append(s.Work, SessionWork{Expression: item.Definition.Expression, transient: true})
+			item.Definition.Expression = nil
+		}
+		if item.Kind == script.Definition && !item.Definition.Function && !item.Definition.Eager {
+			p.Parsed.Items = append(p.Parsed.Items, item)
+			part.Items[i].Definition = nil
 		}
 		if item.Kind == script.Expression || item.Kind == script.Command {
-			s.Work = append(s.Work, SessionWork{Expression: item.Expression, Display: item.Kind == script.Expression})
+			s.Work = append(s.Work, SessionWork{Expression: item.Expression, Display: item.Kind == script.Expression, transient: true})
+			part.Items[i].Expression = nil
 		}
 	}
-	appendSourceFragment(p.Parsed, part)
-	p.Eval.AddSourcePart(name, start, start+len(text), 0)
+	part.Free()
 	return first, nil
+}
+
+// DiscardWork releases a finished/abandoned entry's queue slots. Started syntax
+// is owned by its engine node until retirement; unstarted syntax is freed here.
+// Other jobs keep their indices: only empty trailing slots are removed.
+func (s *Session) DiscardWork(first, end int) {
+	for i := first; i < end; i++ {
+		if s.Work[i].transient {
+			expr.Free(s.Program.Alloc, s.Work[i].Expression)
+		}
+		mem.FreeString(s.Program.Alloc, s.Work[i].Target)
+		s.Work[i] = SessionWork{}
+	}
+	for len(s.Work) != 0 {
+		last := s.Work[len(s.Work)-1]
+		if last.transient || last.Expression != nil || last.Target != "" {
+			break
+		}
+		s.Work = s.Work[:len(s.Work)-1]
+	}
 }
 
 // PendingNodes lists engine nodes with outstanding host requests, so an

@@ -40,6 +40,7 @@ type Context struct {
 	Frames                 []diagnostic.Frame
 	Source                 string
 	SourceOrigin           int
+	EntrySource            *source.Source `json:"-"`
 	Grants                 []Grant
 	Inputs                 []core.Value
 	Outputs                []core.Value
@@ -103,6 +104,7 @@ type Context struct {
 type operationState struct {
 	CallPath     string
 	SourceOrigin int
+	EntrySource  *source.Source `json:"-"`
 	NodeID       int64
 	Generation   int64
 	Start        int
@@ -120,7 +122,7 @@ func (c *Context) OperationState() any {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Generation == c.Engine.Generation() {
 				return state.Value
 			}
@@ -139,12 +141,12 @@ func (c *Context) SetOperationState(value any, free ContextFree) {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			state.Value, state.Free, state.Generation = value, free, c.Engine.Generation()
 			return
 		}
 	}
-	c.Program.OperationStates = append(c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), SourceOrigin: c.SourceOrigin, NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
+	c.Program.OperationStates = append(c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), SourceOrigin: c.SourceOrigin, EntrySource: c.EntrySource, NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
 }
 func (c *Context) ClearOperationState() {
 	if c == nil || c.Program == nil || c.Engine == nil {
@@ -152,7 +154,7 @@ func (c *Context) ClearOperationState() {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Free != nil {
 				state.Free(c.Program.Alloc, state.Value)
 			}

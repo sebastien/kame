@@ -121,4 +121,7 @@ func attachSource(result *Result, context *Context) {
 			result.Diagnostic.Source = location.Source
 		}
 	}
+	if result.Diagnostic.Code != "" && result.Diagnostic.SourceText == "" && context.EntrySource != nil && result.Diagnostic.Source == context.EntrySource.Name {
+		result.Diagnostic.SourceText = context.EntrySource.Text
+	}
 }

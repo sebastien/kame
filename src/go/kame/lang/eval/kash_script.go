@@ -484,7 +484,7 @@ func (p *Program) cancelScriptGroup(group int64) {
 		}
 		// The owning lifetime has joined or deliberately discarded this outcome;
 		// a later session-wide join must not re-raise its cancellation/failure.
-		task.Observed = true
+		task.observe()
 		if task.Root != nil {
 			p.Engine.Release(task.Root)
 			task.Root = nil

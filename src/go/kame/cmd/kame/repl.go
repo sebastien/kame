@@ -49,6 +49,7 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 	session.Program.Eval.CommandAlias, session.Program.Eval.CommandAliasState = replCommandAlias, &repl.shell
 	session.Program.Eval.SessionTool, session.Program.Eval.SessionToolState = replSessionTool, &repl.shell
 	session.Program.BackgroundNode = repl.backgroundNode
+	session.Program.Eval.ProcessStarted = repl.attributeAsync
 	var reader lineReader
 	var terminal *editorReader
 	if run.Inv.Interactive {
@@ -145,7 +146,7 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 		// Entries, builtins included, are numbered in typed order.
 		entries++
 		name := "<kash:" + strconv.Itoa(entries) + ">"
-		if status, stop = repl.runEntry(name, entry.Text, entry.Text, true, entry.Background); stop {
+		if status, stop = repl.runEntry(name, entry.Text, entry.Text, entry.Background); stop {
 			repl.end()
 			return status
 		}
@@ -163,13 +164,10 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 
 // replSession runs entries of one interactive session.
 type replSession struct {
-	run            *sessionRun
-	shell          replShell
-	promptFragment int // 1 + index of the <kash-prompt> fragment; 0 before the first call
-	rightFragment  int // the same for <kash-rprompt>
+	run   *sessionRun
+	shell replShell
 	// Job control (repl_jobs.go).
 	jobs            []*replJob
-	asyncSeen       int  // async graphs already attributed to jobs
 	started         int  // jobs started so far, for their start order
 	jobControl      bool // a terminal session
 	stopSignals     <-chan os.Signal
@@ -203,8 +201,7 @@ func replExitEntry(text string) bool {
 // runEntry runs one entry: a session command, or Kash appended to the
 // session. parsed is the text given to the parser; it equals text, except for
 // startup entries, which keep their file offsets through blank padding.
-// fragment registers text as the diagnostic source named name.
-func (s *replSession) runEntry(name, text, parsed string, fragment, background bool) (int, bool) {
+func (s *replSession) runEntry(name, text, parsed string, background bool) (int, bool) {
 	run, session := s.run, s.run.Session
 	if s.options != nil {
 		if handled, status := s.options.command(text, run.Out, run.Err); handled {
@@ -227,9 +224,6 @@ func (s *replSession) runEntry(name, text, parsed string, fragment, background b
 	}
 	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
 		return status, false
-	}
-	if fragment {
-		run.Fragments = append(run.Fragments, program.Fragment{Name: name, Text: text, Lang: "kash"})
 	}
 	first, diagnostics := session.AppendKash(name, parsed)
 	if s.reportDiagnostics(diagnostics) {
@@ -335,7 +329,7 @@ func (s *replSession) loadStartupFile(path string, explicit bool) (int, bool) {
 			}
 		}
 		var stop bool
-		if status, stop = s.runEntry(path, entry, string(padding)+entry, false, read.Background); stop {
+		if status, stop = s.runEntry(path, entry, string(padding)+entry, read.Background); stop {
 			return status, true
 		}
 	}
@@ -344,20 +338,19 @@ func (s *replSession) loadStartupFile(path string, explicit bool) (int, bool) {
 // prompt returns the first-line prompt: the result of the session's
 // kash-prompt function when it yields a string, otherwise the default.
 func (s *replSession) prompt(status int) (string, bool) {
-	return s.callPrompt("kash-prompt", &s.promptFragment, status, s.shell.prompt())
+	return s.callPrompt("kash-prompt", status, s.shell.prompt())
 }
 
 // rightPrompt returns the right prompt: the result of the session's
 // kash-rprompt function when it yields a string, otherwise none.
 func (s *replSession) rightPrompt(status int) (string, bool) {
-	return s.callPrompt("kash-rprompt", &s.rightFragment, status, "")
+	return s.callPrompt("kash-rprompt", status, "")
 }
 
 // callPrompt calls the prompt function function with the prompt record,
 // returning its string result, or fallback when it is undefined, fails, or
-// yields another value. fragment holds 1 + the index of its diagnostic
-// fragment, 0 before the first call.
-func (s *replSession) callPrompt(function string, fragment *int, status int, fallback string) (string, bool) {
+// yields another value.
+func (s *replSession) callPrompt(function string, status int, fallback string) (string, bool) {
 	run, session := s.run, s.run.Session
 	if !session.Program.Eval.HasFunction(function) {
 		return fallback, false
@@ -370,15 +363,11 @@ func (s *replSession) callPrompt(function string, fragment *int, status int, fal
 		}
 	}
 	text := "(" + function + " [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + " jobs: " + strconv.Itoa(jobs) + "])"
-	if *fragment == 0 {
-		run.Fragments = append(run.Fragments, program.Fragment{Name: name, Lang: "kash"})
-		*fragment = len(run.Fragments)
-	}
-	run.Fragments[*fragment-1].Text = text
 	first, diagnostics := session.AppendKash(name, text)
 	if s.reportDiagnostics(diagnostics) {
 		return fallback, false
 	}
+	defer session.DiscardWork(first, len(session.Work))
 	var value core.Value
 	run.Capture = &value
 	defer func() {

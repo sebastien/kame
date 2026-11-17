@@ -2,7 +2,10 @@ package eval
 
 import (
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/lang/definition"
+	"kame/lang/expr"
+	"slices"
 	"strconv"
 )
 
@@ -90,7 +93,7 @@ func (p *Program) RegisterInteractive(definitions []*definition.Definition) []di
 		if existing != nil && d.Default {
 			continue
 		}
-		duplicate := existing != nil && (existing.Kind == bindingDefinition || existing.Kind == bindingLocalDefinition)
+		duplicate := p.Definition(d.Name) != nil || existing != nil && (existing.Kind == bindingDefinition || existing.Kind == bindingLocalDefinition)
 		for j := 0; j < i && !duplicate; j++ {
 			duplicate = definitions[j].Name == d.Name && !definitions[j].Eager && !definitions[j].Function
 		}
@@ -101,13 +104,19 @@ func (p *Program) RegisterInteractive(definitions []*definition.Definition) []di
 	if len(diagnostics) != 0 {
 		return diagnostics
 	}
+	p.Scope.replaceBindings = true
 	for _, d := range definitions {
 		switch {
 		case d.Default && p.Scope.lookup(d.Name) != nil:
 		case d.Eager:
 			p.Scope.reserveEager(d.Name)
 		case d.Function:
-			p.registerFunction(d)
+			// The binding and saved aliases own this body, not parsed history.
+			cloned := mem.Alloc[definition.Definition](p.Alloc)
+			*cloned = *d
+			cloned.Parameters = slices.Clone(d.Parameters)
+			cloned.Expression = expr.Clone(p.Alloc, d.Expression)
+			p.registerFunction(cloned).DefinitionOwned = true
 		default:
 			p.registerLazy(d)
 		}

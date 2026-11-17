@@ -625,6 +625,11 @@ func freeRunSources(sources *[]buildSource) {
 }
 
 func emitRunDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, fragments []program.Fragment, loaded []buildSource) {
+	if d.SourceText != "" {
+		authored := source.Source{Name: d.Source, Text: d.SourceText}
+		emitDiagnostic(out, d, json, &authored)
+		return
+	}
 	for i := range loaded {
 		for j := range loaded[i].Files {
 			file := loaded[i].Files[j]

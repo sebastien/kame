@@ -114,8 +114,11 @@ type StringPart struct {
 type Expr struct {
 	// SourceOrigin is compiler loading metadata (one-based), not authored syntax.
 	// Generated trees retain zero even if their byte spans overlap a source file.
-	SourceOrigin  int
-	CommentIndent int // Authored Kash comment depth; comments do not close blocks.
+	SourceOrigin int
+	// EntrySource is shared interactive provenance, retained by Go's GC rather
+	// than a program-wide source table. Cloned/escaping ASTs keep it alive.
+	EntrySource   *source.Source `json:"-"`
+	CommentIndent int            // Authored Kash comment depth; comments do not close blocks.
 	// Topology and Edges are used only by prepared process graphs. Authored
 	// syntax retains groups and connections until graph validation/lowering.
 	Topology       bool

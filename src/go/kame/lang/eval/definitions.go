@@ -72,7 +72,11 @@ type Program struct {
 	processEnvironmentValue core.Signature
 	OperationMemos          []*operationMemo
 	Processes               []*processTask
-	finalizers              []*FinalizerState
+	nextProcess             int
+	// ProcessStarted attributes a new async graph before it can complete.
+	ProcessStarted     func(int64, *ProcessHandle)
+	releasedStatements []*core.Node
+	finalizers         []*FinalizerState
 	// The driver must keep polling through cancellation and acknowledge reaping
 	// before cleanup. A missing driver rejects finally! before arming it.
 	FinalizationNow      func(any) int64
@@ -252,10 +256,11 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 	return p
 }
 
-func (p *Program) registerFunction(d *definition.Definition) {
+func (p *Program) registerFunction(d *definition.Definition) *Function {
 	function := mem.Alloc[Function](p.Alloc)
 	function.Kind, function.Parameters, function.Expression, function.Scope, function.ParametersOwned, function.Definition = FunctionDefinition, convertParameters(p.Alloc, d.Parameters), d.Expression, p.Scope, true, d
 	p.Scope.setFunction(d.Name, function)
+	return function
 }
 
 func (p *Program) registerLazy(d *definition.Definition) {
@@ -523,8 +528,19 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 		freeCallables(state.Alloc, &result.Value)
 		result.Value.Free(state.Alloc)
 		location := definition.Program.LocateSource(definition.Program.Script.Source.Name, definition.Definition.Expression.Span)
+		if origin := definition.Definition.Expression.SourceOrigin; origin > 0 && origin <= len(definition.Program.SourceParts) {
+			part := definition.Program.SourceParts[origin-1]
+			span := definition.Definition.Expression.Span
+			span.Start, span.End = span.Start-part.Start+part.Offset, span.End-part.Start+part.Offset
+			location = Location{Source: part.Name, Span: span}
+		}
 		atom.Kind = core.AtomFailed
 		atom.Diagnostic = diagnostic.Diagnostic{Source: location.Source, Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "callable is invocation-scoped and cannot be stored as a definition; apply it immediately (for example, with map)", Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}
+		if entry := definition.Definition.Expression.EntrySource; entry != nil {
+			atom.Diagnostic.Source, atom.Diagnostic.SourceText = entry.Name, entry.Text
+			span := definition.Definition.Expression.Span
+			atom.Diagnostic.Span = diagnostic.Span{Start: span.Start, End: span.End}
+		}
 		return core.PollEmitted
 	}
 	atom.Kind, atom.Value, atom.Wait = core.AtomValue, result.Value, true

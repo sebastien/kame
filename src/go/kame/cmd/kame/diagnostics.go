@@ -324,7 +324,11 @@ func writeDiagnosticFrame(out io.Writer, d diagnostic.Diagnostic, index int, pri
 	var src *source.Source
 	loaded := false
 	if f.Source != "" {
-		src, loaded = diagnosticSource(f.Source, primary)
+		if f.SourceText != "" {
+			src = &source.Source{Name: f.Source, Text: f.SourceText}
+		} else {
+			src, loaded = diagnosticSource(f.Source, primary)
+		}
 		cli.Style(out, "structure", separator, styled)
 		if src != nil && src.Name == f.Source {
 			position := src.Position(f.Span.Start)

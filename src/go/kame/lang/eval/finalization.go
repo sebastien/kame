@@ -181,6 +181,7 @@ func (p *Program) finalizerTasks(s *FinalizerState, c *Context, cleanup bool, ca
 			continue
 		}
 		if cancel {
+			task.observe()
 			c.Engine.ForgetDependency(task.Node.Key)
 			if task.Root != nil {
 				p.Engine.Release(task.Root)
@@ -194,6 +195,7 @@ func (p *Program) finalizerTasks(s *FinalizerState, c *Context, cleanup bool, ca
 			if !c.Engine.TryDependency(task.Node.Key) {
 				return Result{Waiting: true}
 			}
+			task.observe()
 			if d := c.Engine.DependencyDiagnostic(task.Node.Key); d.Code != "" {
 				return Result{Diagnostic: d.Clone(c.Run)}
 			}

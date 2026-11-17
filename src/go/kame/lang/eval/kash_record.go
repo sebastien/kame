@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"kame/internal/mem"
 	"kame/lang/expr"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -149,32 +150,80 @@ func callPathWithin(callPath string, path string) bool {
 // than keeping one suspended-application history per input record. Async jobs
 // and invocation-owned defers retain their independently owned contexts.
 func (p *Program) retireRecordProgress(c *Context) {
-	p.retireRecordNode(c.Engine.NodeID(), c.CallPath)
-	// Completed callable/with scopes are not authored retained cleanup. Release
-	// their roots, consumer edges, worker nodes and contexts before the next item.
-	for i := range p.DeferScopes {
-		s := p.DeferScopes[i]
-		if !s.Done || !s.Observed || !callPathWithin(s.CallPath, c.CallPath) {
+	p.retireProgress(c.Engine.NodeID(), c.CallPath, c.Engine)
+}
+
+// ReleaseStatement queues execution history for collection at a quiet driver
+// boundary. Engine cancellation alone does not acknowledge host reaping.
+func (p *Program) ReleaseStatement(node *core.Node) {
+	if node == nil {
+		return
+	}
+	if !slices.Contains(p.releasedStatements, node) {
+		p.releasedStatements = append(p.releasedStatements, node)
+	}
+}
+
+func (p *Program) retireStatement(node *core.Node) bool {
+	if node.ID == 0 {
+		return true
+	}
+	id := node.ID
+	if !p.Engine.Retire(node) {
+		return false
+	}
+	retired := p.retireProgress(id, "", nil)
+	for i := len(p.finalizers) - 1; i >= 0; i-- {
+		s := p.finalizers[i]
+		if !retired[s.NodeID] || s.Stage != 4 {
 			continue
 		}
-		if s.Root != nil {
-			p.Engine.Release(s.Root)
-			s.Root = nil
+		for _, task := range p.Processes {
+			if task.Finalizer == s {
+				task.Finalizer, task.Context.finalizer = nil, nil
+			}
 		}
-		if s.Owner == c.Engine.NodeID() && s.Node != nil {
-			c.Engine.ForgetDependency(s.Node.Key)
-		}
+		freeFinalizer(p.Alloc, s)
+		p.finalizers = slices.Delete(p.finalizers, i, i+1)
 	}
+	return true
+}
+
+func (p *Program) retireProgress(node int64, path string, engine *core.EngineContext) map[int64]bool {
+	p.retireRecordNode(node, path)
+	var retired map[int64]bool
+	if engine == nil {
+		retired = map[int64]bool{node: true}
+	}
+	// Completed callable/with scopes are not authored retained cleanup. Release
+	// their roots, consumer edges, worker nodes and contexts before the next item.
 	for pass := 0; pass < MaxEvaluationDepth; pass++ {
 		removed := false
+		for _, s := range p.DeferScopes {
+			if !s.Done || !s.Observed || !callPathWithin(s.CallPath, path) || engine == nil && !retired[s.Owner] {
+				continue
+			}
+			if s.Root != nil {
+				p.Engine.Release(s.Root)
+				s.Root = nil
+			}
+			if engine != nil && s.Owner == node && s.Node != nil {
+				engine.ForgetDependency(s.Node.Key)
+			}
+		}
 		for i := len(p.DeferScopes) - 1; i >= 0; i-- {
 			s := p.DeferScopes[i]
-			if !s.Done || !s.Observed || s.Root != nil || !callPathWithin(s.CallPath, c.CallPath) {
+			if !s.Done || !s.Observed || s.Root != nil || !callPathWithin(s.CallPath, path) || engine == nil && !retired[s.Owner] {
 				continue
 			}
 			if s.Node != nil {
+				id := s.Node.ID
 				if !p.Engine.Retire(s.Node) {
 					continue
+				}
+				p.retireRecordNode(id, path)
+				if retired != nil {
+					retired[id] = true
 				}
 				s.Node = nil
 				removed = true
@@ -186,7 +235,10 @@ func (p *Program) retireRecordProgress(c *Context) {
 					id := action.Node.ID
 					if p.Engine.Retire(action.Node) {
 						action.Node = nil
-						p.retireRecordNode(id, c.CallPath)
+						p.retireRecordNode(id, path)
+						if retired != nil {
+							retired[id] = true
+						}
 						removed = true
 					} else {
 						complete = false
@@ -197,14 +249,14 @@ func (p *Program) retireRecordProgress(c *Context) {
 				continue
 			}
 			p.freeDeferScope(s)
-			copy(p.DeferScopes[i:], p.DeferScopes[i+1:])
-			p.DeferScopes = p.DeferScopes[:len(p.DeferScopes)-1]
+			p.DeferScopes = slices.Delete(p.DeferScopes, i, i+1)
 			removed = true
 		}
 		if !removed {
 			break
 		}
 	}
+	return retired
 }
 
 func (p *Program) retireRecordNode(node int64, path string) {
@@ -217,8 +269,7 @@ func (p *Program) retireRecordNode(node int64, path string) {
 			state.Free(p.Alloc, state.Value)
 		}
 		mem.FreeString(p.Alloc, state.CallPath)
-		copy(p.OperationStates[i:], p.OperationStates[i+1:])
-		p.OperationStates = p.OperationStates[:len(p.OperationStates)-1]
+		p.OperationStates = slices.Delete(p.OperationStates, i, i+1)
 	}
 	for i := len(p.OperationMemos) - 1; i >= 0; i-- {
 		state := p.OperationMemos[i]

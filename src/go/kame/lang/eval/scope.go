@@ -3,7 +3,6 @@ package eval
 import (
 	"kame/core"
 	"kame/internal/mem"
-	"kame/lang/expr"
 )
 
 type bindingKind int
@@ -39,6 +38,10 @@ type Scope struct {
 	References   int
 	// Mutable scopes cannot reuse expressions that might have changed bindings.
 	Mutable bool
+	// Interactive rebinding replaces slots; other scopes keep authored shadowing.
+	replaceBindings bool
+	// Call scopes pin their code while suspended bodies or cleanup borrow it.
+	sourceStorage *FunctionStorage
 	// Section holds the positional arguments of an enclosing placeholder
 	// section call. The scope owns these values and frees them with itself.
 	Section []core.Value
@@ -79,7 +82,6 @@ func (s *Scope) setValue(name string, value core.Value) {
 }
 
 func (s *Scope) appendBinding(value binding) {
-	s.Bindings = append(s.Bindings, value)
 	lo, hi := 0, len(s.bindingIndex)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
@@ -90,9 +92,19 @@ func (s *Scope) appendBinding(value binding) {
 		}
 	}
 	if lo < len(s.bindingIndex) && s.bindingIndex[lo].name == value.Name {
+		if s.replaceBindings {
+			index := s.bindingIndex[lo].index
+			old := s.Bindings[index]
+			s.Bindings[index] = value
+			s.bindingIndex[lo].name = value.Name
+			s.freeBinding(&old)
+			return
+		}
+		s.Bindings = append(s.Bindings, value)
 		s.bindingIndex[lo].index = len(s.Bindings) - 1
 		return
 	}
+	s.Bindings = append(s.Bindings, value)
 	s.bindingIndex = append(s.bindingIndex, bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1})
 	copy(s.bindingIndex[lo+1:], s.bindingIndex[lo:])
 	s.bindingIndex[lo] = bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1}
@@ -111,6 +123,9 @@ func (s *Scope) trySetValue(name string, value core.Value) bool {
 }
 
 func (s *Scope) setFunction(name string, function *Function) {
+	if function.PayloadAlloc == nil {
+		function.PayloadAlloc = s.Alloc
+	}
 	s.appendBinding(binding{Kind: bindingFunction, Name: owned(s.Alloc, name), Function: function})
 }
 
@@ -167,42 +182,7 @@ func (s *Scope) Free() {
 		return
 	}
 	for i := range s.Bindings {
-		mem.FreeString(s.Alloc, s.Bindings[i].Name)
-		if s.Bindings[i].Kind == bindingValue || s.Bindings[i].Kind == bindingEager {
-			freeCallables(s.Alloc, &s.Bindings[i].Value)
-			s.Bindings[i].Value.Free(s.Alloc)
-		}
-		if s.Bindings[i].Kind == bindingDefinition {
-			s.Bindings[i].Definition.Free(s.Alloc)
-		}
-		if s.Bindings[i].Kind == bindingLocalDefinition {
-			local := s.Bindings[i].Local
-			local.Value.Free(s.Alloc)
-			local.Diagnostic.Free(s.Alloc)
-			FreeEffects(s.Alloc, local.Effects)
-			for j := range local.WritePaths {
-				mem.FreeString(s.Alloc, local.WritePaths[j])
-			}
-			mem.FreeSlice(nil, local.WritePaths)
-			mem.Free(s.Alloc, local)
-		}
-		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Kind == FunctionDefinition {
-			if s.Bindings[i].Function.ParametersOwned {
-				if s.Bindings[i].Function.ParameterNamesOwned {
-					for j := range s.Bindings[i].Function.Parameters {
-						mem.FreeString(s.Alloc, s.Bindings[i].Function.Parameters[j].Name)
-					}
-				}
-				mem.FreeSlice(nil, s.Bindings[i].Function.Parameters)
-			}
-			if s.Bindings[i].Function.BodyOwned {
-				for j := range s.Bindings[i].Function.Body {
-					expr.Free(s.Alloc, s.Bindings[i].Function.Body[j])
-				}
-				mem.FreeSlice(nil, s.Bindings[i].Function.Body)
-			}
-			mem.Free(s.Alloc, s.Bindings[i].Function)
-		}
+		s.freeBinding(&s.Bindings[i])
 	}
 	for i := range s.Section {
 		freeCallables(s.Alloc, &s.Section[i])
@@ -211,7 +191,34 @@ func (s *Scope) Free() {
 	mem.FreeSlice(nil, s.Section)
 	mem.FreeSlice(nil, s.Bindings)
 	mem.FreeSlice(nil, s.bindingIndex)
+	releaseFunctionStorage(s.sourceStorage)
 	parent := s.Parent
 	mem.Free(s.Alloc, s)
 	parent.Free()
+}
+
+func (s *Scope) freeBinding(b *binding) {
+	mem.FreeString(s.Alloc, b.Name)
+	if b.Kind == bindingValue || b.Kind == bindingEager {
+		freeCallables(s.Alloc, &b.Value)
+		b.Value.Free(s.Alloc)
+	}
+	if b.Kind == bindingDefinition {
+		b.Definition.Free(s.Alloc)
+	}
+	if b.Kind == bindingLocalDefinition {
+		local := b.Local
+		local.Value.Free(s.Alloc)
+		local.Diagnostic.Free(s.Alloc)
+		FreeEffects(s.Alloc, local.Effects)
+		for j := range local.WritePaths {
+			mem.FreeString(s.Alloc, local.WritePaths[j])
+		}
+		mem.FreeSlice(nil, local.WritePaths)
+		mem.Free(s.Alloc, local)
+	}
+	if b.Kind == bindingFunction && b.Function.Kind == FunctionDefinition {
+		freeFunctionStorage(s.Alloc, b.Function)
+		mem.Free(s.Alloc, b.Function)
+	}
 }

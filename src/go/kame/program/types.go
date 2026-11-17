@@ -231,6 +231,10 @@ func (h *Handle) Free() {
 		// for another runtime tick that may never occur.
 		p.drainCancellations()
 	}
+	if h.Session != nil {
+		p.Eval.ReleaseStatement(h.Node)
+		p.CollectProcesses()
+	}
 	mem.FreeString(p.Alloc, h.Target)
 	*h = Handle{}
 	mem.Free(p.Alloc, h)
@@ -360,13 +364,14 @@ type Program struct {
 	ObserveWork func(*core.Node, string, bool)
 	// Prepared dispatch batches let a freestanding host publish work before a
 	// synchronous evaluator call. Selection/order are the same as a normal tick.
-	workPrepared    bool
-	workDispatching bool
-	workReady       []*core.Node
-	workIndex       int
-	nextRequest     int64
-	Pending         []pendingRequest
-	epoch           int64
+	workPrepared        bool
+	workDispatching     bool
+	collectingProcesses bool
+	workReady           []*core.Node
+	workIndex           int
+	nextRequest         int64
+	Pending             []pendingRequest
+	epoch               int64
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	InspectionWaiting bool

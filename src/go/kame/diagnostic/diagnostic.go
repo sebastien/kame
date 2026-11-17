@@ -35,6 +35,8 @@ type Frame struct {
 	Label  string
 	Source string
 	Span   Span
+	// SourceText shares interactive source storage; never serialize source text.
+	SourceText string `json:"-"`
 }
 
 // Related is a separately located fact which helps explain a diagnostic.
@@ -75,6 +77,7 @@ type Diagnostic struct {
 	Protected   bool
 	Cancelled   bool
 	Source      string
+	SourceText  string `json:"-"`
 	Code        string
 	Severity    Severity
 	Message     string

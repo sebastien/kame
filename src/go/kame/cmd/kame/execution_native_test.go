@@ -429,6 +429,40 @@ func TestNativeInteractiveKashEntryContracts(t *testing.T) {
 	}
 }
 
+func TestNativeInteractiveKashIndependentSourceDiagnostics(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	for _, entry := range []struct {
+		text, location string
+	}{
+		{"def broken\n\t(fail! \"old entry\")\n\n" + strings.Repeat("(nop)\n", 32) + "(broken)\n", "<kash:1>:2:9"},
+		{"def one arg\n\treturn 0\n\n(one 1 2)\n", "<kash:2>:1:1"},
+		{"(apply ([x] x) [1 2])\n", "<kash:1>:1:9"},
+		{"bad = ([x] x)\n(nop bad)\n", "<kash:1>:1:7"},
+		{"def older x\n\t(fail! \"old version\")\n\nlet alias = older\ndef older x\n\treturn 0\n\n(alias 1)\n", "<kash:1>:2:9"},
+	} {
+		var out, errOut bytes.Buffer
+		status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i"}, strings.NewReader(entry.text), &out, &errOut)
+		if status == 0 || !strings.Contains(errOut.String(), entry.location) {
+			t.Errorf("source diagnostics: status=%d want=%s err=%s", status, entry.location, errOut.String())
+		}
+	}
+}
+
+func TestNativeInteractiveKashReclaimedEntriesKeepDeferredWorkAndExplain(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	entries := "(fail! \"keep this source\")\ndefer (out! \"deferred\")\n" +
+		strings.Repeat("(nop)\n", 256) + "explain\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
+	if status != 0 || out.String() != "deferred" {
+		t.Fatalf("reclaimed entries: status=%d out=%q err=%s", status, out.String(), errOut.String())
+	}
+	if strings.Count(errOut.String(), "error[USER_ERROR]: keep this source") != 2 ||
+		strings.Count(errOut.String(), "<kash:1>:1:1") < 2 {
+		t.Fatalf("explain lost the original source: %s", errOut.String())
+	}
+}
+
 // Explicit grants do not move with cd, unlike the default policy.
 func TestNativeInteractiveKashExplicitGrants(t *testing.T) {
 	t.Setenv("KASH_INIT", "")
@@ -587,6 +621,26 @@ func TestNativeInteractiveKashBackgroundLineWithoutTerminal(t *testing.T) {
 	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
 	if status != 0 || out.String() != "foreground-first\nbackground-done\n" {
 		t.Fatalf("background entry: status=%d out=%q err=%q", status, out.String(), errOut.String())
+	}
+}
+
+func TestNativeInteractiveKashAsyncFailureReporting(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	for _, test := range []struct {
+		name, entries   string
+		status, reports int
+	}{
+		{"unhandled-await", "let job = (run! :async :true \"/bin/false\")\n(await job)\n", 1, 1},
+		{"awaited", "let job = (run! :async :true \"/bin/false\")\nlet result = (await job) ?? :nil\n/bin/true\n", 0, 0},
+		{"joined-call", "def worker\n\t/bin/false &\n\nlet result = (worker) ?? :nil\n/bin/true\n", 0, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i"}, strings.NewReader(test.entries), &out, &errOut)
+			if status != test.status || strings.Count(errOut.String(), "error[RECIPE_FAIL]") != test.reports {
+				t.Fatalf("status=%d out=%q err=%q", status, out.String(), errOut.String())
+			}
+		})
 	}
 }
 

@@ -71,6 +71,12 @@ named `<kash:N>`, numbered from one per session. Diagnostics locate entry text
 by that name and entry-relative positions, including traces through functions
 defined by earlier entries.
 
+Each entry has independent source storage and local byte spans. Appending an
+entry must not concatenate or copy the previous session source. Shared
+provenance travels with live syntax and retained diagnostics rather than being
+registered in an ever-growing source table. Diagnostic source text is internal
+presentation data and must not appear in JSON.
+
 ## Session semantics
 
 All entries share one program, engine, top-level scope, capability policy,
@@ -90,6 +96,39 @@ statement runs and the session is unchanged.
 Statements of an entry run in order. A failure is reported and ends that entry
 only; the session continues with the next entry. The entry status is the
 failure's ordinary process status. Completed effects are never replayed.
+
+After the last handle and job root release a completed statement, its engine
+node and resumable operation progress are retired. Live published lazy
+dependencies retain one shared session root per dependency instead of keeping
+every completed statement alive. Pending jobs, deferred cleanup and finalizers
+keep their existing ownership and must not be retired while still referenced.
+
+Transient syntax belongs to its queued work until started, then to its engine
+node until retirement. Escaping callables and deferred work own their syntax
+independently. A finished or abandoned entry releases its queue slots without
+moving other jobs' indices; empty trailing slots can be reused. Reusing a slot
+must not reuse a still-live statement's engine identity. Ordinary command entries
+are not retained as execution history.
+
+Rebinding a top-level eager value or function replaces its binding slot, rather
+than retaining shadowed slots and initializer syntax. A saved callable keeps the
+implementation and parameters it borrowed even after its name is rebound.
+Suspended calls keep their already-resolved callee and do not replay application
+head effects. Call scopes retain the code needed by captured lazy bindings,
+async work and deferred cleanup, including cleanup after cancellation. Replaced
+code is released after its last such owner goes away. Lazy definitions remain
+canonical engine resources and cannot be redeclared by shadowing them first.
+
+Completed asynchronous graphs do not become session history. At a driver
+boundary, release terminal tasks and their launcher roots once the host has
+acknowledged physical reaping and all graph consumers have released them.
+Saved process handles retain an independent completion value or diagnostic;
+`await` remains repeat-safe after execution state has been retired. Unobserved
+failures remain available to the owning job report or invocation join. Awaited,
+joined and deliberately cancelled outcomes are not raised again by a later join.
+Attribute async starts to jobs before dispatch, including starts reached through
+an existing job root. Continue pumping pending host acknowledgements while the
+editor is idle after cancellation.
 
 A statement-leading expression displays its value with canonical value display
 and a newline, unless the value is nil or a command completion record, whose
