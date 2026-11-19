@@ -23,7 +23,9 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 			return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable")
 		}
 		result = p.operation(scope, operation, expression.Items, context, expression.Span)
-		firstPart = 2
+	} else if len(expression.Items) != 0 {
+		result = p.evaluate(context.Engine, scope, expression.Items[0], context)
+		firstPart = 0
 	} else {
 		result = name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context)
 	}
@@ -67,37 +69,6 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 		}
 		return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
 	}
-	if part.Kind == expr.ReferenceSelection {
-		if value.Kind != core.Record {
-			return failure(context.Run, "REF_MISSING", part.Span, "selection needs a record")
-		}
-		var fields []core.RecordField
-		start := 0
-		for i := 0; i <= len(part.Text); i++ {
-			if i != len(part.Text) && part.Text[i] != ',' {
-				continue
-			}
-			key := part.Text[start:i]
-			found := false
-			for j := range value.Record {
-				if value.Record[j].Key == key {
-					fields = append(fields, core.RecordField{Key: key, Value: borrowValue(context.Run, value.Record[j].Value)})
-					found = true
-					break
-				}
-			}
-			if !found {
-				// No fields transfer on rejection; each borrow owns its wrapper.
-				freeRecordWithCallables(context.Run, fields)
-				return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
-			}
-			start = i + 1
-		}
-		result := Result{Value: core.NewRecord(context.Run, fields)}
-		// NewRecord transfers the independent field wrappers into the result.
-		freeRecord(context.Run, fields)
-		return result
-	}
 	if part.Kind == expr.ReferenceIndex {
 		index, ok := parseIndex(part.Text)
 		if !ok {
@@ -124,30 +95,6 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 			return Result{Value: core.NewString(context.Run, value.Text[start:end])}
 		}
 		return failure(context.Run, "REF_MISSING", part.Span, "index needs a list or string")
-	}
-	if part.Kind == expr.ReferenceSlice {
-		bounds := parseSlice(part.Text)
-		if !bounds.OK {
-			return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "invalid slice")
-		}
-		start, end := bounds.Start, bounds.End
-		if value.Kind == core.List {
-			bounds = normalizedSlice(bounds, len(value.List))
-			if !bounds.OK {
-				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range")
-			}
-			start, end = bounds.Start, bounds.End
-			return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: value.List[start:end]})}
-		}
-		if value.Kind == core.String {
-			bounds = normalizedSlice(bounds, utf8.RuneCountInString(value.Text))
-			if !bounds.OK {
-				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range")
-			}
-			start, end = bounds.Start, bounds.End
-			return Result{Value: core.NewString(context.Run, value.Text[runeOffset(value.Text, start):runeOffset(value.Text, end)])}
-		}
-		return failure(context.Run, "REF_MISSING", part.Span, "slice needs a list or string")
 	}
 	return failure(context.Run, "REF_MISSING", part.Span, "invalid reference")
 }

@@ -86,6 +86,10 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 		return r
 	}
 	for i := range parsed.Items {
+		if parsed.Items[i].Kind == script.Include {
+			parsed.Free()
+			return failure(c.Run, "FEATURE_UNSUP", span, "include requires a file-backed source")
+		}
 		if parsed.Items[i].Kind == script.SessionCommand {
 			parsed.Free()
 			return failure(c.Run, "FEATURE_UNSUP", span, "session commands require an interactive session entry or startup file")
@@ -223,6 +227,13 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		state = stored.(*kashInvocation)
 	}
 	if state == nil {
+		if parsed != nil {
+			for _, item := range parsed.Items {
+				if item.Kind == script.Include {
+					return failure(c.Run, "FEATURE_UNSUP", item.Span, "include requires a file-backed source")
+				}
+			}
+		}
 		state = mem.Alloc[kashInvocation](p.Alloc)
 		state.Program = p
 		state.TimedIndex, state.TimeoutLimitMS = -1, c.TimeoutMS
@@ -314,7 +325,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+		c.Effects = append(c.Effects, effect.clone())
 	}
 	for i := range state.WritePaths {
 		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))

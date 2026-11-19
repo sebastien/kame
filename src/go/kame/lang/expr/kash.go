@@ -9,11 +9,25 @@ import (
 
 // Kash's process grammar and Kame expressions are mutually recursive. Keep the
 // shared parsing primitives here to avoid an expr <-> kash package cycle.
-// CommandCapture owns command words, not shell text or reparsed expression text.
+func actionPrefix(text string) string {
+	if strings.HasPrefix(text, "$(") {
+		return "$("
+	}
+	if strings.HasPrefix(text, "$?(") || strings.HasPrefix(text, "$&(") {
+		return text[:3]
+	}
+	return ""
+}
+
 func (p *parser) commandCapture() *Expr {
 	start := p.pos
-	p.pos += 2
-	return p.commandGraph(start, true)
+	prefix := actionPrefix(p.s.Text[start:])
+	p.pos += len(prefix)
+	e := p.commandGraph(start, true)
+	if prefix != "$(" {
+		e.ActionPrefix = prefix
+	}
+	return e
 }
 
 // ParseCommandPrefix parses one raw Kash graph on the original source. Nested
@@ -36,7 +50,7 @@ func (p *parser) commandSetupValue(key string) *Expr {
 		p.error(p.pos, p.pos, "expected Kash stage setup value")
 		return nil
 	}
-	if (key == "env" || key == "accept-exit") && p.s.Text[p.pos] == '[' {
+	if (key == "env" && p.s.Text[p.pos] == '{') || (key == "accept-exit" && p.s.Text[p.pos] == '[') {
 		word := p.node(CommandWord, p.pos)
 		word.Bool = true
 		inner := p.expression()
@@ -79,7 +93,7 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	}
 	p := parser{a: a, s: bounded, pos: start, kash: true, valuePathStart: start + 1}
 	var e *Expr
-	if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
+	if start < len(s.Text) && s.Text[start] == '$' && actionPrefix(s.Text[start:]) == "" {
 		word := p.commandWord(false)
 		if word.Bool {
 			e = word.Parts[0].Expr
@@ -631,9 +645,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			continue
 		}
 		if p.s.Text[p.pos] == '#' {
-			for p.pos < len(p.s.Text) && p.s.Text[p.pos] != '\n' {
-				p.pos++
-			}
+			p.lineComment()
 			continue
 		}
 		before := p.pos
@@ -805,6 +817,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 	quoted, hadQuote, spread := false, false, false
 	singleQuoted := false
 	wordDelimiters := 0
+	var continuations []source.Span
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
@@ -837,7 +850,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			from := p.pos
 			previousKash := p.kash
 			p.kash = true
-			inner := p.expression()
+			inner := p.paren()
 			p.kash = previousKash
 			if inner != nil {
 				e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}})
@@ -860,12 +873,9 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				break
 			}
 			escaped := p.s.Text[p.pos]
-			if !quoted && escaped == '\r' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '\n' {
-				p.pos += 2
-				continue
-			}
-			if !quoted && escaped == '\n' {
-				p.pos++
+			if end := source.ContinuationEnd(p.s.Text, from, len(p.s.Text)); !quoted && end != from {
+				continuations = append(continuations, source.Span{Start: from, End: end})
+				p.pos = end
 				continue
 			}
 			if quoted {
@@ -926,7 +936,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) {
 					p.error(from, p.pos, "expected Kame reference after $")
 				} else {
-					inner = p.reference()
+					inner = p.referenceAfterName(p.name(), braced)
 				}
 				if braced {
 					if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '}' {
@@ -975,7 +985,43 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 		p.error(start, p.pos, "list spread requires a standalone unquoted command argv word")
 	}
 	e.Span.End = p.pos
+	if len(p.diags) == 0 {
+		p.retainCommandWordSpelling(e, continuations)
+	}
+	mem.FreeSlice(nil, continuations)
 	return e
+}
+
+// Retain the authored literal chunks around formatted substitutions. Capture
+// them before any source-span remapping in an enclosing quoted string.
+func (p *parser) retainCommandWordSpelling(word *Expr, continuations []source.Span) {
+	text := p.s.Text
+	start := word.Span.Start
+	appendLiteral := func(end int) {
+		literal := text[start:end]
+		if len(continuations) != 0 && continuations[0].Start < end {
+			var b strings.Builder
+			for len(continuations) != 0 && continuations[0].Start < end {
+				b.WriteString(text[start:continuations[0].Start])
+				start = continuations[0].End
+				continuations = continuations[1:]
+			}
+			b.WriteString(text[start:end])
+			literal = b.String()
+		}
+		word.wordSpelling = append(word.wordSpelling, sourceText(p.a, literal))
+	}
+	for _, part := range word.Parts {
+		if commandWordFormatsPart(part) {
+			appendLiteral(part.Span.Start)
+			start = part.Span.End
+		}
+	}
+	appendLiteral(word.Span.End)
+}
+
+func commandWordFormatsPart(part StringPart) bool {
+	return part.Form == "(" || part.Form == "$(" || part.Form == "path"
 }
 
 // Bool records typed substitution semantics, not whether a literal needs quotes.
@@ -1012,6 +1058,18 @@ func commandWordNeedsQuotes(e *Expr) bool {
 }
 
 func writeCommandWord(b *strings.Builder, e *Expr) {
+	if len(e.wordSpelling) != 0 {
+		chunk := 0
+		for _, part := range e.Parts {
+			if commandWordFormatsPart(part) {
+				b.WriteString(e.wordSpelling[chunk])
+				chunk++
+				writeExpr(b, part.Expr)
+			}
+		}
+		b.WriteString(e.wordSpelling[chunk])
+		return
+	}
 	// Expressions must stay outside command quotes. Quote only the adjacent
 	// literal/reference fragments, preserving scalar words versus typed splices.
 	mixedExpression := false
@@ -1045,7 +1103,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			boundary := false
 			if part.Form == "$" && i+1 < len(e.Parts) && len(e.Parts[i+1].Text) != 0 {
 				c := e.Parts[i+1].Text[0]
-				boundary = isNameContinue(c) || c == '/' || c == '.' || c == '?' || c == '!'
+				boundary = isNameContinue(c) || c == '.' || c == '?' || c == '!'
 			}
 			if boundary && !quoted {
 				b.WriteByte('"')
@@ -1099,7 +1157,7 @@ func ParseReferencePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	if start >= len(s.Text) || !isNameStart(s.Text[start]) {
 		p.error(start, start, "expected Kame reference")
 	} else {
-		e = p.reference()
+		e = p.referenceAfterName(p.name(), true)
 	}
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }

@@ -57,13 +57,13 @@ func TestStreamingGraphFormatting(t *testing.T) {
 		"printf a |(broadcast) (cat > ./left, cat > ./right)\n",
 		"(printf a, printf b) |(merge) cat\n",
 		"printf a |(frame :lines) |(balance) (|(each) cat, |(each) cat)\n",
-		"printf a |(frame :lines) |(filter :true | cat > ./selected) | cat\n",
+		"printf a |(frame :lines) |(filter true | cat > ./selected) | cat\n",
 		"if true\n\tprintf a |(broadcast) (cat, cat)\n",
 		"stream reports\n(printf a >&reports 2>&1, &reports | cat)\n",
 		"printf a |(broadcast) (cat, cat) ?\n",
 		"printf a |(broadcast) (cat, cat) ? printf fallback\n",
 		"printf a |(broadcast) (cat, cat) &\n",
-		"(printf a |(broadcast) (cat > ./audit, |(frame :lines) |(filter :true | cat >&errors) | cat > ./normal), &errors | cat)\n",
+		"(printf a |(broadcast) (cat > ./audit, |(frame :lines) |(filter true | cat >&errors) | cat > ./normal), &errors | cat)\n",
 	}
 	for i := range inputs {
 		s := script.ParseKash(a, "stream.kash", inputs[i])

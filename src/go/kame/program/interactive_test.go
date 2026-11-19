@@ -104,7 +104,7 @@ func TestSessionRetiresStatementsWithoutReplayingLazyEffects(t *testing.T) {
 	}, nil)
 	interactiveTestEntry(t, s, "<definition>", "saved = (out! \"once\")")
 	for i := 0; i < 256; i++ {
-		interactiveTestEntry(t, s, "<use>", "(nop saved)\nfor i in [1 2]\n\tif (nop :true)\n\t\t(nop i)\n")
+		interactiveTestEntry(t, s, "<use>", "(nop saved)\nfor i in [1, 2]\n\tif (nop true)\n\t\t(nop i)\n")
 		if len(s.Program.Eval.OperationStates) != 0 || len(s.Program.Eval.OperationMemos) != 0 {
 			t.Fatal("completed statement retained operation progress")
 		}
@@ -126,7 +126,7 @@ func TestSessionRetiresCompletedCallableScopes(t *testing.T) {
 	s := interactiveTestSession(t)
 	interactiveTestEntry(t, s, "<definition>", "def helper value\n\treturn 0\n")
 	interactiveTestEntry(t, s, "<nested>", "def nested value\n\tdefer (helper value)\n\t(helper value)\n")
-	for _, call := range []string{"(nested 1)", "(finally! ([] (nested 1)) ([] (nop)))"} {
+	for _, call := range []string{"(nested 1)", "(finally! (() => (nested 1)) (() => (nop ())))"} {
 		for i := 0; i < 128; i++ {
 			interactiveTestEntry(t, s, "<call>", call)
 			if len(s.Program.Eval.DeferScopes) != 1 {
@@ -183,11 +183,11 @@ func TestInteractiveWorkReclaimsSyntaxWithoutMovingOtherEntries(t *testing.T) {
 
 func TestInteractiveEscapedCallableKeepsItsSyntax(t *testing.T) {
 	s := interactiveTestSession(t)
-	interactiveTestEntry(t, s, "<saved>", "(if (def escaped ([x] (str x \"!\"))) :nil :nil)")
+	interactiveTestEntry(t, s, "<saved>", "def escaped x = str x \"!\"")
 	for i := 0; i < 256; i++ {
-		interactiveTestEntry(t, s, "<later>", "(nop)")
+		interactiveTestEntry(t, s, "<later>", "(nop ())")
 	}
-	interactiveTestEntry(t, s, "<use>", "(if (ne? (apply escaped [\"ok\"]) \"ok!\") (fail! \"escaped syntax was freed\") :nil)")
+	interactiveTestEntry(t, s, "<use>", "(if (ne? (apply escaped [\"ok\"]) \"ok!\") then (fail! \"escaped syntax was freed\") else nil)")
 	if len(s.Program.Parsed.Items) != 0 || len(s.Work) != 0 {
 		t.Fatal("escaped callable required retaining transient work or parsed history")
 	}
@@ -243,7 +243,7 @@ func TestInteractiveRebindingDoesNotRetainDeclarationHistory(t *testing.T) {
 			t.Fatal("rebinding retained obsolete slots, syntax or source history")
 		}
 	}
-	interactiveTestEntry(t, s, "<check>", "(if (ne? value \"value-511\") (fail! \"lost latest value\") :nil)")
+	interactiveTestEntry(t, s, "<check>", "(if (ne? value \"value-511\") then (fail! \"lost latest value\") else nil)")
 }
 
 func TestInteractiveSavedAliasesKeepReplacedFunctionPayload(t *testing.T) {
@@ -254,7 +254,7 @@ func TestInteractiveSavedAliasesKeepReplacedFunctionPayload(t *testing.T) {
 	}, nil)
 	interactiveTestEntry(t, s, "<old>", "def helper arg\n\t(out! (str \"old-\" arg))\n")
 	old := s.Program.Eval.Scope.Bindings[0].Function.Definition
-	interactiveTestEntry(t, s, "<aliases>", "let alias = helper\nlet keep = [helper [call: helper]]")
+	interactiveTestEntry(t, s, "<aliases>", "let alias = helper\nlet keep = [helper, {call: helper}]")
 	interactiveTestEntry(t, s, "<shadow>", "let helper = 42")
 	interactiveTestEntry(t, s, "<new>", "def helper arg\n\t(out! (str \"new-\" arg))\n")
 	if old.Expression == nil {
@@ -264,7 +264,7 @@ func TestInteractiveSavedAliasesKeepReplacedFunctionPayload(t *testing.T) {
 	if out.String() != "old-aold-bold-cnew-d" {
 		t.Fatalf("saved aliases changed implementation: %q", out.String())
 	}
-	interactiveTestEntry(t, s, "<release>", "let alias = :nil\nlet keep = :nil")
+	interactiveTestEntry(t, s, "<release>", "let alias = nil\nlet keep = nil")
 	if old.Expression != nil {
 		t.Fatal("last alias release retained the obsolete function body")
 	}
@@ -278,9 +278,9 @@ func TestInteractiveRebindingPreservesSuspendedCallsAndCleanup(t *testing.T) {
 			s.Program.Eval.SetDefinitionEffectSink(func(_ any, effect eval.Effect) {
 				out.Write(effect.Data)
 			}, nil)
-			interactiveTestEntry(t, s, "<old>", "def worker value\n\tlocal = (str \"cleanup-\" value)\n\tdefer (out! local)\n\t(out! (str \"started-\" value))\n\tfor i in [1 2]\n\t\t(nop i)\n\t(out! (str \"old-\" value))\n")
+			interactiveTestEntry(t, s, "<old>", "def worker value\n\tlocal = (str \"cleanup-\" value)\n\tdefer (out! local)\n\t(out! (str \"started-\" value))\n\tfor i in [1, 2]\n\t\t(nop i)\n\t(out! (str \"old-\" value))\n")
 			old := s.Program.Eval.Scope.Bindings[0].Function.Definition
-			first, diagnostics := s.AppendKash("<pending>", "((if (out! \"head-\") worker worker) \"a\")")
+			first, diagnostics := s.AppendKash("<pending>", "((if (out! \"head-\") then worker else worker) \"a\")")
 			if len(diagnostics) != 0 {
 				t.Fatal(diagnostics)
 			}
@@ -358,9 +358,12 @@ func TestInteractiveLazyDefinitionCannotBeRedeclaredAfterShadowing(t *testing.T)
 
 func TestRejectedReturnedCallableDoesNotPinReplacedCode(t *testing.T) {
 	s := interactiveTestSession(t)
-	interactiveTestEntry(t, s, "<factory>", "(def factory [] ([x] x))")
-	body := s.Program.Eval.Scope.Bindings[0].Function.Body[0]
-	first, diagnostics := s.AppendKash("<rejected>", "(factory)")
+	interactiveTestEntry(t, s, "<factory>", "def factory () = (x => x)")
+	body := s.Program.Eval.Scope.Bindings[0].Function.Expression
+	if body == nil {
+		t.Fatal("factory definition has no expression")
+	}
+	first, diagnostics := s.AppendKash("<rejected>", "(factory ())")
 	if len(diagnostics) != 0 {
 		t.Fatal(diagnostics)
 	}
@@ -379,7 +382,7 @@ func TestRejectedReturnedCallableDoesNotPinReplacedCode(t *testing.T) {
 	result.Result.Free(mem.System)
 	h.Free()
 	s.DiscardWork(first, len(s.Work))
-	interactiveTestEntry(t, s, "<replace>", "let factory = :nil")
+	interactiveTestEntry(t, s, "<replace>", "let factory = nil")
 	if body.Kind != expr.Invalid {
 		t.Fatal("rejected callable kept its factory's code pinned")
 	}
@@ -390,7 +393,7 @@ func BenchmarkInteractiveEntries(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		interactiveTestEntry(b, s, "<entry>", "(nop)")
+		interactiveTestEntry(b, s, "<entry>", "(nop ())")
 	}
 }
 
@@ -413,7 +416,7 @@ func TestInteractiveAsyncRetirementAndSavedHandles(t *testing.T) {
 	var handle *eval.ProcessHandle
 	p.Eval.ProcessStarted = func(_ int64, h *eval.ProcessHandle) { handle = h }
 	for i := 0; i < 128; i++ {
-		interactiveTestEntry(t, s, "<start>", `let job = (run! :async :true "/bin/true")`)
+		interactiveTestEntry(t, s, "<start>", `let job = (run! :async true "/bin/true")`)
 		drainInteractiveProcesses(t, s)
 		if handle == nil || handle.Root() != nil || handle.State() != core.NodeComplete {
 			t.Fatal("completed handle did not retain its terminal snapshot")
@@ -426,7 +429,7 @@ func TestInteractiveAsyncRetirementAndSavedHandles(t *testing.T) {
 		if len(p.Eval.OperationStates) != 0 {
 			t.Fatalf("retained %d operations", len(p.Eval.OperationStates))
 		}
-		interactiveTestEntry(t, s, "<await>", `(if (ne? (get "status" (await job)) 0) (fail! "lost result") :nil)`)
+		interactiveTestEntry(t, s, "<await>", `(if (ne? (get "status" (await job)) 0) then (fail! "lost result") else nil)`)
 		interactiveTestEntry(t, s, "<await-again>", `(await job)`)
 	}
 }
@@ -438,7 +441,7 @@ func TestInteractiveAsyncFailureRetainedUntilObserved(t *testing.T) {
 	p.Options.ResolveTool = posix.ResolveTool
 	var handle *eval.ProcessHandle
 	p.Eval.ProcessStarted = func(_ int64, h *eval.ProcessHandle) { handle = h }
-	interactiveTestEntry(t, s, "<failure>", `let job = (run! :async :true "/bin/false")`)
+	interactiveTestEntry(t, s, "<failure>", `let job = (run! :async true "/bin/false")`)
 	for i := 0; i < 2000 && handle.State() != core.NodeFailed; i++ {
 		p.Tick(1)
 	}
@@ -446,12 +449,12 @@ func TestInteractiveAsyncFailureRetainedUntilObserved(t *testing.T) {
 	if handle.State() != core.NodeFailed || handle.Observed() || len(p.Eval.Processes) != 1 {
 		t.Fatal("unreported failure was lost before its owning join")
 	}
-	interactiveTestEntry(t, s, "<handled>", `let handled = (await job) ?? :nil`)
+	interactiveTestEntry(t, s, "<handled>", `let handled = (await job) ?? nil`)
 	drainInteractiveProcesses(t, s)
 	if !handle.Observed() || handle.Diagnostic().Code == "" {
 		t.Fatal("observed failure lost its saved diagnostic")
 	}
-	interactiveTestEntry(t, s, "<repeat>", `let handled = (await job) ?? :nil`)
+	interactiveTestEntry(t, s, "<repeat>", `let handled = (await job) ?? nil`)
 	h := s.Start(len(s.Work)).Handle
 	if h == nil {
 		t.Fatal("cannot start invocation join")
@@ -482,7 +485,7 @@ func TestInteractiveCancellationWaitsForHostReaping(t *testing.T) {
 			p.Eval.ProcessStarted = func(_ int64, h *eval.ProcessHandle) { process = h }
 			text := `(run! "/bin/sleep" "30")`
 			if async {
-				text = `let job = (run! :async :true "/bin/sleep" "30")`
+				text = `let job = (run! :async true "/bin/sleep" "30")`
 			}
 			first, diagnostics := s.AppendKash("<cancel>", text)
 			if len(diagnostics) != 0 {
@@ -524,7 +527,7 @@ func TestInteractiveInvocationJoinReportsAsyncFailureOnce(t *testing.T) {
 	p := s.Program
 	p.Options.Grants = []eval.Grant{{Capability: eval.Run}}
 	p.Options.ResolveTool = posix.ResolveTool
-	interactiveTestEntry(t, s, "<failure>", `let job = (run! :async :true "/bin/false")`)
+	interactiveTestEntry(t, s, "<failure>", `let job = (run! :async true "/bin/false")`)
 	for _, wantFailure := range []bool{true, false} {
 		h := s.Start(len(s.Work)).Handle
 		if h == nil {
@@ -558,7 +561,7 @@ func BenchmarkInteractiveAsync(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		interactiveTestEntry(b, s, "<async>", `let job = (run! :async :true "/bin/true")`)
+		interactiveTestEntry(b, s, "<async>", `let job = (run! :async true "/bin/true")`)
 		drainInteractiveProcesses(b, s)
 	}
 }
@@ -622,7 +625,7 @@ func TestInteractiveNestedAsyncStarts(t *testing.T) {
 	p.Eval.Terminal = true
 	var handles []*eval.ProcessHandle
 	p.Eval.ProcessStarted = func(_ int64, h *eval.ProcessHandle) { handles = append(handles, h) }
-	interactiveTestEntry(t, s, "<nested>", `let job = (run! :async :true "/bin/sleep" (if (run! :async :true "/bin/false") "0.01" "0.01"))`)
+	interactiveTestEntry(t, s, "<nested>", `let job = (run! :async true "/bin/sleep" (if (run! :async true "/bin/false") then "0.01" else "0.01"))`)
 	if len(handles) != 2 {
 		t.Fatalf("started %d processes", len(handles))
 	}

@@ -45,6 +45,7 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 
 func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool) Result {
 	stage.Kind, stage.Span = expr.CommandStage, e.Span
+	e = expr.Ungroup(e)
 	if e.Kind != expr.Application || len(e.Items) == 0 || e.Items[0].Kind != expr.Name || (e.Items[0].Text != "run!" && (pipeline || e.Items[0].Text != "capture!")) {
 		return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! stages must be run! applications")
 	}

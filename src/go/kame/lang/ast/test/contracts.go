@@ -9,19 +9,19 @@ import (
 	"strings"
 )
 
-func TestSchemaOneAdditiveSemanticFields(t *testing.T) {
+func TestSchemaTwoSemanticFields(t *testing.T) {
 	a := t.Allocator()
 	definitionLanguages := []string{"km", "kmk", "kash"}
 	for _, lang := range definitionLanguages {
 		buffer := bytes.Buffer{}
-		if ast.WriteAST(&buffer, lang, "functions", "(f) = 1\nv = 1\n") != 0 || !strings.Contains(buffer.String(), "\"function\":true") || !strings.Contains(buffer.String(), "\"function\":false") || !strings.Contains(buffer.String(), "\"valueKind\":\"expression\"") {
-			t.Error("schema-1 definition lost zero-parameter function/value distinction")
+		if ast.WriteAST(&buffer, lang, "functions", "(f) = 1\nv = 1\n") != 0 || !strings.Contains(buffer.String(), "\"function\":true") || !strings.Contains(buffer.String(), "\"function\":false") {
+			t.Error("schema-2 definition lost zero-parameter function/value distinction")
 		}
 		buffer.Reset()
 	}
 	patternLanguages := []string{"expr", "km", "kmk", "kash", "rule", "template"}
 	for _, lang := range patternLanguages {
-		text := "[./{name:~[a-z]+} ./{name:*}]"
+		text := "[./{name:~[a-z]+}, ./{name:*}]"
 		if lang == "kash" {
 			text = "p = " + text
 		}
@@ -36,8 +36,8 @@ func TestSchemaOneAdditiveSemanticFields(t *testing.T) {
 			t.Error("regex source failed formatting")
 		} else {
 			buffer := bytes.Buffer{}
-			if ast.WriteAST(&buffer, lang, "regex", formatted.Text) != 0 || !strings.Contains(buffer.String(), "\"regex\":true") || !strings.Contains(buffer.String(), "\"regex\":false") || !strings.Contains(buffer.String(), "\"schema\":1") {
-				t.Error("formatted regex mode missing from additive schema-1 AST")
+			if ast.WriteAST(&buffer, lang, "regex", formatted.Text) != 0 || !strings.Contains(buffer.String(), "\"regex\":true") || !strings.Contains(buffer.String(), "\"regex\":false") || !strings.Contains(buffer.String(), "\"schema\":2") {
+				t.Error("formatted regex mode missing from schema-2 AST")
 			}
 			if lang == "rule" && (!strings.Contains(buffer.String(), "\"sequenceEnd\":true") || !strings.Contains(buffer.String(), "\"sequenceEnd\":false")) {
 				t.Error("input sequence boundary missing from AST")
@@ -53,7 +53,7 @@ func TestSchemaOneAdditiveSemanticFields(t *testing.T) {
 func TestValueASTPreservesCommentItems(t *testing.T) {
 	buffer := bytes.Buffer{}
 	defer buffer.Reset()
-	if ast.WriteAST(&buffer, "km", "comments.km", "# before\nv = 1\n// after\n") != 0 || !strings.Contains(buffer.String(), "\"text\":\"# before\"") || !strings.Contains(buffer.String(), "\"text\":\"// after\"") {
+	if ast.WriteAST(&buffer, "km", "comments.km", "# before\nv = 1\n# after\n") != 0 || !strings.Contains(buffer.String(), "\"text\":\"# before\"") || !strings.Contains(buffer.String(), "\"text\":\"# after\"") {
 		t.Error("value AST dropped authored comments")
 	}
 }
@@ -73,8 +73,8 @@ func TestRuleCapturePatternFieldAndAuthoredCoordinates(t *testing.T) {
 		if i == 0 && (!strings.Contains(text, `"span":{"start":8,"end":14},"kind":"capture"`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":16}`)) {
 			t.Error("quoted target AST lost authored content or capture spans")
 		}
-		if i == 1 && strings.Count(text, `"template":{"kind":"target-template"`) != 2 {
-			t.Error("schema-1 legacy template aliases disappeared")
+		if i == 1 && strings.Count(text, `"pattern":{"kind":"target-template"`) != 2 || strings.Contains(text, `"template":{"kind":"target-template"`) {
+			t.Error("capture fields should appear only as patterns")
 		}
 		if i == 2 && (!strings.Contains(text, `"span":{"start":9,"end":23},"kind":"capture"`) || !strings.Contains(text, `"regex":true`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":25}`)) {
 			t.Error("quoted regex target AST lost authored coordinates")

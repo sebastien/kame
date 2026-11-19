@@ -15,7 +15,7 @@ func TestKashExitRejectsMissingBoundaryAndFinalizationBeforeOperand(t *testing.T
 		registry := eval.NewRegistry(a)
 		state := operationState{}
 		registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-		parsed := script.ParseKash(a, "exit.kash", "exit (tick)")
+		parsed := script.ParseKash(a, "exit.kash", "exit (tick ())")
 		p := eval.Compile(a, engine, parsed, registry)
 		p.ExitBoundary = mode != 0
 		context := eval.Context{Program: p, Scope: p.Scope, Run: a, Finalizing: mode == 1, PurePredicate: mode == 2}
@@ -42,7 +42,7 @@ func TestKashExitOperandRetainsCompletedWorkAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit (let [values (list (once) (async))] 7)\nresult = (stop)\n")
+	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit ((values => 7) (list (once ()) (async ())))\nresult = (stop ())\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.ExitBoundary = true
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
@@ -70,7 +70,7 @@ func TestKashExitWaitsForProcessRetirementEvenWithoutDefers(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit 7\nresult = (stop)\n")
+	parsed := script.ParseKash(a, "exit.kash", "def stop\n\texit 7\nresult = (stop ())\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.ExitBoundary = true
 	host := finalizationHost{}

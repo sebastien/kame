@@ -9,13 +9,13 @@ import (
 func TestStructuralLayoutRoundTrip(t *testing.T) {
 	const long = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	cases := []string{
-		"(let [x (f " + long + " y) z 2] (if x z :nil))",
-		"(match x [\"p\" (f " + long + " x)] [:else :nil])",
-		"([x rest...] [name: x data: (f " + long + " rest)])",
-		"((choose " + long + " x) [x y])",
+		"((x z => if x then z else nil) (f " + long + " y) 2)",
+		"(match x\n    \"p\" => (f " + long + " x)\n    else => nil)",
+		"(x rest... => {name: x, data: (f " + long + " rest)})",
+		"((choose " + long + " x) [x, y])",
 		"(f \"\"\"literal\n  text\t\nend\"\"\" x)",
-		"(" + long + " | map navigation-item | filter ([item] item.visible) | join \"\\n\")",
-		"(value | transform (nested " + long + " data) _ | finish)",
+		"(" + long + " |> map navigation-item |> filter (item => item.visible) |> join \"\\n\")",
+		"(value |> transform (nested " + long + " data) _ |> finish)",
 	}
 	for i := range cases {
 		checkLayoutRoundTrip(t, cases[i])
@@ -27,7 +27,7 @@ func checkLayoutRoundTrip(t *testing.T, text string) {
 	parsed := expr.Parse(a, "style", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 {
-		t.Error("source did not parse")
+		t.Errorf("source %q did not parse: %v", text, parsed.Diagnostics)
 		return
 	}
 	formatted := expr.FormatAt(a, parsed.Expr, 2)
@@ -35,7 +35,7 @@ func checkLayoutRoundTrip(t *testing.T, text string) {
 	again := expr.Parse(a, "style", formatted)
 	defer again.Free()
 	if len(again.Diagnostics) != 0 {
-		t.Error("expanded source did not parse")
+		t.Errorf("expanded source %q did not parse: %v", formatted, again.Diagnostics)
 		return
 	}
 	canonical := expr.FormatAt(a, again.Expr, 2)

@@ -8,10 +8,10 @@ import (
 
 func TestListSpreadCloneAndFormat(t *testing.T) {
 	a := t.Allocator()
-	text := `[...prefix "printf" ...[1 [2]] ...(map uppercase ["a"]) ...$(printf captured)]`
+	text := `[...prefix, "printf", ...[1, [2]], ...(map uppercase ["a"]), ...$(printf captured)]`
 	r := parse(t, text)
 	defer r.Free()
-	if r.Expr == nil || len(r.Expr.Items) != 5 || r.Expr.Items[0].Kind != expr.ListSpread || r.Expr.Items[0].Items[0].Kind != expr.Name {
+	if r.Expr == nil || len(expr.Ungroup(r.Expr).Items) != 5 || expr.Ungroup(r.Expr).Items[0].Kind != expr.ListSpread || expr.Ungroup(r.Expr).Items[0].Items[0].Kind != expr.Name {
 		t.Fatal("list spread lost its operand boundary")
 		return
 	}
@@ -29,7 +29,7 @@ func TestListSpreadCloneAndFormat(t *testing.T) {
 }
 
 func TestListSpreadRejectsInvalidPositions(t *testing.T) {
-	texts := []string{`[... ]`, `[...]`, `...prefix`, `(nop ...prefix)`, `[name: 1 ...prefix]`, `[...prefix name: 1]`, `([...args] args)`}
+	texts := []string{`[... ]`, `[...]`, `...prefix`, `f ... prefix`, `(f ...)`, `[name: 1 ...prefix]`, `[...prefix name: 1]`}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "invalid.km", texts[i])
 		if len(r.Diagnostics) == 0 {

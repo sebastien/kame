@@ -9,7 +9,7 @@ import (
 
 func TestKashWithPreservesSetupOrderBodyAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "with.kash", "exports = [MODE: \"release\"]\nwith :env $exports :cwd ./project\n\tlet local = 1\n\twith\n\t\tprintf %s $local\n")
+	s := script.ParseKash(a, "with.kash", "exports = {MODE: \"release\"}\nwith :env $exports :cwd ./project\n\tlet local = 1\n\twith\n\t\tprintf %s $local\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 {
 		t.Fatal("with block rejected")

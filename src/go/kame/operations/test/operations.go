@@ -71,37 +71,37 @@ func TestPureOperations(t *testing.T) {
 		t.Error("first failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(not :nil)")
+	result = evaluate(t, program, "(not nil)")
 	if result.Diagnostic.Code != "" || !result.Value.Bool {
 		t.Error("not failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "((list \"first\" \"second\") | map ([x] x))")
+	result = evaluate(t, program, "((list \"first\" \"second\") |> map (x => x))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "second" {
 		t.Error("piped map failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map ([x] (list x x)) (list \"first\"))")
+	result = evaluate(t, program, "(map (x => (list x x)) (list \"first\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 1 || len(result.Value.List[0].List) != 2 {
 		t.Error("map container result failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map ([x] x) (list \"first\" \"second\"))")
+	result = evaluate(t, program, "(map (x => x) (list \"first\" \"second\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "second" {
 		t.Error("function-first map failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(filter ([x] (includes? \"second\" x)) (list \"first\" \"second\"))")
+	result = evaluate(t, program, "(filter (x => (includes? \"second\" x)) (list \"first\" \"second\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 1 || result.Value.List[0].Text != "second" {
 		t.Error("predicate-first filter failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(flatmap ([x] (list x x)) [\"first\"])")
+	result = evaluate(t, program, "(flatmap (x => (list x x)) [\"first\"])")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "first" {
 		t.Error("function-first flatmap failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(apply ([values] (count values)) [[\"first\" \"second\"]])")
+	result = evaluate(t, program, "(apply (values => (count values)) [[\"first\", \"second\"]])")
 	if result.Diagnostic.Code != "" || result.Value.Int != 2 {
 		t.Error("list-consuming apply failed")
 	}
@@ -127,12 +127,12 @@ func TestOperationDiagnosticsRetainOperandAndContract(t *testing.T) {
 	program := eval.Compile(a, engine, scriptSource, registry)
 	cases := []diagnosticCase{
 		{Text: "(first 1)", Message: "`first` argument 1 expects list or string; got int", Operand: "1"},
-		{Text: "(nth :false [1])", Message: "`nth` argument 1 expects int; got bool", Operand: ":false"},
-		{Text: "(slice 0 :false [1])", Message: "`slice` argument 2 expects int; got bool", Operand: ":false"},
+		{Text: "(nth false [1])", Message: "`nth` argument 1 expects int; got bool", Operand: "false"},
+		{Text: "(slice 0 false [1])", Message: "`slice` argument 2 expects int; got bool", Operand: "false"},
 		{Text: "(join \"-\" [1])", Message: "`join` argument 2 item 1 expects string; got int", Operand: "[1]"},
-		{Text: "(first)", Message: "`first` expects 1 argument; got 0", Operand: "(first)"},
-		{Text: "(slice)", Message: "`slice` expects 2 to 3 arguments; got 0", Operand: "(slice)"},
-		{Text: "(out!)", Message: "`out!` expects at least 1 argument; got 0", Operand: "(out!)"},
+		{Text: "(first ())", Message: "`first` expects 1 argument; got 0", Operand: "first ()"},
+		{Text: "(slice ())", Message: "`slice` expects 2 to 3 arguments; got 0", Operand: "slice ()"},
+		{Text: "(out! ())", Message: "`out!` expects at least 1 argument; got 0", Operand: "out! ()"},
 	}
 	for i := range cases {
 		parsed := expr.Parse(a, "expr.km", cases[i].Text)
@@ -166,12 +166,12 @@ func TestOutRejectsCallable(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(out! (replace ./{*} ./out/{_0}))")
+	result := evaluate(t, program, "(out! (subst ./{*} ./out/{_0}))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("out accepted a callable")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(err! (replace ./{*} ./out/{_0}))")
+	result = evaluate(t, program, "(err! (subst ./{*} ./out/{_0}))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("err accepted a callable")
 	}
@@ -249,7 +249,7 @@ func TestMapResumesWithoutRepeatingCallbacks(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "result = (map ([item] (wait-each item)) (list \"one\" \"two\"))")
+	parsed := script.Parse(a, "test", "result = (map (item => (wait-each item)) (list \"one\" \"two\"))")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -302,11 +302,11 @@ func TestUntrackedCallbackSuspensionReleasesProgress(t *testing.T) {
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(map untracked-wait ["first" "wait"])`,
-		`(flatmap ([x] (list (untracked-wait x))) ["first" "wait"])`,
-		`(filter untracked-wait ["first" "wait"])`,
-		`(filter-out untracked-wait ["first" "wait"])`,
-		`(reduce ([acc x] (untracked-wait x)) "initial" ["first" "wait"])`,
+		`(map untracked-wait ["first", "wait"])`,
+		`(flatmap (x => (list (untracked-wait x))) ["first", "wait"])`,
+		`(filter untracked-wait ["first", "wait"])`,
+		`(filter-out untracked-wait ["first", "wait"])`,
+		`(reduce (acc x => (untracked-wait x)) "initial" ["first", "wait"])`,
 	}
 	for i := range texts {
 		result := evaluate(t, program, texts[i])
@@ -330,21 +330,18 @@ func TestPatternReplace(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_1}.c \"./a/b/x.c\")")
+	result := evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}/{_1}.c \"./a/b/x.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/a/b/x.c" {
 		t.Error("pattern replace did not expand positional captures")
 	}
 	result.Free(a)
 	captureExpressions := []string{
-		`(replace ./journal/{name:*} "@{name}" "./journal/demo")`,
-		`(replace ./journal/{name:*} name "./journal/demo")`,
-		`(sub ./journal/{name:*} name "./journal/demo")`,
-		`(let [r sub name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
-		`((let [prefix ""] (sub ./journal/{name:*} (str prefix name))) "./journal/demo")`,
-		`(let [r replace name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
-		`(let [r (replace ./journal/{name:*} name)] (r "./journal/demo"))`,
-		`((let [prefix ""] (replace ./journal/{name:*} (str prefix name))) "./journal/demo")`,
-		`((eval """(replace ./journal/{name:*} (get "value" [value: name]))""") "./journal/demo")`,
+		`(subst ./journal/{name:*} "@{name}" "./journal/demo")`,
+		`(subst ./journal/{name:*} name "./journal/demo")`,
+		`((r => ((name => (r ./journal/{name:*} name "./journal/demo")) "outer")) subst)`,
+		`(((prefix => (subst ./journal/{name:*} (str prefix name))) "") "./journal/demo")`,
+		`((r => (r "./journal/demo")) (subst ./journal/{name:*} name))`,
+		`((eval """(subst ./journal/{name:*} (get "value" {value: name}))""") "./journal/demo")`,
 	}
 	for i := range captureExpressions {
 		result = evaluate(t, program, captureExpressions[i])
@@ -353,77 +350,77 @@ func TestPatternReplace(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	result = evaluate(t, program, `(replace ./journal/{name:*} missing "./other/demo")`)
+	result = evaluate(t, program, `(subst ./journal/{name:*} missing "./other/demo")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./other/demo" {
 		t.Error("nonmatch evaluated replacement or lost subject")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(map (replace ./journal/{name:*} (uppercase name)) ["./journal/a" "./journal/b"])`)
+	result = evaluate(t, program, `(map (subst ./journal/{name:*} (uppercase name)) ["./journal/a", "./journal/b"])`)
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "A" || result.Value.List[1].Text != "B" {
 		t.Error("deferred captures did not bind per item")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace {name:*}.c 1 \"hello.c\")")
+	result = evaluate(t, program, "(subst (pattern \"{name:*}.c\") 1 \"hello.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" {
 		t.Error("leading pattern or integer expansion failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map (replace {*}.c :false) [\"a.c\" \"b.c\"])")
+	result = evaluate(t, program, "(map (subst (pattern \"{*}.c\") false) [\"a.c\", \"b.c\"])")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "false" || result.Value.List[1].Text != "false" {
 		t.Error("scalar replacement section failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./src/{name:*}.c ./build/{name}.o \"./src/demo.c\")")
+	result = evaluate(t, program, "(subst ./src/{name:*}.c ./build/{name}.o \"./src/demo.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/demo.o" {
 		t.Error("pattern replace did not expand named captures")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_1}.c \"./no-match.txt\")")
+	result = evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}/{_1}.c \"./no-match.txt\")")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./no-match.txt" {
 		t.Error("pattern replace did not preserve a nonmatch")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}.o (list \"./a.c\" \"./x/y.c\" \"./z.obj\"))")
+	result = evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}.o (list \"./a.c\" \"./x/y.c\" \"./z.obj\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 3 || result.Value.List[0].Text != "./a.c" || result.Value.List[1].Text != "./build/x.o" || result.Value.List[2].Text != "./z.obj" {
 		t.Error("pattern replace did not map a list subject in order")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map (replace ./{**}/{*}.c ./build/{_0}.o) (list \"./a.c\" \"./x/y.c\"))")
+	result = evaluate(t, program, "(map (subst ./{**}/{*}.c ./build/{_0}.o) (list \"./a.c\" \"./x/y.c\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "./a.c" || result.Value.List[1].Text != "./build/x.o" {
 		t.Error("pattern replace section did not work through map")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(\"./a/x.c\" | replace ./{**}/{*}.c ./build/{_0}/{_1}.c)")
+	result = evaluate(t, program, "(\"./a/x.c\" |> subst ./{**}/{*}.c ./build/{_0}/{_1}.c)")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/a/x.c" {
 		t.Error("pattern replace section did not work through a pipe")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace \"a\" \"b\" \"banana\")")
+	result = evaluate(t, program, "(subst \"a\" \"b\" \"banana\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "bbnbnb" {
 		t.Error("literal replace changed behavior")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace \"one\" \"two\")")
+	result = evaluate(t, program, "(subst \"one\" \"two\")")
 	if result.Diagnostic.Code == "" {
 		t.Error("two string arguments were accepted as a match pattern")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./{name:*}.c ./build/{missing}.o \"./a.c\")")
+	result = evaluate(t, program, "(subst ./{name:*}.c ./build/{missing}.o \"./a.c\")")
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("missing capture reference was not diagnosed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_9}.c \"./a/b.c\")")
+	result = evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}/{_9}.c \"./a/b.c\")")
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("out-of-range capture reference was not diagnosed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace {a} ./y/{a} \"./x\")")
+	result = evaluate(t, program, `(subst (pattern '{a}') ./y/{a} "./x")`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("match pattern without matchers was accepted")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(str (replace ./{**}/{*}.c ./build/{_0}.o \"./a.c\"))")
+	result = evaluate(t, program, "(str (subst ./{**}/{*}.c ./build/{_0}.o \"./a.c\"))")
 	if result.Diagnostic.Code != "" {
 		t.Error("str broke on a replace result")
 	}
@@ -438,17 +435,17 @@ func TestPatternReplace(t *testing.T) {
 		t.Error("joinpath accepted a pattern")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(join \"-\" [\"a\" ./x/{n:*}.c])")
+	result = evaluate(t, program, "(join \"-\" [\"a\", ./x/{n:*}.c])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("join accepted a pattern element")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}.o)")
+	result = evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}.o)")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
 		t.Error("two-argument pattern replace did not return a callable")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map (replace ./{**}/{*}.c ./build/{_0}.o) [\"./x/y.c\"])")
+	result = evaluate(t, program, "(map (subst ./{**}/{*}.c ./build/{_0}.o) [\"./x/y.c\"])")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 1 || result.Value.List[0].Text != "./build/x.o" {
 		t.Error("replace section did not apply through map")
 	}
@@ -525,7 +522,7 @@ func TestRegexCaptureOperations(t *testing.T) {
 		t.Error("resub did not expand a named capture")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "name" "}")) ["demo" "42"])`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "name" "}")) ["demo", "42"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.String || result.Value.List[0].Text != "xdemo" || result.Value.List[1].Kind != core.Nil {
 		t.Error("resub did not map captures over a list")
 	}
@@ -540,7 +537,7 @@ func TestRegexCaptureOperations(t *testing.T) {
 		t.Error("resub accepted a non-regex matcher")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) "x" :nil)`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) "x" nil)`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("resub accepted a nil subject")
 	}
@@ -575,7 +572,9 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 	}
 	parsed := script.Parse(a, "document-match", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(match "./posts/demo.md" [./posts/{slug:*}.md slug] [:else "other"])`)
+	result := evaluate(t, program, `match "./posts/demo.md"
+    ./posts/{slug:*}.md => slug
+    else => "other"`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" {
 		t.Error("baseline expression match failed")
 	}
@@ -606,7 +605,7 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	parsed := script.Parse(a, "document-for", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	templateText := `(str "@for([item] xs)\n" "@" "{" "index" "}" ":" "@" "{" "key" "}" ":" "@" "{" "item" "}" ";\n@end(for)\n")`
-	result := evaluate(t, program, `(render [xs: ["a" "b"]] "plain" `+templateText+`)`)
+	result := evaluate(t, program, `(render {xs: ["a", "b"]} "plain" `+templateText+`)`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0::a;\n1::b;\n" {
 		t.Error("list loop did not bind its zero-based index, nil key and item value")
 	}
@@ -626,12 +625,12 @@ func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
 	}
 	parsed := script.Parse(a, "document-inline", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(render "plain" "Hi @if(:true)there@end!")`)
+	result := evaluate(t, program, `(render "plain" "Hi @if(true)there@end!")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "Hi there!" {
 		t.Error("plain inline if block did not preserve text around the block")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "html" "a<!-- @if(:true) -->b<!-- @end(if) -->c")`)
+	result = evaluate(t, program, `(render "html" "a<!-- @if(true) -->b<!-- @end(if) -->c")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
 		t.Error("HTML inline if block did not preserve text around the block")
 	}
@@ -644,7 +643,7 @@ func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
 
 func TestDocumentTrimMarkersRemoveAdjacentASCIIWhitespace(t *testing.T) {
 	a := t.Allocator()
-	doc := template.ParseDocument(a, "trim", "left   @-if(:true)-  right  @-end(if)- \r\n\t tail", "plain")
+	doc := template.ParseDocument(a, "trim", "left   @-if(true)-  right  @-end(if)- \r\n\t tail", "plain")
 	if len(doc.Diagnostics) != 0 {
 		t.Error("trim document parse: " + doc.Diagnostics[0].Code + " " + doc.Diagnostics[0].Message)
 	}
@@ -656,7 +655,7 @@ func TestDocumentTrimMarkersRemoveAdjacentASCIIWhitespace(t *testing.T) {
 	}
 	parsed := script.Parse(a, "document-trim", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(render "plain" "left   @-if(:true)-  right  @-end(if)- \r\n\t tail")`)
+	result := evaluate(t, program, `(render "plain" "left   @-if(true)-  right  @-end(if)- \r\n\t tail")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "leftrighttail" {
 		t.Error("trim markers did not remove adjacent ASCII whitespace: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
@@ -676,7 +675,7 @@ func TestTemplateItemsOwnsInputRows(t *testing.T) {
 	}
 	parsed := script.Parse(a, "template-items", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(template-items ["a" "b"])`)
+	result := evaluate(t, program, `(template-items ["a", "b"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 {
 		t.Error("template-items did not return one row per list item")
 	}
@@ -708,12 +707,12 @@ func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()
 	samples := []string{
-		"(get (str \"t\" \"wo\") [one: 1 two: 2])",
-		"(get \"missing\" 7 [one: 1])",
-		"(get \"missing\" [one: 1])",
-		"(apply (get \"used\" ([x] x) [used: ([x] (str \"hello \" x)) unused: ([x] x)]) [\"Ada\"])",
-		"(apply (get \"missing\" ([x] (str \"fallback \" x)) [unused: ([x] x)]) [\"Ada\"])",
-		"(get 1 [one: 1])",
+		"(get (str \"t\" \"wo\") {one: 1, two: 2})",
+		"(get \"missing\" 7 {one: 1})",
+		"(get \"missing\" {one: 1})",
+		"(apply (get \"used\" (x => x) {used: (x => (str \"hello \" x)), unused: (x => x)}) [\"Ada\"])",
+		"(apply (get \"missing\" (x => (str \"fallback \" x)) {unused: (x => x)}) [\"Ada\"])",
+		"(get 1 {one: 1})",
 	}
 	for i := range samples {
 		r := evaluate(t, p, samples[i])

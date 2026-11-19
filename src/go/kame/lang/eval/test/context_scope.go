@@ -20,7 +20,7 @@ func TestOperandEvaluationPreservesOperationCallerScope(t *testing.T) {
 	parsed := script.Parse(a, "scope.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	registry.Add(eval.Operation{Name: "caller-scope", MinArity: 1, MaxArity: 1, Call: callerScopeOperation, Context: p.Scope})
-	expression := expr.Parse(a, "scope.km", "(caller-scope (let [temporary :true] :nil))")
+	expression := expr.Parse(a, "scope.km", "(caller-scope ((temporary => nil) true))")
 	result := p.Evaluate(a, expression.Expr, p.Scope)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Bool || !result.Value.Bool {
 		t.Error("temporary operand scope replaced the operation caller scope")

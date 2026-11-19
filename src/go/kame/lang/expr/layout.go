@@ -28,7 +28,7 @@ func Fits(text string, column int) bool {
 func FormatAt(a mem.Allocator, e *Expr, column int) string {
 	b := strings.Builder{}
 	writeLayout(a, &b, e, column, column, 0)
-	text := sourceText(a, b.String())
+	text := sourceText(a, restoreTrivia(e, b.String()))
 	b.Reset()
 	return text
 }
@@ -48,117 +48,204 @@ func inlineFits(a mem.Allocator, e *Expr, column int, tail int) bool {
 	return fit
 }
 
-func writeBindings(a mem.Allocator, b *strings.Builder, e *Expr, column int, tail int) {
-	if e.Kind != List || len(e.Items)%2 != 0 || inlineFits(a, e, column, tail) {
-		writeLayout(a, b, e, column, column, tail)
+func writeDelimitedValue(a mem.Allocator, b *strings.Builder, e *Expr, column, indent, tail int) {
+	if e == nil || e.Kind != Application || !e.Juxtaposed || len(e.Items) <= 1 || inlineFits(a, e, column, tail) {
+		writeLayout(a, b, e, column, indent, tail)
 		return
 	}
-	b.WriteByte('[')
-	for i := 0; i < len(e.Items); i += 2 {
+	writeLayout(a, b, e.Items[0], column, indent, 0)
+	next := indent/8 + 1
+	for i, arg := range e.Items[1:] {
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat("\t", next))
+		argTail := 0
+		if i == len(e.Items)-2 {
+			argTail = tail
+		}
+		writeLayout(a, b, arg, next*8, next*8, argTail)
+	}
+}
+
+// An undelimited application can break only within an authored delimiter.
+// Try those operands from right to left and measure the lines they produce.
+func writeJuxtaposition(a mem.Allocator, b *strings.Builder, e *Expr, column, indent, tail int) {
+	if len(e.Items) == 1 {
+		writeLayout(a, b, e.Items[0], column, indent, tail+3)
+		b.WriteString(" ()")
+		return
+	}
+	inline := make([]string, len(e.Items))
+	parts := make([]string, len(e.Items))
+	columns := make([]int, len(e.Items))
+	start := column
+	for i, item := range e.Items {
+		columns[i] = start
+		inline[i] = Compact(a, item)
+		parts[i] = inline[i]
+		start = Columns(inline[i], start) + 1
+	}
+	expanded := make([]bool, len(e.Items))
+	for i := len(e.Items) - 1; i >= 0; i-- {
+		item := e.Items[i]
+		delimiter := item.Kind
+		if delimiter == ListSpread {
+			delimiter = item.Items[0].Kind
+		}
+		switch delimiter {
+		case Group, Section, List, Record:
+		default:
+			continue
+		}
+		if !strings.Contains(inline[i], "\n") && applicationLinesFit(parts, column, tail) {
+			continue
+		}
+		var part strings.Builder
+		writeLayout(a, &part, item, columns[i], indent, max(0, 81-Columns(inline[i], columns[i])))
+		parts[i] = part.String()
+		expanded[i] = true
+	}
+	for i, item := range e.Items {
 		if i != 0 {
-			layoutLine(b, column+1)
+			b.WriteByte(' ')
+			column++
 		}
-		name := Compact(a, e.Items[i])
-		pairTail := 0
-		if i+2 == len(e.Items) {
-			pairTail = tail + 1
+		from := b.Len()
+		if expanded[i] && column != columns[i] {
+			writeLayout(a, b, item, column, indent, max(0, 81-Columns(inline[i], column)))
+		} else {
+			b.WriteString(parts[i])
 		}
-		writePairedValue(a, b, name, "", e.Items[i+1], column+1, pairTail)
-		mem.FreeString(a, name)
-	}
-	b.WriteByte(']')
-}
-
-func writePairedValue(a mem.Allocator, b *strings.Builder, name string, suffix string, value *Expr, column int, tail int) {
-	b.WriteString(name)
-	b.WriteString(suffix)
-	valueColumn := Columns(suffix, Columns(name, column)) + 1
-	if inlineFits(a, value, valueColumn, tail) {
-		b.WriteByte(' ')
-		writeExpr(b, value)
-	} else {
-		layoutLine(b, column+2)
-		writeLayout(a, b, value, column+2, column+2, tail)
+		column = Columns(b.String()[from:], column)
+		mem.FreeString(a, inline[i])
 	}
 }
 
-func writeClause(a mem.Allocator, b *strings.Builder, e *Expr, column int, tail int) {
-	if e.Kind != List || len(e.Items) != 2 || inlineFits(a, e, column, tail) {
-		writeLayout(a, b, e, column, column, tail)
-		return
+func applicationLinesFit(parts []string, column, tail int) bool {
+	for i, part := range parts {
+		if i != 0 {
+			column++
+		}
+		for {
+			line, rest, multiline := strings.Cut(part, "\n")
+			column = Columns(line, column)
+			if column > 80 {
+				return false
+			}
+			if !multiline {
+				break
+			}
+			column, part = 0, rest
+		}
 	}
-	b.WriteByte('[')
-	writeLayout(a, b, e.Items[0], column+1, column, 0)
-	layoutLine(b, column+2)
-	writeLayout(a, b, e.Items[1], column+2, column+2, tail+1)
-	b.WriteByte(']')
+	return column+tail <= 80
 }
 
 func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, indent int, tail int) {
 	if e == nil {
 		return
 	}
-	if e.AuthoredPipe != nil {
-		writeLayout(a, b, e.AuthoredPipe, column, indent, tail)
+	if e.Kind == Match && len(e.Body) != 0 {
+		writeMatch(a, b, e, column, indent)
 		return
 	}
 	if inlineFits(a, e, column, tail) {
 		writeExpr(b, e)
 		return
 	}
-	if e.Kind == ValuePipe {
-		b.WriteByte('(')
-		if e.PipeCall {
-			for i := range e.Items[0].Items {
-				childColumn := column + 1
-				if i != 0 {
-					layoutLine(b, indent+2)
-					childColumn = indent + 2
+	if e.Infix != "" {
+		level := infixPrecedence(e.Infix)
+		next := indent/8 + 1
+		var writeChain func(*Expr, int, int, int)
+		writeChain = func(part *Expr, column, indent, tail int) {
+			if infixPrecedence(part.Infix) != level {
+				if part.Infix != "" {
+					writeExpr(b, part)
+				} else {
+					writeLayout(a, b, part, column, indent, tail)
 				}
-				writeLayout(a, b, e.Items[0].Items[i], childColumn, childColumn, 0)
+				return
 			}
-		} else {
-			writeLayout(a, b, e.Items[0], column+1, indent, 0)
+			writeChain(part.Items[1], column, indent, 0)
+			b.WriteByte('\n')
+			b.WriteString(strings.Repeat("\t", next))
+			b.WriteString(part.Infix)
+			b.WriteByte(' ')
+			writeChain(part.Items[2], next*8+len(part.Infix)+1, next*8, tail)
 		}
+		writeChain(e, column, indent, tail)
+		return
+	}
+	if e.Kind == ValuePipe {
+		writeLayout(a, b, e.Items[0], column, indent, 0)
+		next := indent/8 + 1
 		for i := 1; i < len(e.Items); i++ {
-			layoutLine(b, indent+2)
-			b.WriteString("| ")
-			stage := e.Items[i]
+			b.WriteByte('\n')
+			b.WriteString(strings.Repeat("\t", next))
+			b.WriteString("|> ")
 			stageTail := 0
 			if i+1 == len(e.Items) {
-				stageTail = tail + 1
+				stageTail = tail
 			}
-			// The stage has no surrounding application parentheses here.
-			if inlineFits(a, stage, indent+2, stageTail) {
-				writeEmbedded(b, stage)
-				continue
-			}
-			for j := range stage.Items {
-				childColumn := indent + 4
-				if j != 0 {
-					layoutLine(b, indent+6)
-					childColumn = indent + 6
-				}
-				childTail := 0
-				if i+1 == len(e.Items) && j+1 == len(stage.Items) {
-					childTail = tail + 1
-				}
-				writeLayout(a, b, stage.Items[j], childColumn, childColumn, childTail)
-			}
+			writeLayout(a, b, e.Items[i], next*8+3, next*8, stageTail)
 		}
+		return
+	}
+	if e.Kind == Section || (e.Kind == Group && len(e.Items) == 1) {
+		var child *Expr
+		if e.Kind == Section {
+			child = e.Body[0]
+		} else {
+			child = e.Items[0]
+		}
+		b.WriteByte('(')
+		if child != nil && child.Kind == Conditional && len(child.Items) >= 3 {
+			next := strings.Repeat("\t", indent/8+1)
+			b.WriteString("if ")
+			writeExpr(b, child.Items[0])
+			b.WriteString(" then ")
+			writeExpr(b, child.Items[1])
+			for i := 2; i+1 < len(child.Items); i += 2 {
+				b.WriteByte('\n')
+				b.WriteString(next)
+				b.WriteString("elif ")
+				writeExpr(b, child.Items[i])
+				b.WriteString(" then ")
+				writeExpr(b, child.Items[i+1])
+			}
+			b.WriteByte('\n')
+			b.WriteString(next)
+			b.WriteString("else ")
+			writeExpr(b, child.Items[len(child.Items)-1])
+			b.WriteByte('\n')
+			b.WriteString(strings.Repeat("\t", indent/8))
+			b.WriteByte(')')
+			return
+		}
+		if child != nil && child.Kind == Lambda && child.Arrow && len(child.Body) != 0 {
+			writeLambdaParameters(b, child.Parameters)
+			b.WriteString(" =>")
+			child = child.Body[0]
+		}
+		next := indent/8 + 1
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat("\t", next))
+		writeDelimitedValue(a, b, child, next*8, next*8, 0)
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat("\t", indent/8))
 		b.WriteByte(')')
 		return
 	}
 	if e.Kind == List {
 		b.WriteByte('[')
-		for i := range e.Items {
-			layoutLine(b, indent+2)
-			childTail := 0
-			if i+1 == len(e.Items) {
-				childTail = tail + 1
-			}
-			writeLayout(a, b, e.Items[i], indent+2, indent+2, childTail)
+		next := indent - indent%8 + 8
+		for _, item := range e.Items {
+			b.WriteByte('\n')
+			b.WriteString(strings.Repeat("\t", next/8))
+			writeDelimitedValue(a, b, item, next, next, 1)
+			b.WriteByte(',')
 		}
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat("\t", indent/8))
 		b.WriteByte(']')
 		return
 	}
@@ -168,19 +255,43 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		return
 	}
 	if e.Kind == Record {
-		b.WriteByte('[')
-		for i := range e.Fields {
-			layoutLine(b, indent+2)
-			childTail := 0
-			if i+1 == len(e.Fields) {
-				childTail = tail + 1
+		b.WriteByte('{')
+		next := indent/8 + 1
+		for _, field := range e.Fields {
+			b.WriteByte('\n')
+			b.WriteString(strings.Repeat("\t", next))
+			switch {
+			case field.Spread:
+				b.WriteString("...")
+				writeDelimitedValue(a, b, field.Value, next*8+3, next*8, 1)
+			case field.Shorthand:
+				writeBraceKey(b, field)
+			default:
+				start := b.Len()
+				writeBraceKey(b, field)
+				b.WriteByte(':')
+				valueColumn := Columns(b.String()[start:], next*8) + 1
+				if inlineFits(a, field.Value, valueColumn, 1) {
+					b.WriteByte(' ')
+					writeExpr(b, field.Value)
+				} else {
+					b.WriteByte('\n')
+					b.WriteString(strings.Repeat("\t", next+1))
+					writeDelimitedValue(a, b, field.Value, (next+1)*8, (next+1)*8, 1)
+				}
 			}
-			writePairedValue(a, b, e.Fields[i].Key, ":", e.Fields[i].Value, indent+2, childTail)
+			b.WriteByte(',')
 		}
-		b.WriteByte(']')
+		b.WriteByte('\n')
+		b.WriteString(strings.Repeat("\t", indent/8))
+		b.WriteByte('}')
 		return
 	}
 	if e.Kind == Lambda {
+		if e.Arrow {
+			writeExpr(b, e)
+			return
+		}
 		b.WriteString("([")
 		parameterWidth := column + 3 // opening delimiters and closing bracket
 		if len(e.Body) == 0 {
@@ -219,6 +330,10 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		return
 	}
 	if e.Kind == Application && len(e.Items) != 0 {
+		if e.Juxtaposed {
+			writeJuxtaposition(a, b, e, column, indent, tail)
+			return
+		}
 		b.WriteByte('(')
 		operatorTail := 0
 		if len(e.Items) == 1 {
@@ -236,20 +351,8 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 			if i+1 == len(e.Items) {
 				childTail = tail + 1
 			}
-			if operator.Kind == Name && operator.Text == "let" && i == 1 {
-				writeBindings(a, b, e.Items[i], childIndent, childTail)
-			} else if operator.Kind == Name && operator.Text == "match" && i > 1 {
-				writeClause(a, b, e.Items[i], childIndent, childTail)
-			} else {
-				writeLayout(a, b, e.Items[i], childIndent, childIndent, childTail)
-			}
+			writeLayout(a, b, e.Items[i], childIndent, childIndent, childTail)
 		}
-		b.WriteByte(')')
-		return
-	}
-	if e.Kind == Section {
-		b.WriteByte('(')
-		writeLayout(a, b, e.Body[0], column+1, indent, tail+1)
 		b.WriteByte(')')
 		return
 	}

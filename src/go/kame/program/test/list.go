@@ -13,7 +13,7 @@ import (
 
 func TestListTargetsCatalogueAndMatching(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "list.kmk", "ROOT = \"./build\"\nVALUE = 42\n@{ROOT}/{name}.o : ./src/{name}.c\n./build/app ./build/app.map : ./missing-input\n\ttouch forbidden\nbuild : missing-target\nbuilder :\nrebuild :\nservice daemon :\ntask test {mode} :\n./café :\ngenerate extra = [[kind: \"task\" target: \"generated\" inputs: [] order-only: [] recipe: []]]\n")
+	parsed := script.Parse(a, "list.kmk", "ROOT = \"./build\"\nVALUE = 42\n@{ROOT}/{name}.o : ./src/{name}.c\n./build/app ./build/app.map : ./missing-input\n\ttouch forbidden\nbuild : missing-target\nbuilder :\nrebuild :\nservice daemon :\ntask test {mode} :\n./café :\ngenerate extra = [{kind: \"task\", target: \"generated\", inputs: [], order-only: [], recipe: []}]\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -49,7 +49,7 @@ func TestListTargetsCatalogueAndMatching(t *testing.T) {
 
 func TestListReportClassifiesWithoutPlanningPrerequisites(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "list.kmk", "build : unknown ; [summary: \"Build project\" custom: \"kept\"]\nservice daemon : ; [summary: \"Run daemon\" kind: \"service\"]\ntask cached {mode} :\ntask out :\n./out : @(out! \"forbidden\")\n./obj/{name}.o : ./src/{name}.c\n")
+	parsed := script.Parse(a, "list.kmk", "build : unknown ; {summary: \"Build project\", custom: \"kept\"}\nservice daemon : ; {summary: \"Run daemon\", kind: \"service\"}\ntask cached {mode} :\ntask out :\n./out : @(out! \"forbidden\")\n./obj/{name}.o : ./src/{name}.c\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -92,7 +92,7 @@ func TestListReportRefreshesAcceptedTaskAndArtifactProofs(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
 	host.SetFile("seed", []byte("one"))
-	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; [shell: kash]\n\t(out! (text (read ./seed)))\n./result : ./seed ; [shell: kame]\n\t(read ./seed)\n./downstream : ./result ; [shell: kame]\n\t(read ./result)\n./missing : ./seed\n")
+	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; {shell: kash}\n\t(out! (text (read ./seed)))\n./result : ./seed ; {shell: kame}\n\t(read ./seed)\n./downstream : ./result ; {shell: kame}\n\t(read ./result)\n./missing : ./seed\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}}})
@@ -138,7 +138,7 @@ func TestListReportDisabledTaskCacheDoesNotRequestHostProof(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
 	host.SetFile("seed", []byte("one"))
-	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; [shell: kash]\n\t(out! \"ok\")\n")
+	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; {shell: kash}\n\t(out! \"ok\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}}})

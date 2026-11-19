@@ -3,35 +3,34 @@ package scriptcheck
 import (
 	"kame/internal/mem"
 	"kame/internal/testing"
-	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 )
 
 func TestCompositionFormsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "# before\n(include \"folder/a b.km\")\n(include? ../optional.km)\n(if :false (include ./a.km) :true (if :true (include? ./b.km) :nil) :nil)\n# after\n(if :true 42 0)\nwhen = :true\n"
+	text := "# before\ninclude ./folder/a\\ b.km # required\ninclude? ../optional.km\nif false\n  include ./a.km\n\nelif true # selected\n  if true\n    # nested\n    include? ./b.km\n# after\n(if true then 42 else 0)\nwhen = true\n"
 	parsed := script.Parse(a, "composition.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 7 {
 		t.Fatal("composition parse failed")
 		return
 	}
-	if parsed.Items[1].Kind != script.Include || parsed.Items[1].Include != "folder/a b.km" || parsed.Items[1].Expression.Kind != expr.Application || parsed.Items[2].Kind != script.Include || !parsed.Items[2].OptionalInclude || parsed.Items[3].Kind != script.Composition || parsed.Items[5].Kind != script.Expression {
+	if parsed.Items[1].Kind != script.Include || parsed.Items[1].Include != "./folder/a b.km" || parsed.Items[2].Kind != script.Include || !parsed.Items[2].OptionalInclude || parsed.Items[3].Kind != script.Composition || parsed.Items[5].Kind != script.Expression {
 		t.Error("composition classification failed")
 	}
-	leaf := script.CompositionInclude(parsed.Items[1].Expression)
-	if !leaf.OK || leaf.Optional || leaf.Path != "folder/a b.km" || leaf.Span.Start != parsed.Items[1].Span.Start {
-		t.Error("borrowed include form lost decoded path or span")
+	leaf := parsed.Items[3].Branches[1].Items[0].Branches[0].Items[1]
+	if leaf.Kind != script.Include || !leaf.OptionalInclude || leaf.Include != "./b.km" {
+		t.Error("nested declaration lost its include path")
 	}
-	formatted := script.Format(a, parsed)
+	formatted := script.FormatWithIndent(a, parsed, "  ")
 	defer mem.FreeString(a, formatted)
 	again := script.Parse(a, "again.kmk", formatted)
 	defer again.Free()
-	second := script.Format(a, again)
+	second := script.FormatWithIndent(a, again, "  ")
 	defer mem.FreeString(a, second)
-	if len(again.Diagnostics) != 0 || formatted != second {
-		t.Error("composition formatting is not idempotent")
+	if len(again.Diagnostics) != 0 || formatted != second || formatted != text {
+		t.Errorf("composition formatting changed: first %q, second %q", formatted, second)
 	}
 	original := source.New(a, "fragment.km", text)
 	defer original.Free(a)
@@ -45,18 +44,20 @@ func TestCompositionFormsAndFormatting(t *testing.T) {
 func TestCompositionValidatesInactiveAndForbiddenPlacements(t *testing.T) {
 	a := t.Allocator()
 	cases := []string{
-		"x = (include ./a.km)\n", "x = ([] (include ./a.km))\n", "(str (include ./a.km))\n",
-		"[(include ./a.km)]\n", "[x: (include ./a.km)]\n", "\"@(include ./a.km)\"\n",
-		"(if (include ./a.km) :nil)\n", "(if :false (include variable) :nil)\n",
-		"(if :true (include ./a.km) 42)\n", "(if :true (include ./a.km) (if :false 42 :nil))\n",
-		"(include)\n", "(include ./a.km ./b.km)\n", "(include \"\")\n", "(include ./a*.km)\n",
-		"(include \"@(path)\")\n", "(include ./@(path))\n", "(include \"a\x00b\")\n",
-		"build : @(include ./a.km)\n", "build :\n\techo @(include ./a.km)\n",
-		"include ./a.km\n", "include? ./a.km\n", "when :true\nend\n",
+		"x = (include ./a.km)\n", "x = (() => (include ./a.km))\n", "(str (include ./a.km))\n",
+		"[(include ./a.km)]\n", "{x: (include ./a.km)}\n", "\"@{include ./a.km}\"\n",
+		"(if (include ./a.km) then nil else nil)\n", "(if false then (include variable) else nil)\n",
+		"(if true then (include ./a.km) else 42)\n", "(if true then (include ./a.km) else (if false then 42 else nil))\n",
+		"(include ())\n", "(include ./a.km ./b.km)\n", "(include \"\")\n", "(include ./a*.km)\n",
+		"(include \"@{path ()}\")\n", "(include ./@{path ()})\n", "(include \"a\x00b\")\n",
+		"build : @{include ./a.km}\n", "build :\n\techo @{include ./a.km}\n",
+		"include\n", "include relative.km\n", "include \"./quoted.km\"\n", "include ./a.km ./b.km\n",
+		"include ./[ab].km\n", "include ./x{a,b}.km\n", "include ./@{name ()}\n", "include ./a\x00b\n",
+		"if false\n  include relative.km\nelse\n  include ./valid.km\n", "when true\nend\n",
 	}
 	for i := range cases {
 		parsed := script.Parse(a, "bad.kmk", cases[i])
-		if len(parsed.Diagnostics) == 0 {
+		if len(parsed.Diagnostics) == 0 && (len(parsed.Items) != 1 || parsed.Items[0].Rule == nil || len(parsed.Items[0].Rule.RecipeDiagnostics) == 0) {
 			t.Errorf("invalid composition accepted: %s", cases[i])
 		}
 		parsed.Free()

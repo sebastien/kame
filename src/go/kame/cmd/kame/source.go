@@ -203,7 +203,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
 				return false
 			}
-		} else if !s.expandSourceComposition(fileIndex, item.Expression, errOut, authored, lang) {
+		} else if !s.expandSourceComposition(fileIndex, item.Branches, errOut, authored, lang) {
 			return false
 		}
 	}

@@ -8,28 +8,10 @@ import (
 	"strings"
 )
 
-func appendPathText(b *strings.Builder, text string) {
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' && i+1 < len(text) {
-			i++
-		}
-		b.WriteByte(text[i])
-	}
-}
-
 func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context) Result {
-	result := Result{Value: core.NewString(c.Run, expression.Text)}
+	var result Result
 	glob := expr.PathHasGlob(expression.Text)
-	if len(expression.Parts) == 0 && !expression.LiteralPath && strings.IndexByte(expression.Text, '\\') >= 0 {
-		b := strings.Builder{}
-		appendPathText(&b, expression.Text)
-		result.Value.Free(c.Run)
-		result.Value = core.NewString(c.Run, b.String())
-		b.Reset()
-		result.Value.GlobPattern = owned(c.Run, expression.Text)
-	}
 	if len(expression.Parts) != 0 {
-		result.Value.Free(c.Run)
 		result = p.pathValue(scope, expression, c)
 		glob = false
 		for i := range expression.Parts {
@@ -37,6 +19,14 @@ func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context
 				glob = true
 			}
 		}
+	} else if !expression.LiteralPath && (strings.Contains(expression.Text, "\\") || strings.Contains(expression.Text, "@@")) {
+		text, pattern := strings.Builder{}, strings.Builder{}
+		expr.AppendPathText(&text, expression.Text, false)
+		expr.AppendPathText(&pattern, expression.Text, true)
+		result.Value = core.NewString(c.Run, text.String())
+		result.Value.GlobPattern = owned(c.Run, pattern.String())
+	} else {
+		result.Value = core.NewString(c.Run, expression.Text)
 	}
 	if result.Waiting || result.Diagnostic.Code != "" || result.Value.Kind == core.Pattern || !glob || expression.LiteralPath {
 		return result
@@ -87,10 +77,11 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 		if part.Expr == nil {
 			if expression.LiteralPath {
 				text.WriteString(part.Text)
+				pattern.WriteString(part.Text)
 			} else {
-				appendPathText(&text, part.Text)
+				expr.AppendPathText(&text, part.Text, false)
+				expr.AppendPathText(&pattern, part.Text, true)
 			}
-			pattern.WriteString(part.Text)
 			// Only authored bytes can open or close a glob character class.
 			for j := 0; j < len(part.Text); j++ {
 				b := part.Text[j]
@@ -125,8 +116,8 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 		}
 	}
 	name := text.String()
-	if !(strings.HasPrefix(name, "/") || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../")) || strings.IndexByte(name, 0) >= 0 {
-		return failure(c.Run, "EXPR_INVALID", expression.Span, "interpolated path requires an explicit /, ./ or ../ root and no NUL")
+	if !(strings.HasPrefix(name, "/") || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "~/")) || strings.IndexByte(name, 0) >= 0 {
+		return failure(c.Run, "EXPR_INVALID", expression.Span, "interpolated path requires an explicit /, ./, ../ or ~/ root and no NUL")
 	}
 	if expression.Pattern != nil {
 		instantiated = expression.Pattern.Clone(c.Run)

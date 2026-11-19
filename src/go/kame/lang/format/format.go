@@ -9,6 +9,7 @@ import (
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
+	"strings"
 )
 
 // Result carries either the formatted text (OK) or the first parse diagnostic.
@@ -45,7 +46,7 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 			freeIndent(a, indentBuf)
 			return out
 		}
-		formatted := expr.Format(a, result.Expr)
+		formatted := formatExpressionSource(a, result)
 		result.Free()
 		freeIndent(a, indentBuf)
 		return Result{Text: formatted, OK: true}
@@ -104,6 +105,37 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 	}
 	freeIndent(a, indentBuf)
 	return Result{Text: formatted, OK: true}
+}
+
+func formatExpressionSource(a mem.Allocator, parsed *expr.Result) string {
+	var out strings.Builder
+	writeLines := func(text string, includeLast bool) {
+		for text != "" {
+			line, rest, newline := strings.Cut(text, "\n")
+			if !newline && !includeLast {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if line != "\\" {
+				out.WriteString(line)
+				out.WriteByte('\n')
+			}
+			text = rest
+		}
+	}
+	text, span := parsed.Source.Text, parsed.Expr.Span
+	writeLines(text[:span.Start], false)
+	formatted := expr.Format(a, parsed.Expr)
+	out.WriteString(formatted)
+	mem.FreeString(a, formatted)
+	line, rest, _ := strings.Cut(text[span.End:], "\n")
+	if comment := strings.TrimSpace(line); strings.HasPrefix(comment, "#") {
+		out.WriteByte(' ')
+		out.WriteString(comment)
+	}
+	out.WriteByte('\n')
+	writeLines(rest, true)
+	return cloneText(a, out.String())
 }
 
 func diagnosticResult(a mem.Allocator, code string, message string, span source.Span) Result {

@@ -24,7 +24,7 @@ func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing
 		return
 	}
 	defer os.Remove(dir)
-	source := "MODULES = [\"core\" \"cli\"]\ngenerate module-checks = (map ([module] [kind: \"task\" target: (join \"\" (list \"check-\" module)) inputs: [] order-only: [] recipe: (list (join \"\" (list \"touch generated-\" module)))]) MODULES)\n"
+	source := "MODULES = [\"core\", \"cli\"]\ngenerate module-checks = (map (module => {kind: \"task\", target: (join \"\" (list \"check-\" module)), inputs: [], order-only: [], recipe: (list (join \"\" (list \"touch generated-\" module)))}) MODULES)\n"
 	parsed := script.Parse(a, "generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
@@ -74,7 +74,7 @@ func TestGeneratedFileRuleWritesItsDeclaredOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	source := "generate outputs = [[kind: \"file\" target: \"./generated.txt\" inputs: [] order-only: [] recipe: [\"printf generated > @>\"]]]\n"
+	source := "generate outputs = [{kind: \"file\", target: \"./generated.txt\", inputs: [], order-only: [], recipe: [\"printf generated > @>\"]}]\n"
 	parsed := script.Parse(a, "generated-file.kmk", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
@@ -103,7 +103,7 @@ func TestGeneratedFileRuleWritesItsDeclaredOutput(t *testing.T) {
 
 func TestGeneratedBatchFailureRegistersNoExecutableProgram(t *testing.T) {
 	a := t.Allocator()
-	source := "generate broken = [[kind: \"task\" target: \"valid\" inputs: [] order-only: [] recipe: [\"true\"]] [kind: \"unknown\" target: \"invalid\" inputs: [] order-only: [] recipe: [\"true\"]]]\n"
+	source := "generate broken = [{kind: \"task\", target: \"valid\", inputs: [], order-only: [], recipe: [\"true\"]}, {kind: \"unknown\", target: \"invalid\", inputs: [], order-only: [], recipe: [\"true\"]}]\n"
 	parsed := script.Parse(a, "broken-generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
@@ -121,7 +121,7 @@ func TestGeneratedBatchFailureRegistersNoExecutableProgram(t *testing.T) {
 
 func TestGeneratedTargetCannotOverlapAnAuthoredRule(t *testing.T) {
 	a := t.Allocator()
-	source := "existing :\n\ttrue\ngenerate duplicate = [[kind: \"task\" target: \"existing\" inputs: [] order-only: [] recipe: [\"true\"]]]\n"
+	source := "existing :\n\ttrue\ngenerate duplicate = [{kind: \"task\", target: \"existing\", inputs: [], order-only: [], recipe: [\"true\"]}]\n"
 	parsed := script.Parse(a, "duplicate-generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
@@ -135,7 +135,7 @@ func TestGeneratedTargetCannotOverlapAnAuthoredRule(t *testing.T) {
 
 func TestGeneratedTargetCannotOverlapAnAuthoredPattern(t *testing.T) {
 	a := t.Allocator()
-	source := "existing-{suffix} :\n\ttrue\ngenerate duplicate = [[kind: \"task\" target: \"existing-core\" inputs: [] order-only: [] recipe: [\"true\"]]]\n"
+	source := "existing-{suffix} :\n\ttrue\ngenerate duplicate = [{kind: \"task\", target: \"existing-core\", inputs: [], order-only: [], recipe: [\"true\"]}]\n"
 	parsed := script.Parse(a, "duplicate-pattern-generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
@@ -170,7 +170,7 @@ func TestGeneratedDeclarationsRejectBuildEffects(t *testing.T) {
 
 func TestGeneratedDeclarationRejectsDefinitionCycles(t *testing.T) {
 	a := t.Allocator()
-	text := "MODULES = (concat OTHER)\nOTHER = (concat MODULES)\ngenerate cycle = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	text := "MODULES = (concat OTHER)\nOTHER = (concat MODULES)\ngenerate cycle = (map (module => {kind: \"task\", target: module, inputs: [], order-only: [], recipe: [\"true\"]}) MODULES)\n"
 	parsed := script.Parse(a, "cycle-generated.kmk", text)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
@@ -194,10 +194,10 @@ func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 	a := t.Allocator()
 	text := strings.Builder{}
 	text.WriteString("generate too-many = [")
-	record := "[kind: \"task\" target: \"same\" inputs: [] order-only: [] recipe: [\"true\"]]"
+	record := "{kind: \"task\", target: \"same\", inputs: [], order-only: [], recipe: [\"true\"]}"
 	for i := 0; i <= generatedRecordLimitForTest; i++ {
 		if i != 0 {
-			text.WriteString(" ")
+			text.WriteString(", ")
 		}
 		text.WriteString(record)
 	}
@@ -217,14 +217,14 @@ func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 func TestGeneratedDeclarationEnforcesBatchListItemLimit(t *testing.T) {
 	a := t.Allocator()
 	text := strings.Builder{}
-	text.WriteString("generate too-many = [[kind: \"task\" target: \"task\" inputs: [")
+	text.WriteString("generate too-many = [{kind: \"task\", target: \"task\", inputs: [")
 	for i := 0; i <= generatedListItemLimitForTest; i++ {
 		if i != 0 {
-			text.WriteString(" ")
+			text.WriteString(", ")
 		}
 		text.WriteString("\"\"")
 	}
-	text.WriteString("] order-only: [] recipe: [\"true\"]]]\n")
+	text.WriteString("], order-only: [], recipe: [\"true\"]}]\n")
 	parsed := script.Parse(a, "too-many-generated-items.kmk", text.String())
 	text.Reset()
 	registry := eval.NewRegistry(a)
@@ -244,7 +244,7 @@ func TestGeneratedTargetSetIsReplacedWhenSourceChanges(t *testing.T) {
 		t.Fatal("library registration failed")
 		return
 	}
-	firstSource := "MODULES = [\"first\"]\ngenerate modules = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	firstSource := "MODULES = [\"first\"]\ngenerate modules = (map (module => {kind: \"task\", target: module, inputs: [], order-only: [], recipe: [\"true\"]}) MODULES)\n"
 	firstParsed := script.Parse(a, "first.kmk", firstSource)
 	first := program.Compile(a, firstParsed, registry, program.Options{Host: posix.New(a)})
 	if first.Program == nil || len(first.Diagnostics) != 0 {
@@ -263,7 +263,7 @@ func TestGeneratedTargetSetIsReplacedWhenSourceChanges(t *testing.T) {
 	first.Program.Free()
 	first.Free(a)
 	firstParsed.Free()
-	secondSource := "MODULES = [\"second\"]\ngenerate modules = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	secondSource := "MODULES = [\"second\"]\ngenerate modules = (map (module => {kind: \"task\", target: module, inputs: [], order-only: [], recipe: [\"true\"]}) MODULES)\n"
 	secondParsed := script.Parse(a, "second.kmk", secondSource)
 	second := program.Compile(a, secondParsed, registry, program.Options{Host: posix.New(a)})
 	if second.Program == nil || len(second.Diagnostics) != 0 {

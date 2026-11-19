@@ -17,6 +17,6 @@ func TestGoSuite(t *testing.T) {
 	t.Run("ProcessTopologyInspectionDoesNotEvaluatePredicates", func(t *testing.T) { TestProcessTopologyInspectionDoesNotEvaluatePredicates(legacy.Wrap(t)) })
 	t.Run("RuleCapturePatternFieldAndAuthoredCoordinates", func(t *testing.T) { TestRuleCapturePatternFieldAndAuthoredCoordinates(legacy.Wrap(t)) })
 	t.Run("SchedulingInspectionReportsEffectiveClosedPolicies", func(t *testing.T) { TestSchedulingInspectionReportsEffectiveClosedPolicies(legacy.Wrap(t)) })
-	t.Run("SchemaOneAdditiveSemanticFields", func(t *testing.T) { TestSchemaOneAdditiveSemanticFields(legacy.Wrap(t)) })
+	t.Run("SchemaTwoSemanticFields", func(t *testing.T) { TestSchemaTwoSemanticFields(legacy.Wrap(t)) })
 	t.Run("ValueASTPreservesCommentItems", func(t *testing.T) { TestValueASTPreservesCommentItems(legacy.Wrap(t)) })
 }

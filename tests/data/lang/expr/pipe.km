@@ -1,1 +1,1 @@
-(value | transform a)
+(value |> transform a)

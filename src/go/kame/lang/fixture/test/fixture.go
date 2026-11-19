@@ -148,7 +148,7 @@ func TestValidFixtureTree(t *testing.T) {
 
 func TestFormatIdempotence(t *testing.T) {
 	a := t.Allocator()
-	e := expr.Parse(a, "test.km", "(value | first | second b)")
+	e := expr.Parse(a, "test.km", "(value |> first |> second b)")
 	formatted := expr.Format(a, e.Expr)
 	e2 := expr.Parse(a, "formatted.km", formatted)
 	formatted2 := expr.Format(a, e2.Expr)
@@ -170,7 +170,7 @@ func TestFormatIdempotence(t *testing.T) {
 	template2.Free()
 	mem.FreeString(a, formatted)
 	template1.Free()
-	script1 := script.Parse(a, "test.km", "value = [name: \"app\"]\n./out : ./in\n  echo @<")
+	script1 := script.Parse(a, "test.km", "value = {name: \"app\"}\n./out : ./in\n  echo @<")
 	formatted = script.Format(a, script1)
 	script2 := script.Parse(a, "formatted.km", formatted)
 	formatted2 = script.Format(a, script2)

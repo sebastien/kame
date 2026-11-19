@@ -24,44 +24,44 @@ func TestMatchAndSub(t *testing.T) {
 		`(not (match? ./{*}.{*} "./foo"))`,
 		`(not (match? ./{*}.{*} "./.txt"))`,
 		`((match? ./{*}.{*}) "./foo.txt")`,
-		`(match? {name:~[a-z]+} "demo")`,
+		`(match? (pattern "{name:~[a-z]+}") "demo")`,
 		`(match? (pattern (str "{" "name:*}")) "demo")`,
 		`(match? ./{prefix:**}/{name:*} "./a/b/c")`,
-		`(match? {name:*}-{name:*} "a-a")`,
-		`(not (match? {name:*}-{name:*} "a-b"))`,
-		`(eq (map (match? ./{*}.{*}) ["./foo" "./foo.txt"]) [:false :true])`,
-		`(eq (filter-out (match? ./{*}.{*}) ["./foo" "./foo.txt"]) ["./foo"])`,
-		`(eq (filter (match? ./{*}.{*}) ["./foo" "./foo.txt"]) ["./foo.txt"])`,
-		`(eq (filter-out (match? ./{*}.{*}) (map (sub ./journal/{name:*} ./{name}) ["./journal/foo" "./journal/bar.txt"])) ["./foo"])`,
-		`(eq (sub ./journal/{name:*} missing "./other/foo") "./other/foo")`,
-		`(eq (sub ./journal/{name:*} ./{name} ["./journal/foo" "./other/foo"]) ["./foo" "./other/foo"])`,
-		`(eq (sub "a" "b" "banana") (replace "a" "b" "banana"))`,
-		`(eq (sub {name:*}.c {name}.o ["a.c" "b.h"]) (replace {name:*}.c {name}.o ["a.c" "b.h"]))`,
-		`(eq (sub {*}.c "x" []) [])`,
-		`(eq (sub {*}.c "x" :nil) :nil)`,
-		`(let [name "outer"] (nop (match? {name:*} "inner") (eq name "outer")))`,
+		`(match? (pattern "{name:*}-{name:*}") "a-a")`,
+		`(not (match? (pattern "{name:*}-{name:*}") "a-b"))`,
+		`(eq (map (match? ./{*}.{*}) ["./foo", "./foo.txt"]) [false, true])`,
+		`(eq (filter-out (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo"])`,
+		`(eq (filter (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo.txt"])`,
+		`(eq (filter-out (match? ./{*}.{*}) (map (subst ./journal/{name:*} ./{name}) ["./journal/foo", "./journal/bar.txt"])) ["./foo"])`,
+		`(eq (subst ./journal/{name:*} missing "./other/foo") "./other/foo")`,
+		`(eq (subst ./journal/{name:*} ./{name} ["./journal/foo", "./other/foo"]) ["./foo", "./other/foo"])`,
+		`(eq (subst "a" "b" "banana") "bbnbnb")`,
+		`(eq (subst (pattern "{name:*}.c") (pattern '{name}.o') ["a.c", "b.h"]) ["a.o", "b.h"])`,
+		`(eq (subst (pattern "{*}.c") "x" []) [])`,
+		`(eq (subst (pattern "{*}.c") "x" nil) nil)`,
+		`((name => (nop (match? (pattern "{name:*}") "inner") (eq name "outer"))) "outer")`,
 	}
 	for i := range cases {
 		result := evaluate(t, program, cases[i])
 		if result.Diagnostic.Code != "" || result.Value.Kind != core.Bool || !result.Value.Bool {
-			t.Error("match/sub failed: " + cases[i])
+			t.Error("match/subst failed: " + cases[i])
 		}
 		result.Free(a)
 	}
 	rejections := []string{
 		`(match? "plain" "plain")`,
-		`(match? {*} :nil)`,
-		`(match? {*} ["a"])`,
-		`((match? {*}) 42)`,
-		`((match? {*}) "a" "b")`,
-		`(match? {name} "a")`,
+		`(match? (pattern "{*}") nil)`,
+		`(match? (pattern "{*}") ["a"])`,
+		`((match? (pattern "{*}")) 42)`,
+		`((match? (pattern "{*}")) "a" "b")`,
+		`(match? (pattern '{name}') "a")`,
 		`(match? (pattern "plain"))`,
-		`(sub {*}.c "x" ["a.c" :nil])`,
+		`(subst (pattern "{*}.c") "x" ["a.c", nil])`,
 	}
 	for i := range rejections {
 		result := evaluate(t, program, rejections[i])
 		if result.Diagnostic.Code == "" {
-			t.Error("invalid match/sub accepted: " + rejections[i])
+			t.Error("invalid match/subst accepted: " + rejections[i])
 		}
 		result.Free(a)
 	}
@@ -70,7 +70,7 @@ func TestMatchAndSub(t *testing.T) {
 	for i := 0; i < 1600; i++ {
 		subject.WriteByte('a')
 	}
-	budgetCalls := []string{"(match? {~a*}z \"", "((match? {~a*}z) \"", "(sub {~a*}z \"x\" \"", "(replace {~a*}z \"x\" \""}
+	budgetCalls := []string{"(match? (pattern \"{~a*}z\") \"", "((match? (pattern \"{~a*}z\")) \"", "(subst (pattern \"{~a*}z\") \"x\" \""}
 	for i := range budgetCalls {
 		result := evaluate(t, program, budgetCalls[i]+subject.String()+"\")")
 		if result.Diagnostic.Code != "PAT_LIMIT" {

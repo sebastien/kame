@@ -11,7 +11,7 @@ import (
 
 func TestCompositionRegistrationGuards(t *testing.T) {
 	a := t.Allocator()
-	cases := []string{"(include ./a.km)\nx = 42\n", "(if :false (include? ./a.km) :nil)\nx = 42\n"}
+	cases := []string{"include ./a.km\nx = 42\n", "if false\n  include? ./a.km\nx = 42\n"}
 	for i := range cases {
 		engine := core.NewEngine(a)
 		parsed := script.Parse(a, "composition.km", cases[i])
@@ -38,9 +38,16 @@ func TestCompositionRuntimeReservationAndConditionalArity(t *testing.T) {
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, nil)
 	defer p.Free()
-	cases := []string{"(include ./a.km)", "(include? ./a.km)", "(if)", "(if :true)"}
+	cases := []string{"(include ./a.km)", "(include? ./a.km)", "(if ())", "(if true)"}
 	for i := range cases {
 		expression := expr.Parse(a, "runtime.km", cases[i])
+		if i < 2 {
+			if len(expression.Diagnostics) == 0 || expression.Diagnostics[0].Code != "PARSE_ERR" {
+				t.Error("include was accepted as a value expression")
+			}
+			expression.Free()
+			continue
+		}
 		context := &eval.Context{Program: p, Scope: p.Scope, Run: a, Source: "runtime.km"}
 		result := p.EvaluateWith(expression.Expr, context)
 		if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -52,10 +59,7 @@ func TestCompositionRuntimeReservationAndConditionalArity(t *testing.T) {
 		result.Free(a)
 		expression.Free()
 	}
-	if !eval.IsSpecialForm("include") || !eval.IsSpecialForm("include?") {
-		t.Error("source call heads are not reserved")
-	}
-	expression := expr.Parse(a, "pairs.km", "(if :false 1 :true 2 3)")
+	expression := expr.Parse(a, "pairs.km", "(if false then 1 elif true then 2 else 3)")
 	defer expression.Free()
 	context := &eval.Context{Program: p, Scope: p.Scope, Run: a}
 	result := p.EvaluateWith(expression.Expr, context)

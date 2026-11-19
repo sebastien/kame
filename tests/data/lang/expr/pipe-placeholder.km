@@ -1,1 +1,1 @@
-(value | transform _ a)
+(value |> transform _ a)

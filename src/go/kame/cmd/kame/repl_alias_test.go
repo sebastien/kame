@@ -15,17 +15,17 @@ func TestNativeInteractiveKashAliases(t *testing.T) {
 	t.Setenv("KASH_INIT", "")
 	directory := t.TempDir()
 	entries := strings.Join([]string{
-		`alias ll = ["printf" "<%s>\n" "two words" "$literal" "|"]`,
+		`alias ll = ["printf", "<%s>\n", "two words", "$literal", "|"]`,
 		`ll "extra space"`,
 		`ll | cat > ./alias-output`,
 		`cat ./alias-output`,
 		`echo $(ll capture)`,
-		`alias echo = ["echo" "prefix"]`,
+		`alias echo = ["echo", "prefix"]`,
 		`echo once`,
-		`alias ll = ["printf" "%s\n" "replacement"]`,
+		`alias ll = ["printf", "%s\n", "replacement"]`,
 		`ll`,
 		`alias ll = []`,
-		`alias ll = ["echo" (out! "must-not-run")]`,
+		`alias ll = ["echo", (out! "must-not-run")]`,
 		`ll`,
 		`alias ll`,
 		`unalias ll missing`,
@@ -33,7 +33,7 @@ func TestNativeInteractiveKashAliases(t *testing.T) {
 		`unalias ll echo`,
 		`alias`,
 		`echo plain`,
-		"alias multiline = [\n \"printf\"\n \"%s\\n\"\n \"multiline\"]",
+		"alias multiline = [\n \"printf\",\n \"%s\\n\",\n \"multiline\"]",
 		`multiline`,
 	}, "\n") + "\n"
 	var out, errOut bytes.Buffer
@@ -42,7 +42,7 @@ func TestNativeInteractiveKashAliases(t *testing.T) {
 		"<two words>\n<$literal>\n<|>\n" +
 		"<two words>\n<$literal>\n<|>\n<capture>\n\n" +
 		"prefix once\nreplacement\nreplacement\n" +
-		"alias ll = [\"printf\" \"%s\\n\" \"replacement\"]\nreplacement\nplain\nmultiline\n"
+		"alias ll = [\"printf\", \"%s\\n\", \"replacement\"]\nreplacement\nplain\nmultiline\n"
 	if status != 0 || out.String() != want {
 		t.Fatalf("aliases: status=%d out=%q want=%q err=%q", status, out.String(), want, errOut.String())
 	}
@@ -61,7 +61,7 @@ func TestNativeInteractiveKashAliasDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	entries := "alias c = [\"cd\" \"two words\"]\nc\npwd\n"
+	entries := "alias c = [\"cd\", \"two words\"]\nc\npwd\n"
 	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
 	if status != 0 || out.String() != sub+"\n" || errOut.Len() != 0 {
 		t.Fatalf("directory alias: status=%d out=%q err=%q", status, out.String(), errOut.String())
@@ -77,7 +77,7 @@ func TestNativeKashLogin(t *testing.T) {
 	}
 	profile := filepath.Join(directory, "profile.kash")
 	init := filepath.Join(directory, "init.kash")
-	nativeCLIWrite(t, profile, "echo profile\nexport FROM_PROFILE=yes\nalias p = [\"echo\" \"shortcut\"]\n")
+	nativeCLIWrite(t, profile, "echo profile\nexport FROM_PROFILE=yes\nalias p = [\"echo\", \"shortcut\"]\n")
 	nativeCLIWrite(t, init, "echo init\n")
 	t.Setenv("KASH_PROFILE", profile)
 	t.Setenv("KASH_INIT", init)
@@ -119,12 +119,12 @@ func TestAliasCompletionAndHighlighting(t *testing.T) {
 func TestNativeKashAliasFormatting(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "init.kash")
-	text := "# shortcuts\nalias   ll=[\n \"printf\" \"%s\\n\" \"two words\"]\nalias ll\nunalias   ll\nalias ll = [\"printf\" \"%s\\n\" \"ready\"]\n"
+	text := "# shortcuts\nalias   ll=[\n \"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias   ll\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
 	nativeCLIWrite(t, path, text)
 	binary := nativeCLIBinary(t)
 	command := exec.Command(binary, "do", "fmt", "--lang", "kash", "-i", path)
 	output, err := command.CombinedOutput()
-	want := "# shortcuts\nalias ll = [\"printf\" \"%s\\n\" \"two words\"]\nalias ll\nunalias ll\nalias ll = [\"printf\" \"%s\\n\" \"ready\"]\n"
+	want := "# shortcuts\nalias ll = [\"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias ll\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
 	if err != nil || nativeCLIRead(path) != want {
 		t.Fatalf("alias formatting: error=%v out=%q file=%q", err, output, nativeCLIRead(path))
 	}
@@ -135,7 +135,7 @@ func TestNativeKashAliasFormatting(t *testing.T) {
 	t.Setenv("KASH_INIT", path)
 	var out, errOut bytes.Buffer
 	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader("ll\n"), &out, &errOut)
-	if status != 0 || out.String() != "alias ll = [\"printf\" \"%s\\n\" \"two words\"]\nready\n" || errOut.Len() != 0 {
+	if status != 0 || out.String() != "alias ll = [\"printf\", \"%s\\n\", \"two words\"]\nready\n" || errOut.Len() != 0 {
 		t.Fatalf("formatted aliases: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 	command = exec.Command(binary, "do", "run", path)

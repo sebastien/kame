@@ -6,7 +6,7 @@ import (
 )
 
 func TestMalformedNestedKashValueRetainsDiagnostics(t *testing.T) {
-	inputs := []string{"if true\n  ()\n", "if true\n  (\n", "match (value)\n  case 1\n    ()\n", "match (value)\n  case 1\n    (\n"}
+	inputs := []string{"if true\n  ()\n", "if true\n  (\n", "match (value ())\n  case 1\n    ()\n", "match (value ())\n  case 1\n    (\n"}
 	for i := range inputs {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", inputs[i])
 		if len(s.Diagnostics) == 0 {

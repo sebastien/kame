@@ -1,1 +1,1 @@
-[name: "app" path: ./src count: 2]
+{name: "app", path: ./src, count: 2}

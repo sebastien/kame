@@ -13,7 +13,7 @@ func TestOperationValuesSupportCallbacksAliasesAndContainers(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "operations.km", "callback = count\ncallbacks = [count uppercase]\nrecord = [callback: count]\nresult = [(callback [1 2]) (map count [[1] [2 3]]) (reduce str \"\" [\"a\" \"b\"])]\n")
+	parsed := script.Parse(a, "operations.km", "callback = count\ncallbacks = [count, uppercase]\nrecord = {callback: count}\nresult = [(callback [1, 2]), (map count [[1], [2, 3]]), (reduce str \"\" [\"a\", \"b\"])]\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
@@ -31,7 +31,7 @@ func TestOperationValuesSupportCallbacksAliasesAndContainers(t *testing.T) {
 			}
 		}
 	}
-	sources := []string{"(let [f count] (f [1 2 3]))", "(let [count ([x] 7)] (count []))", "(let [ops [callback: count]] (ops.callback [1 2]))", "(let [f =] (f 1 1))"}
+	sources := []string{"((f => (f [1, 2, 3])) count)", "((count => (count [])) (x => 7))", "((ops => (ops.callback [1, 2])) {callback: count})", "((f => (f 1 1)) eq?)"}
 	for i := range sources {
 		r := evaluate(t, p, sources[i])
 		if r.Diagnostic.Code != "" {
@@ -47,7 +47,7 @@ func TestOperationValuesSupportCallbacksAliasesAndContainers(t *testing.T) {
 			t.Error("record operation call failed")
 		}
 		if i == 3 && !r.Value.Bool {
-			t.Error("comparison alias is not first-class")
+			t.Error("named comparison operation is not first-class")
 		}
 		r.Free(a)
 	}
@@ -64,8 +64,8 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 	operations.Register(registry)
 	parsed := script.Parse(a, "operations.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	sources := []string{"(let [f count] (f))", "(map count [1])", "(let [f read] (f missing))", "(map read [\"blocked\"])", "if", "run!", "(map if [])", "unknown", "(unknown)"}
-	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "CAP_DENIED", "CAP_DENIED", "EXPR_INVALID", "EXPR_INVALID", "EXPR_INVALID", "REF_MISSING", "OP_UNKNOWN"}
+	sources := []string{"((f => (f ())) count)", "(map count [1])", "((f => (f missing)) read)", "(map read [\"blocked\"])", "run!", "unknown", "(unknown ())"}
+	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "CAP_DENIED", "CAP_DENIED", "EXPR_INVALID", "REF_MISSING", "OP_UNKNOWN"}
 	for i := range sources {
 		r := evaluate(t, p, sources[i])
 		if r.Diagnostic.Code != codes[i] {
@@ -73,7 +73,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 		}
 		r.Free(a)
 	}
-	specialForms := []string{"?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await"}
+	specialForms := []string{"let", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await"}
 	for i := range specialForms {
 		if !eval.IsSpecialForm(specialForms[i]) || registry.Add(eval.Operation{Name: specialForms[i], Call: countOperation}) {
 			t.Errorf("special form accepted as operation: %s", specialForms[i])
@@ -89,7 +89,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 }
 
 func TestAliasedOperationResumesAndInvalidates(t *testing.T) {
-	checkRetainedOperands(t, "callback = async\nresult = (list (once) (callback))")
+	checkRetainedOperands(t, "callback = async\nresult = (list (once ()) (callback ()))")
 }
 
 func TestOperationCallableRejectsForeignInvocation(t *testing.T) {

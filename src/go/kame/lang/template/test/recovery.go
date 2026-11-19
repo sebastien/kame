@@ -9,7 +9,7 @@ import (
 
 func TestDocumentLetTransfersBranchConditionsAndPatterns(t *testing.T) {
 	inputs := []string{
-		"@if(:true)\n@let(x 1)\nyes\n@elif(:false)\nno\n@end(if)\n",
+		"@if(true)\n@let(x 1)\nyes\n@elif(false)\nno\n@end(if)\n",
 		"@match(x)\n@case(1)\n@let(y 2)\nyes\n@case(2)\nno\n@end(match)\n",
 	}
 	for i := range inputs {
@@ -22,15 +22,15 @@ func TestDocumentLetTransfersBranchConditionsAndPatterns(t *testing.T) {
 }
 
 func TestDocumentLetRetainsEndLabelDiagnostic(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(:true)\n@let(x 1)\nyes\n@end(for)\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(true)\n@let(x 1)\nyes\n@end(for)\n", "plain")
 	defer doc.Free()
-	if len(doc.Diagnostics) != 1 || doc.Diagnostics[0].Code != "TPL_BLOCK" || doc.Diagnostics[0].Message != "template block end label does not match opening directive" || !sameSpan(doc.Diagnostics[0].Span, 25, 34) {
+	if len(doc.Diagnostics) != 1 || doc.Diagnostics[0].Code != "TPL_BLOCK" || doc.Diagnostics[0].Message != "template block end label does not match opening directive" || !sameSpan(doc.Diagnostics[0].Span, 24, 33) {
 		t.Error("let discarded the end label or diagnostic span")
 	}
 }
 
 func TestDocumentLetTransfersTerminatorRightTrim(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(:true)\n@let(x 1)\nyes\n@elif(:false)-\n no\n@end(if)-\n tail\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(true)\n@let(x 1)\nyes\n@elif(false)-\n no\n@end(if)-\n tail\n", "plain")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 || doc.Root == nil || len(doc.Root.Items) < 3 {
 		t.Fatal("trimmed let document did not lower")
@@ -43,7 +43,7 @@ func TestDocumentLetTransfersTerminatorRightTrim(t *testing.T) {
 	if doc.Root.Items[2].Kind != expr.Application || len(doc.Root.Items[2].Items) != 2 || doc.Root.Items[2].Items[0].Text != "template-trim-start" {
 		t.Error("end right trim was not retained")
 	}
-	ending := template.ParseDocument(t.Allocator(), "end-trim.tmpl", "@if(:true)\n@let(x 1)\nyes\n@end(if)-\n tail\n", "plain")
+	ending := template.ParseDocument(t.Allocator(), "end-trim.tmpl", "@if(true)\n@let(x 1)\nyes\n@end(if)-\n tail\n", "plain")
 	defer ending.Free()
 	if len(ending.Diagnostics) != 0 || len(ending.Root.Items) != 3 || ending.Root.Items[2].Kind != expr.Application || len(ending.Root.Items[2].Items) != 2 || ending.Root.Items[2].Items[0].Text != "template-trim-start" {
 		t.Error("let discarded end right trim")

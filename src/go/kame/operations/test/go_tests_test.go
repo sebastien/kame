@@ -59,7 +59,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("ScalarTextAndExplicitJSONBoundaries", func(t *testing.T) { TestScalarTextAndExplicitJSONBoundaries(legacy.Wrap(t)) })
 	t.Run("ShRejectsUnsupportedOptionsBeforeDryRun", func(t *testing.T) { TestShRejectsUnsupportedOptionsBeforeDryRun(legacy.Wrap(t)) })
 	t.Run("StandardDigestVectors", func(t *testing.T) { TestStandardDigestVectors(legacy.Wrap(t)) })
-	t.Run("StandardOperationAliasMetadata", func(t *testing.T) { TestStandardOperationAliasMetadata(legacy.Wrap(t)) })
+	t.Run("SubstitutionOperationMetadata", func(t *testing.T) { TestSubstitutionOperationMetadata(legacy.Wrap(t)) })
 	t.Run("StreamUpdateCancelsPendingLibraryCallback", func(t *testing.T) { TestStreamUpdateCancelsPendingLibraryCallback(legacy.Wrap(t)) })
 	t.Run("StructuralEqualityAndFilterShorthand", func(t *testing.T) { TestStructuralEqualityAndFilterShorthand(legacy.Wrap(t)) })
 	t.Run("SubToken", func(t *testing.T) { TestSubToken(legacy.Wrap(t)) })

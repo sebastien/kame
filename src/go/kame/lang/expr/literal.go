@@ -1,6 +1,9 @@
 package expr
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // IsLiteral accepts only closed data: no names, interpolation, patterns, calls,
 // selectors or captures. Typed configuration cannot execute caller-supplied
@@ -37,7 +40,7 @@ func literalAt(e *Expr, depth int) bool {
 		return true
 	case Record:
 		for i := range e.Fields {
-			if !utf8.Valid([]byte(e.Fields[i].Key)) || !literalAt(e.Fields[i].Value, depth+1) {
+			if e.Fields[i].Spread || !utf8.Valid([]byte(e.Fields[i].Key)) || !literalAt(e.Fields[i].Value, depth+1) {
 				return false
 			}
 			for j := 0; j < i; j++ {
@@ -64,4 +67,20 @@ func PathHasGlob(text string) bool {
 		}
 	}
 	return false
+}
+
+// AppendPathText decodes authored path escapes and doubled at-signs.
+// When keepEscapes is true, backslashes remain available to the glob matcher.
+func AppendPathText(b *strings.Builder, text string, keepEscapes bool) {
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\\' && i+1 < len(text) {
+			if keepEscapes {
+				b.WriteByte('\\')
+			}
+			i++
+		} else if text[i] == '@' && i+1 < len(text) && text[i+1] == '@' {
+			i++
+		}
+		b.WriteByte(text[i])
+	}
 }

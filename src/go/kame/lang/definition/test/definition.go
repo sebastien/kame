@@ -6,6 +6,7 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
+	"strings"
 )
 
 func sameSpan(span source.Span, start int, end int) bool {
@@ -13,7 +14,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestDefinitionClassifiesExpressionAndSpans(t *testing.T) {
-	result := definition.Parse(t.Allocator(), "test.km", "build = [name: \"app\"]")
+	result := definition.Parse(t.Allocator(), "test.km", "build = {name: \"app\"}")
 	defer result.Free()
 	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Expression.Kind != expr.Record {
 		t.Error("definition did not classify record RHS as an expression")
@@ -30,6 +31,55 @@ func TestFunctionDefinitionRetainsRestParameter(t *testing.T) {
 	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Name != "copy" || len(result.Definition.Parameters) != 2 || !result.Definition.Parameters[1].Rest {
 		t.Error("function definition did not retain rest parameter")
 	}
+	for _, input := range []string{"match = 1", "(service name) = name", "(f with) = 1", "(f _0) = 1"} {
+		bad := definition.Parse(t.Allocator(), "test.km", input)
+		if len(bad.Diagnostics) == 0 || bad.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Errorf("%q accepted a reserved binding or parameter", input)
+		}
+		bad.Free()
+	}
+	sep := definition.Parse(t.Allocator(), "test.km", "(join sep) = sep")
+	defer sep.Free()
+	if len(sep.Diagnostics) != 0 {
+		t.Errorf("contextual template separator cannot be bound: %v", sep.Diagnostics)
+	}
+	for _, tc := range []struct {
+		text     string
+		function bool
+		arity    int
+	}{
+		{"def value = 42", false, 0},
+		{"def ready? () = true", true, 0},
+		{"def collect first rest... = [first, ...rest]", true, 2},
+	} {
+		parsed := definition.Parse(t.Allocator(), "test.km", tc.text)
+		if len(parsed.Diagnostics) != 0 || parsed.Definition == nil || parsed.Definition.Function != tc.function || len(parsed.Definition.Parameters) != tc.arity {
+			t.Errorf("%q: invalid definition structure: %v", tc.text, parsed.Diagnostics)
+		} else {
+			formatted := definition.Format(t.Allocator(), parsed.Definition)
+			if formatted != tc.text {
+				t.Errorf("format = %q, want %q", formatted, tc.text)
+			}
+			mem.FreeString(t.Allocator(), formatted)
+		}
+		parsed.Free()
+	}
+	for _, text := range []string{"def module/value = 42", "def probe arg arg = arg", "def probe () arg = arg", "def probe rest... arg = arg", "def value ?= 42"} {
+		parsed := definition.Parse(t.Allocator(), "test.km", text)
+		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Errorf("%q accepted a malformed def header", text)
+		}
+		parsed.Free()
+	}
+	parameter := strings.Repeat("x", 72)
+	input := "def long " + parameter + " = " + parameter
+	parsed := definition.Parse(t.Allocator(), "test.km", input)
+	defer parsed.Free()
+	formatted := definition.Format(t.Allocator(), parsed.Definition)
+	defer mem.FreeString(t.Allocator(), formatted)
+	if len(parsed.Diagnostics) != 0 || formatted != "def long "+parameter+" =\n\t"+parameter {
+		t.Errorf("long header or body laid out incorrectly: %q", formatted)
+	}
 }
 
 func TestRangeKeepsCallerSourceAndInterpolatedString(t *testing.T) {
@@ -44,21 +94,21 @@ func TestRangeKeepsCallerSourceAndInterpolatedString(t *testing.T) {
 }
 
 func TestFormatDefinitionCanonicalizesWhitespace(t *testing.T) {
-	result := definition.Parse(t.Allocator(), "test.km", "value   =   [\"words\"  name]")
+	result := definition.Parse(t.Allocator(), "test.km", "value   =   [\"words\",  name]")
 	defer result.Free()
 	if len(result.Diagnostics) != 0 || result.Definition.Expression.Kind != expr.List || result.Definition.Expression.Items[1].Kind != expr.Name {
 		t.Error("RHS did not parse list expressions")
 		return
 	}
 	formatted := definition.Format(t.Allocator(), result.Definition)
-	if formatted != "value = [\"words\" name]" {
+	if formatted != "value = [\"words\", name]" {
 		t.Errorf("Format() = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
 func TestDefinitionAtomsUseExpressionGrammar(t *testing.T) {
-	texts := []string{"alias = other", "number = 42", "flag = :false", "nothing = :nil", "path = ./file", "shell = kash", "(identity value) = value"}
+	texts := []string{"alias = other", "number = 42", "flag = false", "nothing = nil", "path = ./file", "shell = kash", "(identity value) = value"}
 	kinds := []expr.Kind{expr.Name, expr.Integer, expr.Boolean, expr.Nil, expr.Path, expr.Name, expr.Name}
 	for i := range texts {
 		result := definition.Parse(t.Allocator(), "test.km", texts[i])
@@ -69,8 +119,8 @@ func TestDefinitionAtomsUseExpressionGrammar(t *testing.T) {
 	}
 }
 
-func TestDefinitionRejectsTextAndMultipleExpressions(t *testing.T) {
-	texts := []string{"value = one two", "value = \"one\" \"two\"", "value = -Wall -Wextra", "value = [", "value =", "value = (broken"}
+func TestDefinitionRejectsMalformedExpressions(t *testing.T) {
+	texts := []string{"value = one = two", "value = -Wall -Wextra", "value = [", "value =", "value = (broken"}
 	for i := range texts {
 		result := definition.Parse(t.Allocator(), "test.km", texts[i])
 		if len(result.Diagnostics) == 0 {
@@ -121,14 +171,14 @@ func TestQuestionMarkNameIsNotDefaultOperator(t *testing.T) {
 
 func TestContributionDefinitionPreservesSpansAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	result := definition.Parse(a, "test.km", "items += [1 2]")
+	result := definition.Parse(a, "test.km", "items += [1, 2]")
 	defer result.Free()
 	d := result.Definition
-	if len(result.Diagnostics) != 0 || d == nil || !d.Contribution || d.Default || !sameSpan(d.NameSpan, 0, 5) || !sameSpan(d.Expression.Span, 9, 14) {
+	if len(result.Diagnostics) != 0 || d == nil || !d.Contribution || d.Default || !sameSpan(d.NameSpan, 0, 5) || !sameSpan(d.Expression.Span, 9, 15) {
 		t.Fatal("contribution lost operator or spans")
 	}
 	formatted := definition.Format(a, d)
-	if formatted != "items += [1 2]" {
+	if formatted != "items += [1, 2]" {
 		t.Error("contribution formatting lost operator")
 	}
 	mem.FreeString(a, formatted)

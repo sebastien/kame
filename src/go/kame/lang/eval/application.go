@@ -28,28 +28,23 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	if len(expression.Items) == 0 {
 		return failure(context.Run, "EXPR_INVALID", expression.Span, "empty application")
 	}
+	switch expression.Infix {
+	case "??", "and", "or":
+		return p.shortCircuitValue(scope, expression, context)
+	}
 	head := expression.Items[0]
-	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "def" || head.Text == "eval" || head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" || head.Text == "await") {
+	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "eval" || head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" || head.Text == "await") {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", expression.Span, "stream predicates require pure, nonblocking computations")
 	}
 	if head.Kind == expr.Name {
-		if head.Text == "include" || head.Text == "include?" {
-			return failure(context.Run, "EXPR_INVALID", expression.Span, "include/include? are source-composition forms; use them at script top level or in composition if bodies")
-		}
 		if head.Text == "await" {
 			return p.awaitProcess(expression, context)
 		}
 		if head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" {
 			return p.processExpression(expression, context)
 		}
-		if head.Text == "?" {
-			return p.fallback(scope, expression.Items[1:], context)
-		}
 		if head.Text == "let" {
 			return p.let(scope, expression.Items[1:], context, expression.Span)
-		}
-		if head.Text == "def" {
-			return p.def(scope, expression.Items[1:], context, expression.Span)
 		}
 		if head.Text == "eval" {
 			return p.evalText(scope, expression.Items[1:], context, expression.Span)
@@ -57,20 +52,13 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		if head.Text == "if" {
 			return p.conditional(scope, expression.Items[1:], context, expression.Span)
 		}
-		if head.Text == "and" {
-			return p.logicalAnd(scope, expression.Items[1:], context, expression.Span)
-		}
-		if head.Text == "or" {
-			return p.logicalOr(scope, expression.Items[1:], context, expression.Span)
-		}
 		if head.Text == "with" {
 			return p.scopedWith(scope, expression.Items[1:], context, expression.Span)
 		}
 		if head.Text == "match" {
 			return p.patternMatch(scope, expression.Items[1:], context, expression.Span)
 		}
-		// Comparison aliases parse as Name atoms; canonicalize before lookup.
-		if aliased, ok := comparisonAlias(head.Text); ok {
+		if aliased, ok := comparisonOperation(expression.Infix); ok {
 			if p.Registry != nil {
 				operation := p.Registry.lookup(aliased)
 				if operation != nil {
@@ -173,11 +161,9 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	return result
 }
 
-// comparisonAlias maps symbolic comparison atoms to canonical operation names.
-func comparisonAlias(name string) (string, bool) {
-	switch name {
-	case "=":
-		return "eq?", true
+// comparisonOperation maps infix comparisons to their library contracts.
+func comparisonOperation(operator string) (string, bool) {
+	switch operator {
 	case "==":
 		return "eq?", true
 	case "!=":
@@ -194,6 +180,31 @@ func comparisonAlias(name string) (string, bool) {
 	return "", false
 }
 
+func hasArgumentSpread(arguments []*expr.Expr) bool {
+	return slices.ContainsFunc(arguments, func(argument *expr.Expr) bool {
+		return argument.Kind == expr.ListSpread
+	})
+}
+
+// expandArguments gives the call independent owners while keeping the authored
+// operands available for suspension and diagnostics.
+func expandArguments(a mem.Allocator, arguments []*expr.Expr, values []core.Value) ([]*expr.Expr, []core.Value) {
+	var origins []*expr.Expr
+	var expanded []core.Value
+	for i, argument := range arguments {
+		if argument.Kind == expr.ListSpread {
+			for _, value := range values[i].List {
+				expanded = append(expanded, borrowValue(a, value))
+				origins = append(origins, argument.Items[0])
+			}
+		} else {
+			expanded = append(expanded, borrowValue(a, values[i]))
+			origins = append(origins, argument)
+		}
+	}
+	return origins, expanded
+}
+
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	if context.PurePredicate && operation.Category != PureOperation {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
@@ -206,7 +217,12 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 			return p.advanceFinalizer(state, context)
 		}
 	}
-	ready := p.prepareOperation(operation, len(arguments), context, span)
+	spread := hasArgumentSpread(arguments)
+	count := len(arguments)
+	if spread {
+		count = -1 // Arity depends on the evaluated spread operands.
+	}
+	ready := p.prepareOperation(operation, count, context, span)
 	if ready.Waiting || ready.Completed || ready.Diagnostic.Code != "" {
 		return ready
 	}
@@ -224,18 +240,39 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
-	if operation.DeferredReplacement && operands.Values[0].Kind == core.Pattern {
+	callArguments, callValues := arguments, operands.Values
+	if spread {
+		callArguments, callValues = expandArguments(context.Run, arguments, operands.Values)
+		defer mem.FreeSlice(nil, callArguments)
+		count := len(callValues)
+		if count < operation.MinArity || (operation.MaxArity >= 0 && count > operation.MaxArity) {
+			freeValuesWithCallables(context.Run, callValues)
+			freeValuesWithCallables(context.Run, operands.Values)
+			return arityFailure(context.Run, span, operation.Name, count, operation.MinArity, operation.MaxArity)
+		}
+	}
+	if i := operands.ReplacementIndex; i >= 0 {
 		function := mem.Alloc[Function](context.Run)
 		function.PayloadAlloc = context.Run
-		function.Kind, function.Scope, function.Expression = FunctionTemporary, scope, expr.Clone(context.Run, arguments[1])
+		function.Kind, function.Scope, function.Expression = FunctionTemporary, scope, expr.Clone(context.Run, arguments[i])
 		function.ExpressionOwned = true
 		function.DeferredReplacement = true
 		scope.Retain()
-		operands.Values[1] = core.Value{Kind: core.Callable, Callable: function}
+		freeCallables(context.Run, &callValues[1])
+		callValues[1] = core.Value{Kind: core.Callable, Callable: function}
 	}
 	context.Scope = scope
 	completedEffects, completedPaths := len(context.Effects), len(context.WritePaths)
 	// Operations consume callable wrappers; suspended operands retain independent owners.
+	if spread {
+		result := p.invokeOperation(operation, callValues, callArguments, context, span)
+		freeValues(context.Run, callValues)
+		if result.Waiting && p.retainArguments(scope, context, span, operation.Name, operands.Values, len(arguments), operands.Facts, effects, completedEffects, paths, completedPaths) {
+			return result
+		}
+		freeValuesWithCallables(context.Run, operands.Values)
+		return result
+	}
 	var retained []core.Value
 	if context.sequencedOperand {
 		for i := range operands.Values {
@@ -308,7 +345,7 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	_ = p
 	if context.Phase == RenderingPhase && (operation.Category == OutputOperation || operation.Category == ProcessOperation || operation.Category == VolatileOperation) {
 		context.MarkPhaseInvalid()
-		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; return artifact content with [shell: kame] or execute actions in Kash")
+		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; return artifact content with {shell: kame} or execute actions in Kash")
 	}
 	if context.PurePredicate && operation.Category != PureOperation {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
@@ -322,7 +359,7 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	if context.Engine != nil && context.Engine.Submitted() && context.Completion().RequestID == 0 {
 		return Result{Waiting: true}
 	}
-	if count < operation.MinArity || (operation.MaxArity >= 0 && count > operation.MaxArity) {
+	if count >= 0 && (count < operation.MinArity || (operation.MaxArity >= 0 && count > operation.MaxArity)) {
 		return arityFailure(context.Run, span, operation.Name, count, operation.MinArity, operation.MaxArity)
 	}
 	if context.OperationObserver != nil {
@@ -393,10 +430,16 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 	context.observeDefinitionSource(function.Definition)
 	scope := context.Scope
 	operands := p.argumentValues(scope, arguments, context, span)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	values := operands.Values
+	if hasArgumentSpread(arguments) {
+		origins, expanded := expandArguments(context.Run, arguments, values)
+		mem.FreeSlice(nil, origins)
+		freeValuesWithCallables(context.Run, values)
+		values = expanded
+	}
 	// Argument expressions may enter temporary scopes. Native constructors
 	// capture the application scope, which must still be alive after arguments.
 	context.Scope = scope
@@ -410,6 +453,7 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
 	context.observeDefinitionSource(function.Definition)
 	if context.PurePredicate && function.Kind == FunctionInvocation {
+		discardCallValues(context.Run, values)
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts")
 	}
 	if function.Kind == FunctionOperation {

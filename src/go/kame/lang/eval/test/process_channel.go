@@ -61,7 +61,7 @@ func TestReservedOutputPortsLowerAndCountCaptureSinks(t *testing.T) {
 		{"$(printf a >&err)", "", 0, 1},
 		{"$((printf a >&err, printf b >&err))", "", 0, 2},
 		{"$((printf a >&out, printf b >&out))", "KASH_AMBIGUOUS_CAPTURE", 2, 0},
-		{"$(printf a |(frame :lines) |(filter :true | cat >&err) | cat)", "", 0, 1},
+		{"$(printf a |(frame :lines) |(filter true | cat >&err) | cat)", "", 0, 1},
 	}
 	for i := range cases {
 		parsed := expr.Parse(a, "ports.km", cases[i].text)

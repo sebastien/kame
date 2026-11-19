@@ -25,13 +25,15 @@ func inputSnapshotAllocations(t *testing.T, count int) uint64 {
 	defer source.Reset()
 	source.WriteString("INPUTS = [")
 	for i := 0; i < count; i++ {
-
+		if i != 0 {
+			source.WriteString(", ")
+		}
 		name := core.NewString(a, "inputs/"+strconv.Itoa(i))
 		memory.SetFile(name.Text, []byte("source"))
-		source.WriteString(" ./" + name.Text)
+		source.WriteString("./" + name.Text)
 		name.Free(a)
 	}
-	source.WriteString("]\n./output : @{INPUTS} ; [shell: kame]\n\t(text (read ./extra))\n")
+	source.WriteString("]\n./output : @{INPUTS} ; {shell: kame}\n\t(text (read ./extra))\n")
 	parsed := script.Parse(a, "snapshot.kmk", source.String())
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)

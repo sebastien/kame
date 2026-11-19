@@ -14,11 +14,12 @@ func TestRunLifecycle(t *testing.T) {
 		output, diagnostic string
 	}{
 		{[]string{"do", "run", "--lang", "expr", "-c", "(out! 42)"}, 0, "42", ""},
+		{[]string{"do", "run", "--lang", "expr", "-c", "# comment\nfalse and missing ?? 42 # result"}, 0, "false", ""},
 		{[]string{"do", "run", "--lang", "expr", "-c", "missing"}, 1, "", ""},
-		{[]string{"do", "fmt", "--lang", "expr", "-c", "[1   2]"}, 0, "[1 2]", ""},
+		{[]string{"do", "fmt", "--lang", "expr", "-c", "[1,   2]"}, 0, "[1, 2]", ""},
 		{[]string{"do", "run", "--unknown"}, 2, "", ""},
 		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0, "", ""},
-		{[]string{"do", "run", "--lang", "expr", "-c", "(finally! ([] 42) ([] (out! \"cleanup\")))"}, 0, "cleanup", ""},
+		{[]string{"do", "run", "--lang", "expr", "-c", "(finally! (() => 42) (() => (out! \"cleanup\")))"}, 0, "cleanup", ""},
 	}
 	baseline := runtime.NumGoroutine()
 	for iteration := 0; iteration < 64; iteration++ {

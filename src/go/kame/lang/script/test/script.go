@@ -110,7 +110,7 @@ func TestFormatScriptPreservesBlankLines(t *testing.T) {
 }
 
 func TestScriptParsesMultilineDefinition(t *testing.T) {
-	s := script.Parse(t.Allocator(), "test.km", "value = [\n  name: \"app\"\n]\n")
+	s := script.Parse(t.Allocator(), "test.km", "value = {\n  name: \"app\"\n}\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 1 || s.Items[0].Definition == nil {
 		t.Error("multiline definition did not compose")
@@ -119,14 +119,14 @@ func TestScriptParsesMultilineDefinition(t *testing.T) {
 
 func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 	a := t.Allocator()
-	text := "# comment \\\nwords = [\"one\" \\\n  \"two\" \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @{paths}\n\tprintf one \\\n\t two\n"
+	text := "# comment \\\nwords = [\"one\", \\\n  \"two\", \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @{paths}\n\tprintf one \\\n\t two\n"
 	s := script.Parse(a, "continued.kmk", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text {
 		t.Error("continuation changed source or item boundaries")
 		return
 	}
-	words := s.Items[1].Definition.Expression.Items
+	words := expr.Ungroup(s.Items[1].Definition.Expression).Items
 	if len(words) != 3 || words[0].Kind != expr.String || words[1].Kind != expr.String || words[2].Kind != expr.String {
 		t.Error("continued definition did not parse list")
 		return
@@ -142,10 +142,10 @@ func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 }
 
 func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
-	text := "(include? \"folder/optional file.kmk\")\n(include ./required.kmk)\n"
+	text := "include? ./folder/optional\\ file.kmk\ninclude ./required.kmk\n"
 	parsed := script.Parse(t.Allocator(), "test.kmk", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "folder/optional file.kmk" || parsed.Items[1].Include != "./required.kmk" {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./folder/optional file.kmk" || parsed.Items[1].Include != "./required.kmk" {
 		t.Error("optional include did not retain its path and required distinction")
 		return
 	}
@@ -157,7 +157,7 @@ func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
 }
 
 func TestGeneratedDeclarationParsesFormatsAndRetainsName(t *testing.T) {
-	text := "MODULES = [\"core\" \"cli\"]\ngenerate checks = (map ([module] [kind: \"task\" target: (join \"\" (list \"check-\" module)) inputs: [] order-only: [] recipe: [\"go test ./...\"]]) MODULES)\n"
+	text := "MODULES = [\"core\", \"cli\"]\ngenerate checks = (map (module => {kind: \"task\", target: (join \"\" (list \"check-\" module)), inputs: [], order-only: [], recipe: [\"go test ./...\"]}) MODULES)\n"
 	parsed := script.Parse(t.Allocator(), "generated.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 {

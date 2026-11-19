@@ -15,7 +15,7 @@ func TestLineRemovesOnlyOneTerminalLF(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "line.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`(line "")`, `(line "name")`, `(line " name \n")`, `(line "name\n\n")`, `(line "name\r\n")`, `(line "name\r")`, `(line "one\ntwo")`, `("value\n" | line)`, `(let [frame line] (frame "\n"))`}
+	texts := []string{`(line "")`, `(line "name")`, `(line " name \n")`, `(line "name\n\n")`, `(line "name\r\n")`, `(line "name\r")`, `(line "one\ntwo")`, `("value\n" |> line)`, `((frame => (frame "\n")) line)`}
 	expected := []string{"", "name", " name ", "name\n", "name\r", "name\r", "one\ntwo", "value", ""}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
@@ -24,7 +24,7 @@ func TestLineRemovesOnlyOneTerminalLF(t *testing.T) {
 		}
 		r.Free(a)
 	}
-	invalid := []string{`(line)`, `(line "a" "b")`, `(line :nil)`, `(line 1)`, `(line [])`, `(line ([x] x))`, `(line [value: ([x] x)])`}
+	invalid := []string{`(line ())`, `(line "a" "b")`, `(line nil)`, `(line 1)`, `(line [])`, `(line (x => x))`, `(line {value: (x => x)})`}
 	for i := range invalid {
 		r := evaluate(t, p, invalid[i])
 		if r.Diagnostic.Code != "EXPR_INVALID" {

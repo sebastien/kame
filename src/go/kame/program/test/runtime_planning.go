@@ -257,7 +257,7 @@ func TestRenderedDuplicateOutputsAreRejected(t *testing.T) {
 
 func TestPlanFlattensComputedInputExpression(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC (list OTHER :nil))\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC (list OTHER nil))\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -281,7 +281,7 @@ func TestPlanFlattensComputedInputExpression(t *testing.T) {
 
 func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\n./output : @(? SRC missing)\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./src\n./output : @(SRC ?? missing)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -492,7 +492,7 @@ func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "sources = [\"source-a\" \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @(map ([s] s) sources)\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "sources = [\"source-a\", \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @(map (s => s) sources)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -536,7 +536,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 		t.Fatal("source write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "sources = [\"./src/a.c\" \"./src/b.c\"]\nobjects = (replace ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @{objects}\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
+	parsed := script.Parse(a, "test.kmk", "sources = [\"./src/a.c\", \"./src/b.c\"]\nobjects = (subst ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @{objects}\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")

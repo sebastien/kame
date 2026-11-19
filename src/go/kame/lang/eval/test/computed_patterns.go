@@ -17,7 +17,7 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "computed", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`@(nop """../two {evil:*} *?[\] @() words""")/{name:*}.@(nop "[a-z]+")`, `@(nop "src")/{name:*}`, `@(nop "file://root")/{name:*}`, `@(nop "C:\\root")/{name:*}`, `./@(nop 42)/{name:*}`, "./@(nop \"\x00\")/{name:*}", `@(nop "/root")/{name:*}`, `@(nop "./root")/{name:*}`, `@(nop "../root")/{name:*}`, `@(nop "./C:\\root")/{name:*}`, `./@(nop "{name:*}")/{other:*}`, `./@(nop [])/{name:*}`}
+	texts := []string{`@{nop """../two {evil:*} *?[\] @() words"""}/{name:*}.@{nop "[a-z]+"}`, `@{nop "src"}/{name:*}`, `@{nop "file://root"}/{name:*}`, `@{nop "C:\\root"}/{name:*}`, `./@{nop 42}/{name:*}`, "./@{nop \"\x00\"}/{name:*}", `@{nop "/root"}/{name:*}`, `@{nop "./root"}/{name:*}`, `@{nop "../root"}/{name:*}`, `@{nop "./C:\\root"}/{name:*}`, `./@{pattern "{name:*}"}/{other:*}`, `./@{nop []}/{name:*}`}
 	for i := range texts {
 		e := expr.Parse(a, "computed", texts[i])
 		if len(e.Diagnostics) != 0 {
@@ -74,15 +74,15 @@ func TestPathReferencesResolveLexicalSymbols(t *testing.T) {
 	parsed := script.Parse(a, "paths", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(let [ROOT "./src" path "widgets/button"] @{ROOT}/js/{path}.js)`,
-		`(let [path "widgets/button"] ./src/js/{path}.js)`,
-		`(let [ROOT "./src" path "widgets/button"] (nop @{ROOT}/js/{path}.js))`,
-		`(let [ROOT "./src" path """*{literal}"""] @{ROOT}/js/{path}.js)`,
-		`(let [ROOT "./src"] @{ROOT}/js/\{path}.js)`,
-		`(let [ROOT "./src"] "@{ROOT}/js/{path}.js")`,
-		`(let [ROOT "./src"] @{ROOT}/js/{missing}.js)`,
-		`(let [ROOT "./src" path 42] @{ROOT}/js/{path}.js)`,
-		"(let [ROOT \"./src\" path \"\x00\"] @{ROOT}/js/{path}.js)",
+		`((ROOT => ((path => @{ROOT}/js/{path}.js) "widgets/button")) "./src")`,
+		`((path => ./src/js/{path}.js) "widgets/button")`,
+		`((ROOT => ((path => (nop @{ROOT}/js/{path}.js)) "widgets/button")) "./src")`,
+		`((ROOT => ((path => @{ROOT}/js/{path}.js) """*{literal}""")) "./src")`,
+		`((ROOT => @{ROOT}/js/\{path\}.js) "./src")`,
+		`((ROOT => "@{ROOT}/js/{path}.js") "./src")`,
+		`((ROOT => @{ROOT}/js/{missing}.js) "./src")`,
+		`((ROOT => ((path => @{ROOT}/js/{path}.js) 42)) "./src")`,
+		"((ROOT => ((path => @{ROOT}/js/{path}.js) \"\x00\")) \"./src\")",
 	}
 	for i := range texts {
 		e := expr.Parse(a, "paths", texts[i])
@@ -129,7 +129,7 @@ func TestComputedPatternRetainsChildrenAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "computed", "result = ./@(str (once))/{name:*}.@(str (async))")
+	parsed := script.Parse(a, "computed", "result = ./@{str (once ())}/{name:*}.@{str (async ())}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -168,7 +168,7 @@ func TestPathReferencesRetainChildrenAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "paths", "part = (str (async))\nresult = ./@(str (once))/{part}")
+	parsed := script.Parse(a, "paths", "part = (str (async ()))\nresult = ./@{str (once ())}/{part}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")

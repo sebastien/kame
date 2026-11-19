@@ -38,7 +38,7 @@ tests/T018-01-lang-source-style.sh	018	lang	Canonical structural layouts, 80-col
 tests/T013-04-meta-layer-examples.sh	013	meta	Runnable value/rule/Kash lessons, source composition, selective rebuilding, reserved index names, legacy projects and optional pandoc blog builds
 tests/T003-01-host-process.sh	003	host	Process streaming, exit codes, retry, shell, environment, cwd
 tests/T003-02-host-signals.sh	003	host	SIGINT/SIGTERM cancellation and process-group reaping
-tests/T004-01-lang-parse-matrix.sh	004	lang	Valid language fixtures parse to schema-1 ASTs through do parse
+tests/T004-01-lang-parse-matrix.sh	004	lang	Valid language fixtures parse to schema-2 ASTs through do parse
 tests/T004-02-lang-parse-invalid.sh	004	lang	Invalid fixtures match the manifest code and severity
 tests/T004-03-lang-parse-io.sh	004	lang	Parse stdin, empty input, missing files, arity
 tests/T004-04-lang-parse-usage.sh	004	lang	Parse option validation and help

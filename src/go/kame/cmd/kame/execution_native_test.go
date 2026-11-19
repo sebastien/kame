@@ -201,16 +201,15 @@ func TestNativeKashSymlinkRunsInterpreterSourceAndArguments(t *testing.T) {
 	}
 }
 
-// Bound lists and records share their backing between lookups; moving a
-// record's fields into a with scope must not change the binding.
-func TestNativeKashSharedBindingsSurviveScopedWith(t *testing.T) {
+// The block reads shared record fields without changing the outer binding.
+func TestNativeKashSharedBindingsSurviveWithBlock(t *testing.T) {
 	binary := nativeCLIBinary(t)
 	directory := t.TempDir()
 	interpreter := filepath.Join(directory, "kash")
 	if err := os.Symlink(binary, interpreter); err != nil {
 		t.Fatal(err)
 	}
-	nativeCLIWrite(t, filepath.Join(directory, "script"), "r = [a: [\"x\" \"y\"] b: \"z\"]\necho (with r (count a))\necho (with r (count a)) (get \"b\" r) (count (get \"a\" r))\n")
+	nativeCLIWrite(t, filepath.Join(directory, "script"), "r = {a: [\"x\", \"y\"], b: \"z\"}\nwith\n\techo (count r.a)\necho (count r.a) (get \"b\" r) (count (get \"a\" r))\n")
 	command := exec.Command(interpreter, "script")
 	command.Dir = directory
 	output, err := command.CombinedOutput()
@@ -232,7 +231,7 @@ func TestNativeMaterializeSignalsDuringServiceTeardown(t *testing.T) {
 			// TERM announces final dependency release, then waits for the test
 			// to permit graceful exit. Signals therefore arrive after the consumer
 			// completed, not while materializeTargets still owns its active root.
-			nativeCLIWrite(t, filepath.Join(directory, "Makefile.kmk"), "service daemon : ; [ready: [argv: [\"test\" \"-f\" \"ready\"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 3000]]\n\ttrap 'touch stopping; while [ ! -f release ]; do sleep .01; done; touch graceful; exit 0' TERM; echo $$ > service.pid; touch ready; while :; do sleep .01; done\nconsumer : daemon\n\ttouch consumed\n")
+			nativeCLIWrite(t, filepath.Join(directory, "Makefile.kmk"), "service daemon : ; {ready: {argv: [\"test\", \"-f\", \"ready\"], interval-ms: 10, timeout-ms: 3000}, stop: {grace-ms: 3000}}\n\ttrap 'touch stopping; while [ ! -f release ]; do sleep .01; done; touch graceful; exit 0' TERM; echo $$ > service.pid; touch ready; while :; do sleep .01; done\nconsumer : daemon\n\ttouch consumed\n")
 			command, stdout, stderr := nativeCLIStart(t, directory, "--json", "consumer")
 			t.Cleanup(func() {
 				pid, err := strconv.Atoi(strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "service.pid"))))
@@ -293,9 +292,9 @@ func TestNativeWatchMissingMandatoryIncludeRecovers(t *testing.T) {
 			directory := t.TempDir()
 			root := filepath.Join(directory, "Makefile.kmk")
 			missing := filepath.Join(directory, "missing.kmk")
-			source := "(include ./missing.kmk)\nchosen :\n\tprintf %s @{MARK} > recovered\n"
+			source := "include ./missing.kmk\nchosen :\n\tprintf %s @{MARK} > recovered\n"
 			if mode == "nested" {
-				nativeCLIWrite(t, filepath.Join(directory, "parent.kmk"), "(include ./missing.kmk)\n")
+				nativeCLIWrite(t, filepath.Join(directory, "parent.kmk"), "include ./missing.kmk\n")
 				source = strings.Replace(source, "./missing.kmk", "./parent.kmk", 1)
 			}
 			if mode == "reload" {
@@ -387,7 +386,7 @@ func TestNativeInteractiveKashSession(t *testing.T) {
 		"lazy = 2",
 		"(nop lazy)",
 		"echo (map",
-		"  uppercase [\"a\" \"b\"])",
+		"  uppercase [\"a\", \"b\"])",
 		"exit 3",
 		"echo unreachable",
 	}, "\n") + "\n"
@@ -434,11 +433,11 @@ func TestNativeInteractiveKashIndependentSourceDiagnostics(t *testing.T) {
 	for _, entry := range []struct {
 		text, location string
 	}{
-		{"def broken\n\t(fail! \"old entry\")\n\n" + strings.Repeat("(nop)\n", 32) + "(broken)\n", "<kash:1>:2:9"},
-		{"def one arg\n\treturn 0\n\n(one 1 2)\n", "<kash:2>:1:1"},
-		{"(apply ([x] x) [1 2])\n", "<kash:1>:1:9"},
-		{"bad = ([x] x)\n(nop bad)\n", "<kash:1>:1:7"},
-		{"def older x\n\t(fail! \"old version\")\n\nlet alias = older\ndef older x\n\treturn 0\n\n(alias 1)\n", "<kash:1>:2:9"},
+		{"def broken\n\t(fail! \"old entry\")\n\n" + strings.Repeat("(nop ())\n", 32) + "(broken ())\n", "<kash:1>:2:10"},
+		{"def one arg\n\treturn 0\n\n(one 1 2)\n", "<kash:2>:1:2"},
+		{"(apply (x => x) [1, 2])\n", "<kash:1>:1:9"},
+		{"bad = (x => x)\n(nop bad)\n", "<kash:1>:1:7"},
+		{"def older x\n\t(fail! \"old version\")\n\nlet alias = older\ndef older x\n\treturn 0\n\n(alias 1)\n", "<kash:1>:2:10"},
 	} {
 		var out, errOut bytes.Buffer
 		status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i"}, strings.NewReader(entry.text), &out, &errOut)
@@ -451,14 +450,14 @@ func TestNativeInteractiveKashIndependentSourceDiagnostics(t *testing.T) {
 func TestNativeInteractiveKashReclaimedEntriesKeepDeferredWorkAndExplain(t *testing.T) {
 	t.Setenv("KASH_INIT", "")
 	entries := "(fail! \"keep this source\")\ndefer (out! \"deferred\")\n" +
-		strings.Repeat("(nop)\n", 256) + "explain\n"
+		strings.Repeat("(nop ())\n", 256) + "explain\n"
 	var out, errOut bytes.Buffer
 	status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
 	if status != 0 || out.String() != "deferred" {
 		t.Fatalf("reclaimed entries: status=%d out=%q err=%s", status, out.String(), errOut.String())
 	}
 	if strings.Count(errOut.String(), "error[USER_ERROR]: keep this source") != 2 ||
-		strings.Count(errOut.String(), "<kash:1>:1:1") < 2 {
+		strings.Count(errOut.String(), "<kash:1>:1:2") < 2 {
 		t.Fatalf("explain lost the original source: %s", errOut.String())
 	}
 }
@@ -630,9 +629,9 @@ func TestNativeInteractiveKashAsyncFailureReporting(t *testing.T) {
 		name, entries   string
 		status, reports int
 	}{
-		{"unhandled-await", "let job = (run! :async :true \"/bin/false\")\n(await job)\n", 1, 1},
-		{"awaited", "let job = (run! :async :true \"/bin/false\")\nlet result = (await job) ?? :nil\n/bin/true\n", 0, 0},
-		{"joined-call", "def worker\n\t/bin/false &\n\nlet result = (worker) ?? :nil\n/bin/true\n", 0, 0},
+		{"unhandled-await", "let job = (run! :async true \"/bin/false\")\n(await job)\n", 1, 1},
+		{"awaited", "let job = (run! :async true \"/bin/false\")\nlet result = (await job) ?? nil\n/bin/true\n", 0, 0},
+		{"joined-call", "def worker\n\t/bin/false &\n\nlet result = (worker ()) ?? nil\n/bin/true\n", 0, 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer

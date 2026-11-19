@@ -6,7 +6,7 @@ import (
 )
 
 func TestClosedConfigurationLiterals(t *testing.T) {
-	valid := []string{`:false`, `:nil`, `42`, `1.25`, `""`, `:release`, `./src`, `["py" "js"]`, `[flag: :true nested: [1 [x: "y"]]]`, `"$(printf inert)"`, `"""@(missing) *"""`}
+	valid := []string{`false`, `nil`, `42`, `1.25`, `""`, `:release`, `./src`, `["py", "js"]`, `{flag: true, nested: [1, {x: "y"}]}`, `"$(printf inert)"`, `"""@(missing) *"""`}
 	for i := range valid {
 		parsed := expr.Parse(t.Allocator(), "literal", valid[i])
 		if len(parsed.Diagnostics) != 0 || !expr.IsLiteral(parsed.Expr) {
@@ -14,7 +14,7 @@ func TestClosedConfigurationLiterals(t *testing.T) {
 		}
 		parsed.Free()
 	}
-	invalid := []string{`name`, `name.field`, `(nop 1)`, `([x] x)`, `$(printf bad)`, `"@(name)"`, `./@(name)/file`, `[1 name]`, `[x: (env "HOME")]`, `./*.c`, `"{name:*}"`}
+	invalid := []string{`name`, `name.field`, `(nop 1)`, `(x => x)`, `$(printf bad)`, `"@{name ()}"`, `./@{name ()}/file`, `[1, name]`, `{x: (env "HOME")}`, `./*.c`}
 	for i := range invalid {
 		parsed := expr.Parse(t.Allocator(), "literal", invalid[i])
 		if len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr) {

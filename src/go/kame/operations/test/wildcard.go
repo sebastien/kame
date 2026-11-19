@@ -57,7 +57,7 @@ func TestWildcardUnionResumesWithoutRevisitingEarlierPatterns(t *testing.T) {
 	parsed := script.Parse(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	text := strings.Builder{}
-	text.WriteString(`(wildcard ["./entries/z" "./entries/a"]`)
+	text.WriteString(`(wildcard ["./entries/z", "./entries/a"]`)
 	const count = 16
 	for i := 0; i < count; i++ {
 
@@ -132,7 +132,7 @@ func TestWildcardUnionPreservesFirstPathProvenance(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	document := expr.Parse(a, "union.km", `(let [name "*"] (wildcard ["./z" "./a" "./z"] [./path/@{name} "./a"] ["./path/*"]))`)
+	document := expr.Parse(a, "union.km", `((name => (wildcard ["./z", "./a", "./z"] [./path/@{name}, "./a"] ["./path/*"])) "*")`)
 	context := eval.Context{Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
 	r := p.EvaluateWith(document.Expr, &context)
 	if r.Waiting || r.Diagnostic.Code != "" || len(r.Value.List) != 3 {
@@ -235,7 +235,7 @@ func TestWildcardFlagsRejectInvalidCallsBeforeRequests(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`(wildcard :+files)`, `(wildcard :-dir :-symlinks)`, `(wildcard :+files :-files ./entries/*)`, `(wildcard :-dir :+dir ./entries/*)`, `(wildcard :+bogus ./entries/*)`, `(wildcard "-unknown" ./entries/*)`, `(wildcard "+files/child")`, `(wildcard :+bogus ([x] x))`, `(wildcard :+files :-files ([x] x))`}
+	texts := []string{`(wildcard :+files)`, `(wildcard :-dir :-symlinks)`, `(wildcard :+files :-files ./entries/*)`, `(wildcard :-dir :+dir ./entries/*)`, `(wildcard :+bogus ./entries/*)`, `(wildcard "-unknown" ./entries/*)`, `(wildcard "+files/child")`, `(wildcard :+bogus (x => x))`, `(wildcard :+files :-files (x => x))`}
 	for i := range texts {
 		e := expr.Parse(a, "flags.km", texts[i])
 		context := eval.Context{Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
@@ -256,7 +256,7 @@ func TestWildcardKindMasksRetainExcludedEntryObservations(t *testing.T) {
 	checkWildcardKinds(t, `(wildcard :+files :-symlinks ./entries/*)`, "./entries/a", false)
 	checkWildcardKinds(t, `(wildcard ./entries/* :+files :+files)`, "./entries/a", false)
 	checkWildcardKinds(t, `(wildcard :-files :-dir :-symlinks ./entries/*)`, "./entries/other", false)
-	checkWildcardKinds(t, `(let [flag "+symlinks"] (wildcard flag ./entries/*))`, "./entries/link", false)
+	checkWildcardKinds(t, `((flag => (wildcard flag ./entries/*)) "+symlinks")`, "./entries/link", false)
 	checkWildcardKinds(t, `(wildcard :+files ./entries/*)`, "", true)
 }
 

@@ -15,7 +15,7 @@ func TestDuplicateTargetArgumentDiagnosticIsStable(t *testing.T) {
 }
 
 func TestRecipeDocumentPreservesNewerInputSelector(t *testing.T) {
-	parsed := rule.ParseRule(t.Allocator(), "selector.kmk", "build : dep\n\t@<?\n\t@if(:true)\n\tok\n\t@end(if)\n")
+	parsed := rule.ParseRule(t.Allocator(), "selector.kmk", "build : dep\n\t@<?\n\t@if(true)\n\tok\n\t@end(if)\n")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || parsed.Rule == nil || parsed.Rule.BodyDoc == nil {
 		t.Fatal("recipe did not select document lowering")

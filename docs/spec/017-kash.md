@@ -425,7 +425,7 @@ the shared expression grammar; there is no wrapper shorthand or second value
 grammar. Inside it, names are plain expression names, not `$` references:
 
 ```kash
-emit (replace ".c" ".o" source)
+emit (subst ".c" ".o" source)
 report (map inspect sources)
 biome --config-path=(js-biome-config ())
 emit prefix-(name)-suffix

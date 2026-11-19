@@ -250,8 +250,8 @@ func TestBuildDefinitionOverrideGrammar(t *testing.T) {
 }
 
 func TestTypedDefinitionOverrideGrammar(t *testing.T) {
-	inv := cli.Parse("plan", []string{"--set", "flag=:false", "--define=flag=literal", "--set=modules=[\"py\" \"js\"]", "default"})
-	if !inv.OK || len(inv.Defines) != 3 || inv.Defines[0] != "flag:=:false" || inv.Defines[1] != "flag=literal" || inv.Defines[2] != "modules:=[\"py\" \"js\"]" {
+	inv := cli.Parse("plan", []string{"--set", "flag=false", "--define=flag=literal", "--set=modules=[\"py\", \"js\"]", "default"})
+	if !inv.OK || len(inv.Defines) != 3 || inv.Defines[0] != "flag:=false" || inv.Defines[1] != "flag=literal" || inv.Defines[2] != "modules:=[\"py\", \"js\"]" {
 		t.Error("typed and literal overrides lost order or type")
 	}
 	inv.Free()
@@ -260,7 +260,7 @@ func TestTypedDefinitionOverrideGrammar(t *testing.T) {
 		t.Error("typed override was mistaken for a source")
 	}
 	inv.Free()
-	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1 (out! \"bad\")]", "flag=\"@(missing)\"", "flag=([x] x)", "flag=1 2", "flag=[x: 1 x: 2]"}
+	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1, (out! \"bad\")]", "flag=\"@{missing}\"", "flag=(x => x)", "flag=1 2", "flag={x: 1, x: 2}"}
 	for i := range invalid {
 		inv = cli.Parse("build", []string{"--set", invalid[i]})
 		if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" {
@@ -275,7 +275,7 @@ func TestTypedDefinitionOverrideGrammar(t *testing.T) {
 	inv.Free()
 	commands := []string{"build", "run", "plan", "inputs", "outputs", "span", "cat", "tools", "render"}
 	for i := range commands {
-		removed := []string{"--define-value", "--define-value=flag=:false"}
+		removed := []string{"--define-value", "--define-value=flag=false"}
 		for j := range removed {
 			inv = cli.Parse(commands[i], []string{removed[j]})
 			if inv.OK || inv.Error.Code != "OPT_UNKNOWN" || !strings.Contains(inv.Error.Message, "--set NAME=LITERAL") {

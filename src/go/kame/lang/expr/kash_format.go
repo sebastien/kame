@@ -232,6 +232,16 @@ func writeKashBody(b *strings.Builder, body []*Expr, indent string, level int) {
 func writeKashValue(b *strings.Builder, e *Expr) {
 	if e.Kind == Name || e.Kind == Reference || e.Kind == EnvironmentReference {
 		b.WriteByte('$')
+		head := e.Text
+		if len(e.Reference) != 0 {
+			head = e.Reference[0].Text
+		}
+		if strings.Contains(head, "/") {
+			b.WriteByte('{')
+			writeExpr(b, e)
+			b.WriteByte('}')
+			return
+		}
 	}
 	writeExpr(b, e)
 }

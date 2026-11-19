@@ -25,7 +25,7 @@ func TestProcessTopologyInspectionDoesNotEvaluatePredicates(t *testing.T) {
 func TestInvalidFramedRejoinStaysInspectable(t *testing.T) {
 	buffer := bytes.Buffer{}
 	defer buffer.Reset()
-	if ast.WriteAST(&buffer, "kash", "invalid.kash", "printf a |(frame :lines) |(filter :true | cat >&) | cat") != 0 {
+	if ast.WriteAST(&buffer, "kash", "invalid.kash", "printf a |(frame :lines) |(filter true | cat >&) | cat") != 0 {
 		t.Error("semantic framing mismatch became a parse error")
 	}
 	if !strings.Contains(buffer.String(), "KASH_FRAME_MISMATCH") {

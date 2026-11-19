@@ -48,34 +48,33 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 	return result
 }
 
-// Only validated source-composition branches reach this traversal. Runtime
-// expressions are never evaluated here to discover includes.
-func (s *buildSource) expandSourceComposition(fileIndex int, expression *expr.Expr, out io.Writer, authored *source.Source, lang string) bool {
-	if expression == nil || expression.Kind == expr.Nil {
-		return true
-	}
-	include := script.CompositionInclude(expression)
-	if include.OK {
-		return s.expandSourceInclude(fileIndex, include.Path, include.Optional, include.Span, out, authored, lang)
-	}
-	if expression.Kind != expr.Application || len(expression.Items) < 3 || expression.Items[0].Kind != expr.Name || expression.Items[0].Text != "if" {
-		emitDiagnostic(out, diagnostic.Diagnostic{Source: authored.Name, Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "source composition requires an include, if branch, or :nil", Span: diagnostic.Span{Start: expression.Span.Start, End: expression.Span.End}}, s.JSON, authored)
-		return false
-	}
-	for i := 1; i+1 < len(expression.Items); i += 2 {
-		result := s.compositionCondition(expression.Items[i], out, authored, s.Files[fileIndex].Includes)
-		selected := result.Selected
-		failed := result.Diagnostic.Code != ""
-		result.Diagnostic.Free(mem.System)
-		if failed {
-			return false
+func (s *buildSource) expandSourceComposition(fileIndex int, branches []script.DeclarationBranch, out io.Writer, authored *source.Source, lang string) bool {
+	for _, branch := range branches {
+		if branch.Condition != nil {
+			result := s.compositionCondition(branch.Condition, out, authored, s.Files[fileIndex].Includes)
+			selected := result.Selected
+			failed := result.Diagnostic.Code != ""
+			result.Diagnostic.Free(mem.System)
+			if failed {
+				return false
+			}
+			if !selected {
+				continue
+			}
 		}
-		if selected {
-			return s.expandSourceComposition(fileIndex, expression.Items[i+1], out, authored, lang)
+		for _, item := range branch.Items {
+			switch item.Kind {
+			case script.Include:
+				if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, out, authored, lang) {
+					return false
+				}
+			case script.Composition:
+				if !s.expandSourceComposition(fileIndex, item.Branches, out, authored, lang) {
+					return false
+				}
+			}
 		}
-	}
-	if len(expression.Items)%2 == 0 {
-		return s.expandSourceComposition(fileIndex, expression.Items[len(expression.Items)-1], out, authored, lang)
+		break
 	}
 	return true
 }
@@ -91,8 +90,22 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}, Tips: tips}, s.JSON, authored)
 		return false
 	}
+	kash := script.IsKashSource(name)
+	if lang == "kash" && !kash {
+		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "RES_INVALID", Severity: diagnostic.Error, Message: "Kash includes require a .kash or .ksh source", Span: diagnostic.Span{Start: span.Start, End: span.End}, Frames: file.Includes}, s.JSON, authored)
+		return false
+	}
 	includeName := cloneCommandText(name)
-	if !path.IsAbs(includeName) {
+	if strings.HasPrefix(name, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil || !path.IsAbs(home) {
+			emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FS_ERR", Severity: diagnostic.Error, Message: "cannot resolve the home directory for include", Span: diagnostic.Span{Start: span.Start, End: span.End}, Frames: file.Includes}, s.JSON, authored)
+			mem.FreeString(mem.System, includeName)
+			return false
+		}
+		mem.FreeString(mem.System, includeName)
+		includeName = path.Join(home, name[2:])
+	} else if !path.IsAbs(includeName) {
 		parent := path.Dir(file.Name)
 		resolved := path.Join(parent, includeName)
 		mem.FreeString(mem.System, parent)
@@ -122,7 +135,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	includes := slices.Clone(file.Includes)
 	includes = append(includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
 	s.Files = append(s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
-	if lang != "kash" && (strings.HasSuffix(includeName, ".kash") || strings.HasSuffix(includeName, ".ksh")) {
+	if kash {
 		lang = "kash"
 	}
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)

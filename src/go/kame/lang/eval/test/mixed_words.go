@@ -11,12 +11,12 @@ import (
 
 func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 	sources := []string{
-		`result = $(printf %s prefix-(once)-(async).txt)`,
-		`result = $(printf(once)(async) value)`,
-		`result = $(printf value > ./prefix-(once)-(async).txt)`,
-		`result = $(:cwd ./prefix-(once)-(async) printf value)`,
-		`result = $(:timeout (once).(async) printf value)`,
-		`result = $(:MODE prefix-(once)-(async) printf value)`,
+		`result = $(printf %s prefix-(once ())-(async ()).txt)`,
+		`result = $(printf(once ())(async ()) value)`,
+		`result = $(printf value > ./prefix-(once ())-(async ()).txt)`,
+		`result = $(:cwd ./prefix-(once ())-(async ()) printf value)`,
+		`result = $(:timeout (once ()).(async ()) printf value)`,
+		`result = $(:MODE prefix-(once ())-(async ()) printf value)`,
 	}
 	for i := range sources {
 		checkMixedWordRetainedFragments(t, sources[i])
@@ -25,8 +25,8 @@ func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 
 func TestInterpolationRetainsCompletedCallsAcrossSuspension(t *testing.T) {
 	sources := []string{
-		`result = "prefix-@(once)-@(async).txt"`,
-		`result = (render "plain" """prefix-@(once)-@(async).txt""")`,
+		`result = "prefix-@{once ()}-@{async ()}.txt"`,
+		`result = (render "plain" """prefix-@{once ()}-@{async ()}.txt""")`,
 	}
 	for i := range sources {
 		a := t.Allocator()

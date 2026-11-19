@@ -9,7 +9,7 @@ import (
 
 func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 	a := t.Allocator()
-	text := "def probe first rest...\n  def nested\n    return 0\n  if (nop first)\n    return 75 ?\n  (nested)\n  return (count rest)\nresult = (probe :true 1 2)\n\"def\" literal\n\"return\" literal\n"
+	text := "def probe first rest...\n  def nested\n    return 0\n  if (nop first)\n    return 75 ?\n  (nested ())\n  return (count rest)\nresult = (probe true 1 2)\n\"def\" literal\n\"return\" literal\n"
 	s := script.ParseKash(a, "functions.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
@@ -47,7 +47,7 @@ func TestKashFunctionsRejectMalformedDefinitionsAndReturns(t *testing.T) {
 		"def probe rest... other\n  return 0", "def probe; printf no\n  return 0",
 		"def probe\n  return", "def probe\n  return 0 ? printf no", "def probe\n  defer return 0",
 		"def probe\n  return 0\nprobe = 1", "probe = 1\ndef probe\n  return 0",
-		"def probe\n  return :nil ?? 0", "def probe\n  return 0 &", "def probe\n  return 0 > ./file",
+		"def probe\n  return nil ?? 0", "def probe\n  return 0 &", "def probe\n  return 0 > ./file",
 		"printf before; def probe\n  return 0",
 		"def probe#comment\n  return 0", "def probe value#comment\n  return 0",
 	}

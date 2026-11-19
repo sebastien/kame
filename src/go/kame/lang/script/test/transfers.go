@@ -9,7 +9,7 @@ import (
 
 func TestKashLoopTransfersPreserveLexicalTargetsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "for item in [1 2]\n\twith\n\t\tif (eq? item 1)\n\t\t\tcontinue\n\t\tbreak\nwhile (eq? 1 1)\n\tbreak\ndef cleanup\n\tfor item in [1]\n\t\tcontinue\n"
+	text := "for item in [1, 2]\n\twith\n\t\tif (eq? item 1)\n\t\t\tcontinue\n\t\tbreak\nwhile (eq? 1 1)\n\tbreak\ndef cleanup\n\tfor item in [1]\n\t\tcontinue\n"
 	s := script.ParseKash(a, "transfers.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 3 {

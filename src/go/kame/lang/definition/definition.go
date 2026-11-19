@@ -20,6 +20,7 @@ type Definition struct {
 	Name         string
 	NameSpan     source.Span
 	Function     bool
+	ExplicitDef  bool
 	Eager        bool
 	Default      bool
 	Contribution bool
@@ -112,6 +113,17 @@ func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int 
 	if start >= len(text) {
 		return 0
 	}
+	if defPrefix(text, start) {
+		line := text[start:source.LogicalLineEnd(text, start)]
+		if comment := source.TopLevelByte(line, '#'); comment >= 0 {
+			line = line[:comment]
+		}
+		equals := source.TopLevelByte(line, '=')
+		if equals < 0 || strings.HasPrefix(line[equals:], "==") {
+			return 0
+		}
+		return start + equals + 1
+	}
 	end := start
 	if text[start] == '(' {
 		for end < len(text) && text[end] != ')' && (defaults || text[end] != '\n') {
@@ -194,7 +206,13 @@ func (p *parser) definition() *Definition {
 		p.error(p.start, equals, "expected definition name")
 		return d
 	}
-	if p.s.Text[lhsStart] == '(' {
+	if defPrefix(p.s.Text[:lhsEnd], lhsStart) {
+		d.ExplicitDef = true
+		if d.Default || d.Contribution {
+			p.error(lhsStart, equals+1, "def requires =")
+		}
+		p.namedLHS(d, lhsStart+3, lhsEnd)
+	} else if p.s.Text[lhsStart] == '(' {
 		if d.Default {
 			p.error(lhsStart, lhsEnd, "default definitions must name a value")
 		}
@@ -211,6 +229,19 @@ func (p *parser) definition() *Definition {
 			d.Name, d.NameSpan = name.Text, source.Span{Start: lhsStart, End: lhsEnd}
 		}
 	}
+	if d.Name != "" && !expr.ValidBindingName(d.Name) {
+		p.error(d.NameSpan.Start, d.NameSpan.End, "expected a binding name")
+	}
+	parameters := make(map[string]bool, len(d.Parameters))
+	for _, parameter := range d.Parameters {
+		if !expr.ValidBindingName(parameter.Name) {
+			p.error(parameter.Span.Start, parameter.Span.End, "expected a parameter name")
+		}
+		if parameters[parameter.Name] {
+			p.error(parameter.Span.Start, parameter.Span.End, "duplicate parameter name")
+		}
+		parameters[parameter.Name] = true
+	}
 	rhsStart, _ := trim(p.s.Text, equals+1, p.end)
 	rhsEnd := p.end
 	for rhsStart < rhsEnd {
@@ -221,7 +252,12 @@ func (p *parser) definition() *Definition {
 		rhsStart, _ = trim(p.s.Text, next, rhsEnd)
 	}
 	if p.kash {
-		prefix := expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
+		var prefix expr.Prefix
+		if d.ExplicitDef {
+			prefix = expr.ParseValuePrefix(p.a, p.s, rhsStart)
+		} else {
+			prefix = expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
+		}
 		d.Expression, d.Span.End = prefix.Expr, prefix.End
 		for i := range prefix.Diagnostics {
 			p.diags = append(p.diags, prefix.Diagnostics[i])
@@ -238,7 +274,7 @@ func (p *parser) definition() *Definition {
 	// determines rhsEnd; this parse retains the AST and validates the whole RHS.
 	bounded := *p.s
 	bounded.Text = p.s.Text[:rhsEnd]
-	prefix := expr.ParsePrefix(p.a, &bounded, rhsStart)
+	prefix := expr.ParseValuePrefix(p.a, &bounded, rhsStart)
 	d.Expression = prefix.Expr
 	for i := range prefix.Diagnostics {
 		p.diags = append(p.diags, prefix.Diagnostics[i])
@@ -251,13 +287,19 @@ func (p *parser) definition() *Definition {
 			end = next
 			continue
 		}
+		if p.s.Text[end] == '#' {
+			for end < rhsEnd && p.s.Text[end] != '\n' {
+				end++
+			}
+			break
+		}
 		if !space(p.s.Text[end]) {
 			break
 		}
 		end++
 	}
 	if len(p.diags) == 0 && end != rhsEnd {
-		p.error(end, rhsEnd, "expected one definition expression; quote text and bracket lists")
+		p.error(end, rhsEnd, "expected one definition expression")
 	}
 	return d
 }
@@ -267,46 +309,61 @@ func (p *parser) functionLHS(d *Definition, start int, end int) {
 		p.error(start, end, "unclosed function definition")
 		return
 	}
-	pos := start + 1
-	for pos < end-1 && space(p.s.Text[pos]) {
-		pos++
+	p.namedLHS(d, start+1, end-1)
+}
+
+func (p *parser) namedLHS(d *Definition, start, end int) {
+	text := p.s.Text[:end]
+	if d.ExplicitDef && strings.ContainsRune(text[start:], '\n') {
+		p.error(start, end, "def header must fit on one line")
+		return
 	}
-	nameStart := pos
-	name := scanName(p.s.Text, pos)
+	nameStart, end := trim(text, start, end)
+	name := scanName(text[:end], nameStart)
 	if !name.OK {
 		p.error(nameStart, end, "expected function name")
 		return
 	}
-	d.Name, d.NameSpan, pos = name.Text, source.Span{Start: nameStart, End: name.End}, name.End
-	for pos < end-1 {
+	d.Name, d.NameSpan = name.Text, source.Span{Start: nameStart, End: name.End}
+	pos := name.End
+	if d.ExplicitDef && pos < end && space(text[pos]) && strings.TrimSpace(text[pos:end]) == "()" {
+		d.Function = true
+		return
+	}
+	for pos < end {
 		if !space(p.s.Text[pos]) {
 			p.error(pos, pos+1, "function parameters need whitespace")
 			return
 		}
-		for pos < end-1 && space(p.s.Text[pos]) {
+		for pos < end && space(p.s.Text[pos]) {
 			pos++
 		}
-		if pos == end-1 {
+		if pos == end {
 			break
 		}
 		paramStart := pos
-		parameter := scanName(p.s.Text, pos)
+		parameter := scanName(text[:end], pos)
 		if !parameter.OK {
 			p.error(pos, end, "invalid function parameter")
 			return
 		}
 		pos = parameter.End
 		rest := false
-		if pos+3 <= end-1 && p.s.Text[pos:pos+3] == "..." {
+		if pos+3 <= end && p.s.Text[pos:pos+3] == "..." {
 			pos += 3
 			rest = true
 		}
+		d.Function = true
 		d.Parameters = append(d.Parameters, Parameter{Name: parameter.Text, Span: source.Span{Start: paramStart, End: pos}, Rest: rest})
-		if rest && pos < end-1 {
-			p.error(pos, end-1, "rest parameter must be last")
+		if rest && pos < end {
+			p.error(pos, end, "rest parameter must be last")
 			return
 		}
 	}
+}
+
+func defPrefix(text string, start int) bool {
+	return len(text)-start > 3 && strings.HasPrefix(text[start:], "def") && (text[start+3] == ' ' || text[start+3] == '\t')
 }
 
 func space(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
@@ -386,8 +443,21 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	if d.Default {
 		headerWidth++
 	}
-	expandedHeader := !compact && d.Function && headerWidth > 80
-	if d.Function {
+	expandedHeader := !compact && !d.ExplicitDef && d.Function && headerWidth > 80
+	if d.ExplicitDef {
+		b.WriteString("def ")
+		b.WriteString(d.Name)
+		if d.Function && len(d.Parameters) == 0 {
+			b.WriteString(" ()")
+		}
+		for _, p := range d.Parameters {
+			b.WriteByte(' ')
+			b.WriteString(p.Name)
+			if p.Rest {
+				b.WriteString("...")
+			}
+		}
+	} else if d.Function {
 		b.WriteByte('(')
 		b.WriteString(d.Name)
 		for i := range d.Parameters {
@@ -421,8 +491,13 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 		b.WriteByte(' ')
 		b.WriteString(v.String())
 	} else {
-		b.WriteString("\n  ")
-		formatted := expr.FormatAt(a, d.Expression, 2)
+		indent := "  "
+		if d.ExplicitDef {
+			indent = "\t"
+		}
+		b.WriteByte('\n')
+		b.WriteString(indent)
+		formatted := expr.FormatAt(a, d.Expression, expr.Columns(indent, 0))
 		b.WriteString(formatted)
 		mem.FreeString(a, formatted)
 	}

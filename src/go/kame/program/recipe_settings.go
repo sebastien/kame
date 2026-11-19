@@ -200,7 +200,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 }
 
 // terminalSettings validates the tty and foreground metadata of 051. Only
-// :true and :false are valid; absence is false, and foreground needs tty.
+// true and false are valid; absence is false, and foreground needs tty.
 // Kash recipes receive the grant; other recipe bodies cannot apply it.
 func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bool) diagnostic.Diagnostic {
 	entry.Terminal = eval.TerminalAuthority{}
@@ -214,7 +214,7 @@ func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bo
 			continue
 		}
 		if field.Value.Kind != core.Bool {
-			return failureAt(p.Alloc, "EXPR_INVALID", span, field.Key+" metadata requires :true or :false")
+			return failureAt(p.Alloc, "EXPR_INVALID", span, field.Key+" metadata requires true or false")
 		}
 		if field.Key == "tty" {
 			entry.Terminal.TTY = field.Value.Bool
@@ -223,7 +223,7 @@ func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bo
 		}
 	}
 	if entry.Terminal.Foreground && !entry.Terminal.TTY {
-		return failureAt(p.Alloc, "EXPR_INVALID", span, "foreground metadata requires tty: :true")
+		return failureAt(p.Alloc, "EXPR_INVALID", span, "foreground metadata requires tty: true")
 	}
 	// A rule that launches no process ignores the grant.
 	if entry.Terminal.TTY && len(entry.Rule.Body) != 0 && (!entry.Kash || kame) {

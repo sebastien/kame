@@ -1,1 +1,1 @@
-(value | pair _ _)
+(value |> pair _ _)

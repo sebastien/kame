@@ -12,7 +12,7 @@ func TestScopedDefinitionsOwnDistinctRuleFrames(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "frames.km", "(newer UNUSED) = (if :true @<? @<?)\nSELECTED = (newer :nil)\nFORWARD = (if :true SELECTED :nil)\n")
+	parsed := script.Parse(a, "frames.km", "(newer UNUSED) = (if true then @<? else @<?)\nSELECTED = (newer nil)\nFORWARD = (if true then SELECTED else nil)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	outer, first, second := core.NewString(a, "outer"), core.NewString(a, "first"), core.NewString(a, "second")
 	frames := []eval.RuleFrame{{FileRule: true, NewerInputs: []core.Value{outer}}, {FileRule: true, NewerInputs: []core.Value{first}}}
@@ -56,7 +56,7 @@ func TestScopedDefinitionsRejectUnavailableRuleFrameIdentity(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "opaque-frame.km", "X = (if :true @< :nil)\n")
+	parsed := script.Parse(a, "opaque-frame.km", "X = (if true then @< else nil)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	first, second := mem.Alloc[int](a), mem.Alloc[int](a)
 	frames := []eval.RuleFrame{{FileRule: true, Inputs: []core.Value{{Kind: core.Process, Process: first}}}}

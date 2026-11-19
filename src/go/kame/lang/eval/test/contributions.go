@@ -10,7 +10,7 @@ import (
 
 func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "contributions.km", "items ?= [0]\nitems += later\nitems ?= missing\nitems += [[3] 4]\nlater = [1 2]\nunused += missing\n")
+	parsed := script.Parse(a, "contributions.km", "items ?= [0]\nitems += later\nitems ?= missing\nitems += [[3], 4]\nlater = [1, 2]\nunused += missing\n")
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -109,7 +109,7 @@ func TestContributionFailuresRetainOrdinaryDiagnostics(t *testing.T) {
 }
 
 func TestContributionOperandsSurviveSuspensionAndInvalidation(t *testing.T) {
-	checkRetainedOperands(t, "result += (list (once))\nresult += (list (async))")
+	checkRetainedOperands(t, "result += (list (once ()))\nresult += (list (async ()))")
 }
 
 func TestScopedContributionOverrideOwnsItsLiteralSnapshot(t *testing.T) {

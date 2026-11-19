@@ -11,8 +11,8 @@ func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 	bodies := []string{
 		"prefix @match(1)@case(1)yes@end(match) suffix",
 		"@-match(1)-\n\t@-case(1)-\n\tyes\n\t@-end(match)-",
-		"prefix @if(:true)yes@end(if) suffix",
-		"Hi @if(:true)there@end!",
+		"prefix @if(true)yes@end(if) suffix",
+		"Hi @if(true)there@end!",
 	}
 	for _, body := range bodies {
 		text := "build : dep\n\t" + body
@@ -33,7 +33,7 @@ func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 		}
 		parsed.Free()
 	}
-	plain := rule.ParseRule(a, "plain.kmk", "build : dep\n\techo \\@if(:true)\n\techo @if (:true)")
+	plain := rule.ParseRule(a, "plain.kmk", "build : dep\n\techo \\@if(true)\n\techo @if (true)")
 	defer plain.Free()
 	if len(plain.Diagnostics) != 0 || plain.Rule.BodyDoc != nil {
 		t.Error("ordinary or escaped recipe text became a document")
@@ -43,7 +43,7 @@ func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) {
 	a := t.Allocator()
 	bodies := []string{
-		"echo @(str \"\"\"@if(:true)\"\"\")",
+		"echo @(str \"\"\"@if(true)\"\"\")",
 		"echo user@end2.example @else_foo @raw/path",
 		"@else_foo\n\t@raw/path\n\t@end2",
 	}
@@ -54,7 +54,7 @@ func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) 
 		}
 		parsed.Free()
 	}
-	raw := rule.ParseRule(a, "raw.kmk", "build : dep\n\t@raw\n\tliteral @if(:true) text @end(raw)")
+	raw := rule.ParseRule(a, "raw.kmk", "build : dep\n\t@raw\n\tliteral @if(true) text @end(raw)")
 	defer raw.Free()
 	if len(raw.Diagnostics) != 0 || raw.Rule == nil || raw.Rule.BodyDoc == nil {
 		t.Error("recipe raw block missed its later same-line closing directive")

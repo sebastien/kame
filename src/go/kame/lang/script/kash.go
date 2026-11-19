@@ -21,7 +21,6 @@ func parseKash(s *Script, offset int) {
 	s.Kash = true
 	p := kashParser{Script: s, Pos: offset}
 	s.Items = p.sequence(0)
-	validateKashComposition(s)
 }
 
 type kashParser struct {
@@ -81,6 +80,16 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
+		if word == "include" || word == "include?" {
+			if level != 0 || !leading {
+				s.error(start, wordEnd, "include declarations require a whole top-level line")
+				break
+			}
+			end := physicalLineEnd(text, start)
+			items = append(items, s.includeDeclaration(start, trimStart(text, wordEnd, end), end, word == "include?"))
+			p.Pos = nextLine(text, end)
+			continue
+		}
 		if (word == "alias" || word == "unalias" || word == "option") && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
 			if level != 0 || !leading {
 				s.error(start, wordEnd, "session commands require a whole top-level session entry")
@@ -476,7 +485,7 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 		pos++
 	}
 	name := text[nameStart:pos]
-	if !definition.ValidName(name) || name == "env" {
+	if !expr.ValidBindingName(name) || name == "env" {
 		s.error(nameStart, pos, "expected non-reserved loop binding name")
 		return e
 	}
@@ -735,7 +744,7 @@ func (p *kashParser) valueHeader(start int, end int, kash bool) *expr.Expr {
 	if kash {
 		value = expr.ParseKashValuePrefix(s.Alloc, view, start)
 	} else {
-		value = expr.ParseKashExpressionPrefix(s.Alloc, view, start)
+		value = expr.ParseMatchPatternPrefix(s.Alloc, view, start)
 	}
 	mem.Free(s.Alloc, view)
 	s.takeDiagnostics(value.Diagnostics)

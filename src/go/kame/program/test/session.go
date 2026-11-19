@@ -155,12 +155,12 @@ func TestSessionSourceDirectoryUsesAuthoredTreesNotLabelsOrGeneratedSpans(t *tes
 	defer registry.Free()
 	operations.Register(registry)
 	fragments := []program.Fragment{
-		{Name: "display-label", SourceDirectory: "/sdk/library", Lang: "km", Text: "(assets) = (source-dir)\n"},
-		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(assets)"},
-		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(assets)\")"},
-		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(source-dir)\")"},
-		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "((eval \"([] (source-dir))\"))"},
-		{Name: "/pretend/file.kash", Lang: "expr", Text: "(source-dir)"},
+		{Name: "display-label", SourceDirectory: "/sdk/library", Lang: "km", Text: "(assets) = (source-dir ())\n"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(assets ())"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(assets ())\")"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(source-dir ())\")"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "((eval \"(() => (source-dir ()))\") ())"},
+		{Name: "/pretend/file.kash", Lang: "expr", Text: "(source-dir ())"},
 	}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{Directory: "/caller"})
 	defer compiled.Free(a)
@@ -342,7 +342,7 @@ func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (sh! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture legacy])\n"}}
+	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (sh! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture, legacy])\n"}}
 	grants := []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{DryRun: true, Grants: grants})
 	defer compiled.Free(a)
@@ -407,7 +407,7 @@ func TestTemplateSessionPreservesPayloadAndAuthoredDiagnostics(t *testing.T) {
 		t.Error("template payload changed type or escaping")
 	}
 	h.Free()
-	bad := []program.Fragment{{Name: "bad.md", Lang: "template", Text: "<!-- @if(:true) -->\nmissing end", Check: true}}
+	bad := []program.Fragment{{Name: "bad.md", Lang: "template", Text: "<!-- @if(true) -->\nmissing end", Check: true}}
 	rejected := program.CompileSession(a, bad, registry, program.Options{})
 	defer rejected.Free(a)
 	if rejected.Session != nil {

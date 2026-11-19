@@ -16,9 +16,9 @@ func TestDeferredExpressionsFinalizeAndReleaseRetainedScopes(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	texts := []string{
-		"if (nop :true)\n  value = \"retained\"\n  defer (write! ./cleanup value)\n(nop :nil)",
+		"if (nop true)\n  value = \"retained\"\n  defer (write! ./cleanup value)\n(nop nil)",
 		"defer (write! ./cleanup \"retained\"); defer (fail! \"cleanup failure\"); (fail! \"primary failure\")",
-		"call = (kash \"\"\"defer (write! ./cleanup \"retained\"); defer (fail! \"cleanup failure\"); (fail! \"primary failure\")\"\"\"); (call)",
+		"call = (kash \"\"\"defer (write! ./cleanup \"retained\"); defer (fail! \"cleanup failure\"); (fail! \"primary failure\")\"\"\"); (call ())",
 	}
 	for scenario := range texts {
 		host := wasm.NewMemoryHost(a)

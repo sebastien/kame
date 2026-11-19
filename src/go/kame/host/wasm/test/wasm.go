@@ -164,7 +164,7 @@ func TestToolChecksRetainPathsAndAllowRepeatedComputedPlans(t *testing.T) {
 
 func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "root : @(if (env \"TOOL_INPUTS\") (wildcard ./input/*.txt) [])\n\ttouch forbidden\n./input/needs.txt :\n\t@{x/test-tool}\n")
+	started := wasm.NewRuntime(a, "root : @(if (env \"TOOL_INPUTS\") then (wildcard ./input/*.txt) else [])\n\ttouch forbidden\n./input/needs.txt :\n\t@{x/test-tool}\n")
 	if started.Runtime == nil {
 		t.Error("runtime did not compile")
 		started.Result.Free(a)
@@ -654,7 +654,7 @@ func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 
 func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "./result : ./seed ; [shell: kame]\n\t(if x/test-tool (read ./seed) \"\")\n")
+	started := wasm.NewRuntime(a, "./result : ./seed ; {shell: kame}\n\t(if x/test-tool then (read ./seed) else \"\")\n")
 	if started.Runtime == nil {
 		t.Error("compile failed")
 		started.Result.Free(a)
@@ -1179,7 +1179,7 @@ func TestQueriedEventStaysPinnedUntilCopiedOrDiscarded(t *testing.T) {
 
 func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 	a := t.Allocator()
-	result := wasm.EvaluatePure(a, "(join \":\" [\"left\" \"right\"])")
+	result := wasm.EvaluatePure(a, "(join \":\" [\"left\", \"right\"])")
 	if result.Code != "" || result.Text != "\"left:right\"" || result.HostNeeded {
 		t.Errorf("pure evaluation = %#v", result)
 	}
@@ -1470,7 +1470,7 @@ func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
 	a := t.Allocator()
 	kinds := []host.RequestKind{host.RequestCacheLock, host.RequestCacheGet}
 	for _, cancelledKind := range kinds {
-		started := wasm.NewRuntime(a, "task cached : ; [shell: kash]\n\t(write! ./side \"changed\")\n\t(out! \"unexpected\")\n")
+		started := wasm.NewRuntime(a, "task cached : ; {shell: kash}\n\t(write! ./side \"changed\")\n\t(out! \"unexpected\")\n")
 		started.Result.Free(a)
 		if started.Runtime == nil {
 			t.Fatal("runtime did not compile")
@@ -1531,7 +1531,7 @@ func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
 
 func TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "service daemon : ; [stop: [grace-ms: 0]]\n\twhile :; do sleep 1; done\ntask consumer : daemon\n\ttrue\n")
+	started := wasm.NewRuntime(a, "service daemon : ; {stop: {grace-ms: 0}}\n\twhile :; do sleep 1; done\ntask consumer : daemon\n\ttrue\n")
 	if started.Runtime == nil {
 		t.Fatal("runtime did not compile")
 		started.Result.Free(a)

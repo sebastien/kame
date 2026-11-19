@@ -16,13 +16,13 @@ func TestDocumentBareTrimMarkerRender(t *testing.T) {
 	parsed := script.Parse(a, "trim.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(render """@if(:false)@if(fail! "unselected")bad@end(if)@else-safe@end(if)""")`,
-		`(render """@if(:true)body@end-tail""")`,
+		`(render """@if(false)@if(fail! "unselected")bad@end(if)@else-safe@end(if)""")`,
+		`(render """@if(true)body@end-tail""")`,
 		`(render """@raw-body@end-tail""")`,
 		`(render """@raw
 body@end-tail""")`,
 		`(render """@end2 @else_foo @raw/path @endif""")`,
-		`(render """@if(:true)body@end!""")`,
+		`(render """@if(true)body@end!""")`,
 		`(render """@raw-body@end!""")`,
 	}
 	wants := []string{"safe", "bodytail", "bodytail", "bodytail", "@end2 @else_foo @raw/path @endif", "body!", "body!"}

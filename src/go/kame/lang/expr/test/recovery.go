@@ -7,19 +7,13 @@ import (
 	"math"
 )
 
-func TestUnclosedPipeFreesDiscardedTrees(t *testing.T) {
-	r := expr.Parse(t.Allocator(), "pipe.km", "(x | f [y]")
-	defer r.Free()
-	if len(r.Diagnostics) == 0 || r.Expr == nil || r.Expr.Kind != expr.Name || r.Expr.Text != "x" {
-		t.Error("unclosed pipe did not preserve its left expression and diagnostics")
-	}
-}
-
-func TestUnclosedInitialCallPipeFreesDiscardedTrees(t *testing.T) {
-	r := expr.Parse(t.Allocator(), "pipe.km", "(tool \"git\" | ?")
-	defer r.Free()
-	if len(r.Diagnostics) == 0 || r.Expr == nil || r.Expr.Kind != expr.Application || len(r.Expr.Items) != 2 {
-		t.Error("unclosed pipe did not preserve its initial application and diagnostics")
+func TestUnclosedPipePreservesPartialAST(t *testing.T) {
+	for _, input := range []string{"(x |> f [y]", "(tool \"git\" |> first"} {
+		r := expr.Parse(t.Allocator(), "pipe.km", input)
+		if len(r.Diagnostics) == 0 || expr.Ungroup(r.Expr).Kind != expr.ValuePipe {
+			t.Error("unclosed pipe did not preserve its parsed stages and diagnostics")
+		}
+		r.Free()
 	}
 }
 
@@ -44,6 +38,9 @@ func TestFloatFormattingPreservesKindAndBits(t *testing.T) {
 			return
 		}
 		text := expr.Format(a, r.Expr)
+		if text != inputs[i] {
+			t.Errorf("formatting changed numeric spelling %q to %q", inputs[i], text)
+		}
 		again := expr.Parse(a, "formatted.km", text)
 		if len(again.Diagnostics) != 0 || again.Expr == nil || again.Expr.Kind != expr.Float {
 			t.Errorf("formatted float %q lost numeric kind", text)

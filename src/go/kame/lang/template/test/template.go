@@ -187,9 +187,9 @@ func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
 
 func TestFormatDocumentCanonicalizesInlineDirectives(t *testing.T) {
 	a := t.Allocator()
-	formatted := template.FormatDocument(a, "inline.tmpl", "hello @if(:true)yes@end world", "plain")
+	formatted := template.FormatDocument(a, "inline.tmpl", "hello @if(true)yes@end world", "plain")
 	defer formatted.Free()
-	if !formatted.OK || formatted.Text != "hello @if(:true)yes@end(if) world" {
+	if !formatted.OK || formatted.Text != "hello @if(true)yes@end(if) world" {
 		t.Errorf("FormatDocument() = %q, want canonical labels", formatted.Text)
 	}
 	again := template.FormatDocument(a, "inline.tmpl", formatted.Text, "plain")
@@ -201,9 +201,9 @@ func TestFormatDocumentCanonicalizesInlineDirectives(t *testing.T) {
 
 func TestFormatDocumentCanonicalizesCommentWrappers(t *testing.T) {
 	a := t.Allocator()
-	formatted := template.FormatDocument(a, "inline.html", "a<!--   @if( :true )   -->b<!-- @end -->c", "html")
+	formatted := template.FormatDocument(a, "inline.html", "a<!--   @if( true )   -->b<!-- @end -->c", "html")
 	defer formatted.Free()
-	if !formatted.OK || formatted.Text != "a<!-- @if(:true) -->b<!-- @end(if) -->c" {
+	if !formatted.OK || formatted.Text != "a<!-- @if(true) -->b<!-- @end(if) -->c" {
 		t.Errorf("FormatDocument() = %q, %s %s", formatted.Text, formatted.Code, formatted.Message)
 	}
 }
@@ -212,15 +212,15 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
 		"@if(eq name \"Ada\")\nyes\n@elif(eq name \"Lin\")\nother\n@end(if)\n",
-		"@with(nop [name: \"Ada\"])\n@{name}\n@end(with)\n",
+		"@with(nop {name: \"Ada\"})\n@{name}\n@end(with)\n",
 		"@match(str \"./\" name)\n@case(nop ./Ada)\nyes\n@end(match)\n",
 		"@if(cond)yes@end(if)",
-		"@if((predicate))yes@end(if)",
+		"@if((predicate ()))yes@end(if)",
 		"@for([item] (list \"a\" \"b\") \",\")\n@{item}\n@end(for)\n",
 		"@let(name (str \"A\" \"da\"))\n@{name}\n",
-		"@include((str \"./\" name) [name: \"Ada\"])\n",
-		"@if(([x] (eq x \"Ada\")) name)yes@end(if)",
-		"@if((values | count))yes@end(if)",
+		"@include((str \"./\" name) {name: \"Ada\"})\n",
+		"@if((x => (eq x \"Ada\")) name)yes@end(if)",
+		"@if((values |> count))yes@end(if)",
 	}
 	for i := range inputs {
 		doc := template.ParseDocument(a, "boundary.tmpl", inputs[i], "plain")
@@ -250,8 +250,8 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 		formatted.Free()
 	}
 	legacy := template.FormatDocument(a, "boundary.html", "<!-- @if((eq name \"Ada\")) -->\nyes\n<!-- @end -->\n", "html")
-	if !legacy.OK || legacy.Text != "<!-- @if(eq name \"Ada\") -->\nyes\n<!-- @end(if) -->\n" {
-		t.Error("directive formatting did not migrate redundant application boundary")
+	if !legacy.OK || legacy.Text != "<!-- @if((eq name \"Ada\")) -->\nyes\n<!-- @end(if) -->\n" {
+		t.Error("directive formatting did not preserve authored parentheses")
 	}
 	legacy.Free()
 	invalid := []string{"@if()\nyes\n@end\n", "@if(eq name\nyes\n@end\n", "@with(\"a\"\"b\")\nyes\n@end\n", "@end(if extra)\n", "@for([item] (list \"a\") \",\" extra)\nyes\n@end\n"}

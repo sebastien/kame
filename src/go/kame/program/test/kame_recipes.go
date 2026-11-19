@@ -19,17 +19,17 @@ func TestKameBodyPublishesExactContentAndReusesTrackedInputs(t *testing.T) {
 		return
 	}
 	sources := []string{
-		"SHELL = kash\n./output : ./input ; [shell: kame]\n\t(str \"Hello, \"\n\t  (strip (text (read @<))) \"!\\n\")\n",
-		"./output : ./input ; [shell: kame]\n\t(read @<)\n",
-		"./output : ./input ; [shell: kame]\n\t\"\"\n",
-		"./output : ./input ; [shell: kame]\n\t\"\"\"first\n\t  second\n\t\"\"\"\n",
-		"./output : ./input ; [shell: kame]\n\t\"first\n\t  second\n\t\"\n",
-		"./output : ./input ; [shell: kame]\n    \"\"\"first\n      second\n    \"\"\"\n",
-		"./output : ./input ; [shell: kame]\n\t\"\"\"\n\t@if(:false)\n\tdata\n\t@end\n\t\"\"\"\n",
+		"SHELL = kash\n./output : ./input ; {shell: kame}\n\t(str \"Hello, \"\n\t  (strip (text (read @<))) \"!\\n\")\n",
+		"./output : ./input ; {shell: kame}\n\t(read @<)\n",
+		"./output : ./input ; {shell: kame}\n\t\"\"\n",
+		"./output : ./input ; {shell: kame}\n\t\"\"\"first\n\t  second\n\t\"\"\"\n",
+		"./output : ./input ; {shell: kame}\n\t\"first\n\t  second\n\t\"\n",
+		"./output : ./input ; {shell: kame}\n    \"\"\"first\n      second\n    \"\"\"\n",
+		"./output : ./input ; {shell: kame}\n\t\"\"\"\n\t@if(false)\n\tdata\n\t@end\n\t\"\"\"\n",
 		"SHELL = kame\n./output : ./input\n\t(read @<)\n",
-		"MODE = kame\n./output : ./input ; [shell: MODE]\n\t(read @<)\n",
+		"MODE = kame\n./output : ./input ; {shell: MODE}\n\t(read @<)\n",
 	}
-	wants := []string{"Hello, Ada!\n", "Ada\n", "", "first\n  second\n", "first\n  second\n", "first\n  second\n", "\n@if(:false)\ndata\n@end\n", "Ada\n", "Ada\n"}
+	wants := []string{"Hello, Ada!\n", "Ada\n", "", "first\n  second\n", "first\n  second\n", "first\n  second\n", "\n@if(false)\ndata\n@end\n", "Ada\n", "Ada\n"}
 	for i := range sources {
 		if code, _ := materializeSource(t, dir, sources[i], true, false); code != "" {
 			t.Error("Kame body failed: " + code)
@@ -54,7 +54,7 @@ func TestComputedRootCapturePrerequisiteExecutesAndTracksChanges(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	source := "ROOT = \".\"\n./out{path} : @{ROOT}/input-{path} ; [shell: kame]\n\t(read @<)\n"
+	source := "ROOT = \".\"\n./out{path} : @{ROOT}/input-{path} ; {shell: kame}\n\t(read @<)\n"
 	for i := 0; i < 3; i++ {
 		want := "first"
 		if i == 2 {
@@ -85,9 +85,9 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 		t.Fatal("output write failed")
 		return
 	}
-	bodies := []string{"42", ":nil", "[1 2]", "([x] x)", "(yield! \"bad\")", "(out! \"bad\")", "(write! ./side \"bad\")", "$(touch side)", "(now)", "VALUE", "(helper)"}
+	bodies := []string{"42", "nil", "[1, 2]", "(x => x)", "(yield! \"bad\")", "(out! \"bad\")", "(write! ./side \"bad\")", "$(touch side)", "(now ())", "VALUE", "(helper ())"}
 	for i := range bodies {
-		text := "VALUE = (sh! \"touch side\")\n(helper) = (out! \"bad\")\n./output : ; [shell: kame]\n\t" + bodies[i] + "\n"
+		text := "VALUE = (sh! \"touch side\")\n(helper) = (out! \"bad\")\n./output : ; {shell: kame}\n\t" + bodies[i] + "\n"
 		code, _ := materializeSource(t, dir, text, true, false)
 		want := "PHASE_INVALID"
 		if i < 4 {
@@ -102,9 +102,9 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 		}
 	}
 	sources := []string{
-		"./output : ; [shell: kame]\n\t\"one\"\n\t\"two\"\n",
-		"./output : ; [shell: kame]\n",
-		"./output ./sibling : ; [shell: kame]\n\t\"content\"\n",
+		"./output : ; {shell: kame}\n\t\"one\"\n\t\"two\"\n",
+		"./output : ; {shell: kame}\n",
+		"./output ./sibling : ; {shell: kame}\n\t\"content\"\n",
 	}
 	for i := range sources {
 		code, _ := materializeSource(t, dir, sources[i], true, false)

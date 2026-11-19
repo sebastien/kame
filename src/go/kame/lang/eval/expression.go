@@ -12,6 +12,7 @@ import (
 const MaxEvaluationDepth = 32
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
+	expression = expr.Ungroup(expression)
 	if context.evaluationDepth >= MaxEvaluationDepth {
 		span := source.Span{}
 		if expression != nil {
@@ -59,6 +60,9 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	if expression == nil {
 		return failure(context.Run, "EXPR_INVALID", source.Span{}, "definition needs an expression value")
 	}
+	if expression.ActionPrefix != "" {
+		return failure(context.Run, "EXPR_INVALID", expression.Span, "action form does not yet support evaluation")
+	}
 	context.Engine, context.Scope, context.Requests = engine, scope, p.Requests
 	switch expression.Kind {
 	case expr.CommandStream:
@@ -80,7 +84,10 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Path:
 		if expression.Pattern != nil && len(expression.Parts) == 0 {
-			return Result{Value: core.NewPattern(context.Run, expression.Text)}
+			text := expr.CanonicalPattern(context.Run, expression.Pattern)
+			result := Result{Value: core.NewPattern(context.Run, text)}
+			mem.FreeString(context.Run, text)
+			return result
 		}
 		return p.pathExpression(scope, expression, context)
 	case expr.Name:
@@ -118,25 +125,29 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.list(scope, expression, context)
 	case expr.ListSpread:
 		r := p.evaluate(engine, scope, expression.Items[0], context)
-		if !r.Waiting && r.Diagnostic.Code == "" && r.Value.Kind != core.List {
+		if !r.Waiting && !r.Completed && r.Diagnostic.Code == "" && r.Value.Kind != core.List {
 			r.Free(context.Run)
 			return failure(context.Run, "EXPR_INVALID", expression.Items[0].Span, "list spread requires a list")
 		}
 		return r
 	case expr.Record:
 		return p.record(scope, expression.Fields, context)
+	case expr.ValuePipe:
+		return p.valuePipe(scope, expression, context)
 	case expr.Application:
 		return p.application(scope, expression, context)
+	case expr.Conditional:
+		return p.conditional(scope, expression.Items, context, expression.Span)
 	case expr.CommandCapture, expr.CommandGraph, expr.CommandTest:
 		return p.capture(expression, context)
 	case expr.CommandList:
 		return p.commandList(expression, context)
-	case expr.KashIf, expr.KashMatch:
+	case expr.KashIf, expr.KashMatch, expr.Match:
 		return p.kashControl(scope, expression, context)
 	case expr.KashFor, expr.KashWhile, expr.KashRecords:
 		return p.kashLoop(scope, expression, context)
 	case expr.ValueRecovery:
-		return p.recoverValue(scope, expression, context)
+		return p.shortCircuitValue(scope, expression, context)
 	case expr.Lambda:
 		function := mem.Alloc[Function](context.Run)
 		function.PayloadAlloc = context.Run
@@ -186,6 +197,14 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 }
 
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
+	if name == pipeInputName {
+		for current := scope; current != nil; current = current.Parent {
+			if current.pipeInput != nil {
+				return context.Program.pipeInputValue(current, context)
+			}
+		}
+		return failure(context.Run, "EXPR_INVALID", span, "pipe input is unavailable")
+	}
 	if len(name) > 2 && name[:2] == "x/" {
 		return context.TrackedTool(name[2:], span)
 	}
@@ -213,11 +232,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 			return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name)
 		}
 		if context.Program != nil {
-			canonical := name
-			if alias, ok := comparisonAlias(name); ok {
-				canonical = alias
-			}
-			if operation := context.Program.Registry.lookup(canonical); operation != nil {
+			if operation := context.Program.Registry.lookup(name); operation != nil {
 				return Result{Value: context.Program.newOperationCallable(operation.Name)}
 			}
 		}

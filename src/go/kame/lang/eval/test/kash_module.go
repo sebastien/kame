@@ -11,9 +11,9 @@ import (
 
 func TestModuleSourceIdentityAndResumedLexicalScope(t *testing.T) {
 	texts := []string{
-		"a = (kash ./a.kash)\nb = (kash ./b.kash)\nresult = (eq? [a.child.value b.child.value] [1 2])\n",
-		"result = (let [m (kash ./scope.kash) x 42] (eq? m.value 42))\n",
-		"result = (let [m (kash ./scope.kash) n (kash ./one.kash) x 42] (eq? m.value 42))\n",
+		"a = (kash ./a.kash)\nb = (kash ./b.kash)\nresult = (eq? [a.child.value, b.child.value] [1, 2])\n",
+		"result = (x => (m => eq? m.value 42) (kash ./scope.kash)) 42\n",
+		"result = (x => (m => (n => eq? m.value 42) (kash ./one.kash)) (kash ./scope.kash)) 42\n",
 	}
 	for i := range texts {
 		a := t.Allocator()
@@ -155,7 +155,7 @@ func TestModuleCancellationReleasesPartialNestedLoad(t *testing.T) {
 		t.Error("root source load missing")
 	}
 	if root.OK {
-		engine.Complete(core.Completion{NodeID: root.Request.NodeID, Generation: root.Request.Generation, Attempt: root.Request.Attempt, RequestID: root.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("(include ./child.kmk)\nvalue = 1\n"))})
+		engine.Complete(core.Completion{NodeID: root.Request.NodeID, Generation: root.Request.Generation, Attempt: root.Request.Attempt, RequestID: root.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("include ./child.kash\nvalue = 1\n"))})
 		root.Request.Free(a)
 	}
 	child := program.Requests.Next()
@@ -163,7 +163,7 @@ func TestModuleCancellationReleasesPartialNestedLoad(t *testing.T) {
 		engine.Step()
 		child = program.Requests.Next()
 	}
-	if !child.OK || child.Request.Kind != host.RequestLoadSource || host.PayloadPath(child.Request.Payload) != "/project/child.kmk" {
+	if !child.OK || child.Request.Kind != host.RequestLoadSource || host.PayloadPath(child.Request.Payload) != "/project/child.kash" {
 		t.Error("nested load did not suspend")
 	}
 	engine.Invalidate(node)

@@ -241,7 +241,7 @@ func TestCachedTaskHits(t *testing.T) {
 func TestCachedTaskUsesPortableMemoryBackend(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
-	parsed := script.Parse(a, "memory-cache.kmk", "task cached : ; [shell: kash]\n\t(out! \"memory-hit\")\n")
+	parsed := script.Parse(a, "memory-cache.kmk", "task cached : ; {shell: kash}\n\t(out! \"memory-hit\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -503,7 +503,7 @@ func TestCachedTaskCachesDeferredOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run : ; [shell: kash]\n\t(out! \"out\")\n\t(err! \"err\")\n")
+	parsed := script.Parse(a, "test.kmk", "task run : ; {shell: kash}\n\t(out! \"out\")\n\t(err! \"err\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -769,7 +769,7 @@ func TestCachedTaskInvalidatesForOperationVersion(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(versioned)\n\tprintf x >> task-log\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(versioned ())\n\tprintf x >> task-log\n")
 	firstRegistry := eval.NewRegistry(a)
 	if !firstRegistry.Add(eval.Operation{Name: "versioned", Version: "v1", Call: cacheVersionOperation, MinArity: 0, MaxArity: 0}) {
 		t.Fatal("operation registration failed")
@@ -866,7 +866,7 @@ func TestCachedTaskInvalidatesForDeclaredEnvironmentDependency(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run : ; [shell: kash]\n\t(out! (str (env \"KM_CACHE_VALUE\")))\n")
+	parsed := script.Parse(a, "test.kmk", "task run : ; {shell: kash}\n\t(out! (str (env \"KM_CACHE_VALUE\")))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1207,7 +1207,7 @@ func TestCachedTaskInvalidatesWhenGlobMembershipChanges(t *testing.T) {
 		t.Fatal("source write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "task run : ; [shell: kash]\n\t(out! (str (count (wildcard \"./src/*\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "task run : ; {shell: kash}\n\t(out! (str (count (wildcard \"./src/*\"))))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1919,7 +1919,7 @@ func TestYieldBufferFreedWhenLaterWriteFails(t *testing.T) {
 		t.Fatal("blocker write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kash]\n\t(yield! \"data\")\n\t(write! \"./not-a-dir/child\" \"x\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kash}\n\t(yield! \"data\")\n\t(write! \"./not-a-dir/child\" \"x\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})

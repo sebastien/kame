@@ -15,11 +15,9 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 	parsed := script.Parse(a, "bounds.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		"(let [xs [7]] xs.18446744073709551616)",
-		"(let [xs [7]] xs.-18446744073709551616)",
-		"(let [xs [7]] xs.0..18446744073709551616)",
-		"(let [xs [7]] xs.0..-2147483648)",
-		"(let [xs \"a\"] xs.9223372036854775807)",
+		"((xs => xs.18446744073709551616) [7])",
+		"((xs => xs.-18446744073709551616) [7])",
+		"((xs => xs.9223372036854775807) \"a\")",
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
@@ -28,11 +26,6 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 		}
 		r.Free(a)
 	}
-	r := evaluate(t, p, "(let [xs [7 8]] xs.1..)")
-	if r.Diagnostic.Code != "" || r.Value.Kind != core.List || len(r.Value.List) != 1 || r.Value.List[0].Int != 8 {
-		t.Error("omitted slice end changed")
-	}
-	r.Free(a)
 	selectors := []string{"@>18446744073709551616", "@>-18446744073709551616", "@>0..18446744073709551616", "@>0..-2147483648"}
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a, Outputs: []core.Value{{Kind: core.Int, Int: 7}}}
 	for i := range selectors {
@@ -40,7 +33,7 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 		if len(expression.Diagnostics) != 0 {
 			t.Error("numeric selector fixture did not parse")
 		}
-		r = p.EvaluateWith(expression.Expr, &context)
+		r := p.EvaluateWith(expression.Expr, &context)
 		if r.Diagnostic.Code != "SEL_INDEX_INVALID" {
 			t.Error("invalid selector bound accepted")
 		}

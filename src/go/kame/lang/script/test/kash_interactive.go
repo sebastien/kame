@@ -26,7 +26,7 @@ func TestKashInteractiveInputClassification(t *testing.T) {
 		{"def greet name\n\tif true", script.KashBlock},
 		{"echo )", script.KashComplete},
 		{"alias ll = [", script.KashOpen},
-		{"alias ll = [\"ls\"\n \"-lah\"]", script.KashComplete},
+		{"alias ll = [\"ls\",\n \"-lah\"]", script.KashComplete},
 		{"alias ll = [\"open", script.KashOpen},
 		{"alias ll = []", script.KashComplete},
 	}

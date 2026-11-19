@@ -206,6 +206,12 @@ type Effect struct {
 	Kind                   EffectKind
 	Data                   []byte
 	Span                   source.Span
+	replayID               *byte
+}
+
+func (e Effect) clone() Effect {
+	e.Data = slices.Clone(e.Data)
+	return e
 }
 
 func (e *Effect) Free(a mem.Allocator) {

@@ -3,6 +3,7 @@ package eval
 import (
 	"kame/core"
 	"kame/internal/mem"
+	"kame/lang/expr"
 )
 
 type bindingKind int
@@ -36,15 +37,14 @@ type Scope struct {
 	Bindings     []binding
 	bindingIndex []bindingIndexEntry
 	References   int
-	// Mutable scopes cannot reuse expressions that might have changed bindings.
-	Mutable bool
 	// Interactive rebinding replaces slots; other scopes keep authored shadowing.
 	replaceBindings bool
 	// Call scopes pin their code while suspended bodies or cleanup borrow it.
 	sourceStorage *FunctionStorage
 	// Section holds the positional arguments of an enclosing placeholder
 	// section call. The scope owns these values and frees them with itself.
-	Section []core.Value
+	Section   []core.Value
+	pipeInput *pipeInput
 	// breakingCycles prevents recursive scope releases from trying to
 	// discover the same unreachable callable cycle while it is dismantled.
 	breakingCycles bool
@@ -191,6 +191,16 @@ func (s *Scope) Free() {
 	mem.FreeSlice(nil, s.Section)
 	mem.FreeSlice(nil, s.Bindings)
 	mem.FreeSlice(nil, s.bindingIndex)
+	if s.pipeInput != nil {
+		s.pipeInput.result.Free(s.Alloc)
+		FreeEffects(s.Alloc, s.pipeInput.effects)
+		for _, path := range s.pipeInput.writePaths {
+			mem.FreeString(s.Alloc, path)
+		}
+		mem.FreeSlice(nil, s.pipeInput.writePaths)
+		expr.Free(s.Alloc, s.pipeInput.expression)
+		mem.Free(s.Alloc, s.pipeInput)
+	}
 	releaseFunctionStorage(s.sourceStorage)
 	parent := s.Parent
 	mem.Free(s.Alloc, s)

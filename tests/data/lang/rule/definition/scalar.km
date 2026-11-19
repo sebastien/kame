@@ -2,4 +2,4 @@
 OUTPUT = ./dist/app
 NAME = "build"
 COUNT = 42
-DEBUG = :true
+DEBUG = true

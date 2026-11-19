@@ -37,7 +37,8 @@ const (
 	RequestPublishFile
 	RequestRecordRead
 	RequestRecordClose
-	// RequestLoadSource is reserved for evaluator-validated authored source paths.
+	// RequestLoadSource reads evaluator-validated authored source paths.
+	// A missing file completes with nil. Other read failures carry diagnostics.
 	RequestLoadSource
 )
 

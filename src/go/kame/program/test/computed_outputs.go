@@ -60,7 +60,7 @@ func TestComputedPrerequisitePathsResolveCaptures(t *testing.T) {
 func TestComputedOutputFailureCleanup(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(nop [./one ./one]) :\n",
+		"@(nop [./one, ./one]) :\n",
 		"@(nop []) :\n",
 		"ROOT = (out! \"forbidden\")\n@{ROOT}/out :\n",
 		"@(str \"./one\") :\n./one :\n",

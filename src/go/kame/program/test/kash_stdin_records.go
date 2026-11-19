@@ -14,7 +14,7 @@ func TestStdinRecordWaitIsReleasedOnCancellationAndShutdown(t *testing.T) {
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		host := countingReadDirHost{memory: wasm.NewMemoryHost(a), recordWaiting: true}
-		fragments := []program.Fragment{{Name: "stdin.kash", Lang: "kash", Text: "for line from :stdin :lines\n\t(nop :nil)\n"}}
+		fragments := []program.Fragment{{Name: "stdin.kash", Lang: "kash", Text: "for line from :stdin :lines\n\t(nop nil)\n"}}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{Host: &host, HasInput: true, InputFD: 7})
 		if compiled.Session == nil {
 			t.Fatal("stdin session compilation failed")

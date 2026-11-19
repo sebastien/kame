@@ -1,1 +1,1 @@
-(value | first | second b)
+(value |> first |> second b)

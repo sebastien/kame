@@ -42,7 +42,7 @@ func renderFailure(a mem.Allocator, expression *expr.Expr, span source.Span, act
 		tip := "Invoke the callable explicitly before rendering its result."
 		if expression != nil && expression.Expansion == "@{" && (expression.Kind == expr.Name || expression.Kind == expr.Reference) {
 			name := expr.Compact(a, expression)
-			tip = owned(a, "Use @("+name+") to invoke it; @{...} only reads the reference.")
+			tip = owned(a, "Use @{"+name+" ()} to invoke it without arguments.")
 			mem.FreeString(a, name)
 			result.Diagnostic.Tips = append(result.Diagnostic.Tips, tip)
 		} else {

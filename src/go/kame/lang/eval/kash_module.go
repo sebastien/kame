@@ -8,6 +8,7 @@ import (
 	"kame/lang/script"
 	"kame/lang/source"
 	"path"
+	"strings"
 )
 
 type moduleSource struct {
@@ -55,6 +56,7 @@ type moduleFrame struct {
 	Index     int
 	RequestID int64
 	IncludeAt source.Span
+	Optional  bool
 }
 
 type moduleLoad struct {
@@ -142,6 +144,20 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 				c.clearFailedModuleLoad(state)
 				return Result{Diagnostic: d}
 			}
+			if completion.HasValue && completion.Value.Kind == core.Nil {
+				c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: frame.Path}, core.ObservationContent, core.Signature{Mode: core.SignatureMissing})
+				if frame.Optional {
+					mem.FreeString(p.Alloc, frame.Path)
+					state.Stack = state.Stack[:len(state.Stack)-1]
+					continue
+				}
+				result := failure(c.Run, "FS_ERR", frame.IncludeAt, "cannot read source: "+frame.Path)
+				if len(state.Stack) > 1 {
+					result.Diagnostic.Source = owned(c.Run, state.Stack[len(state.Stack)-2].Path)
+				}
+				c.clearFailedModuleLoad(state)
+				return result
+			}
 			if completion.Value.Kind != core.Bytes {
 				completion.Value.Free(c.Run)
 				c.clearFailedModuleLoad(state)
@@ -190,9 +206,34 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 			}
 		}
 		if current.Kind == script.Include {
-			base := path.Dir(frame.Path)
-			child := path.Join(base, current.Include)
-			mem.FreeString(p.Alloc, base)
+			if !script.IsKashSource(current.Include) {
+				result := failure(c.Run, "RES_INVALID", current.Span, "Kash includes require a .kash or .ksh source")
+				result.Diagnostic.Source = owned(c.Run, frame.Path)
+				c.clearFailedModuleLoad(state)
+				return result
+			}
+			base := ""
+			var sourceDirectory string
+			if strings.HasPrefix(current.Include, "~/") {
+				home := ""
+				for _, entry := range c.Environment {
+					if value, ok := strings.CutPrefix(entry, "HOME="); ok {
+						home = value
+					}
+				}
+				if !path.IsAbs(home) {
+					result := failure(c.Run, "FS_ERR", current.Span, "cannot resolve the home directory for include")
+					result.Diagnostic.Source = owned(c.Run, frame.Path)
+					c.clearFailedModuleLoad(state)
+					return result
+				}
+				base, current.Include = home, current.Include[2:]
+			} else if !path.IsAbs(current.Include) {
+				sourceDirectory = path.Dir(frame.Path)
+				base = sourceDirectory
+			}
+			child := canonicalPath(p.Alloc, base, current.Include)
+			mem.FreeString(p.Alloc, sourceDirectory)
 			for i := range state.Stack {
 				if state.Stack[i].Path == child {
 					mem.FreeString(p.Alloc, child)
@@ -206,7 +247,7 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 					return result
 				}
 			}
-			state.Stack = append(state.Stack, moduleFrame{Path: child, IncludeAt: current.Span})
+			state.Stack = append(state.Stack, moduleFrame{Path: child, IncludeAt: current.Span, Optional: current.OptionalInclude})
 		}
 	}
 	m := state.Module

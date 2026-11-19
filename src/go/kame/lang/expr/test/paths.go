@@ -8,7 +8,7 @@ import (
 
 func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`./build/@{component}/main.js`, `@{root}/sh/**/*.sh`, `../@(join " " ["a" "b"])/@{name}`, "/@(nop\n \"nested )\")/file", `$(printf "%s" ./@{name}/file)`, `$(printf "%s" @{root}/file)`, `./journal/[a@{name}].md`, `./journal/[@(get "name" [name: "b"])].md`}
+	texts := []string{`./build/@{component}/main.js`, `@{root}/sh/**/*.sh`, `../@{join " " ["a", "b"]}/@{name}`, "/@{nop\n \"nested )\"}/file", `$(printf "%s" ./@{name}/file)`, `$(printf "%s" @{root}/file)`, `./journal/[a@{name}].md`, `./journal/[@{get "name" {name: "b"}}].md`}
 	for i := range texts {
 		parsed := expr.Parse(a, "paths.km", texts[i])
 		if len(parsed.Diagnostics) != 0 || parsed.Expr == nil {
@@ -42,7 +42,7 @@ func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 }
 
 func TestInterpolatedPathsRejectMissingBoundaries(t *testing.T) {
-	texts := []string{`@(root)`, `@(root)suffix`, `./@()/file`, `./@(name`, `./@(nop "unclosed)/file`, `./@(root`}
+	texts := []string{`@{root ()}`, `@{root ()}suffix`, `./@{}/file`, `./@{name`, `./@{nop "unclosed}/file`, `@(root ())/file`, `./@(root ())/file`}
 	for i := range texts {
 		parsed := expr.Parse(t.Allocator(), "invalid.km", texts[i])
 		if len(parsed.Diagnostics) == 0 {
@@ -54,15 +54,15 @@ func TestInterpolatedPathsRejectMissingBoundaries(t *testing.T) {
 
 func TestGlobCharacterClassesKeepContainerBoundaries(t *testing.T) {
 	a := t.Allocator()
-	parsed := expr.Parse(a, "glob.km", `[./journal/[ab].md ./journal/[!x].md ./journal/[a\]].md ./journal/[@(get "name" [name: "b"])]]`)
-	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Items) != 4 {
+	parsed := expr.Parse(a, "glob.km", `[./journal/[ab].md, ./journal/[!x].md, ./journal/[a\]].md, ./journal/[@{get "name" {name: "b"}}]]`)
+	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(expr.Ungroup(parsed.Expr).Items) != 4 {
 		t.Error("glob classes consumed list delimiters")
 		parsed.Free()
 		return
 	}
 	formatted := expr.Format(a, parsed.Expr)
 	again := expr.Parse(a, "formatted.km", formatted)
-	if len(again.Diagnostics) != 0 || len(again.Expr.Items) != 4 {
+	if len(again.Diagnostics) != 0 || len(expr.Ungroup(again.Expr).Items) != 4 {
 		t.Error("formatted glob classes changed boundaries")
 	}
 	again.Free()

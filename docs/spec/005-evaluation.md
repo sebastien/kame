@@ -478,7 +478,7 @@ An operation registry entry contains:
 The evaluator validates arity and capability before calling an operation.
 Operation failures attach the current expression and call frames.
 
-Pattern `sub` is an exception to eager operand evaluation (`014-patterns.md`,
+Pattern `subst` is an exception to eager operand evaluation (`014-patterns.md`,
 `041-pattern-predicates-and-substitution.md`): evaluate the match operand,
 retain the replacement expression without evaluating it, and evaluate that
 expression in a capture child scope only after a successful subject match. A
@@ -488,8 +488,8 @@ operands/effects follow ordinary suspension and cancellation ownership;
 resumption must not replay a completed replacement or its effects.
 
 This policy belongs to the built-in operation, whether it is reached by its
-name or as `std/sub`; a user binding named `sub` follows normal lexical lookup.
-`sub` is not a reserved form. Calls with already-materialized arguments use
+name or as `std/subst`; a user binding named `subst` follows normal lexical lookup.
+`subst` is not a reserved form. Calls with already-materialized arguments use
 constant or path-template values and cannot retroactively defer earlier
 argument evaluation.
 
@@ -725,8 +725,8 @@ capability model.
   membership dependencies and lazy selection; multiple consumers share their
   source on native and WASM; declaration-time discovery overlapping a declared
   output is `DISCOVERY_OVERLAP`.
-- Pattern `sub` binds captures only while evaluating its selected replacement,
-  including calls through `std/sub`, and retains scope and once-only effects
+- Pattern `subst` binds captures only while evaluating its selected replacement,
+  including calls through `std/subst`, and retains scope and once-only effects
   across suspension without leaking bindings or replaying completed list items.
 - `xs |> f a` evaluates `xs` once and equals `f a xs`; a stage with `_` places
   the value there.

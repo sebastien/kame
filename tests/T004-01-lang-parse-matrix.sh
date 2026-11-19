@@ -14,7 +14,7 @@ cli_require_tools
 cli_build
 
 # Function: parse_matrix DIR LANG
-# Every fixture in DIR parses to a schema-1 AST with in-bounds spans.
+# Every fixture in DIR parses to a schema-2 AST with in-bounds spans.
 parse_matrix() {
 	local dir="$1"
 	local lang="$2"
@@ -28,7 +28,7 @@ parse_matrix() {
 			continue
 		fi
 		if jq -e --arg lang "$lang" --arg src "$file" --argjson size "$size" '
-			(.schema == 1) and (.lang == $lang) and (.source == $src)
+			(.schema == 2) and (.lang == $lang) and (.source == $src)
 			and ((.diagnostics | length) == 0)
 			and ((.ast.kind | type) == "string")
 			and (([.ast | .. | objects | select(has("span")) | .span

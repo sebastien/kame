@@ -97,7 +97,7 @@ func Stringify(a mem.Allocator, value core.Value) (string, bool) {
 
 // Display renders a value exactly as the CLI writes a result to stdout using
 // the canonical value notation of docs/spec/005-evaluation.md: nil and booleans
-// as :nil/:true/:false, strings and patterns as quoted literals, ints and
+// as nil/true/false, strings and patterns as quoted literals, ints and
 // floats numerically, and lists and records bracketed. The notation is a subset
 // of the expression grammar, so evaluating it reproduces a value that displays
 // identically. Hosts use it so a completed value matches native output
@@ -120,9 +120,9 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 		*out = appendTextBytes(a, *out, string(value.Bytes))
 	case core.Bool:
 		if value.Bool {
-			*out = appendTextBytes(a, *out, ":true")
+			*out = appendTextBytes(a, *out, "true")
 		} else {
-			*out = appendTextBytes(a, *out, ":false")
+			*out = appendTextBytes(a, *out, "false")
 		}
 	case core.Int:
 
@@ -137,7 +137,7 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 		}
 		*out = appendTextBytes(a, *out, text)
 	case core.Nil:
-		*out = appendTextBytes(a, *out, ":nil")
+		*out = appendTextBytes(a, *out, "nil")
 	case core.Resource:
 		*out = appendTextBytes(a, *out, value.Resource.Name)
 	case core.Process:

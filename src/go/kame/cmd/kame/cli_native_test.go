@@ -144,7 +144,7 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "hello @if(:true)yes@end world"}, &out, &errOut); status != 0 || out.String() != "hello @if(:true)yes@end(if) world" || errOut.Len() != 0 {
+	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "hello @if(true)yes@end world"}, &out, &errOut); status != 0 || out.String() != "hello @if(true)yes@end(if) world" || errOut.Len() != 0 {
 		t.Errorf("template format stdin status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -177,7 +177,7 @@ func TestPlanProducerDetailsAreConciseUnlessVerbose(t *testing.T) {
 
 func TestExpressionAndGraphInspection(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" [\"a\" \"b\"])"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" [\"a\", \"b\"])"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
 		t.Errorf("expr status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -203,7 +203,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(let [a 10] (out! \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "((a => (out! \"hello\" a)) 10)"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
 		t.Errorf("expr out status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -213,7 +213,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(yield! \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(yield! \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generatednil" || errOut.Len() != 0 {
 		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -228,7 +228,7 @@ func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 }
 
 func TestToolsInspectKashRecipes(t *testing.T) {
-	source := "SHELL = kash\nroot : used\nused :\n\tkame-missing-kash-tool run python | sh -c true\n\tkame-missing-kash-tool again\nunused :\n\tkame-unused-kash-tool\nshell : ; [shell: sh]\n\tkame-shell-command\nexplicit : ; [shell: kash]\n\tkame-explicit-kash-tool\n"
+	source := "SHELL = kash\nroot : used\nused :\n\tkame-missing-kash-tool run python | sh -c true\n\tkame-missing-kash-tool again\nunused :\n\tkame-unused-kash-tool\nshell : ; {shell: sh}\n\tkame-shell-command\nexplicit : ; {shell: kash}\n\tkame-explicit-kash-tool\n"
 	var out, errOut bytes.Buffer
 	status := runNativeCLI(t, []string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
 	if status != 0 || strings.Count(out.String(), `"name":"kame-missing-kash-tool"`) != 1 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"name":"kame-explicit-kash-tool"`) || strings.Contains(out.String(), `"name":"python"`) || strings.Contains(out.String(), `"name":"kame-shell-command"`) {

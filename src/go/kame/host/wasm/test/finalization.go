@@ -19,9 +19,9 @@ func TestRuntimeFinallyWaitsForCancelledRequestAndDrainsCleanup(t *testing.T) {
 			return
 		}
 		r.FinalizationTick(1, false)
-		expression := `(finally! ([] (read "resource")) ([] (out! "cleanup")))`
+		expression := `(finally! (() => (read "resource")) (() => (out! "cleanup")))`
 		if mode == 1 {
-			expression = `(finally! [timeout-ms: 1] ([] 42) ([] (read "resource")))`
+			expression = `(finally! {timeout-ms: 1} (() => 42) (() => (read "resource")))`
 		}
 		query := r.RequestExpression(expression)
 		if query.Code != "" {
@@ -96,7 +96,7 @@ func TestRuntimeResultDiagnosticQueryPreservesSecondaryAndRoot(t *testing.T) {
 		return
 	}
 	r.FinalizationTick(1, false)
-	query := r.RequestExpression(`(finally! ([] (fail! "body-primary")) ([] (fail! "cleanup-secondary")))`)
+	query := r.RequestExpression(`(finally! (() => (fail! "body-primary")) (() => (fail! "cleanup-secondary")))`)
 	query.Free(a)
 	for i := 0; i < 64; i++ {
 		next := r.Step()

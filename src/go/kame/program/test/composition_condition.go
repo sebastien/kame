@@ -11,7 +11,7 @@ import (
 
 func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T) {
 	a := t.Allocator()
-	predicates := []string{":nil", ":false", ":true", "0", "0.0", `""`, "[]", "[key: 1]", "(if :false 1 0 2 3)", "(selected)", "mode"}
+	predicates := []string{"nil", "false", "true", "0", "0.0", `""`, "[]", "{key: 1}", "(if false then 1 elif 0 then 2 else 3)", "(selected ())", "mode"}
 	prefix := "mode ?= \"debug\"\n(selected) = mode\nunused = (read \"never read\")\n"
 	for i := range predicates {
 		result := program.CompositionCondition(a, "condition.kmk", prefix, predicates[i], []string{"mode=release", "future=later"}, []string{"KAME_mode=environment"}, "")
@@ -30,7 +30,7 @@ func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T)
 func TestCompositionConditionUsesEvaluationDirectory(t *testing.T) {
 	a := t.Allocator()
 	prefix := "root = (abspath ./)\n(helper) = (abspath ./child/..)\n"
-	predicates := []string{`(eq (abspath ./) "/workspace/project")`, `(eq root "/workspace/project")`, `(eq (helper) "/workspace/project")`}
+	predicates := []string{`(eq (abspath ./) "/workspace/project")`, `(eq root "/workspace/project")`, `(eq (helper ()) "/workspace/project")`}
 	for i := range predicates {
 		result := program.CompositionConditionSources(a, []program.CompileSource{{Name: "/sdk/config.kmk", Text: prefix}}, program.CompileSource{Name: "/sdk/main.kmk", Text: predicates[i]}, nil, nil, "/workspace/project")
 		if result.Diagnostic.Code != "" || !result.Selected {
@@ -65,23 +65,23 @@ func TestCompositionConditionSourcesLargePrefix(t *testing.T) {
 func TestCompositionConditionSourcesRetainAuthoredLocations(t *testing.T) {
 	a := t.Allocator()
 	sources := []program.CompileSource{
-		{Name: "modules.km", Text: "AVAILABLE = (sub {_0} \"x\" \"y\")", Offset: 40, Includes: []diagnostic.Frame{{Kind: "include", Label: "modules.km", Source: "main.km", Span: diagnostic.Span{Start: 5, End: 25}}}},
+		{Name: "modules.km", Text: `AVAILABLE = (subst (pattern '{_0}') "x" "y")`, Offset: 40, Includes: []diagnostic.Frame{{Kind: "include", Label: "modules.km", Source: "main.km", Span: diagnostic.Span{Start: 5, End: 25}}}},
 		{Name: "modules.km", Text: "MODULES = AVAILABLE", Offset: 80},
 		{Name: "helpers.km", Text: "(selected) = MODULES", Offset: 12},
 	}
-	result := program.CompositionConditionSources(a, sources, program.CompileSource{Name: "main.km", Text: "(selected)", Offset: 100}, nil, nil, "")
+	result := program.CompositionConditionSources(a, sources, program.CompileSource{Name: "main.km", Text: "(selected ())", Offset: 100}, nil, nil, "")
 	defer result.Diagnostic.Free(a)
 	d := result.Diagnostic
-	if d.Code != "PAT_INVALID" || d.Source != "modules.km" || d.Span.Start != 57 {
+	if d.Code != "PAT_INVALID" || d.Source != "modules.km" || d.Span.Start != 59 {
 		t.Error("condition did not retain the failing operation's authored origin: " + d.Code + " " + d.Source)
 	}
 	if len(d.Frames) != 6 {
 		t.Error("condition lost operation, definitions, call, include or selecting condition")
 		return
 	}
-	labels := []string{"sub", "AVAILABLE", "MODULES", "selected", "source selection", "modules.km"}
+	labels := []string{"subst", "AVAILABLE", "MODULES", "selected", "source selection", "modules.km"}
 	names := []string{"modules.km", "modules.km", "modules.km", "main.km", "main.km", "main.km"}
-	starts := []int{52, 40, 80, 100, 100, 5}
+	starts := []int{53, 40, 80, 101, 100, 5}
 	for i := range d.Frames {
 		f := d.Frames[i]
 		if f.Label != labels[i] || f.Source != names[i] || f.Span.Start != starts[i] {
@@ -99,7 +99,7 @@ func TestCompositionConditionSourcesKeepPredicateAndDeclarationOffsetsSeparate(t
 	}
 	result.Diagnostic.Free(a)
 	result = program.CompositionConditionSources(a, nil, program.CompileSource{Name: "second.km", Text: "(read ./blocked)", Offset: 90}, nil, nil, "")
-	if result.Diagnostic.Code != "CAP_DENIED" || result.Diagnostic.Source != "second.km" || result.Diagnostic.Span.Start != 90 || len(result.Diagnostic.Tips) != 1 {
+	if result.Diagnostic.Code != "CAP_DENIED" || result.Diagnostic.Source != "second.km" || result.Diagnostic.Span.Start != 91 || len(result.Diagnostic.Tips) != 1 {
 		t.Error("direct pure-condition failure lost origin or guidance")
 	}
 	result.Diagnostic.Free(a)
@@ -118,8 +118,8 @@ func TestCompositionConditionSourcesKeepPredicateAndDeclarationOffsetsSeparate(t
 
 func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T) {
 	a := t.Allocator()
-	prefixes := []string{"a = b\nb = a\n", "", "", "", "", "(include ./never.km)\n", "(if :true (include ./never.km))\n"}
-	predicates := []string{"a", `(sh! "never execute")`, `(out! "never publish")`, `(read "never read")`, "missing", ":true", ":true"}
+	prefixes := []string{"a = b\nb = a\n", "", "", "", "", "include ./never.km\n", "if true\n  include ./never.km\n"}
+	predicates := []string{"a", `(sh! "never execute")`, `(out! "never publish")`, `(read "never read")`, "missing", "true", "true"}
 	codes := []string{"DEP_CYCLE", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING", "FEATURE_UNSUP", "FEATURE_UNSUP"}
 	for i := range prefixes {
 		result := program.CompositionCondition(a, "condition.kmk", prefixes[i], predicates[i], nil, nil, "")
@@ -149,7 +149,7 @@ func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T
 
 func TestCompositionConditionFramesDoNotClaimSyntheticAuthoredLocations(t *testing.T) {
 	a := t.Allocator()
-	result := program.CompositionCondition(a, "main.km", "(helper) = (read ./blocked.txt)\n", "(helper)", nil, nil, "")
+	result := program.CompositionCondition(a, "main.km", "(helper) = (read ./blocked.txt)\n", "(helper ())", nil, nil, "")
 	defer result.Diagnostic.Free(a)
 	if result.Diagnostic.Code != "CAP_DENIED" || len(result.Diagnostic.Frames) != 2 {
 		t.Error("condition lost operation and helper context")

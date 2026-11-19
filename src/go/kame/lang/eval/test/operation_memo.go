@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"kame/internal/testing"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 	"slices"
@@ -31,23 +32,23 @@ func memoEffectSink(value any, effect eval.Effect) {
 }
 
 func TestCompletedOperationSurvivesSiblingWaitWithEffects(t *testing.T) {
-	checkRetainedOperands(t, "result = (list (once) (async))")
+	checkRetainedOperands(t, "result = (list (once ()) (async ()))")
 }
 
 func TestPipeLoweringPreservesRetainedEffects(t *testing.T) {
-	checkRetainedOperands(t, "result = ((once) | list _ (async))")
+	checkRetainedOperands(t, "result = ((once ()) |> list _ (async ()))")
 }
 
 func TestFunctionArgumentsSurviveSiblingWait(t *testing.T) {
-	checkRetainedOperands(t, "(pair first second) = (list first second)\nresult = (pair (once) (async))")
+	checkRetainedOperands(t, "(pair first second) = (list first second)\nresult = (pair (once ()) (async ()))")
 }
 
 func TestRecreatedLexicalScopeRetainsCompletedOperands(t *testing.T) {
-	checkRetainedOperands(t, "result = (let [local 1] (list (once) (async)))")
+	checkRetainedOperands(t, "result = ((local => (list (once ()) (async ()))) 1)")
 }
 
 func TestListSpreadRetainsCompletedOperands(t *testing.T) {
-	checkRetainedOperands(t, "result = [...[(once)] ...(list (async))]")
+	checkRetainedOperands(t, "result = [...[(once ())], ...(list (async ()))]")
 }
 
 func TestSuspendedOperationRetainsItsOwnArguments(t *testing.T) {
@@ -58,7 +59,7 @@ func TestSuspendedOperationRetainsItsOwnArguments(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "wait", Call: asyncOperation, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "memo.km", "result = (wait (once))")
+	parsed := script.Parse(a, "memo.km", "result = (wait (once ()))")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -94,7 +95,7 @@ func TestLoweredOperationsWithSameSpanKeepSeparateOperands(t *testing.T) {
 	registry.Add(eval.Operation{Name: "wait", Call: asyncOperation, MinArity: 1, MaxArity: 1})
 	parsed := script.Parse(a, "memo.km", "result = (list (wait 1))")
 	// Template lowering assigns the wrapper and its sole include the same span.
-	outer := parsed.Items[0].Definition.Expression
+	outer := expr.Ungroup(parsed.Items[0].Definition.Expression)
 	outer.Items[1].Span = outer.Span
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
@@ -117,6 +118,10 @@ func TestLoweredOperationsWithSameSpanKeepSeparateOperands(t *testing.T) {
 }
 
 func checkRetainedOperands(t *testing.T, source string) {
+	checkRetainedOperandsCount(t, source, 2)
+}
+
+func checkRetainedOperandsCount(t *testing.T, source string, count int) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
@@ -137,7 +142,7 @@ func checkRetainedOperands(t *testing.T, source string) {
 	engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID})
 	request.Request.Free(a)
 	stepUntilCurrent(engine, node)
-	if !node.Current || len(node.Latest.List) != 2 || node.Latest.List[0].Int != 1 || state.Calls != 1 || state.Effects != 1 {
+	if !node.Current || len(node.Latest.List) != count || node.Latest.List[0].Int != 1 || (count == 3 && node.Latest.List[2].Int != 1) || state.Calls != 1 || state.Effects != 1 {
 		t.Error("completed operand or its staged effect was replayed incorrectly")
 	}
 	engine.Invalidate(node)

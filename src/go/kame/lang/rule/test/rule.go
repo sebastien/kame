@@ -32,7 +32,7 @@ func TestComputedSequenceGroups(t *testing.T) {
 
 func TestComputedPrerequisitePathsRoundTrip(t *testing.T) {
 	a := t.Allocator()
-	text := "./build/{path:**}.js : @{ROOT}/js/{path}.js, ./meta/@{MODE}/{path}.json | @(str ROOT \"/ready\")/{_0}"
+	text := "./build/{path:**}.js : @{ROOT}/js/{path}.js, ./meta/@{MODE}/{path}.json | @{str ROOT \"/ready\"}/{_0}"
 	parsed := rule.ParseRule(a, "paths.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 3 {
@@ -310,7 +310,7 @@ func TestRuleEnvironmentLiteralMetadataAndRoundTrip(t *testing.T) {
 }
 
 func TestRuleEnvironmentRejectsInvalidOrComputedAssignments(t *testing.T) {
-	texts := []string{"x : ; env", "x : ; other \"MODE=debug\"", "x : ; env MODE", "x : ; env \"1MODE=debug\"", "x : ; env \"MODE\"", "x : ; env \"MODE=@(value)\"", "x : ; env \"MODE=\\u0000\""}
+	texts := []string{"x : ; env", "x : ; other \"MODE=debug\"", "x : ; env MODE", "x : ; env \"1MODE=debug\"", "x : ; env \"MODE\"", "x : ; env \"MODE=@{value ()}\"", "x : ; env \"MODE=\\u0000\""}
 	for i := range texts {
 		parsed := rule.ParseRule(t.Allocator(), "invalid.kmk", texts[i])
 		if len(parsed.Diagnostics) == 0 {

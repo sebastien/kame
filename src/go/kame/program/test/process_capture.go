@@ -16,7 +16,7 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 	a := t.Allocator()
 	captures := []string{
 		"$(/bin/sh -c \"printf x >> capture-log; cat input\")",
-		"(capture! [stdout: :true] \"/bin/sh\" \"-c\" \"printf x >> capture-log; cat input\")",
+		"(capture! {stdout: true} \"/bin/sh\" \"-c\" \"printf x >> capture-log; cat input\")",
 	}
 	for kind := range captures {
 		for scope := 0; scope < 3; scope++ {
@@ -28,7 +28,7 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 			}
 			definition, value := "", captures[kind]
 			if scope == 1 {
-				definition, value = "(probe) = "+value+"\n", "(probe)"
+				definition, value = "(probe) = "+value+"\n", "(probe ())"
 			} else if scope == 2 {
 				definition, value = "probe = "+value+"\n", "probe"
 			}
@@ -38,7 +38,7 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 			} else {
 				body += "\t(yield! captured.stdout)\n"
 			}
-			source := definition + "./output : ./input ; [shell: kash]\n" + body + "\t/bin/sh -c \"printf x >> recipe-log\"\n"
+			source := definition + "./output : ./input ; {shell: kash}\n" + body + "\t/bin/sh -c \"printf x >> recipe-log\"\n"
 			captureLog, recipeLog := "", ""
 			phases := 4
 			if scope == 2 {
@@ -93,7 +93,7 @@ func TestTypedCaptureRepeatedCompletionOwnsBothStreams(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "capture.km", "probe = (capture! [stdout: :true stderr: :true] :accept-exit [1] \"/bin/sh\" \"-c\" \"printf out; printf err >&2; exit 1\")\n")
+	parsed := script.Parse(a, "capture.km", "probe = (capture! {stdout: true, stderr: true} :accept-exit [1] \"/bin/sh\" \"-c\" \"printf out; printf err >&2; exit 1\")\n")
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Grants: []eval.Grant{{Capability: eval.Run}}})
 	if compiled.Program == nil {
 		t.Fatal("compile typed capture")

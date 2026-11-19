@@ -163,7 +163,7 @@ func (s *replShell) alias(command, text string, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "alias %s = [", key)
 			for i, argument := range s.aliases[key] {
 				if i != 0 {
-					fmt.Fprint(out, " ")
+					fmt.Fprint(out, ", ")
 				}
 				fmt.Fprint(out, kameString(argument))
 			}

@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"errors"
+	"io/fs"
 	"kame/core"
 	"kame/host"
 	"kame/internal/mem"
@@ -123,7 +124,7 @@ func (h *MemoryHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	if i := h.findFile(name); i >= 0 {
 		return slices.Clone(h.Files[i].Data), nil
 	}
-	return nil, errors.New("file does not exist")
+	return nil, fs.ErrNotExist
 }
 
 func (h *MemoryHost) FileSignature(name string) core.Signature {

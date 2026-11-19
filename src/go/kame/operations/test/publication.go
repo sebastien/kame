@@ -43,7 +43,7 @@ func TestPublicationRetainsCommitAcrossSuspensionAndPartialFailure(t *testing.T)
 		}
 		parsed := script.Parse(a, "publication", "")
 		program := eval.Compile(a, engine, parsed, registry)
-		text := `(let [result (publish! "./staged" "./final")] (list result (now)))`
+		text := `((result => (list result (now ()))) (publish! "./staged" "./final"))`
 		if scenario == 1 {
 			text = `(publish! "./staged" "./final")`
 		}

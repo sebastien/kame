@@ -20,7 +20,7 @@ rule input or through an explicit discovery operation.
 
 ```kame
 sources-journal = files ./journal/*
-product-by-name = sub ./journal/{name:*} "@{name}" sources-journal
+product-by-name = subst ./journal/{name:*} "@{name}" sources-journal
 ```
 
 `files`, `dirs` and `wildcard` (`007-library.md`) are the discovery

@@ -218,7 +218,7 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, diagnostic.Diagnostic{Source: location.Source, Code: "PHASE_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}, request.Located)}
 	}
 	if request.RequireBoolean && result.Value.Kind != core.Bool {
-		d := diagnostic.Diagnostic{Source: request.Name, Code: "EXPR_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: expression.Expr.Span.Start, End: expression.Expr.Span.End}, Message: "configuration predicate must return bool; got " + core.KindName(result.Value.Kind), Tips: []string{"Use an explicit comparison that returns :true or :false."}}
+		d := diagnostic.Diagnostic{Source: request.Name, Code: "EXPR_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: expression.Expr.Span.Start, End: expression.Expr.Span.End}, Message: "configuration predicate must return bool; got " + core.KindName(result.Value.Kind), Tips: []string{"Use an explicit comparison that returns true or false."}}
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, d, request.Located)}
 	}
 	return PredicateResult{Selected: result.Value.Kind != core.Nil && !(result.Value.Kind == core.Bool && !result.Value.Bool)}

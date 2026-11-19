@@ -44,7 +44,29 @@ func TestKashGraphFormattingCanonicalizesOperatorStages(t *testing.T) {
 
 func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	a := t.Allocator()
-	text := "# before\n(f) = 1\n// between\n  (f)\n# after\n"
+	expression := format.Source(a, "expr", "values.km", "\r\n   # before  \r\n\r\n  1+2  # inline  \r\n\r\n # after\r\n\r\n", "tabs", 4)
+	defer mem.FreeString(a, expression.Text)
+	defer mem.FreeString(a, expression.Code)
+	defer mem.FreeString(a, expression.Message)
+	const wantExpression = "\n# before\n\n1 + 2 # inline\n\n# after\n\n"
+	if !expression.OK || expression.Text != wantExpression {
+		t.Errorf("expression comments and blank lines: got %q, want %q", expression.Text, wantExpression)
+	}
+	again := format.Source(a, "expr", "values.km", expression.Text, "tabs", 4)
+	defer mem.FreeString(a, again.Text)
+	defer mem.FreeString(a, again.Code)
+	defer mem.FreeString(a, again.Message)
+	if !again.OK || again.Text != expression.Text {
+		t.Error("expression source layout was not idempotent")
+	}
+	definition := format.Source(a, "km", "values.km", "value = [1, # item\n  2]\n", "tabs", 4)
+	defer mem.FreeString(a, definition.Text)
+	defer mem.FreeString(a, definition.Code)
+	defer mem.FreeString(a, definition.Message)
+	if !definition.OK || definition.Text != "value =\n  [\n\t1, # item\n\t2,\n]\n" {
+		t.Errorf("definition lost its internal comment: %q", definition.Text)
+	}
+	text := "# before\n(f) = 1\n# between\n  (f ())\n# after\n"
 	authored := source.New(a, "values.km", text)
 	defer authored.Free(a)
 	parsed := script.ParseFragment(a, authored, "km", 0, len(text))
@@ -57,7 +79,7 @@ func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	defer mem.FreeString(a, formatted.Text)
 	defer mem.FreeString(a, formatted.Code)
 	defer mem.FreeString(a, formatted.Message)
-	if !formatted.OK || formatted.Text != "# before\n(f) = 1\n// between\n(f)\n# after\n" {
+	if !formatted.OK || formatted.Text != "# before\n(f) = 1\n# between\n(f ())\n# after\n" {
 		t.Error("value formatter differs from fragment grammar or drops comments")
 	}
 	languages := []string{"km", "kmk", "kash"}

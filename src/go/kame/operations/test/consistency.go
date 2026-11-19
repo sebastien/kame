@@ -19,19 +19,19 @@ func TestPredicateAndSequenceConsistency(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	checks := []string{
 		`(eq? 1 1.0)`, `(ne? 1 2)`, `(lt? 1 2)`, `(gt? 2 1)`, `(lte? 1 1)`, `(gte? 1 1)`,
-		`(in? [x: :nil] [[x: :nil]])`, `(not (in? "x" ["xy"]))`, `(eq? (has? 1 [1.0]) (in? 1 [1.0]))`,
-		`(nil? :nil)`, `(not (nil? uppercase))`, `(bool? :false)`, `(int? 1)`, `(float? 1.5)`,
+		`(in? {x: nil} [{x: nil}])`, `(not (in? "x" ["xy"]))`, `(eq? (has? 1 [1.0]) (in? 1 [1.0]))`,
+		`(nil? nil)`, `(not (nil? uppercase))`, `(bool? false)`, `(int? 1)`, `(float? 1.5)`,
 		`(number? 1)`, `(number? 1.5)`, `(not (number? "1"))`, `(callable? uppercase)`,
-		`(resource? (resource "mem://fixture/file"))`, `(pattern? ./{name:*})`, `(not (process? [status: 0]))`,
-		`(empty? "")`, `(empty? [])`, `(empty? (merge))`, `(not (empty? :nil))`, `(not (empty? :false))`,
-		`(not (empty? 0))`, `(not (empty? " "))`, `(not (empty? uppercase))`, `(not (empty? [:nil]))`,
-		`(blank? :nil)`, `(not (blank? []))`,
-		`(has-key? "x" [x: :nil])`, `(has-key? "x" [x: uppercase])`, `(not (has-key? "missing" [x: :nil]))`,
-		`(eq? (if (has-key? "x" [x: :nil]) (get "x" [x: :nil]) (fail! "unselected")) :nil)`,
-		`(success? [status: 0 signal: 0])`, `(not (success? [status: 75 signal: 0]))`,
-		`(not (success? [status: 0 signal: 15]))`,
-		`(eq? (first "é🙂") (nth 0 "é🙂"))`, `(eq? (first "") :nil)`, `(eq? (first []) :nil)`,
-		`((first [nil?]) :nil)`,
+		`(resource? (resource "mem://fixture/file"))`, `(pattern? ./{name:*})`, `(not (process? {status: 0}))`,
+		`(empty? "")`, `(empty? [])`, `(empty? (merge ()))`, `(not (empty? nil))`, `(not (empty? false))`,
+		`(not (empty? 0))`, `(not (empty? " "))`, `(not (empty? uppercase))`, `(not (empty? [nil]))`,
+		`(blank? nil)`, `(not (blank? []))`,
+		`(has-key? "x" {x: nil})`, `(has-key? "x" {x: uppercase})`, `(not (has-key? "missing" {x: nil}))`,
+		`(eq? (if (has-key? "x" {x: nil}) then (get "x" {x: nil}) else (fail! "unselected")) nil)`,
+		`(success? {status: 0, signal: 0})`, `(not (success? {status: 75, signal: 0}))`,
+		`(not (success? {status: 0, signal: 15}))`,
+		`(eq? (first "é🙂") (nth 0 "é🙂"))`, `(eq? (first "") nil)`, `(eq? (first []) nil)`,
+		`((first [nil?]) nil)`,
 	}
 	for i := range checks {
 		r := evaluate(t, p, checks[i])
@@ -41,10 +41,10 @@ func TestPredicateAndSequenceConsistency(t *testing.T) {
 		r.Free(a)
 	}
 	invalid := []string{
-		`(in? 1 [x: 1])`, `(has-key? 1 [x: 1])`, `(has-key? "x" [])`,
-		`(success? [])`, `(success? [status: 0])`, `(success? [signal: 0])`,
-		`(success? [status: "0" signal: 0])`, `(success? [status: 0 signal: :false])`,
-		`(success? [status: uppercase signal: 0])`, `(apply uppercase [])`, `(apply uppercase ["a" "b"])`,
+		`(in? 1 {x: 1})`, `(has-key? 1 {x: 1})`, `(has-key? "x" [])`,
+		`(success? [])`, `(success? {status: 0})`, `(success? {signal: 0})`,
+		`(success? {status: "0", signal: 0})`, `(success? {status: 0, signal: false})`,
+		`(success? {status: uppercase, signal: 0})`, `(apply uppercase [])`, `(apply uppercase ["a", "b"])`,
 	}
 	for i := range invalid {
 		r := evaluate(t, p, invalid[i])
@@ -53,7 +53,7 @@ func TestPredicateAndSequenceConsistency(t *testing.T) {
 		}
 		r.Free(a)
 	}
-	r := evaluate(t, p, `(get "x" (fail! "eager default") [x: 1])`)
+	r := evaluate(t, p, `(get "x" (fail! "eager default") {x: 1})`)
 	if r.Diagnostic.Code != "USER_ERROR" {
 		t.Error("get silently changed its eager-default contract")
 	}
@@ -91,17 +91,17 @@ func TestExactNumericOrdering(t *testing.T) {
 	parsed := script.Parse(a, "ordering.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	checks := []string{
-		`(< 9007199254740992 9007199254740993)`, `(> 9007199254740993 9007199254740992)`,
-		`(< -9223372036854775808 9223372036854775807)`,
-		`(< 9223372036854775807 9223372036854775808.0)`,
-		`(> 9223372036854775807 9223372036854774784.0)`,
-		`(= -9223372036854775808 -9223372036854775808.0)`,
-		`(> -9223372036854775808 -9223372036854777856.0)`,
-		`(< -9223372036854775808 -9223372036854774784.0)`,
-		`(> 9007199254740993 9007199254740992.0)`,
-		`(< 9007199254740992.0 9007199254740993)`,
-		`(< 0 0.5)`, `(> 0 -0.5)`, `(< -1 -0.5)`, `(> 1 0.5)`,
-		`(<= 0 -0.0)`, `(>= -0.0 0)`,
+		`(lt? 9007199254740992 9007199254740993)`, `(gt? 9007199254740993 9007199254740992)`,
+		`(lt? -9223372036854775808 9223372036854775807)`,
+		`(lt? 9223372036854775807 9223372036854775808.0)`,
+		`(gt? 9223372036854775807 9223372036854774784.0)`,
+		`(eq? -9223372036854775808 -9223372036854775808.0)`,
+		`(gt? -9223372036854775808 -9223372036854777856.0)`,
+		`(lt? -9223372036854775808 -9223372036854774784.0)`,
+		`(gt? 9007199254740993 9007199254740992.0)`,
+		`(lt? 9007199254740992.0 9007199254740993)`,
+		`(lt? 0 0.5)`, `(gt? 0 -0.5)`, `(lt? -1 -0.5)`, `(gt? 1 0.5)`,
+		`(lte? 0 -0.0)`, `(gte? -0.0 0)`,
 		`(eq? (lt 1 2) (lt? 1 2))`, `(eq? (is 1 1) (eq? 1 1))`,
 	}
 	for i := range checks {

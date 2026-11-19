@@ -7,7 +7,6 @@ import (
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -174,7 +173,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+		c.Effects = append(c.Effects, effect.clone())
 	}
 	for i := range state.WritePaths {
 		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
@@ -958,7 +957,7 @@ func streamKind(name string) string {
 func rememberArgumentEffects(state *captureState, c *Context, before int, beforePaths int) {
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		state.Effects = append(state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+		state.Effects = append(state.Effects, effect.clone())
 	}
 	for i := beforePaths; i < len(c.WritePaths); i++ {
 		state.WritePaths = append(state.WritePaths, owned(state.Alloc, c.WritePaths[i]))

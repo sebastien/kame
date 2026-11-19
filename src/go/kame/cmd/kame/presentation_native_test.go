@@ -97,7 +97,7 @@ func TestPresentationDefaultAndStructuredResults(t *testing.T) {
 
 func TestFailurePresentationDoesNotRepeatDiagnosticDetails(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, filepath.Join(directory, "Makefile.kmk"), "root : broken\nbroken : ; [shell: kash]\n\t$(sh -c \"exit 123\")\n")
+	nativeCLIWrite(t, filepath.Join(directory, "Makefile.kmk"), "root : broken\nbroken : ; {shell: kash}\n\t$(sh -c \"exit 123\")\n")
 	for _, mode := range []string{"ansi", "text"} {
 		for _, format := range []string{"human", "plain"} {
 			var out, errOut bytes.Buffer
@@ -116,7 +116,7 @@ func TestFailurePresentationDoesNotRepeatDiagnosticDetails(t *testing.T) {
 					t.Fatalf("%s/%s: repeated %q in:\n%s", mode, format, once, text)
 				}
 			}
-			if format == "human" && !strings.Contains(text, "\n     │ broken : ; [shell: kash]\n") {
+			if format == "human" && !strings.Contains(text, "\n     │ broken : ; {shell: kash}\n") {
 				t.Fatalf("trace excerpt is not nested under its frame:\n%s", text)
 			}
 		}

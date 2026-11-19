@@ -22,15 +22,12 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 	engine := core.NewEngine(a)
 	source := script.Parse(a, "migration.km", "")
 	p := eval.Compile(a, engine, source, r)
-	names := []string{"write", "yield", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail", "shell!", "shellrun!", "set-field", "regex-replace"}
+	names := []string{"write", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail", "shell!", "shellrun!", "regex-replace"}
 	for i := range names {
 		name := names[i]
 		replacement := name + "!"
 		if name == "shell" || name == "shellrun" || name == "shell!" || name == "shellrun!" {
 			replacement = "sh!"
-		}
-		if name == "set-field" {
-			replacement = "set"
 		}
 		if name == "regex-replace" {
 			replacement = "resub"
@@ -50,7 +47,7 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 			result.Free(a)
 			parsed.Free()
 		}
-		parsed := expr.Parse(a, "migration.km", "(let ["+name+" ([x] x)] ("+name+" 42))")
+		parsed := expr.Parse(a, "migration.km", "(("+name+" => "+name+" 42) (x => x))")
 		context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 		result := p.EvaluateWith(parsed.Expr, &context)
 		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
@@ -62,7 +59,7 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 	if !r.Add(eval.Operation{Name: "out", Call: contractNoop}) {
 		t.Error("custom legacy-named operation rejected")
 	}
-	parsed := expr.Parse(a, "migration.km", "(out)")
+	parsed := expr.Parse(a, "migration.km", "(out ())")
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 	result := p.EvaluateWith(parsed.Expr, &context)
 	if result.Diagnostic.Code != "" {
@@ -81,7 +78,7 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	if !operations.Register(r) {
 		t.Error("standard operation registration failed")
 	}
-	if len(r.Items) != 122 {
+	if len(r.Items) != 127 {
 		t.Error("standard operation count changed")
 	}
 	for i := range r.Items {
@@ -120,52 +117,30 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	r.Free()
 }
 
-func TestStandardOperationAliasMetadata(t *testing.T) {
+func TestSubstitutionOperationMetadata(t *testing.T) {
 	r := eval.NewRegistry(t.Allocator())
 	operations.Register(r)
-	names := []string{"sub", "replace"}
+	defer r.Free()
 	var replacement *eval.Operation
 	for i := range r.Items {
-		if r.Items[i].Name == "replace" {
+		switch r.Items[i].Name {
+		case "replace":
+			t.Error("unexpected substitution operation: replace")
+		case "sub":
+			if r.Items[i].DeferredReplacement {
+				t.Error("sub cannot defer substitution operands")
+			}
+		case "subst":
 			replacement = &r.Items[i]
 		}
 	}
 	if replacement == nil {
-		t.Error("standard aliases missing")
-		r.Free()
+		t.Error("subst is missing")
 		return
-	}
-	for i := range names {
-		found := false
-		for j := range r.Items {
-			o := &r.Items[j]
-			if o.Name != names[i] {
-				continue
-			}
-			found = true
-			base := replacement
-			if o.Category != base.Category || o.Phases != base.Phases || o.Behavior != base.Behavior || o.Version != base.Version || o.MinArity != base.MinArity || o.MaxArity != base.MaxArity || o.DeferredReplacement != base.DeferredReplacement || len(o.Capabilities) != len(base.Capabilities) || len(o.ConditionalCapabilities) != len(base.ConditionalCapabilities) {
-				t.Error("alias metadata differs: " + o.Name)
-			}
-			for k := range o.Capabilities {
-				if k < len(base.Capabilities) && o.Capabilities[k] != base.Capabilities[k] {
-					t.Error("alias authority differs: " + o.Name)
-				}
-			}
-			for k := range o.ConditionalCapabilities {
-				if k < len(base.ConditionalCapabilities) && o.ConditionalCapabilities[k] != base.ConditionalCapabilities[k] {
-					t.Error("alias conditional authority differs: " + o.Name)
-				}
-			}
-		}
-		if !found {
-			t.Error("standard alias missing: " + names[i])
-		}
 	}
 	if replacement.Category != eval.PureOperation || replacement.Phases != eval.AllPhases || replacement.Behavior != eval.CallsCallable || !replacement.DeferredReplacement || len(replacement.Capabilities) != 0 || len(replacement.ConditionalCapabilities) != 0 {
 		t.Error("replacement propagation metadata must not grant effects")
 	}
-	r.Free()
 }
 
 func TestPatternReplacementEffectsAreDemandedOnlyOnMatch(t *testing.T) {
@@ -175,19 +150,19 @@ func TestPatternReplacementEffectsAreDemandedOnlyOnMatch(t *testing.T) {
 	engine := core.NewEngine(a)
 	source := script.Parse(a, "contracts.km", "")
 	p := eval.Compile(a, engine, source, r)
-	names := []string{"sub", "replace"}
+	names := []string{"subst"}
 	phases := []eval.Phase{eval.EvaluatePhase, eval.PlanningPhase, eval.ResolvingPhase, eval.RenderingPhase}
-	subjects := []string{`"inner.c"`, `"inner.h"`, `[]`, `:nil`}
+	subjects := []string{`"inner.c"`, `"inner.h"`, `[]`, `nil`}
 	for i := range names {
 		for j := range phases {
 			for k := range subjects {
 				calls := []string{
-					"(" + names[i] + " {name:*}.c (nop (out! name) name) " + subjects[k] + ")",
-					"((" + names[i] + " {name:*}.c (nop (out! name) name)) " + subjects[k] + ")",
-					"(let [alias " + names[i] + "] (alias {name:*}.c (nop (out! name) name) " + subjects[k] + "))",
+					"(" + names[i] + " (pattern \"{name:*}.c\") (nop (out! name) name) " + subjects[k] + ")",
+					"((" + names[i] + " (pattern \"{name:*}.c\") (nop (out! name) name)) " + subjects[k] + ")",
+					"((alias => alias (pattern \"{name:*}.c\") (nop (out! name) name) " + subjects[k] + ") " + names[i] + ")",
 				}
 				for n := range calls {
-					parsed := expr.Parse(a, "contracts.km", `(let [name "outer"] (nop `+calls[n]+` name))`)
+					parsed := expr.Parse(a, "contracts.km", `((name => nop `+calls[n]+` name) "outer")`)
 					if len(parsed.Diagnostics) != 0 {
 						t.Error("replacement effect test parse failed")
 					}
@@ -270,7 +245,7 @@ func TestContractMetadataDoesNotAuthorizeNestedEffects(t *testing.T) {
 		}
 		result.Free(a)
 		parsed.Free()
-		parsed = expr.Parse(a, "contracts.km", `(if :false (fail! "unreached") (render "plain" """@(str "ok")"""))`)
+		parsed = expr.Parse(a, "contracts.km", `(if false then (fail! "unreached") else (render "plain" """@(str "ok")"""))`)
 		context = eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: phases[i]}
 		result = p.EvaluateWith(parsed.Expr, &context)
 		if result.Diagnostic.Code != "" || result.Value.Text != "ok" || context.PhaseInvalid() {
@@ -279,7 +254,7 @@ func TestContractMetadataDoesNotAuthorizeNestedEffects(t *testing.T) {
 		result.Free(a)
 		parsed.Free()
 	}
-	parsed := expr.Parse(a, "contracts.km", `(map ([x] (out! x)) ["blocked"])`)
+	parsed := expr.Parse(a, "contracts.km", `(map (x => (out! x)) ["blocked"])`)
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: eval.PlanningPhase}
 	result := p.EvaluateWith(parsed.Expr, &context)
 	if !context.PhaseInvalid() || len(context.Effects) != 0 {

@@ -46,7 +46,7 @@ inline evaluation in that phase. Tool metadata tracking does not confer user
 read authority. Service, dry-run, and publication restrictions remain independent.
 
 Callback-bearing operations (`apply`, `map`, `flatmap`, `filter`, `filter-out`,
-`reduce`, `finally!`, `sub`, and template application) explicitly propagate reached
+`reduce`, `finally!`, `subst`, and template application) explicitly propagate reached
 callable behavior. A computation category on the enclosing operation does not
 declare its callbacks pure.
 `render` also evaluates template expressions under the caller's authority and
@@ -57,9 +57,9 @@ An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
 the run allocator unless explicitly transferred to the engine.
 
-An explicitly specified staged operand is the exception: pattern `sub`
+An explicitly specified staged operand is the exception: pattern `subst`
 retains its replacement expression for evaluation after matching, as defined in
-`014-patterns.md` and `005-evaluation.md`. This does not make `sub` a reserved
+`014-patterns.md` and `005-evaluation.md`. This does not make `subst` a reserved
 word or change ordinary literal-string replacement.
 
 Pure operations must not read clocks, environment, global mutable state, files,
@@ -228,6 +228,23 @@ Do not substitute resource/value/build fingerprints for these interoperable
 digests. SHA-1 is only for interoperating with existing SHA-1 identifiers, not a
 collision-resistant security claim or password derivation.
 
+## Numeric operations
+
+| Signature | Result |
+| --- | --- |
+| `add LEFT RIGHT` | `LEFT + RIGHT` |
+| `sub LEFT RIGHT` | `LEFT - RIGHT` |
+| `mul LEFT RIGHT` | `LEFT * RIGHT` |
+| `div LEFT RIGHT` | Floating-point quotient, including when both operands are integers |
+| `mod LEFT RIGHT` | Integer remainder with the sign of the dividend when nonzero |
+| `neg VALUE` | The additive inverse |
+
+`add`, `sub` and `mul` preserve the integer kind when both operands are
+integers. They convert to floating-point arithmetic when either operand is a
+float. `neg` preserves its operand's kind. `mod` accepts integers only.
+Integer overflow, nonfinite operands or results, division or remainder by zero,
+and operands of other kinds are `EXPR_INVALID`.
+
 ## Comparison Operations
 
 Comparison operations compare materialized values. Each comparison exists as a
@@ -356,7 +373,7 @@ The text operations are:
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
-| `sub` | Substitute literal occurrences, or evaluate a capture-scoped expansion while preserving nonmatches per `041-pattern-predicates-and-substitution.md` |
+| `subst` | Substitute literal occurrences, or evaluate a capture-scoped expansion while preserving nonmatches per `041-pattern-predicates-and-substitution.md` |
 | `match?` | Anchored boolean pattern matching, directly or as a unary predicate |
 | `capture` | `capture PATTERN SUBJECT`: anchored match returning a capture record, or nil on no match |
 | `bind` | `bind TEMPLATE CAPTURES`: build a value from a template and a capture record |
@@ -398,7 +415,7 @@ Portable regular-expression matching and replacement are specified in
 
 Pattern dispatch over ordered arms is the `match` keyword (`055` §4.5), not a
 library operation. The operations below cover single-pattern use. Per
-`041-pattern-predicates-and-substitution.md`, `sub` preserves nonmatching
+`041-pattern-predicates-and-substitution.md`, `subst` preserves nonmatching
 strings and `match?` provides boolean pattern predicates.
 
 `capture PATTERN SUBJECT` matches a `PathPattern` against a `Path`, or a string
@@ -419,7 +436,7 @@ output = captures |> bind ./build/{path}/{name}.o
 Regex matching and selection of positional or named regex captures
 (`regex-match`, `regex-group`) are specified in `029-pattern-extensions.md`.
 
-`sub` accepts two or three arguments. `sub FROM TO TEXT` with plain
+`subst` accepts two or three arguments. `subst FROM TO TEXT` with plain
 strings replaces literal occurrences and retains ordinary eager evaluation.
 Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 A match pattern as the first argument selects anchored matching. Its second
@@ -428,7 +445,7 @@ captures bound locally; `./{name}`, `"@{name}"`, `name`, and `(uppercase name)`
 can all use `{name:*}`:
 
 ```kame
-stems = sources |> sub ./src/{name:*}.c name
+stems = sources |> subst ./src/{name:*}.c name
 ```
 
  With two operands it returns a callable of arity one
@@ -697,6 +714,10 @@ executable metadata checks do not grant access to user read operations.
   and their named operations agree in behavior and phase contracts, and only the
   named forms are callable values. `not` and `bool` retain logical/conversion
   names without pretending to be kind tests.
+- Numeric operators agree with their named operations. Integer addition,
+  subtraction, multiplication and negation detect overflow. Division of
+  integers yields a float. Remainder requires integers and follows the
+  dividend's sign. Zero divisors and nonfinite operands or results fail.
 - `apply` spreads argument lists regardless of arity, with normal arity errors,
   typed/rest argument binding, callable ownership, and once-only host suspension.
 - `first` and `nth 0` agree on empty/nonempty lists and Unicode strings.
@@ -757,7 +778,7 @@ executable metadata checks do not grant access to user read operations.
   trailing spaces, multiple terminal LFs, embedded newlines, CR-only and CRLF
   input. Arity and non-string errors, callable aliases, and value pipes agree on
   native and WASM; capture and `strip` behavior remain unchanged.
-- Pattern `sub` matches anchored, expands
+- Pattern `subst` matches anchored, expands
   references, preserves the original string without a match, and accepts a
   callable through `map` and pipes. `resub` retains its separate
   nil-on-nonmatch contract in `029-pattern-extensions.md`.

@@ -12,7 +12,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("DefinitionAtomsUseExpressionGrammar", func(t *testing.T) { TestDefinitionAtomsUseExpressionGrammar(legacy.Wrap(t)) })
 	t.Run("DefinitionClassifiesExpressionAndSpans", func(t *testing.T) { TestDefinitionClassifiesExpressionAndSpans(legacy.Wrap(t)) })
 	t.Run("DefinitionRangeBoundsExpressionAndAllowsTrailingContinuation", func(t *testing.T) { TestDefinitionRangeBoundsExpressionAndAllowsTrailingContinuation(legacy.Wrap(t)) })
-	t.Run("DefinitionRejectsTextAndMultipleExpressions", func(t *testing.T) { TestDefinitionRejectsTextAndMultipleExpressions(legacy.Wrap(t)) })
+	t.Run("DefinitionRejectsTextAndMultipleExpressions", func(t *testing.T) { TestDefinitionRejectsMalformedExpressions(legacy.Wrap(t)) })
 	t.Run("FormatDefinitionCanonicalizesWhitespace", func(t *testing.T) { TestFormatDefinitionCanonicalizesWhitespace(legacy.Wrap(t)) })
 	t.Run("FunctionDefinitionRetainsRestParameter", func(t *testing.T) { TestFunctionDefinitionRetainsRestParameter(legacy.Wrap(t)) })
 	t.Run("QuestionMarkNameIsNotDefaultOperator", func(t *testing.T) { TestQuestionMarkNameIsNotDefaultOperator(legacy.Wrap(t)) })

@@ -11,7 +11,7 @@ import (
 func TestForwardedBuildWritesWaitForHostAndPreserveBytes(t *testing.T) {
 	a := t.Allocator()
 	for scenario := 0; scenario < 2; scenario++ {
-		started := wasm.NewRuntime(a, "./out : ; [shell: kash]\n\t(write! \"./side\" \"side\")\n\t(yield! \"one\")\n\t(yield! \"two\")\n")
+		started := wasm.NewRuntime(a, "./out : ; {shell: kash}\n\t(write! \"./side\" \"side\")\n\t(yield! \"one\")\n\t(yield! \"two\")\n")
 		if started.Runtime == nil {
 			t.Fatal("create runtime")
 			return

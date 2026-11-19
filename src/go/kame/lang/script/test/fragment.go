@@ -26,17 +26,18 @@ func TestContributionFragmentCannotBorrowClosingDelimiter(t *testing.T) {
 func TestValueFragmentRetainsBoundedCommentOrderAndOffsets(t *testing.T) {
 	a := t.Allocator()
 	prefix := "prior : dependency\n"
-	text := prefix + "  # before  \nv = 1\n// after\n" + "following : dependency\n"
+	fragment := "  # before  \nv = 1\n//server/share\n# after\n"
+	text := prefix + fragment + "following : dependency\n"
 	s := source.New(a, "fragments", text)
 	defer s.Free(a)
-	end := len(prefix) + len("  # before  \nv = 1\n// after\n")
+	end := len(prefix) + len(fragment)
 	part := script.ParseFragment(a, s, "km", len(prefix), end)
 	defer part.Free()
-	if len(part.Diagnostics) != 0 || len(part.Items) != 3 {
+	if len(part.Diagnostics) != 0 || len(part.Items) != 4 {
 		t.Fatal("value fragment crossed an independent rule fragment")
 		return
 	}
-	if part.Items[0].Kind != script.Comment || part.Items[0].Text != "# before" || part.Items[0].Span.Start != len(prefix)+2 || part.Items[0].Span.End != len(prefix)+len("  # before") || part.Items[1].Kind != script.Definition || part.Items[2].Kind != script.Comment {
+	if part.Items[0].Kind != script.Comment || part.Items[0].Text != "# before" || part.Items[0].Span.Start != len(prefix)+2 || part.Items[0].Span.End != len(prefix)+len("  # before") || part.Items[1].Kind != script.Definition || part.Items[2].Kind != script.Expression || part.Items[3].Kind != script.Comment {
 		t.Error("bounded value fragment changed comment spans or order")
 	}
 }
@@ -54,7 +55,7 @@ func TestValueScriptRuleDiagnosticNamesTheLanguage(t *testing.T) {
 
 func TestValueScriptSymbolAdjacencyDoesNotSuggestBuildGrammar(t *testing.T) {
 	a := t.Allocator()
-	s := source.New(a, "wrong.km", "default :false")
+	s := source.New(a, "wrong.km", "default :fast")
 	defer s.Free(a)
 	part := script.ParseFragment(a, s, "km", 0, len(s.Text))
 	defer part.Free()

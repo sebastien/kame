@@ -7,7 +7,7 @@ import (
 
 func TestListQueryGrammar(t *testing.T) {
 	arguments := [][]string{
-		{}, {"biuld"}, {"--json", "-C", "project", "-f", "Build.kmk", "--set", "mode=:true", "biuld"},
+		{}, {"biuld"}, {"--json", "-C", "project", "-f", "Build.kmk", "--set", "mode=true", "biuld"},
 		{"--", "--help"}, {"name=value"},
 	}
 	for i := range arguments {

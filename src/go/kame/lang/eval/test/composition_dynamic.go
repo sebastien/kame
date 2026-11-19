@@ -22,15 +22,15 @@ func TestCompositionDynamicTextRejectsHeadsBeforeEffects(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()
 	cases := []string{
-		"(eval \"(if :false (include ./a.km) (out! 42))\")",
-		"(eval \"(let [unused ([] (include? ./a.km))] (out! 42))\")",
-		"(kash \"(out! 42)\\n(if :false (include ./a.km) :nil)\")",
+		"(eval \"(if false then (include ./a.km) else (out! 42))\")",
+		"(eval \"((unused => (out! 42)) (() => (include? ./a.km)))\")",
+		"(kash \"(out! 42)\\n(if false then (include ./a.km) else nil)\")",
 	}
 	for i := range cases {
 		expression := expr.Parse(a, "dynamic", cases[i])
 		context := &eval.Context{Program: p, Scope: p.Scope, Run: a}
 		result := p.EvaluateWith(expression.Expr, context)
-		if result.Diagnostic.Code != "EXPR_INVALID" || len(context.Effects) != 0 {
+		if result.Diagnostic.Code != "PARSE_ERR" || len(context.Effects) != 0 {
 			t.Error("dynamic text did not reject source heads before effects")
 		}
 		result.Free(a)
@@ -38,10 +38,10 @@ func TestCompositionDynamicTextRejectsHeadsBeforeEffects(t *testing.T) {
 		expression.Free()
 	}
 	context := &eval.Context{Program: p, Scope: p.Scope, Run: a}
-	result := p.RunKash("(out! 42)\nunused = ([] (include ./a.km))\n", context, source.Span{})
+	result := p.RunKash("(out! 42)\nunused = (() => (include ./a.km))\n", context, source.Span{})
 	defer result.Free(a)
 	defer eval.FreeEffects(a, context.Effects)
-	if result.Diagnostic.Code != "EXPR_INVALID" || len(context.Effects) != 0 {
+	if result.Diagnostic.Code != "PARSE_ERR" || len(context.Effects) != 0 {
 		t.Error("Kash recipe ran earlier effects before hidden-head validation")
 	}
 	if request := p.Requests.Next(); request.OK {

@@ -4,6 +4,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
+	"strings"
 )
 
 // Document is a lowered document template: Root evaluates to the rendered
@@ -549,7 +550,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			return blockOut{Items: items, Next: lineStart, Term: d.Kind, TermSpan: d.Span, TermArgs: d.Args, TermEnd: lineEnd, TermTrimRight: d.TrimRight, TrimRight: pendingTrim || d.TrimRight}
 		}
 		if d.Kind == dirLet {
-			// (let [n e] rest): remainder of this block is the body.
+			// The binding scopes over the remainder of this block.
 			rest := p.parseBlock(lineEnd, end)
 			restCat := newCat(p.a, rest.Items, source.Span{Start: lineEnd, End: rest.Next})
 			nameExpr := d.Args[0]
@@ -1650,7 +1651,25 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		// "@if (" with space, or bare "@if": not a directive (ordinary text).
 		return dirOut{Kind: dirNone}
 	}
-	ares := p.parseArgs(kend+1, innerEnd)
+	if kind == dirEnd {
+		if text[innerEnd-1] != ')' {
+			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
+			return dirOut{Kind: dirError, Span: lineSpan}
+		}
+		label := strings.TrimSpace(text[kend+1 : innerEnd-1])
+		switch label {
+		case "if", "for", "with", "match", "raw":
+			arg := mem.Alloc[expr.Expr](p.a)
+			labelStart := kend + 1 + strings.Index(text[kend+1:innerEnd-1], label)
+			arg.Kind, arg.Text = expr.Name, label
+			arg.Span = source.Span{Start: labelStart, End: labelStart + len(label)}
+			return dirOut{Kind: kind, Args: []*expr.Expr{arg}, Span: lineSpan, TrimLeft: trimLeft, TrimRight: trimRight}
+		default:
+			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
+			return dirOut{Kind: dirError, Span: lineSpan}
+		}
+	}
+	ares := p.parseArgs(kend+1, innerEnd, kind == dirCase)
 	args := ares.Args
 	argsEnd := ares.End
 	ok := ares.OK
@@ -1740,22 +1759,14 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			mem.FreeSlice(nil, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
-	case dirEnd:
-		if len(args) != 1 || args[0].Kind != expr.Name {
-			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
+
 	}
 	return dirOut{Kind: kind, Args: args, Span: lineSpan, TrimLeft: trimLeft, TrimRight: trimRight}
 }
 
 // parseArgs parses whitespace-separated expressions starting at pos until
 // the outer ")".
-func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
+func (p *docParser) parseArgs(pos int, innerEnd int, casePattern bool) argsRes {
 	text := p.s.Text
 	var args []*expr.Expr
 	cur := pos
@@ -1784,7 +1795,12 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 			mem.FreeSlice(nil, args)
 			return argsRes{End: innerEnd, OK: false}
 		}
-		prefix := expr.ParsePrefix(p.a, p.s, cur)
+		var prefix expr.Prefix
+		if casePattern && len(args) == 0 && text[cur] == '"' {
+			prefix = expr.ParseMatchPatternPrefix(p.a, p.s, cur)
+		} else {
+			prefix = expr.ParsePrefix(p.a, p.s, cur)
+		}
 		if prefix.Expr == nil {
 			for i := range args {
 				expr.Free(p.a, args[i])

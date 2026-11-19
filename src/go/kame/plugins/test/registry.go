@@ -135,7 +135,7 @@ func TestRegisteredOperationCapabilityIsCheckedBeforeRequest(t *testing.T) {
 		t.Error("plugin registration failed")
 	}
 	engine := core.NewEngine(a)
-	parsed := script.Parse(a, "plugin.km", "result = (example-run)")
+	parsed := script.Parse(a, "plugin.km", "result = (example-run ())")
 	program := eval.Compile(a, engine, parsed, registry)
 	definition := program.Definition("result")
 	engine.Request(definition)

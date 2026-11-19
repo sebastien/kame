@@ -1,1 +1,1 @@
-([x] (compile x))
+(x => (compile x))

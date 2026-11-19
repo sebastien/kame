@@ -9,7 +9,7 @@ import (
 
 func TestValueFragmentCompactHeadersMatchDefinitionParser(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{"value=42", "value= 42", "value =42", "(identity x)=x", "(f)=42", "items+=[1]", "value?=42", "value??=42", "ready!=:true", "ready? =:true", "(collect rest...)=[rest]"}
+	texts := []string{"value=42", "value= 42", "value =42", "(identity x)=x", "(f)=42", "items+=[1]", "value?=42", "value??=42", "ready!=true", "ready? =true", "(collect rest...)=[rest]"}
 	for _, text := range texts {
 		prefix := "prior : dependency\n# before\n"
 		authored := source.New(a, "fragments.km", prefix+text+"\n# after\nfollowing : dependency\n")
@@ -47,7 +47,7 @@ func TestValueFragmentCompactHeadersRetainDiagnostics(t *testing.T) {
 		parsed.Free()
 		authored.Free(a)
 	}
-	invalidValues := []string{"value=", "value=42 43", "(f x)?=42", "(f x)+=[x]"}
+	invalidValues := []string{"value=", "value=42 = 43", "(f x)?=42", "(f x)+=[x]"}
 	for _, text := range invalidValues {
 		authored := source.New(a, "invalid.km", text)
 		direct := definition.ParseRange(a, authored, 0, len(text))

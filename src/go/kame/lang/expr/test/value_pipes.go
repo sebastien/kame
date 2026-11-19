@@ -9,18 +9,18 @@ import (
 func TestValuePipeCloneAndFormattingPreserveAuthoredStructure(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
-		`(tool "git" | ?)`,
-		`((tool "git") | ?)`,
-		`(tool "git" | ? _ "fallback")`,
-		`(str "a" "b" | uppercase | count)`,
-		`(tool "a-long-tool-name-that-exercises-the-multiline-value-pipe-formatting-layout-boundary" | ?)`,
-		`(value | first | second b)`,
-		`(value | pair _ _)`,
-		`(value | transform a _ b)`,
-		`(value | map ([item] (item | transform)) | join " ")`,
+		`(tool "git" |> first)`,
+		`((tool "git") |> first)`,
+		`(tool "git" |> transform _ "fallback")`,
+		`(str "a" "b" |> uppercase |> count)`,
+		`(tool "a-long-tool-name-that-exercises-the-multiline-value-pipe-formatting-layout-boundary" |> first)`,
+		`(value |> first |> second b)`,
+		`(value |> pair _ _)`,
+		`(value |> transform a _ b)`,
+		`(value |> map (item => (item |> transform)) |> join " ")`,
 		`(join " " (map transform value))`,
-		`"@(value | transform _ b)"`,
-		`$(printf %s prefix-(value | transform _ b).txt)`,
+		`"@{value |> transform _ b}"`,
+		`$(printf %s prefix-(value |> transform _ b).txt)`,
 	}
 	for i := range inputs {
 		parsed := expr.Parse(a, "pipe.km", inputs[i])

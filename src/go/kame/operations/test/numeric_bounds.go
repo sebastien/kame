@@ -17,7 +17,7 @@ func TestRemediation3NumericBounds(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"(nth 4294967296 [7])", "(nth 4294967296 \"a\")",
-		"(nth -4294967296 [7])", "(nth 9223372036854775807 [([x] x)])",
+		"(nth -4294967296 [7])", "(nth 9223372036854775807 [(x => x)])",
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
@@ -28,7 +28,7 @@ func TestRemediation3NumericBounds(t *testing.T) {
 	}
 	texts = []string{
 		"(slice 4294967296 [7])", "(slice 0 4294967296 \"a\")",
-		"(slice -4294967296 [7])", "(slice 0 -9223372036854775808 [([x] x)])",
+		"(slice -4294967296 [7])", "(slice 0 -9223372036854775808 [(x => x)])",
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])

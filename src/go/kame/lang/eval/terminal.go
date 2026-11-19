@@ -40,8 +40,8 @@ func setupBoolean(value core.Value) (bool, bool) {
 	if value.Kind == core.Bool {
 		return value.Bool, true
 	}
-	if value.Kind == core.String && (value.Text == ":true" || value.Text == ":false") {
-		return value.Text == ":true", true
+	if value.Kind == core.String && (value.Text == "true" || value.Text == "false") {
+		return value.Text == "true", true
 	}
 	return false, false
 }
@@ -55,11 +55,11 @@ func (p *Program) terminalSetup(state *captureState, kind expr.SetupKey, value c
 	}
 	enabled, ok := setupBoolean(value)
 	if !ok {
-		return failure(c.Run, "EXPR_INVALID", span, name+" setup requires :true or :false")
+		return failure(c.Run, "EXPR_INVALID", span, name+" setup requires true or false")
 	}
 	if enabled && !granted && !p.Terminal {
 		r := failure(c.Run, "CAP_DENIED", span, "terminal "+name+" is not authorized for this execution")
-		r.Diagnostic.Tips = append(r.Diagnostic.Tips, owned(c.Run, "authorize it in the rule metadata, e.g. ["+name+": :true]; direct sessions cannot grant it"))
+		r.Diagnostic.Tips = append(r.Diagnostic.Tips, owned(c.Run, "authorize it in the rule metadata, e.g. {"+name+": true}; direct sessions cannot grant it"))
 		return r
 	}
 	flag := setupFalse

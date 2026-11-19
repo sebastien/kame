@@ -1,5 +1,5 @@
 # hash comment
-// slash comment
+# slash comment
 
 OUTPUT = ./dist/app
 

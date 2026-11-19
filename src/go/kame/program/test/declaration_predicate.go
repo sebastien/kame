@@ -35,7 +35,7 @@ func TestDeclarationPredicateRejectsCyclesEffectsAndNonBooleanValues(t *testing.
 		if result.Diagnostic.Code != codes[i] {
 			t.Error("predicate " + predicates[i] + " expected " + codes[i] + " got " + result.Diagnostic.Code + " " + result.Diagnostic.Message)
 		}
-		if predicates[i] == "42" && (result.Diagnostic.Message != "configuration predicate must return bool; got int" || len(result.Diagnostic.Tips) != 1 || result.Diagnostic.Tips[0] != "Use an explicit comparison that returns :true or :false." || !result.Diagnostic.Owned) {
+		if predicates[i] == "42" && (result.Diagnostic.Message != "configuration predicate must return bool; got int" || len(result.Diagnostic.Tips) != 1 || result.Diagnostic.Tips[0] != "Use an explicit comparison that returns true or false." || !result.Diagnostic.Owned) {
 			t.Error("strict predicate lost kind or owned recovery tip")
 		}
 		// The legacy API supplies no authored origin map for either input text.

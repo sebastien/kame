@@ -72,21 +72,21 @@ func TestRemediation3PatternBudgets(t *testing.T) {
 
 func TestRemediation3SectionAndPatternPositions(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{"((f _4096))", "((f _1000000000))", "((f _999999999999999999999999999999))"}
+	texts := []string{"(f _4096)", "(f _1000000000)", "(f _999999999999999999999999999999)"}
 	for i := range texts {
 		r := expr.Parse(a, "arity.km", texts[i])
-		if len(r.Diagnostics) == 0 || r.Expr == nil || len(r.Expr.Parameters) != 0 {
+		if len(r.Diagnostics) == 0 || r.Expr == nil || len(expr.Ungroup(r.Expr).Parameters) != 0 {
 			t.Error("excessive section arity materialized parameters")
 		}
 		r.Free()
 	}
-	r := expr.Parse(a, "arity.km", "((f _3))")
-	if len(r.Diagnostics) != 0 || r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != 4 {
+	r := expr.Parse(a, "arity.km", "(f _3)")
+	if len(r.Diagnostics) != 0 || r.Expr == nil || r.Expr.Kind != expr.Section || len(expr.Ungroup(r.Expr).Parameters) != 4 {
 		t.Error("ordinary placeholder section changed")
 	}
 	r.Free()
-	r = expr.Parse(a, "arity.km", "((f _4095))")
-	if len(r.Diagnostics) != 0 || r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != expr.MaxSectionArity {
+	r = expr.Parse(a, "arity.km", "(f _4095)")
+	if len(r.Diagnostics) != 0 || r.Expr == nil || r.Expr.Kind != expr.Section || len(expr.Ungroup(r.Expr).Parameters) != expr.MaxSectionArity {
 		t.Error("maximum supported placeholder section was rejected")
 	}
 	r.Free()

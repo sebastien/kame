@@ -8,14 +8,14 @@ import (
 
 func TestMixedWordExpressionsKeepSpansAndTypedBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := `$(printf --config=(name).json (name) "literal(call)" (name)"")`
+	text := `$(printf --config=(name ()).json (name ()) "literal(call)" (name ())"")`
 	parsed := expr.Parse(a, "words.km", text)
 	if len(parsed.Diagnostics) != 0 {
 		t.Error("mixed words did not parse")
 		parsed.Free()
 		return
 	}
-	words := parsed.Expr.Items[0].Items
+	words := expr.Ungroup(parsed.Expr).Items[0].Items
 	if len(words) != 5 {
 		t.Error("mixed expressions split argv")
 		parsed.Free()
@@ -26,7 +26,7 @@ func TestMixedWordExpressionsKeepSpansAndTypedBoundaries(t *testing.T) {
 		t.Error("mixed word lost its literal fragments")
 	} else {
 		part := mixed.Parts[1]
-		if part.Form != "(" || part.Expr.Kind != expr.Application || text[part.Span.Start:part.Span.End] != "(name)" || text[part.Expr.Span.Start:part.Expr.Span.End] != "(name)" {
+		if part.Form != "(" || expr.Ungroup(part.Expr).Kind != expr.Application || text[part.Span.Start:part.Span.End] != "(name ())" || text[part.Expr.Span.Start:part.Expr.Span.End] != "(name ())" {
 			t.Error("expression lost its parser boundary or authored span")
 		}
 	}
@@ -38,7 +38,7 @@ func TestMixedWordExpressionsKeepSpansAndTypedBoundaries(t *testing.T) {
 	formatted := expr.Compact(a, cloned)
 	expr.Free(a, cloned)
 	again := expr.Parse(a, "formatted.km", formatted)
-	if len(again.Diagnostics) != 0 || again.Expr.Items[0].Items[4].Bool {
+	if len(again.Diagnostics) != 0 || expr.Ungroup(again.Expr).Items[0].Items[4].Bool {
 		t.Error("formatting enabled typed splicing on a scalar word")
 	}
 	again.Free()

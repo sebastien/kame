@@ -362,7 +362,7 @@ func (s *replSession) callPrompt(function string, status int, fallback string) (
 			jobs++
 		}
 	}
-	text := "(" + function + " [status: " + strconv.Itoa(status) + " dir: " + kameString(session.Program.Options.Directory) + " name: " + kameString(s.shell.directoryName()) + " jobs: " + strconv.Itoa(jobs) + "])"
+	text := "(" + function + " {status: " + strconv.Itoa(status) + ", dir: " + kameString(session.Program.Options.Directory) + ", name: " + kameString(s.shell.directoryName()) + ", jobs: " + strconv.Itoa(jobs) + "})"
 	first, diagnostics := session.AppendKash(name, text)
 	if s.reportDiagnostics(diagnostics) {
 		return fallback, false

@@ -13,15 +13,15 @@ boilerplate from build scripts:
   giving lambda shorthand without naming parameters.
 - Typed path patterns: path atoms containing glob syntax or groups are
   first-class `PathPattern` and `PathTemplate` values. `capture`, `bind` and
-  `sub` match and rebuild paths, so
-  `sources |> sub ./{**}/{*}.c ./build/{_0}/{_1}.o` rewrites paths positionally.
+  `subst` match and rebuild paths, so
+  `sources |> subst ./{**}/{*}.c ./build/{_0}/{_1}.o` rewrites paths positionally.
 
 Path patterns use the group grammar of rule headers (`004-language.md`), so one
 matching model serves rules, `match` arms and expressions. Sections lower to
 lexical functions, so no new evaluation machinery is introduced.
 `029-pattern-extensions.md` adds regex groups, anonymous rule captures and
 runtime construction; `041-pattern-predicates-and-substitution.md` defines
-`match?` and the full `sub` surface.
+`match?` and the full `subst` surface.
 
 ## Placeholder Sections
 
@@ -121,10 +121,10 @@ are `PARSE_ERR`. Parenthesized groups inside a stage are sections of their own:
 Pattern substitution accepts a list subject, so no extra section is needed:
 
 ```kame
-sources |> sub ./{**}/{*}.c ./build/{_0}/{_1}.o
+sources |> subst ./{**}/{*}.c ./build/{_0}/{_1}.o
 ```
 
-is `sub ./{**}/{*}.c ./build/{_0}/{_1}.o sources`, preserving nonmatching
+is `subst ./{**}/{*}.c ./build/{_0}/{_1}.o sources`, preserving nonmatching
 entries under `041-pattern-predicates-and-substitution.md`. `{_0}` and `{_1}`
 are path-template references, not placeholders.
 
@@ -286,15 +286,15 @@ dependencies, and keep path kinds.
 
 ## Substitution
 
-`sub` is the canonical substitution operation; the complete operation surface,
+`subst` is the substitution operation; the complete operation surface,
 including `match?` and nonmatch preservation, is in
 `041-pattern-predicates-and-substitution.md`. It has two modes:
 
-- `sub FROM TO TEXT` with plain strings replaces every literal `FROM`
+- `subst FROM TO TEXT` with plain strings replaces every literal `FROM`
   occurrence in `TEXT` with `TO`. All three operands evaluate normally in
   caller scope, left to right. Wrong literal operand types or a missing subject
   report `EXPR_INVALID`; only pattern mode supports a two-argument callable.
-- `sub PATTERN REPLACEMENT [SUBJECT]` performs anchored pattern matching and
+- `subst PATTERN REPLACEMENT [SUBJECT]` performs anchored pattern matching and
   evaluates `REPLACEMENT` with the successful match's named captures in scope.
   It is not an eager evaluation of every operand.
 
@@ -323,11 +323,11 @@ interpolations, in that scope. Ordinary names and composed expressions can use
 captures, and unrelated names follow normal lexical lookup:
 
 ```kame
-sub ./journal/{name:*} ./{name} "./journal/demo"
-sub ./journal/{name:*} ./@{name} "./journal/demo"
-sub ./journal/{name:*} "@{name}" "./journal/demo"
-sub ./journal/{name:*} name "./journal/demo"
-sub ./journal/{name:*} (uppercase name) "./journal/demo"
+subst ./journal/{name:*} ./{name} "./journal/demo"
+subst ./journal/{name:*} ./@{name} "./journal/demo"
+subst ./journal/{name:*} "@{name}" "./journal/demo"
+subst ./journal/{name:*} name "./journal/demo"
+subst ./journal/{name:*} (uppercase name) "./journal/demo"
 ```
 
 These return the path `./demo`, the path `./demo`, `"demo"`, `"demo"`, and
@@ -356,7 +356,7 @@ caller's capabilities, phase restrictions, suspension and publication policy.
 
 ### Deferred replacement callables
 
-With two pattern-mode operands, `sub` returns a callable of arity one that
+With two pattern-mode operands, `subst` returns a callable of arity one that
 retains the pattern, the unevaluated replacement expression, and its enclosing
 lexical scope. It must not look up capture names, evaluate replacement helpers,
 or acquire replacement dependencies merely to construct the callable. Each
@@ -367,14 +367,14 @@ restrictions in `005-evaluation.md`.
 Both of these rewrite each source path:
 
 ```kame
-map (sub ./{**}/{*}.c ./build/{_0}/{_1}.o) sources
-sources |> sub ./{**}/{*}.c ./build/{_0}/{_1}.o
+map (subst ./{**}/{*}.c ./build/{_0}/{_1}.o) sources
+sources |> subst ./{**}/{*}.c ./build/{_0}/{_1}.o
 ```
 
 Named references use capture names:
 
 ```kame
-sub ./src/{name:*}.c ./build/{name}.o ./src/demo.c
+subst ./src/{name:*}.c ./build/{name}.o ./src/demo.c
 ```
 
 produces `./build/demo.o`. Capture names are equally available in a deferred
@@ -382,12 +382,12 @@ expression replacement:
 
 ```kame
 journal = files ./journal/*
-product-by-name = journal |> map (sub ./journal/{name:*} "@{name}")
-product-paths = journal |> sub ./journal/{name:*} ./{name}
+product-by-name = journal |> map (subst ./journal/{name:*} "@{name}")
+product-paths = journal |> subst ./journal/{name:*} ./{name}
 ```
 
 An explicit lambda must pass its subject when applying a replacement:
-`journal |> map (j => sub ./journal/{name:*} name j)`.
+`journal |> map (j => subst ./journal/{name:*} name j)`.
 
 Strings used as the pattern operand never become patterns; matching requires a
 `PathPattern` literal or a value from `pattern TEXT`. A plain string first
@@ -403,7 +403,7 @@ operand selects literal mode.
   expansion references to missing captures are `PAT_INVALID`.
 - Patterns and templates passed to string-expecting operations, and subjects of
   unsupported kinds, are `EXPR_INVALID`.
-- No match is not an error: `capture` returns `nil` and `sub` preserves the
+- No match is not an error: `capture` returns `nil` and `subst` preserves the
   original subject.
 
 Regular-expression groups, regex operations, anonymous rule captures and
@@ -434,12 +434,12 @@ runtime pattern construction are specified in `029-pattern-extensions.md`.
   named captures must agree.
 - `bind ./build/{path}/{name}.o {path: "lib/math", name: "vector"}` returns
   the `Path` `./build/lib/math/vector.o`; absent captures are `PAT_INVALID`.
-- `sub ./{**}/{*}.c ./build/{_0}/{_1}.c ./a/b/x.c` is `./build/a/b/x.c`; a
+- `subst ./{**}/{*}.c ./build/{_0}/{_1}.c ./a/b/x.c` is `./build/a/b/x.c`; a
   nonmatching subject is unchanged.
 - A list subject maps in order and retains nonmatching entries.
-- Two-argument pattern `sub` returns a callable usable directly and through a
+- Two-argument pattern `subst` returns a callable usable directly and through a
   pipe.
-- `sub ./src/{name:*}.c ./build/{name}.o ./src/demo.c` is `./build/demo.o`.
+- `subst ./src/{name:*}.c ./build/{name}.o ./src/demo.c` is `./build/demo.o`.
 - Named captures resolve in bare-name, interpolated string/path and composed
   replacement expressions, for both direct calls and deferred callables.
 - Captures shadow enclosing names only in the replacement, not the subject,
@@ -455,7 +455,7 @@ runtime pattern construction are specified in `029-pattern-extensions.md`.
 - String, path, template and numeric/boolean replacements render as specified;
   invalid selected values are `PAT_INVALID`, while missing ordinary expression
   names retain `REF_MISSING`.
-- Literal string `sub` replaces every occurrence.
+- Literal string `subst` replaces every occurrence.
 - A pattern renders as its text in interpolation, argv and rule inputs; `str`
   rejects it; `fmt` preserves its kind.
 - A string operation given a pattern is `EXPR_INVALID`.

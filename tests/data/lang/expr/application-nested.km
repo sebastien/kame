@@ -1,1 +1,1 @@
-(map ([f] (compile f)) [./src])
+(map (f => (compile f)) [./src])

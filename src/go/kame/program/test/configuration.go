@@ -38,7 +38,7 @@ func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
 
 func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default : ; [shell: kash]\n\t(out! mode)\n")
+	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default : ; {shell: kash}\n\t(out! mode)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	overrides := []string{"mode=first", "mode=@(missing)=literal"}
@@ -94,7 +94,7 @@ func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
 		"@(nop \"./mode=debug\") :\n\ttrue\n",
-		"generate outputs = [[kind: \"file\" target: \"./mode=debug\" inputs: [] order-only: [] recipe: [\"true\"]]]\n",
+		"generate outputs = [{kind: \"file\", target: \"./mode=debug\", inputs: [], order-only: [], recipe: [\"true\"]}]\n",
 	}
 	for i := range fixtures {
 		parsed := script.Parse(a, "assignment-target.kmk", fixtures[i])
@@ -127,7 +127,7 @@ func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T)
 	a := t.Allocator()
 	fixtures := []string{
 		"@(str \"./mode=\" mode) :\n\ttrue\n",
-		"generate outputs = [[kind: \"file\" target: (str \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"true\"]]]\n",
+		"generate outputs = [{kind: \"file\", target: (str \"./mode=\" mode), inputs: [], order-only: [], recipe: [\"true\"]}]\n",
 	}
 	for i := range fixtures {
 		parsed := script.Parse(a, "parameter-generation.kmk", "mode = (read \"not-evaluated\")\n"+fixtures[i])
@@ -157,7 +157,7 @@ func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T)
 
 func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [[kind: \"file\" target: (str \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"exit 99\"]]]\n")
+	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [{kind: \"file\", target: (str \"./mode=\" mode), inputs: [], order-only: [], recipe: [\"exit 99\"]}]\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"mode=debug", "./mode=debug", "unknown=value"}})
@@ -174,12 +174,12 @@ func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 
 func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "typed.kmk", "flag = (read ./never)\nmodules = []\nresult = [flag: flag modules: modules]\n")
+	parsed := script.Parse(a, "typed.kmk", "flag = (read ./never)\nmodules = []\nresult = {flag: flag, modules: modules}\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{"flag=literal", "flag:=:false", "modules:=[\"py\" \"js\"]"}, Environment: []string{"KAME_flag=ambient", "KAME_modules=ambient"}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{"flag=literal", "flag:=false", "modules:=[\"py\", \"js\"]"}, Environment: []string{"KAME_flag=ambient", "KAME_modules=ambient"}})
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		t.Fatal("typed configuration did not compile")
@@ -192,19 +192,19 @@ func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 		t.Error("typed values lost type, precedence, or ownership")
 	}
 	r.Free(a)
-	if len(p.Configuration) != 2 || p.Configuration[0] != "flag:=:false" || p.Configuration[1] != "modules:=[\"py\" \"js\"]" {
+	if len(p.Configuration) != 2 || p.Configuration[0] != "flag:=false" || p.Configuration[1] != "modules:=[\"py\", \"js\"]" {
 		t.Error("configuration identity lost literal type")
 	}
 }
 
 func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "typed.kmk", "flag = :true\n(f x) = x\n")
+	parsed := script.Parse(a, "typed.kmk", "flag = true\n(f x) = x\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"@(missing)\"", "unknown:=:false", "f:=:false"}
+	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"@{missing}\"", "unknown:=false", "f:=false"}
 	for i := range invalid {
 		compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{invalid[i]}})
 		if compiled.Program != nil {
@@ -216,7 +216,7 @@ func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 		}
 		compiled.Free(a)
 	}
-	condition := program.DeclarationPredicate(a, "typed", "flag = :true\n", "flag", []string{"flag:=:false"}, nil, "")
+	condition := program.DeclarationPredicate(a, "typed", "flag = true\n", "flag", []string{"flag:=false"}, nil, "")
 	if condition.Diagnostic.Code != "" || condition.Selected {
 		t.Error("typed false did not select declaration conditions")
 	}

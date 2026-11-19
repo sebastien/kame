@@ -4,18 +4,17 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/internal/mem"
-	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
 )
 
-const defEscapeMessage = "function value escapes its scope; define it with (def name [params] body) instead"
+const defEscapeMessage = "function value captures a scope that cannot own the binding"
 
 // IsSpecialForm distinguishes syntax that consumes unevaluated expressions from
 // ordinary registry operations. Special forms cannot be registered as operations.
 func IsSpecialForm(name string) bool {
 	switch name {
-	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "capture!", "pipe!", "await", "include", "include?":
+	case "let", "eval", "if", "and", "or", "with", "match", "run!", "capture!", "pipe!", "await":
 		return true
 	}
 	return false
@@ -48,18 +47,6 @@ func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result
 	return result
 }
 
-func (p *Program) fallback(scope *Scope, values []*expr.Expr, context *Context) Result {
-	for i := range values {
-		r := p.evaluate(context.Engine, scope, values[i], context)
-		if r.Waiting || r.Diagnostic.Protected || (r.Diagnostic.Code != "REF_MISSING" && r.Diagnostic.Code != "TOOL_MISSING") {
-			return r
-		}
-		r.Diagnostic.Free(context.Run)
-		context.handledFinalizerFailure()
-	}
-	return Result{Value: core.Value{Kind: core.Nil}}
-}
-
 func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
 	if len(values) == 0 || values[0].Kind != expr.List || len(values[0].Items)%2 != 0 {
 		return failure(context.Run, "EXPR_INVALID", span, "let needs name/value pairs")
@@ -68,7 +55,7 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 	defer child.Free()
 	for i := 0; i < len(values[0].Items); i += 2 {
 		name := values[0].Items[i]
-		if name.Kind != expr.Name || !definition.ValidName(name.Text) {
+		if name.Kind != expr.Name || !expr.ValidBindingName(name.Text) {
 			return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name")
 		}
 		if context.ReserveEnv && name.Text == "env" {
@@ -84,75 +71,6 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 		r.Value.Free(context.Run)
 	}
 	return p.body(child, values[1:], context)
-}
-
-func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	scope.Mutable = true
-	if len(values) < 2 || values[0].Kind != expr.Name || !definition.ValidName(values[0].Text) {
-		return failure(context.Run, "DEF_INVALID", span, "def needs a name and value")
-	}
-	if context.ReserveEnv && values[0].Text == "env" {
-		return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash")
-	}
-	for i := range scope.Bindings {
-		if scope.Bindings[i].Kind == bindingEager && scope.Bindings[i].Name == values[0].Text {
-			return failure(context.Run, "DEF_INVALID", values[0].Span, "eager bindings cannot be reassigned")
-		}
-	}
-	if len(values) >= 3 && values[1].Kind == expr.List {
-		if context.ReserveEnv {
-			for i := range values[1].Items {
-				parameter := values[1].Items[i]
-				if parameter.Kind == expr.Name && parameter.Text == "env" {
-					return failure(context.Run, "DEF_INVALID", parameter.Span, "env is reserved in Kash")
-				}
-			}
-		}
-		parameters := make([]expr.Parameter, len(values[1].Items))
-		for i := range values[1].Items {
-			parameter := values[1].Items[i]
-			if parameter.Kind != expr.Name || !definition.ValidName(parameter.Text) || (parameter.Rest && i != len(values[1].Items)-1) {
-				for j := 0; j < i; j++ {
-					mem.FreeString(context.Run, parameters[j].Name)
-				}
-				mem.FreeSlice(nil, parameters)
-				return failure(context.Run, "DEF_INVALID", parameter.Span, "invalid function parameter")
-			}
-			for j := 0; j < i; j++ {
-				if parameters[j].Name == parameter.Text {
-					for j := 0; j < i; j++ {
-						mem.FreeString(context.Run, parameters[j].Name)
-					}
-					mem.FreeSlice(nil, parameters)
-					return failure(context.Run, "DEF_INVALID", parameter.Span, "duplicate function parameter")
-				}
-			}
-			parameters[i] = expr.Parameter{Name: owned(context.Run, parameter.Text), Span: parameter.Span, Rest: parameter.Rest}
-		}
-		function := mem.Alloc[Function](context.Run)
-		for i := 2; i < len(values); i++ {
-			function.Body = append(function.Body, expr.Clone(context.Run, values[i]))
-		}
-		function.Kind, function.Parameters, function.Scope, function.ParametersOwned, function.ParameterNamesOwned, function.BodyOwned = FunctionDefinition, parameters, scope, true, true, true
-		scope.setFunction(values[0].Text, function)
-		return Result{Value: core.Value{Kind: core.Nil}}
-	}
-	if len(values) != 2 {
-		return failure(context.Run, "DEF_INVALID", span, "invalid def form")
-	}
-	r := p.evaluate(context.Engine, scope, values[1], context)
-	if r.Waiting || r.Diagnostic.Code != "" {
-		return r
-	}
-	if !scope.trySetValue(values[0].Text, r.Value) {
-		return rejectStrandedCapture(context.Run, &r.Value, values[1].Span)
-	}
-	// Transfer: the scope clones the value, so relinquish the original and
-	// read the binding back. Returning r directly would share one callable
-	// wrapper between the scope and the result (double free on Result.Free);
-	// the fresh lookup owns an independent clone (or borrowed wrapper).
-	r.Value.Free(context.Run)
-	return name(scope, values[0].Text, values[0].Span, context)
 }
 
 func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
@@ -174,10 +92,6 @@ func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, 
 		parseDiagnostic := parsed.Diagnostics[0]
 		parsed.Free()
 		return Result{Diagnostic: diagnostic.Diagnostic{Code: parseDiagnostic.Code, Severity: diagnosticSeverity(parseDiagnostic.Severity), Message: parseDiagnostic.Message, Span: diagnostic.Span{Start: parseDiagnostic.Span.Start, End: parseDiagnostic.Span.End}}}
-	}
-	if result := validateValueExpression(context.Run, parsed.Expr); result.Diagnostic.Code != "" {
-		parsed.Free()
-		return result
 	}
 	previousCallPath := context.CallPath
 	previousMemo := context.DisableMemo
@@ -221,50 +135,6 @@ func (p *Program) conditional(scope *Scope, values []*expr.Expr, context *Contex
 		return p.evaluate(context.Engine, scope, values[len(values)-1], context)
 	}
 	return Result{Value: core.Value{Kind: core.Nil}}
-}
-
-func (p *Program) logicalAnd(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	_ = span
-	if len(values) == 0 {
-		return Result{Value: core.Value{Kind: core.Bool, Bool: true}}
-	}
-	for i := range values {
-		r := p.evaluate(context.Engine, scope, values[i], context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			return r
-		}
-		if !truthValue(r.Value) {
-			return r
-		}
-		if i == len(values)-1 {
-			return r
-		}
-		freeCallables(context.Run, &r.Value)
-		r.Value.Free(context.Run)
-	}
-	return Result{Value: core.Value{Kind: core.Bool, Bool: true}}
-}
-
-func (p *Program) logicalOr(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	_ = span
-	if len(values) == 0 {
-		return Result{Value: core.Value{Kind: core.Bool, Bool: false}}
-	}
-	for i := range values {
-		r := p.evaluate(context.Engine, scope, values[i], context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			return r
-		}
-		if truthValue(r.Value) {
-			return r
-		}
-		if i == len(values)-1 {
-			return r
-		}
-		freeCallables(context.Run, &r.Value)
-		r.Value.Free(context.Run)
-	}
-	return Result{Value: core.Value{Kind: core.Bool, Bool: false}}
 }
 
 func (p *Program) scopedWith(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
@@ -456,6 +326,41 @@ type matchOutcome struct {
 	Names    []string
 	Captures []string
 	Diag     diagnostic.Diagnostic
+}
+
+func matchArmValue(a mem.Allocator, subject, pattern *core.Value, glob bool, span source.Span) matchOutcome {
+	if (glob || pattern.Kind == core.Pattern) && subject.Kind != core.String {
+		return matchOutcome{Diag: failure(a, "EXPR_INVALID", span, "pattern subject must be a path or string").Diagnostic}
+	}
+	if glob {
+		text := pattern.Text
+		if pattern.GlobPattern != "" {
+			text = pattern.GlobPattern
+		}
+		matched, limited := expr.MatchGlob(text, subject.Text)
+		if limited {
+			return matchOutcome{Diag: failure(a, "PAT_LIMIT", span, "glob match exceeded its step budget").Diagnostic}
+		}
+		return matchOutcome{Matched: matched}
+	}
+	if pattern.Kind == core.Pattern {
+		return matchPattern(a, subject.Text, pattern, span)
+	}
+	if subject.Kind != pattern.Kind {
+		return matchOutcome{}
+	}
+	switch pattern.Kind {
+	case core.String:
+		return matchOutcome{Matched: subject.Text == pattern.Text}
+	case core.Int:
+		return matchOutcome{Matched: subject.Int == pattern.Int}
+	case core.Float:
+		return matchOutcome{Matched: subject.Float == pattern.Float}
+	case core.Bool:
+		return matchOutcome{Matched: subject.Bool == pattern.Bool}
+	default:
+		return matchOutcome{Matched: pattern.Kind == core.Nil}
+	}
 }
 
 // matchPattern tests subject against a pattern value. Misuse is reported in

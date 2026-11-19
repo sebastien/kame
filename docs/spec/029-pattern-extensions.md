@@ -131,12 +131,12 @@ version = "v1.24.3" |> regex-match (pattern "v{major:~[0-9]+}.{~[0-9]+}.{~[0-9]+
 minor = version |> regex-group 1
 ```
 
-`resub PATTERN EXPANSION SUBJECT` uses the expansion rules of `sub`: a string
+`resub PATTERN EXPANSION SUBJECT` uses the expansion rules of `subst`: a string
 expansion is constant, while a template expansion must be a `PathTemplate` with
 references and no matchers. The subject must be a string, a `Path`, or a list of
 those. A nonmatching scalar or list item produces `nil`, missing references
 fail with `PAT_INVALID`, and invalid kinds fail with `EXPR_INVALID`. This
-nil-on-nonmatch contract is separate from `sub`, which preserves nonmatches
+nil-on-nonmatch contract is separate from `subst`, which preserves nonmatches
 (`041-pattern-predicates-and-substitution.md`).
 
 All results and retained captures are invocation-owned and released on success,
@@ -159,7 +159,7 @@ substitution results must agree across native, WASM CLI and evaluator tests.
 - Named-only rule matching, input rendering, cache identity, planning,
   diagnostics and source formatting are unaffected by these extensions.
 - `pattern (str "./" "{" "name:*" "}.c")` returns a `PathPattern` that can be
-  passed to `capture`, `match?` and `sub`; reference-only text returns a
+  passed to `capture`, `match?` and `subst`; reference-only text returns a
   `PathTemplate`; malformed runtime patterns produce `PAT_INVALID`.
 - `{name:~[a-z]+}` and `{~(ab|cd)+}` parse in path atoms and rule outputs,
   preserve their spelling when formatted, and expose each non-empty capture by

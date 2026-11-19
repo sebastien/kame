@@ -29,6 +29,7 @@ func (p *Program) declareExpressionTools(value *expr.Expr) {
 			break
 		}
 	}
+	value = expr.Ungroup(value)
 	if value.Kind == expr.Application && len(value.Items) == 2 && value.Items[0].Kind == expr.Name && value.Items[0].Text == "tool" {
 		argument := value.Items[1]
 		if argument.Kind == expr.Symbol || argument.Kind == expr.Path {

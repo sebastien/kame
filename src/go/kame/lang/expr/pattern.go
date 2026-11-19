@@ -86,6 +86,7 @@ type patternParser struct {
 	offset int
 	pos    int
 	diags  []source.Diagnostic
+	path   bool
 }
 
 // PatternParse separates a parsed pattern from its diagnostics. Both are
@@ -117,7 +118,7 @@ func ParsePatternText(a mem.Allocator, text string, offset int) PatternParse {
 // values. Groups must be wholly contained in one text part. Spans retain source
 // byte offsets; interpolation indices follow expression operand order.
 func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
-	p := patternParser{a: a}
+	p := patternParser{a: a, path: true}
 	pattern := mem.Alloc[Pattern](a)
 	pattern.Alloc = a
 	next := 0
@@ -155,6 +156,31 @@ func countGroups(pattern *Pattern) (int, int) {
 	return matchers, references
 }
 
+func (p *Pattern) promoteNamedCaptures() (source.Span, bool) {
+	for _, part := range p.Parts {
+		if part.Kind == PatternReference && part.Text == "" {
+			return part.Span, false
+		}
+	}
+	for _, name := range p.Names {
+		mem.FreeString(p.Alloc, name)
+	}
+	p.Names = p.Names[:0]
+	for i := range p.Parts {
+		part := &p.Parts[i]
+		if part.Kind == PatternReference {
+			part.Kind = PatternMatcher
+			part.Pattern = ownedText(p.Alloc, "*")
+		}
+		if part.Kind == PatternMatcher {
+			part.Index = len(p.Names)
+			p.Names = append(p.Names, ownedText(p.Alloc, part.Text))
+		}
+	}
+	p.Matchers, p.References = len(p.Names), 0
+	return source.Span{}, true
+}
+
 func (p *patternParser) parse(pattern *Pattern) {
 	var literal strings.Builder
 	literal = strings.Builder{}
@@ -167,6 +193,11 @@ func (p *patternParser) parse(pattern *Pattern) {
 				break
 			}
 			literal.WriteByte(p.text[p.pos+1])
+			p.pos += 2
+			continue
+		}
+		if p.path && b == '@' && strings.HasPrefix(p.text[p.pos:], "@@") {
+			literal.WriteByte('@')
 			p.pos += 2
 			continue
 		}
@@ -617,6 +648,12 @@ func ChargeMatchStep(budget *int) bool {
 	}
 	*budget--
 	return true
+}
+
+// MatchGlob matches the complete value within the pattern work limit.
+func MatchGlob(pattern, value string) (matched, limited bool) {
+	budget := maxRegexSteps
+	return MatchGlobBudget(pattern, value, &budget)
 }
 
 // MatchGlobBudget uses the existing nonempty-star glob matcher and shared bound.

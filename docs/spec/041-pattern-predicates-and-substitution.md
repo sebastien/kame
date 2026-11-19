@@ -6,7 +6,7 @@ revision: 2
 
 ## Purpose
 
-`match?` tests whether a complete string or path matches a pattern. `sub`
+`match?` tests whether a complete string or path matches a pattern. `subst`
 rewrites matching subjects and preserves nonmatches. Testing and rewriting are
 separate operations: substitution must not serve as an implicit filtering
 predicate.
@@ -23,12 +23,12 @@ grammar, rule matching, `capture`, `bind`, `regex-match`, `regex-group`, or
 | --- | --- |
 | `match? PATTERN SUBJECT` | `true` or `false` |
 | `match? PATTERN` | Unary matching predicate |
-| `sub FROM TO TEXT` | Literal substitution with three string arguments |
-| `sub PATTERN EXPANSION SUBJECT` | Pattern substitution |
-| `sub PATTERN EXPANSION` | Unary substitution callable |
+| `subst FROM TO TEXT` | Literal substitution with three string arguments |
+| `subst PATTERN EXPANSION SUBJECT` | Pattern substitution |
+| `subst PATTERN EXPANSION` | Unary substitution callable |
 
 Every form takes its subject last, so it composes with `|>`:
-`path |> match? ./src/{**}.c` and `sources |> sub ./src/{**}.c ./build/{_0}.o`.
+`path |> match? ./src/{**}.c` and `sources |> subst ./src/{**}.c ./build/{_0}.o`.
 
 ## Matching predicate
 
@@ -70,7 +70,7 @@ or register dependencies. Exceeding the shared regex matching budget reports
 
 ### Literal form
 
-`sub FROM TO TEXT` with three strings replaces all literal occurrences of
+`subst FROM TO TEXT` with three strings replaces all literal occurrences of
 `FROM` in `TEXT`. All arguments are evaluated eagerly. This form does not
 perform pattern matching or expose captures, and a text with no occurrences is
 returned unchanged. Wrong literal operand types or a missing literal subject
@@ -104,13 +104,13 @@ caller bindings after the call. Deferred callables support capture-scoped
 expansion expressions, not merely constant expansion values.
 
 ```kame
-sub ./journal/{name:*} ./{name} ./journal/foo
+subst ./journal/{name:*} ./{name} ./journal/foo
 # ./foo
-sub ./journal/{name:*} ./{name} ./other/foo
+subst ./journal/{name:*} ./{name} ./other/foo
 # ./other/foo
-sub ./journal/{name:*} ./{name} [./journal/foo, ./other/foo]
+subst ./journal/{name:*} ./{name} [./journal/foo, ./other/foo]
 # [./foo, ./other/foo]
-sub ./journal/{name:*} missing ./other/foo
+subst ./journal/{name:*} missing ./other/foo
 # ./other/foo
 ```
 
@@ -124,7 +124,7 @@ agree, including suspension and replay of selected expansion effects.
 
 ```kame
 product-by-name = journal
-	|> sub ./journal/{name:*} ./{name}
+	|> subst ./journal/{name:*} ./{name}
 	|> filter-out (match? ./{*}.{*})
 ```
 
@@ -138,7 +138,7 @@ and an unchanged subject are truthy, so selecting matches uses `match?`.
 Removing `nil` entries after substitution does not remove nonmatches. `resub`
 keeps its separate nil-on-nonmatch contract (`029-pattern-extensions.md`).
 
-The operation version of `sub` participates in cached-task identity, so cached
+The operation version of `subst` participates in cached-task identity, so cached
 results computed under a different substitution contract are not reused.
 
 ## Acceptance
@@ -151,7 +151,7 @@ results computed under a different substitution contract are not reused.
 - Predicate callables work with `map`, `filter`, and `filter-out` in
   `OP PREDICATE LIST` order and with `|>`; invalid arity and subject kinds are
   rejected; a `PathTemplate` predicate pattern is `PAT_INVALID`.
-- Direct and callable `sub` preserve nonmatching subjects byte-for-byte and
+- Direct and callable `subst` preserve nonmatching subjects byte-for-byte and
   kind-for-kind, and list substitution preserves order and length without
   inserting `nil` entries.
 - Literal substitution, empty lists, and `nil` subject passthrough retain their

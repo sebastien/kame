@@ -2,6 +2,8 @@ package program
 
 import (
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"kame/core"
 	"kame/host"
 	"kame/internal/mem"
@@ -89,6 +91,10 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	}
 	if op == host.OpRead {
 		data, err := p.Host.ReadFile(p.Alloc, filename)
+		if request.Kind == host.RequestLoadSource && errors.Is(err, fs.ErrNotExist) {
+			completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true
+			return completion
+		}
 		if err != nil {
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read file")
 			return completion

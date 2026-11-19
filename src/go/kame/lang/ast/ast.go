@@ -12,11 +12,11 @@ import (
 	"kame/lang/template"
 )
 
-// WriteAST parses text as lang and writes its schema-1 AST JSON to out. It
+// WriteAST parses text as lang and writes its schema-2 AST JSON to out. It
 // returns 0 on success and 1 when the source has errors or encoding fails. The
 // JSON is written even when the parse has diagnostics, matching the CLI.
-// Rule captures use pattern; capture-only operands retain template as a legacy
-// alias. Quoted operands use template for their decoded string/interpolation AST.
+// Rule captures use pattern. Quoted operands use template for their decoded
+// string and interpolation AST.
 func WriteAST(out io.Writer, lang string, name string, text string) int {
 	enc := newASTEncoder(out, lang, name)
 	failed := false
@@ -73,7 +73,7 @@ func newASTEncoder(out io.Writer, lang string, name string) astEncoder {
 	e := astEncoder{enc: json.NewEncoder(out), out: out}
 	e.BeginObject()
 	e.Str("schema")
-	e.Int(1)
+	e.Int(2)
 	e.Str("lang")
 	e.Str(lang)
 	e.Str("source")
@@ -141,10 +141,6 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Null()
 		return
 	}
-	if value.AuthoredPipe != nil {
-		e.expr(value.AuthoredPipe)
-		return
-	}
 	if value.Pattern != nil {
 		e.pattern(value)
 		return
@@ -185,6 +181,48 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str(value.RecordFrame)
 	}
 	process := value.Kind == expr.CommandGraph || value.Kind == expr.CommandCapture
+	if value.ActionPrefix != "" {
+		e.Str("actionPrefix")
+		e.Str(value.ActionPrefix)
+	}
+	if value.Infix != "" {
+		e.Str("operator")
+		e.Str(value.Infix)
+	}
+	if value.Kind == expr.Group {
+		e.Str("expression")
+		e.expr(value.Items[0])
+	}
+	if value.Kind == expr.Match {
+		e.Str("subject")
+		if len(value.Body) == 0 {
+			e.Null()
+		} else {
+			e.expr(value.Body[0])
+		}
+		e.Str("arms")
+		e.exprs(value.Items)
+	}
+	if value.Kind == expr.MatchArm {
+		if len(value.Items) != 0 {
+			e.Str("pattern")
+			e.expr(value.Items[0])
+		}
+		e.Str("result")
+		if len(value.Body) == 0 {
+			e.Null()
+		} else {
+			e.expr(value.Body[0])
+		}
+	}
+	if value.Kind == expr.Conditional {
+		e.Str("items")
+		e.BeginArray()
+		for _, part := range value.Items {
+			e.expr(part)
+		}
+		e.EndArray()
+	}
 	if process {
 		if e.processDepth == 0 {
 			for i := range value.Items {
@@ -274,6 +312,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 	}
 	if value.Kind == expr.Reference || value.Kind == expr.EnvironmentReference {
+		if value.Kind == expr.Reference && len(value.Items) != 0 {
+			e.Str("base")
+			e.expr(value.Items[0])
+		}
 		e.Str("parts")
 		e.BeginArray()
 		for i := range value.Reference {
@@ -283,6 +325,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 			e.Str(referenceKind(p.Kind))
 			e.Str("text")
 			e.Str(p.Text)
+			if p.Quoted {
+				e.Str("quoted")
+				e.Bool(true)
+			}
 			e.Str("span")
 			e.span(p.Span)
 			e.EndObject()
@@ -332,6 +378,18 @@ func (e *astEncoder) expr(value *expr.Expr) {
 			e.BeginObject()
 			e.Str("key")
 			e.Str(f.Key)
+			if f.Shorthand {
+				e.Str("shorthand")
+				e.Bool(true)
+			}
+			if f.Spread {
+				e.Str("spread")
+				e.Bool(true)
+			}
+			if f.Quoted {
+				e.Str("quoted")
+				e.Bool(true)
+			}
 			e.Str("span")
 			e.span(f.Span)
 			e.Str("value")
@@ -562,6 +620,18 @@ func exprKind(k expr.Kind) string {
 	if k == expr.CommandCapture {
 		return "command-capture"
 	}
+	if k == expr.Group {
+		return "group"
+	}
+	if k == expr.Match {
+		return "match"
+	}
+	if k == expr.MatchArm {
+		return "match-arm"
+	}
+	if k == expr.Conditional {
+		return "conditional"
+	}
 	if k == expr.CommandGraph {
 		return "command-graph"
 	}
@@ -637,10 +707,7 @@ func referenceKind(k expr.ReferenceKind) string {
 	if k == expr.ReferenceIndex {
 		return "index"
 	}
-	if k == expr.ReferenceSlice {
-		return "slice"
-	}
-	return "selection"
+	return "invalid"
 }
 
 func (e *astEncoder) template(value *template.String) {
@@ -730,12 +797,6 @@ func (e *astEncoder) rule(value *rule.Rule) {
 			if len(o.Text) >= 2 && o.Text[0] == '"' && o.Text[len(o.Text)-1] == '"' {
 				offset++
 			}
-			// Schema 1 keeps the legacy capture-only template alias. Pattern is
-			// stable regardless of whether a separate string template is present.
-			if o.Expansion == nil {
-				e.Str("template")
-				e.target(o.TargetForm, offset)
-			}
 			e.Str("pattern")
 			e.target(o.TargetForm, offset)
 		}
@@ -784,8 +845,6 @@ func (e *astEncoder) rule(value *rule.Rule) {
 			e.template(in.Template)
 		}
 		if in.TargetForm != nil {
-			e.Str("template")
-			e.target(in.TargetForm, in.Span.Start)
 			e.Str("pattern")
 			e.target(in.TargetForm, in.Span.Start)
 		}
@@ -887,9 +946,13 @@ func (e *astEncoder) target(value *template.Target, offset int) {
 func (e *astEncoder) script(value *script.Script) {
 	e.node("script", source.Span{Start: 0, End: len(value.Source.Text)})
 	e.Str("items")
+	e.scriptItems(value.Items)
+	e.EndObject()
+}
+
+func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 	e.BeginArray()
-	for i := range value.Items {
-		item := value.Items[i]
+	for _, item := range items {
 		e.BeginObject()
 		e.Str("kind")
 		e.Str(scriptKind(item.Kind))
@@ -919,6 +982,23 @@ func (e *astEncoder) script(value *script.Script) {
 			e.Str("rule")
 			e.rule(item.Rule)
 		}
+		if item.Kind == script.Composition {
+			e.Str("branches")
+			e.BeginArray()
+			for _, branch := range item.Branches {
+				e.BeginObject()
+				e.Str("span")
+				e.span(branch.Span)
+				if branch.Condition != nil {
+					e.Str("condition")
+					e.expr(branch.Condition)
+				}
+				e.Str("items")
+				e.scriptItems(branch.Items)
+				e.EndObject()
+			}
+			e.EndArray()
+		}
 		if item.Expression != nil {
 			e.Str("expression")
 			e.expr(item.Expression)
@@ -926,8 +1006,8 @@ func (e *astEncoder) script(value *script.Script) {
 		e.EndObject()
 	}
 	e.EndArray()
-	e.EndObject()
 }
+
 func scriptKind(k script.ScriptItemKind) string {
 	if k == script.SessionCommand {
 		return "session-command"
@@ -1003,9 +1083,6 @@ func (e *astEncoder) definition(value *definition.Definition) {
 		e.EndObject()
 	}
 	e.EndArray()
-	// Schema-1 compatibility tag, not a separate RHS classification.
-	e.Str("valueKind")
-	e.Str("expression")
 	if value.Expression != nil {
 		e.Str("expression")
 		e.expr(value.Expression)

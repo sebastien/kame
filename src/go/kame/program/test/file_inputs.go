@@ -117,8 +117,8 @@ func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
 	directories := []string{"/sdk/first", "/sdk/first", "/sdk/second"}
 	for i := range directories {
 		sources := []program.CompileSource{
-			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "(assets) = (source-dir)\n"},
-			{Name: "build.kmk", Text: "./output : ./input ; [shell: kame]\n\t(assets)\n"},
+			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "(assets) = (source-dir ())\n"},
+			{Name: "build.kmk", Text: "./output : ./input ; {shell: kame}\n\t(assets ())\n"},
 		}
 		compiled := program.CompileMany(a, sources, registry, program.Options{Host: posix.New(a), Directory: dir})
 		if compiled.Program == nil {
@@ -160,7 +160,7 @@ func TestFileFreshnessTracksReachedSignedSources(t *testing.T) {
 			if phase >= 3 {
 				value = "new"
 			}
-			root := "SHELL = kash\n./output : ./input\n\t(yield! (payload))\n"
+			root := "SHELL = kash\n./output : ./input\n\t(yield! (payload ()))\n"
 			helper := "(payload) = \"" + value + "\"\n"
 			if mode == 0 {
 				root += helper
@@ -208,7 +208,7 @@ func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input ; [shell: kame]\n\t(text (read \"./extra\"))\n"
+	source := "./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -244,7 +244,7 @@ func TestFileInputsRebuildWhenDiscoveredInputChanges(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input ; [shell: kame]\n\t(text (read \"./extra\"))\n"
+	source := "./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -279,7 +279,7 @@ func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	source := "./output : @(wildcard ./src/*) ; [shell: kame]\n\t(str (count @<*))\n"
+	source := "./output : @(wildcard ./src/*) ; {shell: kame}\n\t(str (count @<*))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first membership build failed: " + code)
 		return
@@ -409,7 +409,7 @@ func TestFileInputsDemandDiscoveredGeneratedInput(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./extra : ./seed\n\tcp @< @>\n./output : ./input ; [shell: kame]\n\t(text (read \"./extra\"))\n"
+	source := "./extra : ./seed\n\tcp @< @>\n./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first generated dependency build failed: " + code)
 		return

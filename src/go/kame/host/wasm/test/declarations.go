@@ -14,12 +14,12 @@ func TestDeclarationPredicateDescriptorIsTypedAndHostFree(t *testing.T) {
 		t.Error("declaration predicate descriptor lost literal configuration")
 	}
 	result.Free(a)
-	result = wasm.DeclarationPredicate(a, []byte(`{"predicate":":false"}`))
+	result = wasm.DeclarationPredicate(a, []byte(`{"predicate":"false"}`))
 	if result.Code != "" || result.Text != "false" {
 		t.Error("false declaration predicate failed")
 	}
 	result.Free(a)
-	inputs := []string{`[]`, `{}`, `{"predicate":true}`, `{"predicate":":true","prefix":42}`, `{"predicate":":true","name":[]}`, `{"predicate":":true","defines":"mode=release"}`, `{"predicate":":true","environment":[42]}`, `{"predicate":":true","unexpected":0}`}
+	inputs := []string{`[]`, `{}`, `{"predicate":true}`, `{"predicate":"true","prefix":42}`, `{"predicate":"true","name":[]}`, `{"predicate":"true","defines":"mode=release"}`, `{"predicate":"true","environment":[42]}`, `{"predicate":"true","unexpected":0}`}
 	for i := range inputs {
 		result = wasm.DeclarationPredicate(a, []byte(inputs[i]))
 		if result.Code != "EXPR_INVALID" {
@@ -53,7 +53,7 @@ func TestConfigurationConditionDirectoryDescriptor(t *testing.T) {
 		t.Error("declaration directory was not propagated")
 	}
 	result.Free(a)
-	result = wasm.RunCompositionCondition(a, []byte(`{"directory":42,"predicate":":true"}`))
+	result = wasm.RunCompositionCondition(a, []byte(`{"directory":42,"predicate":"true"}`))
 	if result.Code != "EXPR_INVALID" {
 		t.Error("non-string configuration directory was accepted")
 	}
@@ -68,13 +68,13 @@ func TestCompositionConditionAuthoredDescriptor(t *testing.T) {
 	}
 	result.Free(a)
 	invalid := []string{
-		`{"sources":[],"predicate":":true"}`,
-		`{"sources":[],"condition":{"name":"a","text":":true"},"prefix":""}`,
-		`{"sources":false,"condition":{"name":"a","text":":true"}}`,
-		`{"sources":[{"name":"a","text":"x = 1","offset":-1}],"condition":{"name":"a","text":":true"}}`,
+		`{"sources":[],"predicate":"true"}`,
+		`{"sources":[],"condition":{"name":"a","text":"true"},"prefix":""}`,
+		`{"sources":false,"condition":{"name":"a","text":"true"}}`,
+		`{"sources":[{"name":"a","text":"x = 1","offset":-1}],"condition":{"name":"a","text":"true"}}`,
 		`{"sources":[],"condition":{"name":"a","text":true}}`,
-		`{"sources":[],"condition":{"name":"a","text":":true","offset":2147483647}}`,
-		`{"sources":[],"condition":{"name":"a","text":":true","unexpected":0}}`,
+		`{"sources":[],"condition":{"name":"a","text":"true","offset":2147483647}}`,
+		`{"sources":[],"condition":{"name":"a","text":"true","unexpected":0}}`,
 	}
 	for i := range invalid {
 		result = wasm.RunCompositionCondition(a, []byte(invalid[i]))
@@ -87,7 +87,7 @@ func TestCompositionConditionAuthoredDescriptor(t *testing.T) {
 
 func TestCompositionConditionDescriptorSharesValidationAndDiagnosticJSON(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{`{"predicate":"0"}`, `{"predicate":"[]"}`, `{"predicate":":nil"}`, `{"predicate":":false"}`, `{"prefix":"mode ?= \"debug\"\nunused = (read \"never read\")\n","predicate":"(eq mode \"release\")","defines":["future=later","mode=release"],"environment":["KAME_mode=debug"]}`}
+	inputs := []string{`{"predicate":"0"}`, `{"predicate":"[]"}`, `{"predicate":"nil"}`, `{"predicate":"false"}`, `{"prefix":"mode ?= \"debug\"\nunused = (read \"never read\")\n","predicate":"(eq mode \"release\")","defines":["future=later","mode=release"],"environment":["KAME_mode=debug"]}`}
 	for i := range inputs {
 		result := wasm.RunCompositionCondition(a, []byte(inputs[i]))
 		expected := "true"
@@ -99,7 +99,7 @@ func TestCompositionConditionDescriptorSharesValidationAndDiagnosticJSON(t *test
 		}
 		result.Free(a)
 	}
-	invalid := []string{`[]`, `{}`, `{"predicate":true}`, `{"predicate":":true","prefix":42}`, `{"predicate":":true","name":[]}`, `{"predicate":":true","defines":"mode=release"}`, `{"predicate":":true","environment":[42]}`, `{"predicate":":true","unexpected":0}`}
+	invalid := []string{`[]`, `{}`, `{"predicate":true}`, `{"predicate":"true","prefix":42}`, `{"predicate":"true","name":[]}`, `{"predicate":"true","defines":"mode=release"}`, `{"predicate":"true","environment":[42]}`, `{"predicate":"true","unexpected":0}`}
 	for i := range invalid {
 		result := wasm.RunCompositionCondition(a, []byte(invalid[i]))
 		if result.Code != "EXPR_INVALID" || result.HostNeeded {

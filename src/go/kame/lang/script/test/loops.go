@@ -9,7 +9,7 @@ import (
 
 func TestKashLoopsParseFormatAndRejectInvalidHeaders(t *testing.T) {
 	a := t.Allocator()
-	text := "for item in [1 2]\n  while (nop :false)\n    printf %s $item\n"
+	text := "for item in [1, 2]\n  while (nop false)\n    printf %s $item\n"
 	s := script.ParseKash(a, "loops.kash", text)
 	if len(s.Diagnostics) != 0 || len(s.Items) != 1 {
 		t.Error("loop parse failed")

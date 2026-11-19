@@ -5,6 +5,7 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
+	"strings"
 )
 
 // ParseFragment parses only this bounded range, in the selected language. The
@@ -25,19 +26,11 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		return s
 	}
 	if lang == "expr" {
-		for start < end && (space(original.Text[start]) || original.Text[start] == '\n') {
-			start++
-		}
-		part := expr.ParsePrefix(a, s.Source, start)
+		part := expr.ParseRange(a, s.Source, start, end, "")
 		s.takeDiagnostics(part.Diagnostics)
-		s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
-		for part.End < end && (space(original.Text[part.End]) || original.Text[part.End] == '\n') {
-			part.End++
+		if part.Expr != nil {
+			s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: part.Expr.Span, Expression: part.Expr})
 		}
-		if part.End != end {
-			s.error(part.End, end, "expected exactly one expression")
-		}
-		validateValueScript(s)
 		return s
 	}
 	// Definitions and top-level statements share expression grammar, never
@@ -55,7 +48,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		for lineEnd < end && text[lineEnd] != '\n' {
 			lineEnd++
 		}
-		if comment(text, pos, lineEnd) {
+		if text[pos] == '#' {
 			_, commentEnd := trim(text, pos, lineEnd)
 			s.Items = append(s.Items, ScriptItem{Kind: Comment, Text: text[pos:commentEnd], Span: source.Span{Start: pos, End: commentEnd}})
 			pos = nextLine(text, lineEnd)
@@ -65,9 +58,10 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			pos = following
 			continue
 		}
-		if legacyInclude(text[pos:lineEnd]) {
-			s.error(pos, lineEnd, "legacy include directive is unsupported; use (include PATH) or (include? PATH)")
-			pos = nextLine(text, lineEnd)
+		lineStart := strings.LastIndexByte(text[:pos], '\n') + 1
+		if item, next, ok := s.sourceDeclaration(lineStart, pos, source.LogicalLineEnd(text, pos)); ok {
+			s.Items = append(s.Items, item)
+			pos = next
 			continue
 		}
 		headerEnd := definition.ValueHeaderEnd(a, s.Source, pos)
@@ -105,6 +99,5 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			break
 		}
 	}
-	validateComposition(s)
 	return s
 }

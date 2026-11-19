@@ -5,7 +5,6 @@ import (
 	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/expr"
-	"slices"
 )
 
 type localDefinition struct {
@@ -59,7 +58,7 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 		for i := before; i < len(c.Effects); i++ {
 			effect := c.Effects[i]
 			if p.DefinitionEffectSink == nil || r.Diagnostic.Code != "" || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
-				local.Effects = append(local.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+				local.Effects = append(local.Effects, effect.clone())
 			}
 		}
 		if p.DefinitionEffectSink != nil && r.Diagnostic.Code == "" {
@@ -77,7 +76,7 @@ func replayLocalEffects(local *localDefinition, c *Context) {
 	}
 	for i := range local.Effects {
 		effect := local.Effects[i]
-		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+		c.Effects = append(c.Effects, effect.clone())
 	}
 	for i := range local.WritePaths {
 		c.WritePaths = append(c.WritePaths, owned(c.Run, local.WritePaths[i]))
@@ -117,7 +116,7 @@ func (p *Program) retainControlEffects(state *kashControlState, c *Context, scop
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
 		if p.DefinitionEffectSink == nil || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
-			state.Effects = append(state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+			state.Effects = append(state.Effects, effect.clone())
 		}
 	}
 	if p.DefinitionEffectSink != nil {
@@ -151,7 +150,7 @@ func (p *Program) streamControlOutput(c *Context, before int) {
 func replayControlEffects(state *kashControlState, c *Context) {
 	for i := range state.Effects {
 		effect := state.Effects[i]
-		c.Effects = append(c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
+		c.Effects = append(c.Effects, effect.clone())
 	}
 	for i := range state.WritePaths {
 		c.WritePaths = append(c.WritePaths, owned(c.Run, state.WritePaths[i]))
@@ -159,7 +158,7 @@ func replayControlEffects(state *kashControlState, c *Context) {
 }
 
 func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
-	if c.Engine == nil {
+	if c.Engine == nil && e.Kind != expr.Match {
 		return failure(c.Run, "HOST_FAIL", e.Span, "Kash control requires an execution engine")
 	}
 	previousStart, previousEnd := c.operationStart, c.operationEnd
@@ -170,21 +169,32 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	if state == nil {
 		state = mem.Alloc[kashControlState](p.Alloc)
-		c.SetOperationState(state, freeKashControlState)
+		if c.Engine == nil {
+			defer freeKashControlState(p.Alloc, state)
+		} else {
+			c.SetOperationState(state, freeKashControlState)
+		}
 	}
 	c.operationStart, c.operationEnd = previousStart, previousEnd
 	replayControlEffects(state, c)
-	if e.Kind == expr.KashMatch && !state.SubjectReady {
+	isMatch := e.Kind == expr.KashMatch || e.Kind == expr.Match
+	if isMatch && !state.SubjectReady {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		r := p.evaluate(c.Engine, scope, e.Body[0], c)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
 		}
-		if r.Value.Kind != core.String && r.Value.Kind != core.Pattern {
+		if e.Kind == expr.KashMatch && r.Value.Kind != core.String && r.Value.Kind != core.Pattern {
 			r.Free(c.Run)
 			return failure(c.Run, "EXPR_INVALID", e.Body[0].Span, "match subject must be text")
 		}
-		state.Subject, state.SubjectReady = r.Value.Clone(p.Alloc), true
+		switch r.Value.Kind {
+		case core.String, core.Pattern, core.Bool, core.Int, core.Float, core.Nil:
+			state.Subject = r.Value.Clone(p.Alloc)
+		default:
+			state.Subject.Kind = r.Value.Kind
+		}
+		state.SubjectReady = true
 		r.Free(c.Run)
 		p.retainControlEffects(state, c, scope, before, beforePaths)
 	}
@@ -193,20 +203,33 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		selected := true
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		if len(branch.Items) != 0 {
-			r := p.evaluate(c.Engine, scope, branch.Items[0], c)
+			pattern := branch.Items[0]
+			operand := pattern
+			glob := e.Kind == expr.Match && pattern.Kind == expr.Path && pattern.Pattern == nil && expr.PathHasGlob(pattern.Text)
+			if glob {
+				literal := *pattern
+				literal.LiteralPath = true
+				operand = &literal
+			}
+			r := p.evaluate(c.Engine, scope, operand, c)
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
 			}
-			if e.Kind == expr.KashMatch {
-				matched := matchPattern(c.Run, state.Subject.Text, &r.Value, branch.Items[0].Span)
+			if isMatch {
+				var matched matchOutcome
+				if e.Kind == expr.Match {
+					matched = matchArmValue(c.Run, &state.Subject, &r.Value, glob, pattern.Span)
+				} else {
+					matched = matchPattern(c.Run, state.Subject.Text, &r.Value, pattern.Span)
+				}
 				for i := range matched.Names {
-					if matched.Names[i] == "env" && matched.Diag.Code == "" {
+					if (e.Kind == expr.KashMatch || e.Kash) && matched.Names[i] == "env" && matched.Diag.Code == "" {
 						denied := failure(c.Run, "DEF_INVALID", branch.Items[0].Span, "env is reserved in Kash")
 						matched.Diag = denied.Diagnostic
 					}
 				}
 				selected = matched.Matched
-				if selected {
+				if selected && matched.Diag.Code == "" {
 					state.Scope = newScope(p.Alloc, scope)
 					for i := range matched.Names {
 						if matched.Names[i] != "" {
@@ -242,6 +265,9 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		if state.Scope == nil {
 			state.Scope = newScope(p.Alloc, scope)
 		}
+		if e.Kind == expr.Match {
+			break
+		}
 		initialized := p.kashBodyDefinitions(state.Scope, branch.Body, c)
 		if initialized.Diagnostic.Code != "" {
 			return initialized
@@ -249,6 +275,9 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	if !state.Selected {
 		return Result{Value: core.Value{Kind: core.Nil}}
+	}
+	if e.Kind == expr.Match {
+		return p.evaluate(c.Engine, state.Scope, e.Items[state.Branch].Body[0], c)
 	}
 	return p.kashBody(state, e.Items[state.Branch].Body, c)
 }

@@ -24,7 +24,7 @@ func TestTimingHistoryDoesNotChangeFreshnessOrCountPastWatchWork(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	memory.SetFile("seed", []byte("seed"))
-	parsed := script.Parse(a, "timing.kmk", "default : ./out\n./out : ./seed ; [shell: kame]\n\t(read @<)\n")
+	parsed := script.Parse(a, "timing.kmk", "default : ./out\n./out : ./seed ; {shell: kame}\n\t(read @<)\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)

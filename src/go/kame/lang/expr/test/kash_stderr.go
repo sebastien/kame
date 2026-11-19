@@ -122,12 +122,12 @@ func TestTeeOperatorKeepsPathAndAppendFlag(t *testing.T) {
 			continue
 		}
 		found, appendFlag := false, false
-		for j := range r.Expr.Items {
-			if r.Expr.Items[j].Kind != expr.CommandMux || r.Expr.Items[j].Text != "tee" {
+		for j := range expr.Ungroup(r.Expr).Items {
+			if expr.Ungroup(r.Expr).Items[j].Kind != expr.CommandMux || expr.Ungroup(r.Expr).Items[j].Text != "tee" {
 				continue
 			}
-			found, appendFlag = true, r.Expr.Items[j].Bool
-			if len(r.Expr.Items[j].Items) != 1 {
+			found, appendFlag = true, expr.Ungroup(r.Expr).Items[j].Bool
+			if len(expr.Ungroup(r.Expr).Items[j].Items) != 1 {
 				t.Errorf("tee lost its destination argument: %s", cases[i].text)
 			}
 		}

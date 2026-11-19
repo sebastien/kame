@@ -39,7 +39,7 @@ func TestPluginWireCompletionRespectsResponseLimit(t *testing.T) {
 		t.Fatal("plugin registration failed")
 		return
 	}
-	parsed := script.Parse(a, "plugin.km", "result = (example-run)")
+	parsed := script.Parse(a, "plugin.km", "result = (example-run ())")
 	defer parsed.Free()
 	engine := core.NewEngine(a)
 	p := eval.Compile(a, engine, parsed, registry)

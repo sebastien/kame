@@ -162,11 +162,11 @@ func HasRuleSeparator(text string) bool {
 }
 
 func misplacedSettings(text string) bool {
-	bracket := strings.IndexByte(text, '[')
-	if bracket < 0 || !strings.HasPrefix(strings.TrimSpace(text[bracket+1:]), "shell:") || source.TopLevelByte(text[:bracket], ':') >= 0 {
+	brace := strings.IndexByte(text, '{')
+	if brace < 0 || !strings.HasPrefix(strings.TrimSpace(text[brace+1:]), "shell:") || source.TopLevelByte(text[:brace], ':') >= 0 {
 		return false
 	}
-	head := strings.TrimSpace(text[:bracket])
+	head := strings.TrimSpace(text[:brace])
 	if strings.HasSuffix(head, ";") {
 		head = strings.TrimSpace(head[:len(head)-1])
 	}
@@ -250,7 +250,7 @@ func (p *parser) rule() *Rule {
 	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
 	header := p.s.Text[headerStart:headerEnd]
 	if misplacedSettings(header) {
-		p.error(headerStart, headerEnd, "rule settings belong after the colon and inputs: target : inputs ; [shell: kash], or target : ; [shell: kash] with no inputs")
+		p.error(headerStart, headerEnd, "rule settings belong after the colon and inputs: target : inputs ; {shell: kash}, or target : ; {shell: kash} with no inputs")
 		return r
 	}
 	colon := source.TopLevelByte(header, ':')

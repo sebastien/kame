@@ -139,11 +139,17 @@ func (s *terminalSession) send(text string) {
 // leaves it; keys sent then reach the cooked terminal, where a typed-ahead
 // Ctrl-D becomes a NUL byte instead of end of input.
 func (s *terminalSession) waitReading() {
+	s.waitReadingAfterSubmission(0)
+}
+
+func (s *terminalSession) waitReadingAfterSubmission(before int) {
 	s.t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		raw := s.raw()
-		if i := strings.LastIndex(raw, "\x1b[?25h"); i >= 0 && !strings.ContainsAny(raw[i:], "\r\n") && strings.TrimSpace(terminalControls.ReplaceAllString(raw[i:], "")) == "" {
+		i := strings.LastIndex(raw, "\x1b[?25h")
+		fresh := i >= before && (before == 0 || strings.ContainsRune(raw[before:i], '\n'))
+		if fresh && !strings.ContainsAny(raw[i:], "\r\n") && strings.TrimSpace(terminalControls.ReplaceAllString(raw[i:], "")) == "" {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -242,7 +248,7 @@ func TestNativeInteractiveKashPersistentLatency(t *testing.T) {
 	}
 	cold := measure("cold")
 	for i := 0; i < 10; i++ {
-		s.send(strings.Repeat("(nop)\r", 100))
+		s.send(strings.Repeat("(nop ())\r", 100))
 	}
 	s.send("(out! (str \"warmup-\" \"done\\n\"))\r")
 	s.waitFor("warmup-done\r\n")
@@ -433,21 +439,12 @@ func TestNativeInteractiveKashRightPrompt(t *testing.T) {
 	s.waitFor("abcde")
 	for _, width := range []uint16{10, 100} {
 		s.waitReading()
-		before := len(s.raw())
 		if err := unix.IoctlSetWinsize(int(s.control.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: width}); err != nil {
 			t.Fatal(err)
 		}
-		s.send("\x0c")
-		deadline := time.Now().Add(10 * time.Second)
-		for len(s.raw()) == before {
-			if time.Now().After(deadline) {
-				t.Fatal("resize did not redraw the prompt")
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		s.waitReading()
-		if got := strings.Contains(s.raw()[before:], "[R0]"); got != (width == 100) {
-			t.Fatalf("right prompt at width %d: %q", width, s.raw()[before:])
+		frame := s.redraw()
+		if got := strings.Contains(frame, "[R0]"); got != (width == 100) {
+			t.Fatalf("right prompt at width %d: %q", width, frame)
 		}
 	}
 	s.send("\x15sh -c 'exit 4'\r")
@@ -659,27 +656,27 @@ func TestNativeRecipeTerminalHandoff(t *testing.T) {
 	directory := t.TempDir()
 	nativeCLIWrite(t, directory+"/Kamefile", `SHELL = kash
 
-handoff : ; [tty: :true foreground: :true]
+handoff : ; {tty: true, foreground: true}
 	sh -c '[ -t 0 ] && [ -t 1 ] && [ -t 2 ] && echo all-terminal-$((40+2))'
 	sh -c 'ps -o stat= -p $$ | grep -q + && echo foreground-$((40+2))'
 	x = $(sh -c '[ -t 1 ] && echo terminal || echo pi''pe')
 	echo captured-$x
 
-selective : ; [tty: :true foreground: :true]
+selective : ; {tty: true, foreground: true}
 	sh -c '[ -t 1 ] && echo first-terminal || echo first-pi''pe'
-	:tty :true sh -c '[ -t 1 ] && echo second-terminal || echo second-pipe'
+	:tty true sh -c '[ -t 1 ] && echo second-terminal || echo second-pipe'
 
-background : ; [tty: :true]
+background : ; {tty: true}
 	sh -c '[ -t 1 ] && echo attached-$((40+2))'
 	sh -c 'ps -o stat= -p $$ | grep -q + && echo fore''ground || echo background-$((40+2))'
 
 denied :
-	:tty :true sh -c 'true'
+	:tty true sh -c 'true'
 
-capture : ; [tty: :true]
-	echo $(:tty :true sh -c 'true')
+capture : ; {tty: true}
+	echo $(:tty true sh -c 'true')
 
-invalid : ; [foreground: :true]
+invalid : ; {foreground: true}
 	true
 `)
 	for _, check := range []struct{ target, want string }{
@@ -721,7 +718,7 @@ func TestNativeInteractiveKashHighlightingAndBlocks(t *testing.T) {
 	}
 	s.send("\x03")
 	s.waitFor("^C")
-	s.send("def f\r\tsh -c 'echo block-$((40+2))'\r\r(f)\r")
+	s.send("def f\r\tsh -c 'echo block-$((40+2))'\r\r(f ())\r")
 	s.waitFor("block-42")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("highlighting session status %d: %q", status, s.text())

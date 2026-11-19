@@ -11,7 +11,7 @@ import (
 
 func TestOutAndErrEmitEvents(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run : ; [shell: kash]\n\t(out! \"out\")\n\t(err! \"err\")\n")
+	parsed := script.Parse(a, "test.kmk", "run : ; {shell: kash}\n\t(out! \"out\")\n\t(err! \"err\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -52,7 +52,7 @@ func TestOutAndErrEmitEvents(t *testing.T) {
 
 func TestOutCoercesScalarValues(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run : ; [shell: kash]\n\t(out! 42)\n\t(out! :true)\n\t(out! :nil)\n\t(out! 1.5)\n\t(out! (list 1 2))\n")
+	parsed := script.Parse(a, "test.kmk", "run : ; {shell: kash}\n\t(out! 42)\n\t(out! true)\n\t(out! nil)\n\t(out! 1.5)\n\t(out! (list 1 2))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -262,7 +262,7 @@ func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 
 func TestPipelineProcessDisplayIsBoundedToFourStages(t *testing.T) {
 	a := t.Allocator()
-	source := "run : ; [shell: kash]\n\t(out! (pipe! (run! \"printf\" \"one\") (run! \"cat\") (run! \"cat\") (run! \"cat\") (run! \"cat\")))\n"
+	source := "run : ; {shell: kash}\n\t(out! (pipe! (run! \"printf\" \"one\") (run! \"cat\") (run! \"cat\") (run! \"cat\") (run! \"cat\")))\n"
 	parsed := script.Parse(a, "test.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {

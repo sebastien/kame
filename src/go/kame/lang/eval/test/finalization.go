@@ -40,7 +40,7 @@ func TestFinallyOutputCancellationCannotBeRecovered(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.Parse(a, "output-cancel.km", `result = (? (finally! ([] missing) ([] (out! "cleanup"))) "fallback")`)
+	parsed := script.Parse(a, "output-cancel.km", `result = finally! (() => missing) (() => (out! "cleanup")) ?? "fallback"`)
 	p := eval.Compile(a, e, parsed, r)
 	h := finalizationHost{Alloc: a, Program: p, Quiet: true, CancelOutput: true}
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -67,16 +67,16 @@ func finalizationAdvanceClock(c *eval.Context, value any, values []core.Value) e
 
 func TestFinallyResultsAndFailures(t *testing.T) {
 	sources := []string{
-		`(finally! ([] 42) ([] (out! "cleanup")))`,
-		`(finally! ([] :false) ([] :nil))`,
-		`(finally! ([] :nil) ([] :false))`,
-		`(finally! ([] (fail! "body")) ([] (out! "cleanup")))`,
-		`(finally! ([] 42) ([] (fail! "cleanup")))`,
-		`(finally! ([] (fail! "body")) ([] (fail! "cleanup")))`,
-		`(let [finish finally!] (finish [timeout-ms: 1] ([] 42) ([] (out! "cleanup"))))`,
-		`(apply finally! [([] 42) ([] (out! "cleanup"))])`,
-		`(finally! ([] (finally! ([] 42) ([] (out! "inner")))) ([] (out! "outer")))`,
-		`(finally! ([] result) ([] (out! "cleanup")))`,
+		`(finally! (() => 42) (() => (out! "cleanup")))`,
+		`(finally! (() => false) (() => nil))`,
+		`(finally! (() => nil) (() => false))`,
+		`(finally! (() => (fail! "body")) (() => (out! "cleanup")))`,
+		`(finally! (() => 42) (() => (fail! "cleanup")))`,
+		`(finally! (() => (fail! "body")) (() => (fail! "cleanup")))`,
+		`((finish => (finish {timeout-ms: 1} (() => 42) (() => (out! "cleanup")))) finally!)`,
+		`(apply finally! [(() => 42), (() => (out! "cleanup"))])`,
+		`(finally! (() => (finally! (() => 42) (() => (out! "inner")))) (() => (out! "outer")))`,
+		`(finally! (() => result) (() => (out! "cleanup")))`,
 	}
 	codes := []string{"", "", "", "USER_ERROR", "USER_ERROR", "USER_ERROR", "", "", "", "DEP_CYCLE"}
 	output := []string{"cleanup", "", "", "cleanup", "", "", "cleanup", "cleanup", "innerouter", "cleanup"}
@@ -118,14 +118,14 @@ func TestFinallyResultsAndFailures(t *testing.T) {
 
 func TestFinallyValidationBeforeCallbacks(t *testing.T) {
 	sources := []string{
-		`(finally! [timeout-ms: 0] ([] (out! "body")) ([] (out! "cleanup")))`,
-		`(finally! [timeout-ms: 60001] ([] (out! "body")) ([] (out! "cleanup")))`,
-		`(finally! [timeout-ms: :true] ([] (out! "body")) ([] (out! "cleanup")))`,
-		`(finally! [secret: "hidden"] ([] (out! "body")) ([] (out! "cleanup")))`,
-		`(finally! [] ([] (out! "body")) ([] (out! "cleanup")))`,
-		`(finally! ([] (out! "body")) ([required] required))`,
-		`(finally! ([] (out! "body")) ((uppercase _)))`,
-		`(finally! 42 ([] (out! "cleanup")))`,
+		`(finally! {timeout-ms: 0} (() => (out! "body")) (() => (out! "cleanup")))`,
+		`(finally! {timeout-ms: 60001} (() => (out! "body")) (() => (out! "cleanup")))`,
+		`(finally! {timeout-ms: true} (() => (out! "body")) (() => (out! "cleanup")))`,
+		`(finally! {secret: "hidden"} (() => (out! "body")) (() => (out! "cleanup")))`,
+		`(finally! [] (() => (out! "body")) (() => (out! "cleanup")))`,
+		`(finally! (() => (out! "body")) (required => required))`,
+		`(finally! (() => (out! "body")) (uppercase _))`,
+		`(finally! 42 (() => (out! "cleanup")))`,
 	}
 	for i := range sources {
 		a := t.Allocator()
@@ -157,12 +157,12 @@ func TestFinallySuspensionCancellationAndDeadline(t *testing.T) {
 		r := eval.NewRegistry(a)
 		operations.Register(r)
 		r.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-		source := `result = (finally! ([] (async)) ([] (out! "cleanup")))`
+		source := `result = (finally! (() => (async ())) (() => (out! "cleanup")))`
 		if mode >= 2 {
-			source = `result = (finally! [timeout-ms: 1] ([] 42) ([] (async)))`
+			source = `result = (finally! {timeout-ms: 1} (() => 42) (() => (async ())))`
 		}
 		if mode == 5 {
-			source = `result = (finally! ([] (async)) ([] (out! "cleanup")))`
+			source = `result = (finally! (() => (async ())) (() => (out! "cleanup")))`
 		}
 		parsed := script.Parse(a, "finalization.km", source)
 		p := eval.Compile(a, e, parsed, r)
@@ -258,9 +258,9 @@ func TestFinallyNestedSharedDeadline(t *testing.T) {
 		r := eval.NewRegistry(a)
 		operations.Register(r)
 		r.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-		source := `result = (finally! [timeout-ms: 1] ([] (finally! [timeout-ms: 60000] ([] (fail! "body")) ([] (async)))) ([] (out! "outer")))`
+		source := `result = (finally! {timeout-ms: 1} (() => (finally! {timeout-ms: 60000} (() => (fail! "body")) (() => (async ())))) (() => (out! "outer")))`
 		if mode == 1 {
-			source = `result = (finally! [timeout-ms: 1] ([] 42) ([] (finally! ([] (async)) ([] (out! "inner")))))`
+			source = `result = (finally! {timeout-ms: 1} (() => 42) (() => (finally! (() => (async ())) (() => (out! "inner")))))`
 		}
 		parsed := script.Parse(a, "nested.km", source)
 		p := eval.Compile(a, e, parsed, r)
@@ -301,7 +301,7 @@ func TestFinallyUnavailableDriverDoesNotArm(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.Parse(a, "finalization.km", `result = (finally! ([] (out! "body")) ([] (out! "cleanup")))`)
+	parsed := script.Parse(a, "finalization.km", `result = (finally! (() => (out! "body")) (() => (out! "cleanup")))`)
 	p := eval.Compile(a, e, parsed, r)
 	n := p.Definition("result")
 	e.Request(n)
@@ -320,7 +320,16 @@ func TestFinallyStatementsRetainBindingsAndAcceptedWrites(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.Parse(a, "sequence.km", `result = (finally! ([] (def saved 42) (write! "first" "one") (write! "second" "two") saved) ([] (out! "cleanup")))`)
+	parsed := script.ParseKash(a, "sequence.kash", `def body
+	let saved = 42
+	(write! "first" "one")
+	(write! "second" "two")
+	return $saved ?
+result = (finally! body (() => out! "cleanup")).status
+`)
+	if len(parsed.Diagnostics) != 0 {
+		t.Errorf("finalization fixture did not parse: %v", parsed.Diagnostics)
+	}
 	p := eval.Compile(a, e, parsed, r)
 	h := finalizationHost{Alloc: a, Quiet: true}
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -346,7 +355,7 @@ func TestFinallyStatementsRetainBindingsAndAcceptedWrites(t *testing.T) {
 	}
 	stepUntilCurrent(e, n)
 	if !n.Current || n.Latest.Int != 42 || string(h.Output) != "cleanup" {
-		t.Error("callback lost lexical bindings or sequenced effects")
+		t.Errorf("callback lost lexical bindings or sequenced effects: current=%v value=%+v diagnostic=%s output=%q", n.Current, n.Latest, n.Diagnostic.Code, h.Output)
 	}
 	e.Free()
 	p.Free()
@@ -362,7 +371,7 @@ func TestFinallyHandledFailureDoesNotStartOuterUnwind(t *testing.T) {
 	operations.Register(r)
 	h := finalizationHost{Alloc: a, Quiet: true}
 	r.Add(eval.Operation{Name: "advance-clock", Call: finalizationAdvanceClock, Context: &h, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "handled.km", `result = (finally! [timeout-ms: 1] ([] (? (finally! ([] missing) ([] :nil)) 0) (advance-clock) (fail! "later")) ([] (out! "outer")))`)
+	parsed := script.Parse(a, "handled.km", `result = (finally! {timeout-ms: 1} (() => nop (finally! (() => missing) (() => nil) ?? 0) (advance-clock ()) (fail! "later")) (() => (out! "outer")))`)
 	p := eval.Compile(a, e, parsed, r)
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
 	p.SetDefinitionEffectSink(finalizationOutput, &h)

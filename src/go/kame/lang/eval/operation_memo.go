@@ -27,9 +27,10 @@ type operationMemo struct {
 }
 
 type argumentResult struct {
-	Values []core.Value
-	Result Result
-	Facts  int
+	Values           []core.Value
+	Result           Result
+	Facts            int
+	ReplacementIndex int
 }
 
 func (p *Program) freeOperationMemo(state *operationMemo) {
@@ -108,9 +109,6 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 		d.Write(newer.Digest[:])
 	}
 	for current := scope; current != nil; current = current.Parent {
-		if current.Mutable && !c.sequencedOperand {
-			return core.Signature{}
-		}
 		if current == p.Scope {
 			break
 		}
@@ -264,38 +262,60 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 	if values == nil {
 		values = make([]core.Value, len(arguments))
 	}
-	for i := next; i < len(arguments); i++ {
-		if deferReplacement && i == 1 && values[0].Kind == core.Pattern {
+	position, replacementIndex := 0, -1
+	firstPattern := false
+	for i, argument := range arguments {
+		spread := argument.Kind == expr.ListSpread
+		if deferReplacement && position == 1 && firstPattern && !spread {
+			replacementIndex = i
+			position++
 			continue
 		}
-		facts, completedEffects, completedPaths := 0, len(c.Effects), len(c.WritePaths)
-		if c.Engine != nil {
-			facts = len(c.Engine.AcceptedObservations())
-		}
-		r := p.evaluate(c.Engine, scope, arguments[i], c)
-		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
-			if r.Waiting && i != 0 && p.retainArguments(scope, c, span, operation, values, i, facts, effects, completedEffects, paths, completedPaths) {
+		if i >= next {
+			facts, completedEffects, completedPaths := 0, len(c.Effects), len(c.WritePaths)
+			if c.Engine != nil {
+				facts = len(c.Engine.AcceptedObservations())
+			}
+			r := p.evaluate(c.Engine, scope, argument, c)
+			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+				if r.Waiting && i != 0 && p.retainArguments(scope, c, span, operation, values, i, facts, effects, completedEffects, paths, completedPaths) {
+					return argumentResult{Result: r}
+				}
+				freeValuesWithCallables(c.Run, values)
 				return argumentResult{Result: r}
 			}
-			freeValuesWithCallables(c.Run, values)
-			return argumentResult{Result: r}
+			values[i] = r.Value
 		}
-		values[i] = r.Value
-		if deferReplacement && i == 0 && r.Value.Kind == core.Pattern {
-			pattern := expr.ParsePatternText(c.Run, r.Value.Text, arguments[0].Span.Start)
-			invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
-			pattern.Pattern.Free(c.Run)
-			mem.FreeSlice(nil, pattern.Diagnostics)
-			if invalid {
-				freeValuesWithCallables(c.Run, values)
-				return argumentResult{Result: failure(c.Run, "PAT_INVALID", arguments[0].Span, "match pattern needs a matcher group")}
+		if !deferReplacement {
+			continue
+		}
+		first, count := values[i], 1
+		if spread {
+			count = len(first.List)
+			if count == 0 {
+				continue
+			}
+			first = first.List[0]
+		}
+		if position == 0 && first.Kind == core.Pattern {
+			firstPattern = true
+			if i >= next {
+				pattern := expr.ParsePatternText(c.Run, first.Text, argument.Span.Start)
+				invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
+				pattern.Pattern.Free(c.Run)
+				mem.FreeSlice(nil, pattern.Diagnostics)
+				if invalid {
+					freeValuesWithCallables(c.Run, values)
+					return argumentResult{Result: failure(c.Run, "PAT_INVALID", argument.Span, "match pattern needs a matcher group")}
+				}
 			}
 		}
+		position += count
 	}
 	if facts < 0 && c.Engine != nil {
 		facts = len(c.Engine.AcceptedObservations())
 	}
-	return argumentResult{Values: values, Facts: facts}
+	return argumentResult{Values: values, Facts: facts, ReplacementIndex: replacementIndex}
 }
 
 func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, operation string, values []core.Value, next int, facts int, effects int, completedEffects int, paths int, completedPaths int) bool {

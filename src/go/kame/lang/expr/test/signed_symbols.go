@@ -36,7 +36,7 @@ func TestSignedSymbolsRetainTextSpansAndFormatting(t *testing.T) {
 }
 
 func TestSignedSymbolsRequireOrdinaryNames(t *testing.T) {
-	texts := []string{":+", ":-", ":+1", ":-1", ":++files", ":--files", ":+ files", ":-dir/child", ":+dir.name"}
+	texts := []string{":+", ":-", ":+1", ":-1", ":++files", ":--files", ":+ files", ":-dir/child"}
 	for i := range texts {
 		parsed := expr.Parse(t.Allocator(), "invalid.km", texts[i])
 		if len(parsed.Diagnostics) == 0 {

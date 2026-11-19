@@ -18,7 +18,7 @@ func TestBoundEnvironmentReadsRespectSnapshotAndGrants(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	document := expr.Parse(a, "test", "(env \"MODE\")")
+	document := expr.Parse(a, "test", "env/MODE")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, HasEnvironment: true, Environment: []string{"MODE=scoped=with-equals", "OTHER=value"}, Grants: []eval.Grant{{Capability: eval.Env, Names: []string{"MODE"}}}}
 	result := program.EvaluateWith(document.Expr, &context)
 	if result.Waiting || result.Diagnostic.Code != "" || result.Value.Text != "scoped=with-equals" {

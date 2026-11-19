@@ -11,19 +11,19 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$((printf a, printf b) |(merge) cat)",
 		"$(printf a |(broadcast) (cat > ./left, cat > ./right))",
 		"$((printf a | cat, (printf b, printf c) |(merge) cat) |(merge) cat)",
-		"$((printf \"a,b\" (nop [1 2]), printf %s $(printf \"(x,y)\")) |(merge) cat)",
-		"$((printf %s ./a{b,c}, printf %s ./@(nop \"value\")) |(merge) cat)",
+		"$((printf \"a,b\" (nop [1, 2]), printf %s $(printf \"(x,y)\")) |(merge) cat)",
+		"$((printf %s ./a{b,c}, printf %s ./@{nop \"value\"}) |(merge) cat)",
 		"$(printf a |(frame :lines) |(filter (eq item \"a\") | cat > ./selected) | cat)",
-		"$(printf a |(frame :lines) |(filter :true | cat |(frame :lines) >&) | cat)",
-		"$(printf a |(frame :lines) |(filter :true | cat |(frame :lines) >@) |(filter :false | cat > ./selected) | cat)",
+		"$(printf a |(frame :lines) |(filter true | cat |(frame :lines) >&) | cat)",
+		"$(printf a |(frame :lines) |(filter true | cat |(frame :lines) >@) |(filter false | cat > ./selected) | cat)",
 		"$((printf a |(frame :lines), printf b |(frame :lines)) |(merge) |(encode :lines) | cat)",
-		"$(printf a |(frame :lines) |(filter :true |(encode :lines) | cat > ./selected) | cat)",
+		"$(printf a |(frame :lines) |(filter true |(encode :lines) | cat > ./selected) | cat)",
 		"$((printf a >&reports, &reports | cat))",
 		"$(printf a |(broadcast) (>&left, >&right))",
 		"$(printf a >&out)",
 		"$(printf a >&err)",
 		"$(printf a |(broadcast) (>&out, >&err))",
-		"$((printf a |(frame :lines) |(filter :true | cat >&reports) | cat, &reports | cat))",
+		"$((printf a |(frame :lines) |(filter true | cat >&reports) | cat, &reports | cat))",
 		"$(diff -u <(printf a) <(printf b))",
 		"$(printf a | cat <&)",
 		"$(printf a | cat < ./stdin <& <(printf b))",
@@ -73,7 +73,7 @@ func TestCommandListParseFormatBoundaries(t *testing.T) {
 	a := t.Allocator()
 	input := "$(printf a&&printf b ||\nprintf c)"
 	r := expr.Parse(a, "list.km", input)
-	if len(r.Diagnostics) != 0 || r.Expr.Kind != expr.CommandList || len(r.Expr.Items) != 3 || len(r.Expr.CommandOps) != 2 {
+	if len(r.Diagnostics) != 0 || r.Expr.Kind != expr.CommandList || len(expr.Ungroup(r.Expr).Items) != 3 || len(r.Expr.CommandOps) != 2 {
 		t.Error("command list lost its operands or operators")
 		r.Free()
 		return
@@ -124,7 +124,7 @@ func TestCommandListParseFormatBoundaries(t *testing.T) {
 }
 
 func TestProcessGroupDiscriminationAndMalformedGraphs(t *testing.T) {
-	values := []string{"(nop [1 2])", "(str \"a,b\")", "(nop $(printf \"a,b\"))", "(nop ./a{b,c})"}
+	values := []string{"(nop [1, 2])", "(str \"a,b\")", "(nop $(printf \"a,b\"))", "(nop ./a{b,c})"}
 	for i := range values {
 		if expr.IsCommandGroup(values[i], 0) {
 			t.Error("value expression was classified as a process group")

@@ -16,7 +16,22 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "paths.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`./@(nop "a *?[\\]")/file.txt`, `@(nop "../two words")/file`, `./@(nop :nil)/file`, `./@(nop 42)/file`, `./@(nop [])/file`, `./@(nop [a: 1])/file`, `@(nop "src")/file`, `./@(nop :true)/file`, `./@([x] x)/file`, "./@(nop \"\x00\")/file"}
+	for _, tc := range []struct{ input, want string }{
+		{`./@@assets/file`, `./@assets/file`},
+		{`./@@\{not-a-reference\}/file`, `./@{not-a-reference}/file`},
+		{`./@@files/@{nop '@@'}`, `./@files/@@`},
+		{`./@@assets/{name:*}`, `./@assets/{name:*}`},
+		{`./@@assets/@{nop "dir"}/{name:*}`, `./@assets/dir/{name:*}`},
+	} {
+		e := expr.Parse(a, "path.km", tc.input)
+		r := p.Evaluate(a, e.Expr, p.Scope)
+		if len(e.Diagnostics) != 0 || r.Diagnostic.Code != "" || r.Value.Text != tc.want {
+			t.Errorf("%s: expected path text %s, got %s", tc.input, tc.want, r.Value.Text)
+		}
+		r.Free(a)
+		e.Free()
+	}
+	texts := []string{`./@{nop "a *?[\\]"}/file.txt`, `@{nop "../two words"}/file`, `~/@{nop "dir"}/file`, `./@{nop nil}/file`, `./@{nop 42}/file`, `./@{nop []}/file`, `./@{nop {a: 1}}/file`, `@{nop "src"}/file`, `./@{nop true}/file`, `./@{x => x}/file`, "./@{nop \"\x00\"}/file"}
 	for i := range texts {
 		e := expr.Parse(a, "path.km", texts[i])
 		if len(e.Diagnostics) != 0 {
@@ -35,6 +50,10 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 		} else if i == 1 {
 			if r.Diagnostic.Code != "" || r.Value.Text != "../two words/file" {
 				t.Error("explicit path root with spaces failed")
+			}
+		} else if i == 2 {
+			if r.Diagnostic.Code != "" || r.Value.Text != "~/dir/file" {
+				t.Error("home-relative interpolated path failed")
 			}
 		} else if r.Diagnostic.Code != "EXPR_INVALID" {
 			t.Error("nontext or implicit-root path interpolation was accepted")
@@ -56,7 +75,7 @@ func TestPathInterpolationRetainsCompletedChildrenAcrossSuspension(t *testing.T)
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "paths.km", "result = ./@(str (once))/@(str (async))")
+	parsed := script.Parse(a, "paths.km", "result = ./@{str (once ())}/@{str (async ())}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")

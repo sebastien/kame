@@ -82,9 +82,9 @@ otherwise it is `PARSE_ERR`.
 - `-` is part of a name: `sha256-file` is one name. Subtraction needs whitespace
   on both sides (`a - b`).
 - `?` or `!` may end a name once. `name?` is a name; `name?more` is not.
-- The placeholder tokens `_`, `__`, `___` and `_N` (`_` followed only by
-  decimal digits) are not names (§2.6). Other underscore-prefixed names such as
-  `_value` are ordinary names.
+- Placeholder tokens are not names (§2.6). A positional placeholder `_N` uses
+  canonical decimal without leading zeros. `_00` and `_value` are ordinary
+  names.
 - An `ENV-NAME` is a name of uppercase letters, digits and `_` starting with a
   letter. It takes part in the environment fallback of §3.13.
 
@@ -426,10 +426,12 @@ needed so that reparsing cannot activate interpolation.
 | `PathPattern` | `./src/**/*.c`, `./src/{path:**}.c` | Matches paths; may capture |
 | `PathTemplate` | `./build/{path}.o` | Builds a path from captures |
 
-Groups with glob content (`{*}`, `{**}`, `{name:*}`, `{name:**}`) are matchers;
-`{name}` and `{_N}` in a value atom are expansion references. A path atom mixing
-matcher and reference groups is `PARSE_ERR`. Kinds never convert implicitly. A
-path renders as text only in interpolation, template output and argv.
+Groups with glob content (`{*}`, `{**}`, `{name:*}`, `{name:**}`) are matchers.
+In a `PathPattern`, `{name}` is shorthand for `{name:*}` and `{_N}` is
+`PARSE_ERR`. In a `PathTemplate`, `{name}` and `{_N}` are expansion references.
+Matching is anchored to the entire path, including any literal suffix. Kinds
+never convert implicitly. A path renders as text only in interpolation,
+template output and argv.
 
 Interpolation fixes literal parts when the atom is evaluated and leaves groups
 deferred: `@{root}/{name:*}.@{ext}` constructs a matcher, and
@@ -443,7 +445,7 @@ output = captures |> bind ./build/{path}/{name}.o
 ```
 
 `capture PATTERN PATH` returns a capture record or `nil`; `bind TEMPLATE
-CAPTURES` returns a `Path`. Pattern `sub` and `resub` evaluate their
+CAPTURES` returns a `Path`. Pattern `subst` and `resub` evaluate their
 replacement only after matching, with named and positional captures available as
 string bindings. See `014-patterns.md` and `038-direct-kash-and-values.md`.
 

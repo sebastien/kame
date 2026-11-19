@@ -40,7 +40,7 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	document := expr.Parse(a, "test", "[(read \"./input\") (exists? \"input\") (stat \"./input\") (lstat \"./input\") (readlink \"./input\")]")
+	document := expr.Parse(a, "test", "[(read \"./input\"), (exists? \"input\"), (stat \"./input\"), (lstat \"./input\"), (readlink \"./input\")]")
 	state := mem.Alloc[observedFileState](a)
 	state.Program, state.Expression = program, document.Expr
 	node := engine.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "files"}, evaluateObservedFile, state)

@@ -17,11 +17,11 @@ func TestCanonicalTransformationPipes(t *testing.T) {
 	source := script.Parse(a, "conventions.km", "")
 	p := eval.Compile(a, engine, source, r)
 	checks := []string{
-		`(eq ((nop [x: 1]) | set "x" 2) [x: 2])`,
-		`(let [r [x: 1]] (eq (list (r | set "x" 2) r) [[x: 2] [x: 1]]))`,
-		`(eq ("./src/demo.c" | resub ./src/{name:~[a-z]+}.c ./out/{name}.o) "./out/demo.o")`,
-		`(eq ("./src/demo.c" | regex-match ./src/{name:~[a-z]+}.c | capture "name") "demo")`,
-		`(eq ("abc" | digest "sha256") (digest "sha256" "abc"))`,
+		`(eq ((nop {x: 1}) |> put "x" 2) {x: 2})`,
+		`((r => (eq (list (r |> put "x" 2) r) [{x: 2}, {x: 1}])) {x: 1})`,
+		`(eq ("./src/demo.c" |> resub ./src/{name:~[a-z]+}.c ./out/{name}.o) "./out/demo.o")`,
+		`(eq ("./src/demo.c" |> regex-match ./src/{name:~[a-z]+}.c |> capture "name") "demo")`,
+		`(eq ("abc" |> digest "sha256") (digest "sha256" "abc"))`,
 	}
 	for i := range checks {
 		result := evaluate(t, p, checks[i])
@@ -43,7 +43,12 @@ func TestLiteralSubSignatureErrors(t *testing.T) {
 	operations.Register(r)
 	source := script.Parse(a, "sub.km", "")
 	p := eval.Compile(a, engine, source, r)
-	checks := []string{`(sub "a" "b")`, `(sub 1 "b" "a")`, `(sub "a" 1 "a")`, `(sub "a" "b" [])`, `(replace "a" "b")`}
+	result := evaluate(t, p, `subst "a" "x" "a-b-a"`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "x-b-x" {
+		t.Error("subst did not replace literal occurrences")
+	}
+	result.Free(a)
+	checks := []string{`(subst "a" "b")`, `(subst 1 "b" "a")`, `(subst "a" 1 "a")`, `(subst "a" "b" [])`}
 	for i := range checks {
 		result := evaluate(t, p, checks[i])
 		if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -66,9 +71,9 @@ func TestShRejectsUnsupportedOptionsBeforeDryRun(t *testing.T) {
 	p := eval.Compile(a, engine, source, r)
 	p.DryRun = true
 	checks := []string{
-		`(sh! "true")`, `(sh! (merge) "true")`, `("true" | sh! (merge))`,
-		`(sh! [cwd: "ignored"] "true")`, `("true" | sh! [env: (merge)])`,
-		`(sh! [unknown: ([x] x)] "true")`, `(sh! [] "true")`,
+		`(sh! "true")`, `(sh! (merge ()) "true")`, `("true" |> sh! (merge ()))`,
+		`(sh! {cwd: "ignored"} "true")`, `("true" |> sh! {env: (merge ())})`,
+		`(sh! {unknown: (x => x)} "true")`, `(sh! [] "true")`,
 	}
 	for i := range checks {
 		parsed := expr.Parse(a, "sh.km", checks[i])

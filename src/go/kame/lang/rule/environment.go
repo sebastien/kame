@@ -9,7 +9,7 @@ import (
 
 func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 	start, end = trim(p.s.Text, start, end)
-	if start == end || p.s.Text[start] != '[' {
+	if start == end || p.s.Text[start] != '{' {
 		p.ruleEnvironment(r, start, end)
 		return
 	}
@@ -20,14 +20,6 @@ func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 	if parsed.End != end || r.Metadata == nil || r.Metadata.Kind != expr.Record {
 		p.error(start, end, "rule metadata must be a record")
 		return
-	}
-	for i := range r.Metadata.Fields {
-		field := r.Metadata.Fields[i]
-		for j := 0; j < i; j++ {
-			if r.Metadata.Fields[j].Key == field.Key {
-				p.error(field.Span.Start, field.Span.End, "duplicate rule metadata field")
-			}
-		}
 	}
 }
 

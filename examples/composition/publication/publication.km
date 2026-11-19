@@ -1,7 +1,7 @@
 # This value program also supplies the rule file's definitions unchanged.
 title = "Little publication"
 sources = ./notes/*.txt
-(page source) = (sub ./notes/{name:*}.txt ./public/{name}.txt source)
+(page source) = (subst ./notes/{name:*}.txt ./public/{name}.txt source)
 pages =
   (if
     (in? ./notes/index.txt sources)

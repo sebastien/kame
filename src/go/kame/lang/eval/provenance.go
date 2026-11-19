@@ -169,7 +169,6 @@ func setExpressionOrigin(e *expr.Expr, origin int, entry *source.Source) {
 	for i := range e.Parts {
 		setExpressionOrigin(e.Parts[i].Expr, origin, entry)
 	}
-	setExpressionOrigin(e.AuthoredPipe, origin, entry)
 	setExpressionOrigin(e.CapturePolicy, origin, entry)
 }
 

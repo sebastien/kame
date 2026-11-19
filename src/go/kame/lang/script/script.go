@@ -38,6 +38,14 @@ type ScriptItem struct {
 	Include         string
 	OptionalInclude bool
 	GenerateName    string
+	Branches        []DeclarationBranch
+}
+
+type DeclarationBranch struct {
+	Condition *expr.Expr
+	Comment   string
+	Items     []ScriptItem
+	Span      source.Span
 }
 
 type Script struct {
@@ -53,12 +61,7 @@ func (s *Script) Free() {
 	if s == nil {
 		return
 	}
-	for i := range s.Items {
-		definition.Free(s.Alloc, s.Items[i].Definition)
-		rule.FreeRule(s.Alloc, s.Items[i].Rule)
-		expr.Free(s.Alloc, s.Items[i].Expression)
-	}
-	mem.FreeSlice(nil, s.Items)
+	freeItems(s.Alloc, s.Items)
 	mem.FreeSlice(nil, s.Diagnostics)
 	if s.BorrowedSource {
 		mem.Free(s.Alloc, s.Source)
@@ -68,6 +71,21 @@ func (s *Script) Free() {
 	a := s.Alloc
 	*s = Script{}
 	mem.Free(a, s)
+}
+
+func freeItems(a mem.Allocator, items []ScriptItem) {
+	for _, item := range items {
+		definition.Free(a, item.Definition)
+		rule.FreeRule(a, item.Rule)
+		expr.Free(a, item.Expression)
+		mem.FreeString(a, item.Include)
+		for _, branch := range item.Branches {
+			expr.Free(a, branch.Condition)
+			freeItems(a, branch.Items)
+		}
+		mem.FreeSlice(nil, item.Branches)
+	}
+	mem.FreeSlice(nil, items)
 }
 
 func Parse(a mem.Allocator, name string, text string) *Script {
@@ -95,7 +113,7 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, lineEnd)
 			continue
 		}
-		if comment(text, start, end) {
+		if text[start] == '#' {
 			lineEnd = pos
 			for lineEnd < len(text) && text[lineEnd] != '\n' {
 				lineEnd++
@@ -110,11 +128,6 @@ func parseScript(s *Script, offset int) {
 				pos = following
 				continue
 			}
-		}
-		if legacyInclude(text[start:end]) {
-			s.error(start, end, "legacy include directive is unsupported; use (include PATH) or (include? PATH)")
-			pos = nextLine(text, lineEnd)
-			continue
 		}
 		generated := generatedHeader(text, start, end)
 		if generated.OK {
@@ -132,6 +145,11 @@ func parseScript(s *Script, offset int) {
 		if text[pos] == ' ' || text[pos] == '\t' {
 			s.error(pos, lineEnd, "indented text has no preceding rule")
 			pos = nextLine(text, lineEnd)
+			continue
+		}
+		if item, next, ok := s.sourceDeclaration(pos, start, end); ok {
+			s.Items = append(s.Items, item)
+			pos = next
 			continue
 		}
 		if source.TopLevelByte(text[start:end], '=') >= 0 {
@@ -179,7 +197,6 @@ func parseScript(s *Script, offset int) {
 		s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
 		pos = nextLine(text, lineEnd)
 	}
-	validateComposition(s)
 }
 
 type generatedHeaderResult struct {
@@ -254,15 +271,6 @@ func trim(text string, start int, end int) (int, int) {
 	}
 	return start, end
 }
-func comment(text string, start int, end int) bool {
-	return text[start] == '#' || (start+1 < end && text[start] == '/' && text[start+1] == '/')
-}
-func legacyInclude(text string) bool {
-	if source.TopLevelByte(text, '=') >= 0 {
-		return false
-	}
-	return text == "include" || text == "include?" || strings.HasPrefix(text, "include ") || strings.HasPrefix(text, "include\t") || strings.HasPrefix(text, "include? ") || strings.HasPrefix(text, "include?\t")
-}
 
 func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEnd int) int {
 	text := s.Text
@@ -284,7 +292,7 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 	// strings and nested process captures, without another RHS classifier.
 	// This probe discovers the range and discards its AST/diagnostics; definition
 	// parsing then enforces exactly one expression inside that bounded range.
-	prefix := expr.ParsePrefix(a, s, pos)
+	prefix := expr.ParseValuePrefix(a, s, pos)
 	end := prefix.End
 	expr.Free(a, prefix.Expr)
 	mem.FreeSlice(nil, prefix.Diagnostics)
@@ -345,6 +353,11 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == Comment {
 			b.WriteString(item.Text)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == Include || item.Kind == Composition {
+			writeSourceDeclaration(a, &b, text, item, indent, 0)
 			previousEnd = item.Span.End
 			continue
 		}

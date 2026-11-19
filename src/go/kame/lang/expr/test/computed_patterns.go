@@ -39,7 +39,7 @@ func TestComputedPatternAuthoredPartsAndClone(t *testing.T) {
 
 func TestPathReferenceFormattingAndClone(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`@{ROOT}/js/{path}.js`, `./src/{path}/{_0}.js`, `./@{ROOT}/\{literal}/{path}.@(nop "js")`}
+	texts := []string{`@{ROOT}/js/{path}.js`, `./src/{path}/{_0}.js`, `./@{ROOT}/\{literal\}/{path}.@{nop "js"}`}
 	for i := range texts {
 		r := expr.Parse(a, "paths", texts[i])
 		if len(r.Diagnostics) != 0 {
@@ -60,16 +60,20 @@ func TestPathReferenceFormattingAndClone(t *testing.T) {
 
 func TestComputedPatternClassificationAndGroupBoundaries(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`@{ROOT}/{name}`, `@{ROOT}/{bad:}`, `@{ROOT}/\{name}`, `"@{ROOT}/{name:*}"`, `@{ROOT}/{a:*}/{b}`, `./{@{NAME}:*}`, `./{name:@{GLOB}}`, `./{name:~@{REGEX}}`, `@{ROOT}/{name:~(a|)}`}
+	texts := []string{`@{ROOT}/{name}`, `@{ROOT}/{bad:}`, `@{ROOT}/\{name\}`, `"@{ROOT}/{name:*}"`, `@{ROOT}/{a:*}/{b}`, `./{@{NAME}:*}`, `./{name:@{GLOB}}`, `./{name:~@{REGEX}}`, `@{ROOT}/{name:~(a|)}`}
 	for i := range texts {
 		r := expr.Parse(a, "computed", texts[i])
 		if i == 0 {
 			if len(r.Diagnostics) != 0 || r.Expr.Pattern != nil || len(r.Expr.Parts) != 3 || r.Expr.Parts[2].Form != "{" {
 				t.Error("computed reference path did not lower to interpolation")
 			}
-		} else if i < 4 {
+		} else if i == 2 || i == 3 {
 			if len(r.Diagnostics) != 0 || r.Expr.Pattern != nil {
-				t.Error("literal fallback/string changed classification")
+				t.Error("literal escape or string changed classification")
+			}
+		} else if i == 4 {
+			if len(r.Diagnostics) != 0 || r.Expr.Pattern == nil || r.Expr.Pattern.Matchers != 2 {
+				t.Error("computed path did not classify shorthand as a capture")
 			}
 		} else if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Error("invalid authored group accepted")
@@ -82,11 +86,9 @@ func TestComputedPatternClassificationAndGroupBoundaries(t *testing.T) {
 		}
 		r.Free()
 	}
-	// A regex-looking value expression must not change malformed authored-group
-	// fallback into a source regex diagnostic.
-	r := expr.Parse(a, "computed", `@(nop """./{name:~a}""")/{bad:}`)
-	if len(r.Diagnostics) != 0 || r.Expr.Pattern != nil {
-		t.Error("interpolation source influenced authored regex classification")
+	r := expr.Parse(a, "computed", `@{ROOT}/{bad:}`)
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Span.Start != 13 {
+		t.Error("malformed group diagnostic lost its authored span")
 	}
 	r.Free()
 }

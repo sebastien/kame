@@ -185,11 +185,6 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			mem.FreeSlice(nil, doc.Diagnostics)
 			doc.Diagnostics = nil
 			root := templateBindings(a, doc.Root, f.Defines)
-			valueDiagnostics := script.ValidateValueExpression(a, root)
-			for j := range valueDiagnostics {
-				parsed.Diagnostics = append(parsed.Diagnostics, valueDiagnostics[j])
-			}
-			mem.FreeSlice(nil, valueDiagnostics)
 			doc.Root = nil
 			doc.Free()
 			parsed.Items = append(parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})

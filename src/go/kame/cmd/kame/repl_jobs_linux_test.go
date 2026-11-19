@@ -299,8 +299,9 @@ func TestNativeInteractiveKashJobCommandsAndPrompt(t *testing.T) {
 	}
 	s.send("kill %1\r")
 	waitProcessState(t, pid, "")
+	before := len(s.raw())
 	s.send("sh -c 'true'\r")
-	s.waitFor("J0> ")
+	s.waitFrame(before, func(frame string) bool { return strings.Contains(frame, "J0> ") })
 	s.finish()
 }
 
@@ -335,7 +336,7 @@ func TestNativeInteractiveKashNestedAsyncAttribution(t *testing.T) {
 	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("S0J0> ")
-	s.send("let job = (run! :async :true \"/bin/sleep\" (if (run! :async :true \"/bin/false\") \"0.1\" \"0.1\"))\r")
+	s.send("let job = (run! :async true \"/bin/sleep\" (if (run! :async true \"/bin/false\") then \"0.1\" else \"0.1\"))\r")
 	s.send("wait %+\r")
 	s.waitFor("S1J0> ")
 	// Only the outer handle is saved. The inner failure belongs to the same job,

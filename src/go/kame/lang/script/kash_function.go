@@ -25,7 +25,7 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 	}
 	d.Name, d.NameSpan = text[nameStart:pos], source.Span{Start: nameStart, End: pos}
 	e.Text = d.Name
-	if !definition.ValidName(d.Name) || d.Name == "env" {
+	if !expr.ValidBindingName(d.Name) || d.Name == "env" {
 		s.error(nameStart, pos, "expected non-reserved function name")
 	}
 	for pos < len(text) && text[pos] != '\n' && text[pos] != '#' && len(s.Diagnostics) == 0 {
@@ -48,7 +48,7 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 		if rest {
 			name = name[:len(name)-3]
 		}
-		if !definition.ValidName(name) || name == "env" {
+		if !expr.ValidBindingName(name) || name == "env" {
 			s.error(parameterStart, pos, "invalid or reserved function parameter")
 		}
 		for i := range d.Parameters {

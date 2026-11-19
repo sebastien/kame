@@ -369,7 +369,7 @@ func (l *kashLexer) expressionItems(i int, closing byte, head bool) int {
 		case c == '{':
 			l.emit(KashTokenPunct, i, i+1)
 			i, head = l.expressionItems(i+1, '}', false), false
-		case c == ')' || c == ']' || c == '}':
+		case c == ')' || c == ']' || c == '}' || c == ',':
 			i = l.emit(KashTokenPunct, i, i+1)
 		case c == '"':
 			i, head = l.expressionString(i), false
@@ -380,7 +380,7 @@ func (l *kashLexer) expressionItems(i int, closing byte, head bool) int {
 			i = l.emit(KashTokenOperator, i, i+1)
 		default:
 			end := i
-			for end < len(text) && !kashBlank(text[end]) && strings.IndexByte("\n()[]{}\";", text[end]) < 0 {
+			for end < len(text) && !kashBlank(text[end]) && strings.IndexByte("\n()[]{}\";,", text[end]) < 0 {
 				end++
 			}
 			if end == i {

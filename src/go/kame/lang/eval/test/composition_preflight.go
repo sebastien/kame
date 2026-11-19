@@ -12,11 +12,11 @@ func TestCompositionUncheckedCompileHonorsValueDiagnostics(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	defer engine.Free()
-	parsed := script.Parse(a, "invalid.km", "unused = ([] (include ./a.km))\nother = 42\n")
+	parsed := script.Parse(a, "invalid.km", "unused = (() => (include ./a.km))\nother = 42\n")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, nil)
 	defer p.Free()
-	if p.Valid || len(p.Diagnostics) == 0 || p.Diagnostics[0].Code != "EXPR_INVALID" || len(p.Nodes) != 0 || len(p.Definitions) != 0 || p.Definition("other") != nil {
+	if p.Valid || len(p.Diagnostics) == 0 || p.Diagnostics[0].Code != "PARSE_ERR" || len(p.Nodes) != 0 || len(p.Definitions) != 0 || p.Definition("other") != nil {
 		t.Error("unchecked compilation registered definitions despite value-placement errors")
 	}
 	name := expr.Parse(a, "lookup", "unused")

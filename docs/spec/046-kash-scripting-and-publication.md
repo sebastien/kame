@@ -236,7 +236,7 @@ with `New` transforms `Font,Font` into `New,New`, but leaves `OtherFont`,
 `Font-alt`, and `Font_1` unchanged. No eligible matches returns the original text
 unchanged. Wrong operand kinds and empty `FROM` report `EXPR_INVALID`.
 
-The operation is pure and does not change regex grammar, `sub`, `resub`, or
+The operation is pure and does not change regex grammar, `subst`, `resub`, or
 anchored pattern semantics. It is textual substitution, not a CSS parser: matching
 text in comments, strings, and URLs is not excluded. Mapping multiple replacement
 pairs is explicitly sequential unless another operation specifies simultaneous

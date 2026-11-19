@@ -20,24 +20,15 @@ func TestCompositionPublicEvaluationPreflightsAllChildren(t *testing.T) {
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()
-	cases := []string{"(if :false (include ./a.km) :nil)", "([] (include? ./a.km))", "(let [unused ([] (include ./a.km))] (out! 42))", "(if :true (out! 42) (include ./a.km))"}
+	cases := []string{"(if false then (include ./a.km) else nil)", "(() => (include? ./a.km))", "((unused => (out! 42)) (() => (include ./a.km)))", "(if true then (out! 42) else (include ./a.km))"}
 	for i := range cases {
 		expression := expr.Parse(a, "public", cases[i])
-		plain := p.Evaluate(a, expression.Expr, p.Scope)
-		if plain.Diagnostic.Code != "EXPR_INVALID" || !plain.Diagnostic.Owned {
-			t.Error("Evaluate missed hidden source head or returned borrowed failure")
+		if len(expression.Diagnostics) == 0 || expression.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Error("value parser accepted a source declaration in a nested expression")
 		}
-		plain.Free(a)
-		context := &eval.Context{Program: p, Scope: p.Scope, Run: a, Source: "public"}
-		result := p.EvaluateWith(expression.Expr, context)
-		if result.Diagnostic.Code != "EXPR_INVALID" || len(context.Effects) != 0 || result.Diagnostic.Source != "public" {
-			t.Error("EvaluateWith ran effects or lost placement diagnostic source")
-		}
-		result.Free(a)
-		eval.FreeEffects(a, context.Effects)
 		expression.Free()
 	}
-	normal := expr.Parse(a, "normal", "(if :false 1 :true 42 0)")
+	normal := expr.Parse(a, "normal", "(if false then 1 elif true then 42 else 0)")
 	defer normal.Free()
 	plain := p.Evaluate(a, normal.Expr, p.Scope)
 	defer plain.Free(a)

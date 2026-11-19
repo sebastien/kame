@@ -279,7 +279,7 @@ func TestInspectionReversePositionalReferencesAndLogicalPatterns(t *testing.T) {
 
 func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : @(nop :true) ./elsewhere\n./computed-bad : @(nop \"./computed-seed\") @(nop :true)\n./late-computed-bad : @(nop :true) @(nop \"./late-computed-seed\")\n")
+	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : @(nop true) ./elsewhere\n./computed-bad : @(nop \"./computed-seed\") @(nop true)\n./late-computed-bad : @(nop true) @(nop \"./late-computed-seed\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})

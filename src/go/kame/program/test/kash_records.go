@@ -61,7 +61,7 @@ func TestKashFileRecordLoopsRetireCompletedScopeAndOperationHistory(t *testing.T
 	}
 	memory.SetFile("items", data)
 	mem.FreeSlice(nil, data)
-	fragments := []program.Fragment{{Name: "records.kash", Lang: "kash", Text: "for line from (record-source) :lines\n\twith\n\t\tlet local = line\n\t\tdefer (record-check local)\n\t\tcontinue\n"}}
+	fragments := []program.Fragment{{Name: "records.kash", Lang: "kash", Text: "for line from (record-source ()) :lines\n\twith\n\t\tlet local = line\n\t\tdefer (record-check local)\n\t\tcontinue\n"}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
 	if compiled.Session == nil {
 		t.Fatal("record session compilation failed")
