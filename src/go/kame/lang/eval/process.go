@@ -433,11 +433,20 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					state.Index++
 					continue
 				case expr.SetupTTY, expr.SetupForeground:
-					d := p.terminalSetup(state, kind, r.Value, word.Span, c)
+					d := p.terminalSetup(state, kind, r.Value, literalSetupWord(word.Items[0]), word.Span, c)
 					r.Free(c.Run)
 					if d.Diagnostic.Code != "" {
 						return d
 					}
+					state.Index++
+					continue
+				case expr.SetupTimeout:
+					timeout, ok := stageTimeout(r.Value, literalSetupWord(word.Items[0]))
+					r.Free(c.Run)
+					if !ok {
+						return failure(c.Run, "EXPR_INVALID", word.Span, "stage timeout requires positive finite seconds")
+					}
+					state.Timeout = timeout
 					state.Index++
 					continue
 				case expr.SetupAsync:
@@ -465,16 +474,6 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 						return failure(c.Run, "EXPR_INVALID", word.Span, "stage cwd must not be empty")
 					}
 					state.Cwd = canonicalPath(state.Alloc, c.Cwd, text)
-				} else if kind == expr.SetupTimeout {
-					seconds, err := strconv.ParseFloat(text, 64)
-					if err != nil || !(seconds > 0 && seconds*1000 < 9007199254740991) {
-						mem.FreeString(c.Run, text)
-						return failure(c.Run, "EXPR_INVALID", word.Span, "stage timeout requires positive finite seconds")
-					}
-					state.Timeout = int64(seconds * 1000)
-					if float64(state.Timeout) < seconds*1000 {
-						state.Timeout++
-					}
 				} else {
 					state.Environment = append(state.Environment, core.NewString(state.Alloc, word.Text+"="+text))
 				}
@@ -986,6 +985,46 @@ func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState,
 	state.Recovering = true
 	r.Free(c.Run)
 	return p.capture(e.Body[0], c)
+}
+
+// Reserved settings may interpret literal text. Evaluated fragments retain
+// their original value kind.
+func literalSetupWord(word *expr.Expr) bool {
+	return len(word.Parts) == 1 && word.Parts[0].Expr == nil
+}
+
+func stageTimeout(value core.Value, literal bool) (int64, bool) {
+	var seconds float64
+	switch value.Kind {
+	case core.Int:
+		seconds = float64(value.Int)
+	case core.Float:
+		seconds = value.Float
+	case core.String:
+		if !literal {
+			return 0, false
+		}
+		var err error
+		seconds, err = strconv.ParseFloat(value.Text, 64)
+		if err != nil {
+			integer, err := strconv.ParseInt(value.Text, 0, 64)
+			if err != nil {
+				return 0, false
+			}
+			seconds = float64(integer)
+		}
+	default:
+		return 0, false
+	}
+	milliseconds := seconds * 1000
+	if !(milliseconds > 0 && milliseconds < 9007199254740991) {
+		return 0, false
+	}
+	timeout := int64(milliseconds)
+	if float64(timeout) < milliseconds {
+		timeout++
+	}
+	return timeout, true
 }
 
 // Scalar conversion is shared with argv, but redirections never splice lists.

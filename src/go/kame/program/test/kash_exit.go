@@ -11,7 +11,6 @@ func TestSessionExitIsTypedAndStopsLaterFragments(t *testing.T) {
 	texts := []string{
 		"exit 23\n(out! \"forbidden\")",
 		"def stop ()\n\texit 23\n(stop ()) ?? \"fallback\"\n(out! \"forbidden\")",
-		"def runner = (kash \"exit 23\")\n((runner ()) ?? \"fallback\")\n(out! \"forbidden\")",
 		"def stop ()\n\texit 23\nif (stop ())\n\t(out! \"forbidden\")\n",
 	}
 	for i := range texts {

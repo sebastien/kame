@@ -5,7 +5,6 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"kame/lang/script"
 )
 
 // Callable ownership protocol.
@@ -51,8 +50,8 @@ const (
 	// function). The scope owns the Function struct plus owned AST slices;
 	// values carrying it are borrowed and must not free the struct.
 	FunctionDefinition
-	// FunctionInvocation is an immutable Kash callable owned by Program until shutdown.
-	FunctionInvocation
+	// FunctionInterpreter is a recipe interpreter selector owned by Program.
+	FunctionInterpreter
 	// FunctionOperation is an immutable registry callable owned by Program.
 	FunctionOperation
 )
@@ -64,12 +63,7 @@ type Function struct {
 	PayloadAlloc mem.Allocator
 	Owner        *Program
 	// OperationName is the registry key for FunctionOperation, not a discriminator.
-	OperationName   string
-	KashConstructor bool
-	// KameSelector marks the shell value that publishes one expression as a file.
-	KameSelector        bool
-	KashScript          *script.Script
-	KashSignature       core.Signature
+	OperationName       string
 	Kind                FunctionKind
 	Parameters          []expr.Parameter
 	Body                []*expr.Expr
@@ -139,7 +133,7 @@ func borrowValueCallables(a mem.Allocator, value *core.Value) {
 // that retains the captured Scope. The wrapper shares parameters, body, and
 // Native state with its source.
 func borrowFunction(a mem.Allocator, source *Function) *Function {
-	if source.Kind == FunctionInvocation || source.Kind == FunctionOperation {
+	if source.Kind == FunctionInterpreter || source.Kind == FunctionOperation {
 		return source
 	}
 	if source.storage == nil && (source.NativeFree != nil || source.AST != nil || source.ExpressionOwned || source.DefinitionOwned || source.ParametersOwned || source.BodyOwned) {
@@ -355,7 +349,7 @@ func freeFunctionParameters(a mem.Allocator, parameters []expr.Parameter, namesO
 func wouldStrandCapture(scope *Scope, value core.Value) bool {
 	if value.Kind == core.Callable {
 		function := value.Callable.(*Function)
-		if function != nil && (function.Kind == FunctionInvocation || function.Kind == FunctionOperation) {
+		if function != nil && (function.Kind == FunctionInterpreter || function.Kind == FunctionOperation) {
 			return false
 		}
 		if function == nil || function.Scope == nil || function.Scope == scope {

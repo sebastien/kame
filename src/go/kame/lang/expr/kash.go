@@ -732,6 +732,22 @@ func setupKeyByte(b byte, first bool) bool {
 
 func commandWhitespace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
 
+const kashTemplateWordError = "template interpolation is invalid in a Kash word; use $name or (expr), or quote it to pass it literally"
+
+func kashTemplateWordEnd(text string, start int) int {
+	if start >= len(text) || text[start] != '@' {
+		return start
+	}
+	pos := start + 1
+	for end := source.ContinuationEnd(text, pos, len(text)); end != pos; end = source.ContinuationEnd(text, pos, len(text)) {
+		pos = end
+	}
+	if pos < len(text) && text[pos] == '{' {
+		return pos + 1
+	}
+	return start
+}
+
 func commandOperator(b byte) bool {
 	return b == '|' || b == '<' || b == '>' || b == '&' || b == '?' || b == ';' || b == '('
 }
@@ -804,15 +820,6 @@ func descriptorBoundary(text string, pos int) bool {
 func (p *parser) commandWord(allowSpread bool) *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
-	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") || strings.HasPrefix(p.s.Text[start:], "@{") {
-		inner := p.pathAtom(true)
-		if len(inner.Parts) != 0 {
-			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "path", Span: inner.Span})
-		} else {
-			freeExpr(p.a, inner)
-			p.pos = start
-		}
-	}
 	text := strings.Builder{}
 	quoted, hadQuote, spread := false, false, false
 	singleQuoted := false
@@ -869,9 +876,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 		if b == '\\' {
 			from := p.pos
 			p.pos++
-			if !quoted && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == "@(" || p.s.Text[p.pos:p.pos+2] == "@{") {
-				p.error(from, p.pos+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
-				break
+			if !quoted {
+				if end := kashTemplateWordEnd(p.s.Text, p.pos); end != p.pos {
+					p.error(p.pos, end, kashTemplateWordError)
+					break
+				}
 			}
 			if p.pos == len(p.s.Text) {
 				p.error(from, p.pos, "unfinished Kash escape")
@@ -898,22 +907,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			p.pos++
 			continue
 		}
-		if !quoted && b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
-			p.error(p.pos, p.pos+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
-			break
-		}
-		if !quoted && b == '@' && p.pos == start {
-			if p.pos+1 < len(p.s.Text) && isNameStart(p.s.Text[p.pos+1]) {
-				p.error(p.pos, p.pos+2, "template directives are invalid in Kash; use Kash if/match or an explicit render expression")
+		if !quoted && b == '@' {
+			if end := kashTemplateWordEnd(p.s.Text, p.pos); end != p.pos {
+				p.error(p.pos, end, kashTemplateWordError)
 				break
 			}
-			inner := p.selector()
-			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "selector", Span: source.Span{Start: start, End: p.pos}})
-			partStart = p.pos
-			if len(p.diags) != 0 {
-				break
-			}
-			continue
 		}
 		if b == '$' {
 			p.addTextPart(e, &text, partStart, p.pos)
@@ -959,10 +957,6 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				break
 			}
 			continue
-		}
-		if !quoted && b == '@' {
-			p.error(p.pos, p.pos+1, "literal at-sign in a Kash word must be quoted, for example \"--mtime=@0\"")
-			break
 		}
 		if !quoted && commandOperator(b) {
 			p.error(p.pos, p.pos+1, "unsupported Kash process operator or reserved syntax")
@@ -1026,7 +1020,7 @@ func (p *parser) retainCommandWordSpelling(word *Expr, continuations []source.Sp
 }
 
 func commandWordFormatsPart(part StringPart) bool {
-	return part.Form == "(" || part.Form == "$(" || part.Form == "path"
+	return part.Form == "(" || part.Form == "$("
 }
 
 // Bool records typed substitution semantics, not whether a literal needs quotes.
@@ -1046,15 +1040,18 @@ func commandWordNeedsQuotes(e *Expr) bool {
 			continue
 		}
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "def" || part.Text == "return" || part.Text == "let" || part.Text == "exit" || part.Text == "with" || part.Text == "break" || part.Text == "continue") {
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "defer" || part.Text == "def" || part.Text == "return" || part.Text == "let" || part.Text == "exit" || part.Text == "with" || part.Text == "break" || part.Text == "continue") {
 			return true
 		}
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') {
 			return true
 		}
+		if strings.Contains(part.Text, "@{") {
+			return true
+		}
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\'' || c == '\\' || c == '$' || c == '@' {
+			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\'' || c == '\\' || c == '$' {
 				return true
 			}
 		}
@@ -1089,7 +1086,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 		}
 		for i := range e.Parts {
 			part := e.Parts[i]
-			if part.Form == "(" || part.Form == "path" || part.Form == "selector" {
+			if part.Form == "(" {
 				writeExpr(b, part.Expr)
 				continue
 			}
@@ -1115,8 +1112,6 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			}
 			if part.Form == "$(" {
 				writeExpr(b, part.Expr)
-			} else if part.Form == "(" || part.Form == "selector" || part.Form == "path" {
-				writeExpr(b, part.Expr)
 			} else {
 				b.WriteString(part.Form)
 				writeExpr(b, part.Expr)
@@ -1136,7 +1131,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 		}
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if c == '"' || c == '\\' || c == '$' || c == '@' {
+			if c == '"' || c == '\\' || c == '$' {
 				b.WriteByte('\\')
 				b.WriteByte(c)
 			} else if c == '\n' {

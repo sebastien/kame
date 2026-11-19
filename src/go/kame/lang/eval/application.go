@@ -113,7 +113,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return result
 	}
 	function := callee.Value.Callable.(*Function)
-	if function.KashConstructor && len(expression.Items) == 2 && expression.Items[1].Kind == expr.Path {
+	if function == p.kashSelector && len(expression.Items) == 2 && expression.Items[1].Kind == expr.Path {
 		operand := expression.Items[1]
 		freeCallables(context.Run, &callee.Value)
 		callee.Value.Free(context.Run)
@@ -132,7 +132,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	}
 	context.Scope = scope
 	if retained == nil && p.Scope.replaceBindings && context.Engine != nil &&
-		function.Kind != FunctionOperation && function.Kind != FunctionInvocation && function.NativeCall == nil {
+		function.Kind != FunctionOperation && function.Kind != FunctionInterpreter && function.NativeCall == nil {
 		retained = mem.Alloc[functionCallState](p.Alloc)
 		retained.Head.Value = borrowValue(p.Alloc, callee.Value)
 		for _, effect := range context.Effects[before:] {
@@ -421,6 +421,9 @@ func (p *Program) invokeOperation(operation *Operation, values []core.Value, arg
 }
 
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	if function.Kind == FunctionInterpreter {
+		return p.callValues(function, nil, context, span)
+	}
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
 		if operation == nil {
@@ -455,10 +458,6 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
 	context.observeDefinitionSource(function.Definition)
-	if context.PurePredicate && function.Kind == FunctionInvocation {
-		discardCallValues(context.Run, values)
-		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts")
-	}
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
 		if operation == nil {
@@ -474,28 +473,12 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		attachNamedFrame(&result, context, span, "operation", function.OperationName)
 		return result
 	}
-	if function.Kind == FunctionInvocation {
-		if function.Owner != p {
-			discardCallValues(context.Run, values)
-			return failure(context.Run, "EXPR_INVALID", span, "Kash callable belongs to another invocation")
-		}
-		previousStart, previousEnd := context.operationStart, context.operationEnd
-		context.operationStart, context.operationEnd = span.Start, span.End
-		var result Result
-		if function.KameSelector {
-			discardCallValues(context.Run, values)
-			context.operationStart, context.operationEnd = previousStart, previousEnd
-			return failure(context.Run, "EXPR_INVALID", span, "kame selects a value-producing recipe; it is not callable")
-		}
-		if function.KashConstructor {
-			result = p.constructKash(values, context, span)
-		} else {
-			result = p.invokeKash(function.KashScript, function.Scope, values, context)
-		}
-		// Kash only borrows invocation arguments (selectors independently borrow).
+	if function.Kind == FunctionInterpreter {
 		discardCallValues(context.Run, values)
-		context.operationStart, context.operationEnd = previousStart, previousEnd
-		return result
+		if function == p.kashSelector {
+			return failure(context.Run, "EXPR_INVALID", span, "use a def block to author Kash actions")
+		}
+		return failure(context.Run, "EXPR_INVALID", span, "kame selects a value-producing recipe; it is not callable")
 	}
 	if function.NativeCall != nil {
 		if len(values) != function.Arity {

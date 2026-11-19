@@ -129,8 +129,6 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "assignment execution is unavailable")
 	case expr.KashYield:
 		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "yield requires generator execution")
-	case expr.KashReturn:
-		return p.kashReturn(scope, expression, context)
 	case expr.KashLet:
 		return p.kashLet(scope, expression, context)
 	case expr.KashExit:
@@ -246,7 +244,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 			return context.Program.selector("@*", span, context)
 		}
 		if name == "kash" && context.Program != nil {
-			return Result{Value: context.Program.KashConstructor()}
+			return Result{Value: context.Program.KashSelector()}
 		}
 		if name == "kame" && context.Program != nil {
 			return Result{Value: context.Program.KameSelector()}

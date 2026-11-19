@@ -62,8 +62,8 @@ func TestGoSuite(t *testing.T) {
 	t.Run("InvocationInputRootExcludesAnonymousProducersAndCurrentOperands", func(t *testing.T) {
 		TestInvocationInputRootExcludesAnonymousProducersAndCurrentOperands(legacy.Wrap(t))
 	})
-	t.Run("KashCallableDefinitionsPublishWithoutRelaxingClosurePolicy", func(t *testing.T) { TestKashCallableDefinitionsPublishWithoutRelaxingClosurePolicy(legacy.Wrap(t)) })
-	t.Run("KashConstructionIsPureAndRetainsLexicalScope", func(t *testing.T) { TestKashConstructionIsPureAndRetainsLexicalScope(legacy.Wrap(t)) })
+	t.Run("KashInterpreterDefinitionsPublish", func(t *testing.T) { TestKashInterpreterDefinitionsPublish(legacy.Wrap(t)) })
+	t.Run("KashInterpreterRejectsTextCompilation", func(t *testing.T) { TestKashInterpreterRejectsTextCompilation(legacy.Wrap(t)) })
 	t.Run("KashEagerBindingRetainsInitializerAcrossSuspension", func(t *testing.T) { TestKashEagerBindingRetainsInitializerAcrossSuspension(legacy.Wrap(t)) })
 	t.Run("KashEagerBindingsAreReachedOnceAndFreshInEachCall", func(t *testing.T) { TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(legacy.Wrap(t)) })
 	t.Run("KashEagerCancelledInitializerReleasesCallableOperands", func(t *testing.T) { TestKashEagerCancelledInitializerReleasesCallableOperands(legacy.Wrap(t)) })

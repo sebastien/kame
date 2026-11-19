@@ -150,7 +150,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 			return d
 		}
 	} else if explicit {
-		if p.Eval.IsKashConstructor(shell) {
+		if p.Eval.IsKashSelector(shell) {
 			entry.Kash = true
 		} else if shell.Kind == core.String && shell.Text != "" && strings.IndexByte(shell.Text, 0) < 0 {
 			entry.Shell = append(entry.Shell, cloneText(p.Alloc, shell.Text))

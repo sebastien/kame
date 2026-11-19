@@ -276,7 +276,7 @@ func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 
 func TestKashRejectsLegacyBoundariesButKeepsQuotedData(t *testing.T) {
 	a := t.Allocator()
-	invalid := []string{"printf @(name ())", "printf \\@(name)", "@(out! \"bad\")", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  \"x\" =>\n    printf bad", "printf > @(name ())", ":cwd @(name ()) printf bad", "@if(true)"}
+	invalid := []string{"printf @{name}", "printf \\@{name}", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  \"x\" =>\n    printf bad", "printf > @{name}", ":cwd @{name} printf bad"}
 	for i := range invalid {
 		s := script.ParseKash(a, "legacy.kash", invalid[i])
 		if len(s.Diagnostics) == 0 {

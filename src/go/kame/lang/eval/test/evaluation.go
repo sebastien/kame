@@ -629,7 +629,7 @@ func TestNestedDefReleasesItsFunction(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.ParseKash(a, "test.kash", "def outer ()\n\tdef foo x = x\n\treturn (foo 0)\ndef result = (outer ()).status\n")
+	parsed := script.ParseKash(a, "test.kash", "def outer ()\n\tdef foo x = x\n\treturn (foo 0)\ndef result = (outer ())\n")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := program.Definition("result")
 	if result == nil {

@@ -10,7 +10,7 @@ import (
 
 func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 	a := t.Allocator()
-	text := "def probe first rest...\n  def nested ()\n    return 0\n  if (nop first)\n    return 75 ?\n  (nested ())\n  return (count rest)\ndef result = (probe true 1 2)\n\"def\" literal\n\"return\" literal\n"
+	text := "def probe first rest...\n  def nested ()\n    return 0\n  if (nop first)\n    return 75\n  (nested ())\n  return count rest ?? 0\ndef result = (probe true 1 2)\n\"def\" literal\n\"return\" literal\n"
 	s := script.ParseKash(a, "functions.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
@@ -36,8 +36,8 @@ func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 	}
 	canonical := script.Format(a, again)
 	defer mem.FreeString(a, canonical)
-	if formatted != canonical || copy.Body[1].Items[0].Body[0].Kind != expr.KashReturn || !copy.Body[1].Items[0].Body[0].AcceptExit {
-		t.Error("function clone/format lost native returns or acceptance")
+	if formatted != canonical || copy.Body[1].Items[0].Body[0].Kind != expr.ValueReturn || copy.Body[1].Items[0].Body[0].Items[0].Int != 75 {
+		t.Error("function clone/format lost typed returns")
 	}
 }
 
@@ -48,7 +48,7 @@ func TestKashFunctionsRejectMalformedDefinitionsAndReturns(t *testing.T) {
 		"def probe rest... other\n  return 0", "def probe; printf no\n  return 0",
 		"def probe ()\n  return 0 ? printf no", "def probe ()\n  defer return 0",
 		"def probe ()\n  return 0\ndef probe = 1", "def probe = 1\ndef probe ()\n  return 0",
-		"def probe ()\n  return nil ?? 0", "def probe ()\n  return 0 &", "def probe ()\n  return 0 > ./file",
+		"def probe ()\n  return 0 ?", "def probe ()\n  return 0 &", "def probe ()\n  return 0 >> ./file",
 		"printf before; def probe\n  return 0",
 		"def probe#comment\n  return 0", "def probe value#comment\n  return 0",
 	}
@@ -73,7 +73,7 @@ func TestKameFunctionBodySharesActionGrammar(t *testing.T) {
 		return
 	}
 	body := parsed.Items[0].Definition.Expression.Body
-	if len(body) != 2 || body[0].Kind != expr.CommandGraph || body[1].Kind != expr.KashReturn {
+	if len(body) != 2 || body[0].Kind != expr.CommandGraph || body[1].Kind != expr.ValueReturn {
 		t.Error("Kame function block lost the action statements")
 	}
 	formatted := script.FormatWithIndent(a, parsed, "  ")

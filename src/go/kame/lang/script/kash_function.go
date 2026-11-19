@@ -59,22 +59,10 @@ func (p *kashParser) functionBlock(level, start int) *definition.Definition {
 	return d
 }
 
-func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *expr.Expr {
-	if (p.ValueBlock || p.RuleBody) && kind == expr.KashReturn {
-		return p.valueReturn(start, wordEnd)
-	}
+func (p *kashParser) exitStatement(start int, wordEnd int) *expr.Expr {
 	s, text := p.Script, p.Script.Source.Text
-	single := "return requires one status expression"
-	trailing := "return has unexpected trailing operands or process syntax"
-	if kind == expr.KashExit {
-		single = "exit requires one status expression"
-		trailing = "exit has unexpected trailing operands or process syntax"
-	}
 	e := mem.Alloc[expr.Expr](s.Alloc)
-	e.Kind, e.Span.Start = kind, start
-	if kind == expr.KashReturn && p.Functions == 0 {
-		s.error(start, wordEnd, "return requires an enclosing def, value block or rule body")
-	}
+	e.Kind, e.Span.Start = expr.KashExit, start
 	pos := wordEnd
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
 		pos++
@@ -87,21 +75,14 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 	s.takeDiagnostics(part.Diagnostics)
 	e.Items = append(e.Items, part.Expr)
 	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
-		s.error(pos, part.End, single)
+		s.error(pos, part.End, "exit requires one status expression")
 	}
 	pos = part.End
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
 		pos++
 	}
-	if kind == expr.KashReturn && pos < len(text) && text[pos] == '?' {
-		e.AcceptExit = true
-		pos++
-	}
-	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
-		pos++
-	}
 	if pos < len(text) && text[pos] != '\n' && text[pos] != ';' && text[pos] != '#' {
-		s.error(pos, pos+1, trailing)
+		s.error(pos, pos+1, "exit has unexpected trailing operands or process syntax")
 	}
 	p.Pos, e.Span.End = pos, pos
 	return e

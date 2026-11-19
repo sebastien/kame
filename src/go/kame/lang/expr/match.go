@@ -111,7 +111,7 @@ func (p *parser) armPattern() *Expr {
 		pattern = p.quoted(true)
 	case strings.HasPrefix(rest, "./"), strings.HasPrefix(rest, "../"),
 		strings.HasPrefix(rest, "/"), strings.HasPrefix(rest, "~/"), strings.HasPrefix(rest, "@{"):
-		pattern = p.pathAtom(false)
+		pattern = p.pathAtom()
 		p.classifyPathPattern(pattern, true)
 	default:
 		pattern = p.atom()

@@ -61,7 +61,6 @@ const (
 	KashWhile
 	ListSpread
 	KashFunction
-	KashReturn
 	KashLet
 	KashExit
 	KashWith
@@ -933,26 +932,25 @@ func (p *parser) atom() *Expr {
 }
 
 func (p *parser) path() *Expr {
-	e := p.pathAtom(false)
+	e := p.pathAtom()
 	p.classifyPathPattern(e, false)
 	return e
 }
 
-func (p *parser) pathAtom(command bool) *Expr {
+func (p *parser) pathAtom() *Expr {
 	start := p.pos
 	e := p.node(Path, start)
-	e.LiteralPath = command
 	partStart := start
 	patternDepth, pathParens := 0, 0
 	classStart := -1
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
-		if !command && b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@@") {
+		if b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@@") {
 			p.pos += 2
 			continue
 		}
 		if b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@{") {
-			if !command && patternDepth != 0 {
+			if patternDepth != 0 {
 				p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid")
 			}
 			if partStart < p.pos {
@@ -966,11 +964,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "@{", Span: source.Span{Start: open, End: p.pos}})
 			partStart = p.pos
 			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') {
-				message := "a leading path expansion requires / after it"
-				if command {
-					message = "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call; a leading path expansion requires / after it"
-				}
-				p.error(start, p.pos, message)
+				p.error(start, p.pos, "a leading path expansion requires / after it")
 				break
 			}
 			continue
@@ -993,13 +987,10 @@ func (p *parser) pathAtom(command bool) *Expr {
 			p.pos++
 			continue
 		}
-		if b == '[' && !command && patternDepth == 0 {
+		if b == '[' && patternDepth == 0 {
 			classStart = p.pos
 			p.pos++
 			continue
-		}
-		if command && (commandOperator(b) || b == '\'' || (p.commandGroup && b == ',' && patternDepth == 0)) {
-			break
 		}
 		if (p.valuePathStart == start+1 || p.kash && !p.delimitedValue) && b == ';' && patternDepth == 0 {
 			break
@@ -1018,18 +1009,13 @@ func (p *parser) pathAtom(command bool) *Expr {
 			break
 		}
 		if patternDepth == 0 {
-			if command && isDelimiter(b) {
+			if pathParens == 0 && (b == ',' || b == ')' || b == ']' || b == '}') {
 				break
 			}
-			if !command {
-				if pathParens == 0 && (b == ',' || b == ')' || b == ']' || b == '}') {
-					break
-				}
-				if b == '(' {
-					pathParens++
-				} else if b == ')' {
-					pathParens--
-				}
+			if b == '(' {
+				pathParens++
+			} else if b == ')' {
+				pathParens--
 			}
 		}
 		p.pos++
@@ -2538,18 +2524,11 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		}
 		return
 	}
-	if e.Kind == KashReturn || e.Kind == KashExit {
-		if e.Kind == KashExit {
-			b.WriteString("exit")
-		} else {
-			b.WriteString("return")
-		}
+	if e.Kind == KashExit {
+		b.WriteString("exit")
 		if len(e.Items) != 0 {
 			b.WriteByte(' ')
 			writeKashValue(b, e.Items[0])
-		}
-		if e.AcceptExit {
-			b.WriteString(" ?")
 		}
 		return
 	}

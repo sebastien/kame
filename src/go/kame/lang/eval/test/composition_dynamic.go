@@ -24,7 +24,6 @@ func TestCompositionDynamicTextRejectsHeadsBeforeEffects(t *testing.T) {
 	cases := []string{
 		"(eval \"(if false then (include ./a.km) else (out! 42))\")",
 		"(eval \"((unused => (out! 42)) (() => (include? ./a.km)))\")",
-		"(kash \"(out! 42)\\n(if false then (include ./a.km) else nil)\")",
 	}
 	for i := range cases {
 		expression := expr.Parse(a, "dynamic", cases[i])

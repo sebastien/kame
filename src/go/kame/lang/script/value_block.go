@@ -87,6 +87,9 @@ func (s *Script) startsValueBlock(start, end int) bool {
 
 func (p *kashParser) valueReturn(start, operand int) *expr.Expr {
 	s, text := p.Script, p.Script.Source.Text
+	if p.Functions == 0 && !p.ValueBlock && !p.RuleBody {
+		s.error(start, operand, "return requires an enclosing def, value block or rule body")
+	}
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind = expr.ValueReturn
 	e.Span = source.Span{Start: start, End: operand}

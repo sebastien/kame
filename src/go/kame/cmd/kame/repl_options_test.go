@@ -265,14 +265,14 @@ func TestNativeInteractiveOptions(t *testing.T) {
 	if status != 0 || errOut.Len() != 0 || !strings.Contains(out.String(), "history-scope: local (local;") {
 		t.Fatalf("startup override: status=%d out=%q err=%q", status, &out, &errOut)
 	}
-	for _, source := range []string{
-		"touch ./unexpected\noption history-scope global\n",
-		"((kash " + kameString("touch ./unexpected\noption history-scope global\n") + "))",
+	for _, test := range []struct{ source, code string }{
+		{"touch ./unexpected\noption history-scope global\n", "FEATURE_UNSUP"},
+		{"((kash " + kameString("touch ./unexpected\noption history-scope global\n") + "))", "EXPR_INVALID"},
 	} {
-		command := exec.Command(nativeCLIBinary(t), "do", "run", "--lang", "kash", "-c", source)
+		command := exec.Command(nativeCLIBinary(t), "do", "run", "--lang", "kash", "-c", test.source)
 		command.Dir = directory
 		output, err := command.CombinedOutput()
-		if err == nil || !strings.Contains(string(output), "FEATURE_UNSUP") || fileExists(filepath.Join(directory, "unexpected")) {
+		if err == nil || !strings.Contains(string(output), test.code) || fileExists(filepath.Join(directory, "unexpected")) {
 			t.Fatalf("batch options were not preflight rejected: %v %q", err, output)
 		}
 	}

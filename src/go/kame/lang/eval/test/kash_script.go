@@ -4,39 +4,42 @@ import (
 	"kame/core"
 	"kame/internal/testing"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 )
 
-func TestKashConstructionIsPureAndRetainsLexicalScope(t *testing.T) {
+func TestKashInterpreterRejectsTextCompilation(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	parsed := script.Parse(a, "test.km", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	r := evaluate(t, program, "((name => (kash \"printf %s $name\")) \"retained\")")
-	if r.Diagnostic.Code != "" || r.Value.Kind != core.Callable || r.Value.CallableOwner != program {
-		t.Error("Kash script did not retain an invocation-owned callable")
+	textCalls := []string{
+		`kash "printf forbidden"`,
+		`kash "./module.kash"`,
+		`kash (out! "forbidden")`,
 	}
-	if request := program.Requests.Next(); request.OK {
-		request.Request.Free(a)
-		t.Error("script construction performed a host effect")
+	for i := range textCalls {
+		expression := expr.Parse(a, "text.km", textCalls[i])
+		context := eval.Context{Program: program, Scope: program.Scope, Run: a}
+		r := program.EvaluateWith(expression.Expr, &context)
+		if r.Diagnostic.Code != "EXPR_INVALID" || len(context.Effects) != 0 {
+			t.Error("Kash text compilation was accepted or performed effects")
+		}
+		r.Free(a)
+		eval.FreeEffects(a, context.Effects)
+		expression.Free()
 	}
-	r.Free(a)
-	r = evaluate(t, program, "(kash \"if true\")")
-	if r.Diagnostic.Code != "PARSE_ERR" {
-		t.Error("Kash construction accepted an incomplete block")
+	r := evaluate(t, program, `(kash => kash "authored") (value => value)`)
+	if r.Diagnostic.Code != "" || r.Value.Text != "authored" {
+		t.Error("built-in interpreter selection changed lexical lookup")
 	}
 	r.Free(a)
 	r = evaluate(t, program, "(kash ./module.kash)")
 	if r.Diagnostic.Code != "SEL_NO_CONTEXT" {
 		t.Error("literal module path did not require a file-backed source")
-	}
-	r.Free(a)
-	r = evaluate(t, program, "(kash \"./module.kash\")")
-	if r.Diagnostic.Code != "" || r.Value.Kind != core.Callable {
-		t.Error("quoted module-looking text did not construct a script")
 	}
 	r.Free(a)
 	invalid := []string{"(kash ./module.km)", "(kash ./*.kash)", "(kash ./@{name}.kash)"}
@@ -53,28 +56,28 @@ func TestKashConstructionIsPureAndRetainsLexicalScope(t *testing.T) {
 	registry.Free()
 }
 
-func TestKashCallableDefinitionsPublishWithoutRelaxingClosurePolicy(t *testing.T) {
+func TestKashInterpreterDefinitionsPublish(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test.km", "SHELL = kash\nscript = ((value => (kash \"printf %s $value\")) 42)\n")
+	parsed := script.Parse(a, "test.km", "SHELL = kash\nselected = SHELL\n")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("SHELL")
 	engine.Request(node)
 	for i := 0; i < 10 && !node.Current; i++ {
 		engine.Step()
 	}
-	if !node.Current || !program.IsKashConstructor(node.Latest) {
-		t.Error("Kash constructor could not cross the definition boundary")
+	if !node.Current || !program.IsKashSelector(node.Latest) {
+		t.Error("Kash interpreter could not cross the definition boundary")
 	}
-	node = program.Definition("script")
+	node = program.Definition("selected")
 	engine.Request(node)
 	for i := 0; i < 10 && !node.Current; i++ {
 		engine.Step()
 	}
 	if !node.Current || node.Latest.Kind != core.Callable || node.Latest.HasTransientCallable() {
-		t.Error("retained script definition could not publish")
+		t.Error("aliased interpreter definition could not publish")
 	}
 	engine.Free()
 	program.Free()
@@ -87,18 +90,18 @@ func TestNativeKashFunctionsBindAndReturnWithoutHostProcesses(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	text := "def result = (list (probe 75 1 2) (probe 0))\ndef probe status rest...\n\tdef nested code\n\t\treturn code ?\n\tif (count rest == 2)\n\t\treturn status ?\n\t(nested 3)\n\treturn (count rest)\n\t(fail! \"unreachable\")\n"
+	text := "def result = (list (probe 75 1 2) (probe 0))\ndef probe status rest...\n\tdef nested code\n\t\treturn code\n\tif (count rest == 2)\n\t\treturn status\n\t(nested 3)\n\treturn (count rest)\n\t(fail! \"unreachable\")\n"
 	parsed := script.ParseKash(a, "functions.kash", text)
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
 	stepUntilCurrent(engine, node)
-	if !node.Current || node.Diagnostic.Code != "" || len(node.Latest.List) != 2 || node.Latest.List[0].Record[0].Value.Int != 75 || node.Latest.List[1].Record[0].Value.Int != 0 {
-		t.Error("native function failed to bind parameters, accept status, or unwind nested calls")
+	if !node.Current || node.Diagnostic.Code != "" || len(node.Latest.List) != 2 || node.Latest.List[0].Int != 75 || node.Latest.List[1].Int != 0 {
+		t.Error("native function failed to bind parameters, return typed integers, or unwind nested calls")
 	}
 	if request := p.Requests.Next(); request.OK {
 		request.Request.Free(a)
-		t.Error("native status return launched a host process")
+		t.Error("native value return launched a host process")
 	}
 	engine.Free()
 	p.Free()
@@ -113,7 +116,7 @@ func TestNativeKashFunctionsHaveFreshLocalDefinitions(t *testing.T) {
 	operations.Register(registry)
 	state := operationState{}
 	registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "fresh.kash", "def probe ()\n\tdef local = (tick ())\n\treturn local ?\ndef result = (map (unused => (probe ())) [1, 2, 3])\n")
+	parsed := script.ParseKash(a, "fresh.kash", "def probe ()\n\tdef local = (tick ())\n\treturn local\ndef result = (map (unused => (probe ())) [1, 2, 3])\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
@@ -122,7 +125,7 @@ func TestNativeKashFunctionsHaveFreshLocalDefinitions(t *testing.T) {
 		t.Error("separate native calls shared local effects")
 	} else {
 		for i := range node.Latest.List {
-			if node.Latest.List[i].Record[0].Value.Int != int64(i+1) {
+			if node.Latest.List[i].Int != int64(i+1) {
 				t.Error("native call returned a stale local definition")
 			}
 		}

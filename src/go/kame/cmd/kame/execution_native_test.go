@@ -729,6 +729,71 @@ func TestNativeKashRuleReturnPublishesArtifactAndStopsBody(t *testing.T) {
 	}
 }
 
+func TestNativeKashCommandWordsComposeTypedArguments(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("KAME_TEST_WORD_SCOPE", "scope with space")
+	text := "def folder = \"./two words\"\ndef flags = [\"x y\", \"z\"]\n" +
+		"printf '[%s]' @build --mtime=@0 deploy@host: @(str 42) '@{quoted}' " +
+		"$folder/file ${env/KAME_TEST_WORD_SCOPE}/file $...flags prefix-$(printf captured)-suffix\n"
+	want := "[@build][--mtime=@0][deploy@host:][@42][@{quoted}]" +
+		"[./two words/file][scope with space/file][x y][z][prefix-captured-suffix]"
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
+		"--allow-run", "--allow-env=KAME_TEST_WORD_SCOPE", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("command words returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashFunctionsReturnValuesAndRunCleanup(t *testing.T) {
+	directory := t.TempDir()
+	text := "def describe amount\n" +
+		"  defer (out! \"cleanup \")\n" +
+		"  with\n    if amount > 0\n      return {value: amount + 1, ok: true}\n" +
+		"  return nil\n" +
+		"def falls-through ()\n  printf ' command'\n" +
+		"let result = describe 41\n(out! result.value)\n" +
+		"let implicit = falls-through ()\nif implicit == nil\n  (out! \" nil\")\n"
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "cleanup 42 command nil" {
+		t.Fatalf("function returns gave status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "parse", "--lang", "kash", "-c", "def old ()\n  return 7 ?\n")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
+		!strings.Contains(nativeCLIRead(stderr), "PARSE_ERR") {
+		t.Fatalf("old return syntax gave status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashStageSettingsUseReservedTypes(t *testing.T) {
+	directory := t.TempDir()
+	stageDirectory := filepath.Join(directory, "build", "release")
+	if err := os.MkdirAll(stageDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(stageDirectory, "stage-proof"), "present")
+	text := "def seconds = 10\ndef detached = false\ndef variant = \"release\"\n" +
+		":timeout 10 :tty false :foreground $detached :env {MODE: \"two words\"} sh -c 'printf \"[%s]\" \"$MODE\"'\n" +
+		":timeout $seconds printf '[done]'\n" +
+		":cwd ./build/(variant) :timeout 0x10 sh -c 'test -f ./stage-proof && printf \"[cwd]\"'\n"
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "[two words][done][cwd]" {
+		t.Fatalf("typed stage settings returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, text := range []string{
+		":timeout (str 10) printf forbidden",
+		"def timeout = \"10\"\n:timeout $timeout printf forbidden",
+		":tty (str false) printf forbidden",
+		":foreground (str false) printf forbidden",
+		":env (str 10) printf forbidden",
+	} {
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
+		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
+			!strings.Contains(nativeCLIRead(stderr), "EXPR_INVALID") {
+			t.Errorf("invalid %q returned status %d: %q %s", text, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+}
+
 func TestNativeKashConditionsUseValuesAndExplicitProcessOutcomes(t *testing.T) {
 	directory := t.TempDir()
 	text := "if 1 + 1 == 2 and false or $?(false).ok\n  (fail! \"unreachable\")\n" +

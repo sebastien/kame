@@ -11,128 +11,30 @@ import (
 	"slices"
 )
 
-// KashConstructor is a pure, invocation-owned script constructor.
-func (p *Program) KashConstructor() core.Value {
-	for i := range p.KashFunctions {
-		if p.KashFunctions[i].KashConstructor {
-			return kashFunctionValue(p, p.KashFunctions[i])
-		}
+// KashSelector is the built-in interpreter value selected by the name kash.
+func (p *Program) KashSelector() core.Value {
+	if p.kashSelector == nil {
+		p.kashSelector = mem.Alloc[Function](p.Alloc)
+		p.kashSelector.Kind, p.kashSelector.Owner = FunctionInterpreter, p
 	}
-	f := mem.Alloc[Function](p.Alloc)
-	f.Kind, f.Owner, f.KashConstructor = FunctionInvocation, p, true
-	p.KashFunctions = append(p.KashFunctions, f)
-	return kashFunctionValue(p, f)
+	return core.Value{Kind: core.Callable, Callable: p.kashSelector, CallableOwner: p, Text: "kash"}
 }
 
-func kashFunctionValue(p *Program, f *Function) core.Value {
-	text := ""
-	if f.KashConstructor {
-		text = "kash"
-	}
-	value := core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: text}
-	if f.KashSignature.Mode == core.SignatureContent {
-		value.CallableSignature = &f.KashSignature
-	}
-	return value
+func (p *Program) IsKashSelector(v core.Value) bool {
+	return v.Kind == core.Callable && p.kashSelector != nil && v.Callable == p.kashSelector
 }
 
-func (p *Program) IsKashConstructor(v core.Value) bool {
-	if v.Kind != core.Callable || v.CallableOwner != p {
-		return false
-	}
-	f := v.Callable.(*Function)
-	return f.Kind == FunctionInvocation && f.KashConstructor
-}
-
-// KameSelector is the shell value selected by the name kame. The string "kame"
-// remains an external executable. The selector is not a script constructor.
+// KameSelector selects a value-producing recipe body.
 func (p *Program) KameSelector() core.Value {
 	if p.kameSelector == nil {
-		f := mem.Alloc[Function](p.Alloc)
-		f.Kind, f.Owner, f.KameSelector = FunctionInvocation, p, true
-		p.kameSelector = f
+		p.kameSelector = mem.Alloc[Function](p.Alloc)
+		p.kameSelector.Kind, p.kameSelector.Owner = FunctionInterpreter, p
 	}
 	return core.Value{Kind: core.Callable, Callable: p.kameSelector, CallableOwner: p, Text: "kame"}
 }
 
 func (p *Program) IsKameSelector(v core.Value) bool {
-	if v.Kind != core.Callable || v.CallableOwner != p || v.Callable == nil {
-		return false
-	}
-	f := v.Callable.(*Function)
-	return f.Kind == FunctionInvocation && f.KameSelector
-}
-
-type kashConstruction struct{ Function *Function }
-
-func freeKashConstruction(a mem.Allocator, state any) { mem.Free(a, state.(*kashConstruction)) }
-
-func (p *Program) constructKash(values []core.Value, c *Context, span source.Span) Result {
-	if len(values) != 1 {
-		return arityFailure(c.Run, span, "kash", len(values), 1, 1)
-	}
-	if values[0].Kind != core.String {
-		return failure(c.Run, "EXPR_INVALID", span, "kash requires script text")
-	}
-	if stored := c.OperationState(); stored != nil {
-		state := stored.(*kashConstruction)
-		return Result{Value: kashFunctionValue(p, state.Function)}
-	}
-	parsed := script.ParseKash(p.Alloc, "<kash>", values[0].Text)
-	if len(parsed.Diagnostics) != 0 {
-		d := parsed.Diagnostics[0]
-		r := failure(c.Run, d.Code, span, d.Message)
-		parsed.Free()
-		return r
-	}
-	for i := range parsed.Items {
-		if parsed.Items[i].Kind == script.Include {
-			parsed.Free()
-			return failure(c.Run, "FEATURE_UNSUP", span, "include requires a file-backed source")
-		}
-		if parsed.Items[i].Module != nil {
-			parsed.Free()
-			return failure(c.Run, "FEATURE_UNSUP", span, "module declarations require a file-backed source")
-		}
-		if parsed.Items[i].Kind == script.SessionCommand {
-			parsed.Free()
-			return failure(c.Run, "FEATURE_UNSUP", span, "session commands require an interactive session entry or startup file")
-		}
-	}
-	f := mem.Alloc[Function](p.Alloc)
-	f.Kind, f.Owner, f.KashScript, f.Scope = FunctionInvocation, p, parsed, c.Scope
-	// Only the global scope has no captured invocation-local bindings. Its
-	// referenced definitions and other reads remain tracked as dependencies.
-	if f.Scope == p.Scope {
-		digest := core.NewDigest()
-		digest.Text("kame-global-kash-callable-v1")
-		digest.Text(parsed.Source.Text)
-		f.KashSignature.Mode = core.SignatureContent
-		digest.Sum(f.KashSignature.Digest[:])
-	}
-	f.Scope.Retain()
-	p.KashFunctions = append(p.KashFunctions, f)
-	if c.Engine != nil {
-		state := mem.Alloc[kashConstruction](p.Alloc)
-		state.Function = f
-		c.SetOperationState(state, freeKashConstruction)
-	}
-	return Result{Value: kashFunctionValue(p, f)}
-}
-
-func (p *Program) freeKashFunctions() {
-	// Keep every function alive while captured scopes discard their bindings.
-	for i := range p.KashFunctions {
-		f := p.KashFunctions[i]
-		f.Scope.Free()
-		if f.KashScript != nil {
-			f.KashScript.Free()
-		}
-	}
-	for i := range p.KashFunctions {
-		mem.Free(p.Alloc, p.KashFunctions[i])
-	}
-	mem.FreeSlice(nil, p.KashFunctions)
+	return v.Kind == core.Callable && p.kameSelector != nil && v.Callable == p.kameSelector
 }
 
 type kashInvocation struct {
@@ -159,7 +61,7 @@ type kashInvocation struct {
 	PropagateReturn bool
 	Returned        bool
 	LoopTransfer    expr.Kind
-	ValueBlock      bool
+	ExplicitReturn  bool
 }
 
 func freeKashInvocation(a mem.Allocator, value any) {
@@ -203,7 +105,7 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 			return r
 		}
 	}
-	r := p.invokeKash(parsed, c.Scope, c.Args, c)
+	r := p.invokeKashBody(parsed, nil, c.Scope, c.Args, c)
 	if state == nil {
 		if stored := c.OperationState(); stored != nil {
 			state = stored.(*kashInvocation)
@@ -214,10 +116,6 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 	}
 	c.operationStart, c.operationEnd = previousStart, previousEnd
 	return r
-}
-
-func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Value, c *Context) Result {
-	return p.invokeKashBody(parsed, nil, scope, args, c)
 }
 
 func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope *Scope, args []core.Value, c *Context) Result {
@@ -256,7 +154,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		}
 		if native != nil {
 			state.Native = true
-			state.ValueBlock = native.Kind == expr.ValueBlock
+			state.ExplicitReturn = native.Kind == expr.ValueBlock || native.Kind == expr.KashFunction
 			state.PropagateReturn = native.Kind == expr.KashWith
 			initialized := p.kashBodyDefinitions(state.Scope, native.Body, c)
 			if initialized.Diagnostic.Code != "" {
@@ -269,7 +167,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 				if e.Kind == expr.KashDefinition || e.Kind == expr.KashComment {
 					continue
 				}
-				if e.Kind == expr.CommandGraph || e.Kind == expr.CommandList || e.Kind == expr.KashReturn || expr.IsKashControl(e.Kind) {
+				if e.Kind == expr.CommandGraph || e.Kind == expr.CommandList || expr.IsKashControl(e.Kind) {
 					kind = script.Command
 				}
 				state.Items = append(state.Items, script.ScriptItem{Kind: kind, Expression: e, Span: e.Span})
@@ -425,7 +323,7 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		}
 		freeCallables(p.Alloc, &state.Value)
 		state.Value.Free(p.Alloc)
-		if (item.Kind == script.Expression || state.ValueBlock) && !r.Returned {
+		if (item.Kind == script.Expression || state.ExplicitReturn) && !r.Returned {
 			freeCallables(p.Alloc, &r.Value)
 			r.Value.Free(p.Alloc)
 			state.Value = core.Value{}

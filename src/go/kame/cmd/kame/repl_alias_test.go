@@ -142,13 +142,13 @@ func TestNativeKashAliasFormatting(t *testing.T) {
 	if output, err = command.CombinedOutput(); err == nil || !strings.Contains(string(output), "FEATURE_UNSUP") {
 		t.Fatalf("batch aliases were not rejected: error=%v out=%q", err, output)
 	}
-	for _, source := range []string{
-		"touch ./unexpected\nalias ll = [\"ls\"]\n",
-		"((kash " + kameString("touch ./unexpected\nalias ll = [\"ls\"]\n") + "))",
+	for _, test := range []struct{ source, code string }{
+		{"touch ./unexpected\nalias ll = [\"ls\"]\n", "FEATURE_UNSUP"},
+		{"((kash " + kameString("touch ./unexpected\nalias ll = [\"ls\"]\n") + "))", "EXPR_INVALID"},
 	} {
-		command = exec.Command(binary, "do", "run", "--lang", "kash", "-c", source)
+		command = exec.Command(binary, "do", "run", "--lang", "kash", "-c", test.source)
 		command.Dir = directory
-		if output, err = command.CombinedOutput(); err == nil || !strings.Contains(string(output), "FEATURE_UNSUP") || fileExists(filepath.Join(directory, "unexpected")) {
+		if output, err = command.CombinedOutput(); err == nil || !strings.Contains(string(output), test.code) || fileExists(filepath.Join(directory, "unexpected")) {
 			t.Fatalf("batch alias preflight: error=%v out=%q", err, output)
 		}
 	}

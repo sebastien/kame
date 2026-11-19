@@ -16,7 +16,7 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 	operations.Register(registry)
 	state := operationState{}
 	registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "fresh.kash", "def probe ()\n\tlet unused = (tick ())\n\tlet value = (tick ())\n\tlet call = (() => value)\n\treturn (call ()) ?\ndef result = (map (item => (probe ())) [1, 2, 3])\n")
+	parsed := script.ParseKash(a, "fresh.kash", "def probe ()\n\tlet unused = (tick ())\n\tlet value = (tick ())\n\tlet call = (() => value)\n\treturn (call ())\ndef result = (map (item => (probe ())) [1, 2, 3])\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
@@ -25,7 +25,7 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 		t.Error("eager acquisition was skipped, repeated, or reused across calls: " + node.Diagnostic.Code)
 	} else {
 		for i := range node.Latest.List {
-			if node.Latest.List[i].Record[0].Value.Int != int64((i+1)*2) {
+			if node.Latest.List[i].Int != int64((i+1)*2) {
 				t.Error("fresh eager slot retained another call's value")
 			}
 		}
@@ -37,16 +37,16 @@ func TestKashEagerBindingsAreReachedOnceAndFreshInEachCall(t *testing.T) {
 }
 
 func TestKashEagerBindingRetainsInitializerAcrossSuspension(t *testing.T) {
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (map (item => (list (once ()) (async ()))) [1, 2])\n\treturn (count values) ?\ndef result = (probe ())\n", 2)
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (flatmap (item => [(list (once ()) (async ()))]) [1, 2])\n\treturn (count values) ?\ndef result = (probe ())\n", 2)
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (filter (item => (list (once ()) (async ()))) [1, 2])\n\treturn (count values) ?\ndef result = (probe ())\n", 2)
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (reduce (acc item => (list (once ()) (async ()))) [] [1, 2])\n\treturn (count values) ?\ndef result = (probe ())\n", 2)
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (list (once ()) (async ()))\n\treturn (count values) ?\ndef result = (probe ())\n", 1)
-	checkKashEagerSuspension(t, "def probe ()\n\tdef unused = (once ())\n\tdef helper () = 42\n\tlet values = (list (once ()) (async ()))\n\treturn (count values) ?\ndef result = (probe ())\n", 1)
-	checkKashEagerSuspension(t, "def probe callback\n\tlet values = (list (once ()) (async ()))\n\treturn (count values) ?\ndef result = (probe (() => 42))\n", 1)
-	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (list (() => 42) (once ()) (async ()))\n\treturn 2 ?\ndef result = (probe ())\n", 1)
-	checkKashEagerSuspension(t, "def probe ()\n\tdef unrelated = 1\n\tlet values = (list (once ()) (async ()))\n\treturn 2 ?\ndef result = (probe ())\n", 1)
-	checkKashEagerSuspension(t, "def probe ()\n\tfor item in [1, 2]\n\t\tif (eq? item item)\n\t\t\tdef unused = (once ())\n\t\t\tdef helper () = item\n\t\t\tlet values = (list (once ()) (async ()))\n\treturn 2 ?\ndef result = (probe ())\n", 2)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (map (item => (list (once ()) (async ()))) [1, 2])\n\treturn (count values)\ndef result = (probe ())\n", 2)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (flatmap (item => [(list (once ()) (async ()))]) [1, 2])\n\treturn (count values)\ndef result = (probe ())\n", 2)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (filter (item => (list (once ()) (async ()))) [1, 2])\n\treturn (count values)\ndef result = (probe ())\n", 2)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (reduce (acc item => (list (once ()) (async ()))) [] [1, 2])\n\treturn (count values)\ndef result = (probe ())\n", 2)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (list (once ()) (async ()))\n\treturn (count values)\ndef result = (probe ())\n", 1)
+	checkKashEagerSuspension(t, "def probe ()\n\tdef unused = (once ())\n\tdef helper () = 42\n\tlet values = (list (once ()) (async ()))\n\treturn (count values)\ndef result = (probe ())\n", 1)
+	checkKashEagerSuspension(t, "def probe callback\n\tlet values = (list (once ()) (async ()))\n\treturn (count values)\ndef result = (probe (() => 42))\n", 1)
+	checkKashEagerSuspension(t, "def probe ()\n\tlet values = (list (() => 42) (once ()) (async ()))\n\treturn 2\ndef result = (probe ())\n", 1)
+	checkKashEagerSuspension(t, "def probe ()\n\tdef unrelated = 1\n\tlet values = (list (once ()) (async ()))\n\treturn 2\ndef result = (probe ())\n", 1)
+	checkKashEagerSuspension(t, "def probe ()\n\tfor item in [1, 2]\n\t\tif (eq? item item)\n\t\t\tdef unused = (once ())\n\t\t\tdef helper () = item\n\t\t\tlet values = (list (once ()) (async ()))\n\treturn 2\ndef result = (probe ())\n", 2)
 }
 
 func checkKashEagerSuspension(t *testing.T, text string, expected int) {
@@ -79,7 +79,7 @@ func checkKashEagerSuspension(t *testing.T, text string, expected int) {
 		request.Request.Free(a)
 	}
 	stepUntilCurrent(engine, node)
-	if !node.Current || node.Diagnostic.Code != "" || len(node.Latest.Record) == 0 || node.Latest.Record[0].Value.Int != 2 || state.Calls != expected || state.Effects != expected {
+	if !node.Current || node.Diagnostic.Code != "" || node.Latest.Kind != core.Int || node.Latest.Int != 2 || state.Calls != expected || state.Effects != expected {
 		t.Errorf("eager initializer replayed completed work or lost its output: current=%t calls=%d effects=%d diagnostic=%s", node.Current, state.Calls, state.Effects, node.Diagnostic.Code)
 	}
 	engine.Free()

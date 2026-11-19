@@ -353,7 +353,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.ValueReturn || value.Kind == expr.KashSet || value.Kind == expr.KashYield || value.Kind == expr.KashReturn || value.Kind == expr.KashExit || value.Kind == expr.KashLet || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
+	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.ValueReturn || value.Kind == expr.KashSet || value.Kind == expr.KashYield || value.Kind == expr.KashExit || value.Kind == expr.KashLet || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -580,9 +580,6 @@ func exprKind(k expr.Kind) string {
 	}
 	if k == expr.KashFunction {
 		return "kash-function"
-	}
-	if k == expr.KashReturn {
-		return "kash-return"
 	}
 	if k == expr.KashLet {
 		return "kash-let"

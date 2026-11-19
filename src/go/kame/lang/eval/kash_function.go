@@ -2,7 +2,6 @@ package eval
 
 import (
 	"kame/core"
-	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/expr"
 )
@@ -51,31 +50,6 @@ func (p *Program) evaluatePureValueBlock(e *expr.Expr, scope *Scope, c *Context)
 	if r.Value.HasTransientCallable() {
 		r.Free(c.Run)
 		return failure(c.Run, "EXPR_INVALID", e.Span, "value block cannot return a temporary callable")
-	}
-	return r
-}
-
-func (p *Program) kashReturn(scope *Scope, e *expr.Expr, c *Context) Result {
-	if len(e.Items) == 0 {
-		return Result{Value: core.Value{Kind: core.Nil}, Returned: true}
-	}
-	r := p.evaluate(c.Engine, scope, e.Items[0], c)
-	if r.Waiting || r.Diagnostic.Code != "" {
-		return r
-	}
-	if r.Value.Kind != core.Int || r.Value.Int < 0 || r.Value.Int > 255 {
-		r.Free(c.Run)
-		return failure(c.Run, "EXPR_INVALID", e.Items[0].Span, "return status must be an integer from 0 through 255")
-	}
-	status := r.Value.Int
-	r.Free(c.Run)
-	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: status}}}
-	r = processResult(c.Run, core.Value{Kind: core.Record, Record: fields}, e.Span)
-	r.Returned = true
-	if status != 0 && !e.AcceptExit {
-		failed := failure(c.Run, "RECIPE_FAIL", e.Span, "function returned an unsuccessful status")
-		failed.Diagnostic.Cause = diagnostic.Cause{Kind: owned(c.Run, "process"), Message: owned(c.Run, "function returned"), Status: int(status), HasStatus: true}
-		r.Diagnostic = failed.Diagnostic
 	}
 	return r
 }

@@ -12,7 +12,7 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$(printf a |(broadcast) (cat > ./left, cat > ./right))",
 		"$((printf a | cat, (printf b, printf c) |(merge) cat) |(merge) cat)",
 		"$((printf \"a,b\" (nop [1, 2]), printf %s $(printf \"(x,y)\")) |(merge) cat)",
-		"$((printf %s ./a{b,c}, printf %s ./@{nop \"value\"}) |(merge) cat)",
+		"$((printf %s ./a{b,c}, printf %s ./(nop \"value\")) |(merge) cat)",
 		"$(printf a |(frame :lines) |(filter (eq item \"a\") | cat > ./selected) | cat)",
 		"$(printf a |(frame :lines) |(filter true | cat |(frame :lines) >&) | cat)",
 		"$(printf a |(frame :lines) |(filter true | cat |(frame :lines) >@) |(filter false | cat > ./selected) | cat)",

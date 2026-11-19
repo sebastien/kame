@@ -15,7 +15,7 @@ func TestKashRuleBodyReturnUsesValueGrammar(t *testing.T) {
 	}
 	functionReturn := parsed.Items[0].Definition.Expression.Body[0]
 	ruleReturn := parsed.Items[1].Expression.Items[0].Body[0]
-	if functionReturn.Kind != expr.KashReturn || ruleReturn.Kind != expr.ValueReturn || ruleReturn.Items[0].Infix != "+" {
+	if functionReturn.Kind != expr.ValueReturn || ruleReturn.Kind != expr.ValueReturn || ruleReturn.Items[0].Infix != "+" {
 		t.Fatalf("wrong return contexts: %v and %v", functionReturn.Kind, ruleReturn.Kind)
 	}
 	if actual := script.Format(nil, parsed); actual != text {

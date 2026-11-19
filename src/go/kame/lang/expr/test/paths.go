@@ -8,7 +8,7 @@ import (
 
 func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`./build/@{component}/main.js`, `@{root}/sh/**/*.sh`, `../@{join " " ["a", "b"]}/@{name}`, "/@{nop\n \"nested )\"}/file", `$(printf "%s" ./@{name}/file)`, `$(printf "%s" @{root}/file)`, `./journal/[a@{name}].md`, `./journal/[@{get "name" {name: "b"}}].md`}
+	texts := []string{`./build/@{component}/main.js`, `@{root}/sh/**/*.sh`, `../@{join " " ["a", "b"]}/@{name}`, "/@{nop\n \"nested )\"}/file", `$(printf "%s" (./@{name}/file))`, `$(printf "%s" (@{root}/file))`, `./journal/[a@{name}].md`, `./journal/[@{get "name" {name: "b"}}].md`}
 	for i := range texts {
 		parsed := expr.Parse(a, "paths.km", texts[i])
 		if len(parsed.Diagnostics) != 0 || parsed.Expr == nil {
@@ -18,7 +18,7 @@ func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 		}
 		path := parsed.Expr
 		if path.Kind == expr.CommandCapture {
-			path = path.Items[0].Items[2].Parts[0].Expr
+			path = expr.Ungroup(path.Items[0].Items[2].Parts[0].Expr)
 		}
 		if path.Kind != expr.Path || len(path.Parts) == 0 || path.Pattern != nil {
 			t.Error("path lost its structural parts")

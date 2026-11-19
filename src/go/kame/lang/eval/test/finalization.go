@@ -324,8 +324,8 @@ func TestFinallyStatementsRetainBindingsAndAcceptedWrites(t *testing.T) {
 	let saved = 42
 	(write! "first" "one")
 	(write! "second" "two")
-	return $saved ?
-def result = (finally! body (() => out! "cleanup")).status
+	return saved
+def result = (finally! body (() => out! "cleanup"))
 `)
 	if len(parsed.Diagnostics) != 0 {
 		t.Errorf("finalization fixture did not parse: %v", parsed.Diagnostics)

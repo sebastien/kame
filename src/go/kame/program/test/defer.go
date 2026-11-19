@@ -18,7 +18,7 @@ func TestDeferredExpressionsFinalizeAndReleaseRetainedScopes(t *testing.T) {
 	texts := []string{
 		"if (nop true)\n  def value = \"retained\"\n  defer (write! ./cleanup value)\n(nop nil)",
 		"defer (write! ./cleanup \"retained\"); defer (fail! \"cleanup failure\"); (fail! \"primary failure\")",
-		"def call = (kash \"\"\"defer (write! ./cleanup \"retained\"); defer (fail! \"cleanup failure\"); (fail! \"primary failure\")\"\"\"); (call ())",
+		"def call ()\n  defer (write! ./cleanup \"retained\")\n  defer (fail! \"cleanup failure\")\n  (fail! \"primary failure\")\n(call ())",
 	}
 	for scenario := range texts {
 		host := wasm.NewMemoryHost(a)

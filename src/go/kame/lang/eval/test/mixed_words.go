@@ -15,7 +15,7 @@ func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 		`result = $(printf(once ())(async ()) value)`,
 		`result = $(printf value > ./prefix-(once ())-(async ()).txt)`,
 		`result = $(:cwd ./prefix-(once ())-(async ()) printf value)`,
-		`result = $(:timeout (once ()).(async ()) printf value)`,
+		`result = $(:timeout ((once ()) + (async ())) printf value)`,
 		`result = $(:MODE prefix-(once ())-(async ()) printf value)`,
 	}
 	for i := range sources {

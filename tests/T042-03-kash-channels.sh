@@ -5,8 +5,13 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-03 Kash named channel parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
 cli_build
+if [ -n "${KAME_WASM:-}" ]; then
+	wasm_wrapper="$CLI_ROOT/src/js/kame.js"
+else
+	make dist-wasm >/dev/null
+	wasm_wrapper="$CLI_ROOT/dist/kame.js"
+fi
 work="$TMPDIR/channels"
 mkdir -p "$work"
 
@@ -25,7 +30,7 @@ expect() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_wrapper"); fi
 	left="$work/$backend-left"
 	right="$work/$backend-right"
 	marker="$work/$backend-marker"
@@ -48,7 +53,7 @@ stream right
 	expect "selected branch owns its channel writer" test "$(cat "$left")" = a
 	expect "named side output never rejoins implicitly" test "$(cat "$right")" = b
 	run_case "stream records
-(printf \"a\nb\n\" |(frame :lines) >&records, &records |(filter :true | cat > $left) | cat > $right) &" 0
+(printf \"a\nb\n\" |(frame :lines) >&records, &records |(filter true | cat > $left) | cat > $right) &" 0
 	expect "framing crosses named aliases without encoding" test "$(cat "$left")" = $'a\nb'
 	expect "async owner joins reader and selected branch" test ! -s "$right"
 	run_case 'stream terminal
@@ -82,7 +87,7 @@ printf a >&reports
 stream second
 (&first | cat >&second, &second | cat >&first)' 1 KASH_GRAPH_CYCLE
 	run_case 'stream reports
-(printf a >&reports, &reports |(filter :true | cat) | cat)' 1 KASH_FRAME_REQUIRED
+(printf a >&reports, &reports |(filter true | cat) | cat)' 1 KASH_FRAME_REQUIRED
 	run_case 'stream reports
 (:cwd . &reports | cat, printf a >&reports)' 1 PARSE_ERR
 done

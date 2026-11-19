@@ -36,11 +36,11 @@ const (
 	terminalBackgroundKey = "terminalBackground"
 )
 
-func setupBoolean(value core.Value) (bool, bool) {
+func setupBoolean(value core.Value, literal bool) (bool, bool) {
 	if value.Kind == core.Bool {
 		return value.Bool, true
 	}
-	if value.Kind == core.String && (value.Text == "true" || value.Text == "false") {
+	if literal && value.Kind == core.String && (value.Text == "true" || value.Text == "false") {
 		return value.Text == "true", true
 	}
 	return false, false
@@ -48,12 +48,12 @@ func setupBoolean(value core.Value) (bool, bool) {
 
 // terminalSetup records one stage's :tty or :foreground. Requesting either
 // facility needs metadata authority, or an interactive terminal session.
-func (p *Program) terminalSetup(state *captureState, kind expr.SetupKey, value core.Value, span source.Span, c *Context) Result {
+func (p *Program) terminalSetup(state *captureState, kind expr.SetupKey, value core.Value, literal bool, span source.Span, c *Context) Result {
 	name, granted := "tty", c.Terminal.TTY
 	if kind == expr.SetupForeground {
 		name, granted = "foreground", c.Terminal.Foreground
 	}
-	enabled, ok := setupBoolean(value)
+	enabled, ok := setupBoolean(value, literal)
 	if !ok {
 		return failure(c.Run, "EXPR_INVALID", span, name+" setup requires true or false")
 	}

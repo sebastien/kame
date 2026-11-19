@@ -73,8 +73,8 @@ func acceptsNoArguments(p *Program, v core.Value) bool {
 		o := p.operationForCallable(f)
 		return o != nil && o.MinArity == 0
 	}
-	if f.Kind == FunctionInvocation {
-		return f.Owner == p && !f.KashConstructor
+	if f.Kind == FunctionInterpreter {
+		return false
 	}
 	if f.NativeCall != nil {
 		return f.Arity == 0

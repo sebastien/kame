@@ -64,7 +64,7 @@ func (p *kashParser) checkGenerator(function *expr.Expr) {
 		switch e.Kind {
 		case expr.KashYield:
 			function.Bool = true
-		case expr.KashReturn:
+		case expr.ValueReturn:
 			if len(e.Items) != 0 {
 				returns = append(returns, e.Span)
 			}

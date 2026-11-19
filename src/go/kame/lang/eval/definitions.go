@@ -31,7 +31,7 @@ type Program struct {
 	ExitBoundary       bool
 	StreamStates       []*captureState
 	OperationFunctions []*Function
-	KashFunctions      []*Function
+	kashSelector       *Function
 	Modules            []*kashModule
 	kameSelector       *Function
 	NextScriptGroup    int64
@@ -325,11 +325,11 @@ func (p *Program) Free() {
 		p.freeOperationMemo(p.OperationMemos[i])
 	}
 	mem.FreeSlice(nil, p.OperationMemos)
-	p.freeKashFunctions()
 	for i := range p.Modules {
 		p.Modules[i].Free()
 	}
 	mem.FreeSlice(nil, p.Modules)
+	mem.Free(p.Alloc, p.kashSelector)
 	mem.Free(p.Alloc, p.kameSelector)
 	for i := range p.OperationFunctions {
 		mem.Free(p.Alloc, p.OperationFunctions[i])

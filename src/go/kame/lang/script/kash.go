@@ -280,12 +280,12 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			e := p.loopTransferStatement(start, wordEnd, kind)
 			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
-		} else if word == "return" || word == "exit" {
-			kind := expr.KashReturn
-			if word == "exit" {
-				kind = expr.KashExit
-			}
-			e := p.transferStatement(start, wordEnd, kind)
+		} else if word == "return" {
+			e := p.valueReturn(start, wordEnd)
+			expr.SetCommandChannels(s.Alloc, e, p.Channels)
+			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+		} else if word == "exit" {
+			e := p.exitStatement(start, wordEnd)
 			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 		} else if word == "defer" {
 			p.Pos = wordEnd
