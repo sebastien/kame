@@ -201,6 +201,7 @@ uint32_t kame_wasm_declaration_predicate(uint64_t instance, uint32_t data,
  * Diagnostics add portable source/span/tips when available. */
 uint32_t kame_wasm_composition_condition(uint64_t instance, uint32_t data,
     uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Compile a complete Kame program with the configured source name. */
 uint32_t kame_wasm_source_compile(uint64_t instance, uint32_t source,
                                   uint32_t source_len);
 /* Label the compiled source for diagnostics. Call before source_compile; an

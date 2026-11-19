@@ -57,7 +57,7 @@ func TestEmptyOptionValuesHaveConsistentDiagnostics(t *testing.T) {
 func TestFormattingOptionsMustApplyToSelectedLanguage(t *testing.T) {
 	invalid := [][]string{
 		{"--lang=expr", "--indent=spaces"}, {"--lang=template", "--indent=tabs"},
-		{"--lang=km", "--indent=spaces"}, {"--indent-width=2"}, {"--lang=expr", "--comment=plain"},
+		{"--indent-width=2"}, {"--lang=expr", "--comment=plain"},
 	}
 	for i := range invalid {
 		inv := cli.Parse("fmt", invalid[i])
@@ -66,7 +66,7 @@ func TestFormattingOptionsMustApplyToSelectedLanguage(t *testing.T) {
 		}
 		inv.Free()
 	}
-	languages := []string{"rule", "script", "kmk", "kash"}
+	languages := []string{"km", "kash", "rule", "script"}
 	for i := range languages {
 		inv := cli.Parse("fmt", []string{"--lang", languages[i], "--indent-width=2", "--indent=spaces"})
 		if !inv.OK {

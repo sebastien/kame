@@ -12,7 +12,7 @@ import (
 func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T) {
 	a := t.Allocator()
 	predicates := []string{"nil", "false", "true", "0", "0.0", `""`, "[]", "{key: 1}", "(if false then 1 elif 0 then 2 else 3)", "(selected ())", "mode"}
-	prefix := "mode ?= \"debug\"\n(selected) = mode\nunused = (read \"never read\")\n"
+	prefix := "mode ?= \"debug\"\ndef selected () = mode\nunused = (read \"never read\")\n"
 	for i := range predicates {
 		result := program.CompositionCondition(a, "condition.kmk", prefix, predicates[i], []string{"mode=release", "future=later"}, []string{"KAME_mode=environment"}, "")
 		if result.Diagnostic.Code != "" || result.Selected != (i >= 2) {
@@ -29,7 +29,7 @@ func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T)
 
 func TestCompositionConditionUsesEvaluationDirectory(t *testing.T) {
 	a := t.Allocator()
-	prefix := "root = (abspath ./)\n(helper) = (abspath ./child/..)\n"
+	prefix := "root = (abspath ./)\ndef helper () = (abspath ./child/..)\n"
 	predicates := []string{`(eq (abspath ./) "/workspace/project")`, `(eq root "/workspace/project")`, `(eq (helper ()) "/workspace/project")`}
 	for i := range predicates {
 		result := program.CompositionConditionSources(a, []program.CompileSource{{Name: "/sdk/config.kmk", Text: prefix}}, program.CompileSource{Name: "/sdk/main.kmk", Text: predicates[i]}, nil, nil, "/workspace/project")
@@ -67,7 +67,7 @@ func TestCompositionConditionSourcesRetainAuthoredLocations(t *testing.T) {
 	sources := []program.CompileSource{
 		{Name: "modules.km", Text: `AVAILABLE = (subst (pattern '{_0}') "x" "y")`, Offset: 40, Includes: []diagnostic.Frame{{Kind: "include", Label: "modules.km", Source: "main.km", Span: diagnostic.Span{Start: 5, End: 25}}}},
 		{Name: "modules.km", Text: "MODULES = AVAILABLE", Offset: 80},
-		{Name: "helpers.km", Text: "(selected) = MODULES", Offset: 12},
+		{Name: "helpers.km", Text: "def selected () = MODULES", Offset: 12},
 	}
 	result := program.CompositionConditionSources(a, sources, program.CompileSource{Name: "main.km", Text: "(selected ())", Offset: 100}, nil, nil, "")
 	defer result.Diagnostic.Free(a)
@@ -149,7 +149,7 @@ func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T
 
 func TestCompositionConditionFramesDoNotClaimSyntheticAuthoredLocations(t *testing.T) {
 	a := t.Allocator()
-	result := program.CompositionCondition(a, "main.km", "(helper) = (read ./blocked.txt)\n", "(helper ())", nil, nil, "")
+	result := program.CompositionCondition(a, "main.km", "def helper () = (read ./blocked.txt)\n", "(helper ())", nil, nil, "")
 	defer result.Diagnostic.Free(a)
 	if result.Diagnostic.Code != "CAP_DENIED" || len(result.Diagnostic.Frames) != 2 {
 		t.Error("condition lost operation and helper context")

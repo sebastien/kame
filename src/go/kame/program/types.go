@@ -246,6 +246,9 @@ type Options struct {
 	HasInput    bool
 	InputFD     int
 	PrintResult bool
+	// Session compilation verifies source-dependent CLI options after parsing.
+	RequireRuleWork    bool
+	RequireProcessWork bool
 	// TrackTimings records advisory wall-clock history, never freshness evidence.
 	TrackTimings bool
 	// TimingNow optionally supplies monotonic nanoseconds for a forwarding host.

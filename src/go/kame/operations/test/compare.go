@@ -14,7 +14,7 @@ func TestStructuralEqualityAndFilterShorthand(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "equality.km", "(identity value) = value")
+	parsed := script.Parse(a, "equality.km", "def identity value = value")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"(eq [1, [2, nil], {a: 3, b: [4]}] [1.0, [2, nil], {b: [4], a: 3}])",

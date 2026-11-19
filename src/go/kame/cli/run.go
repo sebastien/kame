@@ -39,7 +39,7 @@ func AppendsCommands(args []string) bool {
 func parseRun(args []string, discover bool) Invocation {
 	inv := Invocation{Name: "run", Directory: ".", Jobs: 1, WatchDebounceMS: 100}
 	if discover {
-		inv.Inputs = append(inv.Inputs, RunInput{Kind: "discover", Lang: "kmk"})
+		inv.Inputs = append(inv.Inputs, RunInput{Kind: "discover", Lang: "km"})
 	}
 	language := ""
 	stdin := false
@@ -80,7 +80,7 @@ func parseRun(args []string, discover bool) Invocation {
 				value = args[i]
 			}
 			if option == "-l" || option == "--lang" {
-				if value != "km" && value != "kmk" && value != "kash" && value != "expr" {
+				if value != "km" && value != "kash" && value != "expr" {
 					inv.fail("OPT_VALUE_INVALID", "invalid language: "+value)
 					return inv
 				}
@@ -153,10 +153,13 @@ func parseRun(args []string, discover bool) Invocation {
 			if !discover && len(inv.Inputs) == 0 {
 				continue
 			}
-			if !discover && inv.Inputs[len(inv.Inputs)-1].Lang != "kmk" {
-				continue
+			if !discover {
+				input := inv.Inputs[len(inv.Inputs)-1]
+				if input.Lang != "km" || len(input.Entries) == 0 {
+					continue
+				}
 			}
-			// Keep task arguments as entries, never reinterpret their value as a file.
+			// Keep target arguments as entries, never reinterpret their value as a file.
 			if discover {
 				inv.Inputs[0].Entries = append(inv.Inputs[0].Entries, arg)
 			} else if !runEntry(&inv, arg) {
@@ -209,23 +212,25 @@ func parseRun(args []string, discover bool) Invocation {
 		return inv
 	}
 	// A later file/parser cannot broaden the first fragment's authority.
-	inv.NoDefaultGrants = !runProcessLanguage(inv.Inputs[0].Lang)
+	inv.NoDefaultGrants = !discover && !runProcessLanguage(inv.Inputs[0].Lang)
 	rules, processes, scripts := false, false, false
 	for i := range inv.Inputs {
 		if inv.Inputs[i].Lang == "km" {
 			scripts = true
 		}
-		if inv.Inputs[i].Lang == "kmk" {
+		if inv.Inputs[i].Kind == "discover" {
 			rules = true
 		}
-		if runProcessLanguage(inv.Inputs[i].Lang) {
+		if runProcessLanguage(inv.Inputs[i].Lang) || inv.Inputs[i].Kind == "discover" {
 			processes = true
 		}
 	}
-	if (ruleOptions && !rules) || (processOptions && !processes) {
+	if (ruleOptions && !rules && !scripts) || (processOptions && !processes && !scripts) {
 		inv.fail("OPT_CONFLICT", "option requires rule or process source work")
 		return inv
 	}
+	inv.RequireRuleWork = ruleOptions && !rules
+	inv.RequireProcessWork = processOptions && !processes
 	if inv.PrintResult && !scripts {
 		inv.fail("OPT_CONFLICT", "--print-result requires km source work")
 		return inv
@@ -235,19 +240,13 @@ func parseRun(args []string, discover bool) Invocation {
 }
 
 func runLanguage(name string) string {
-	if name == "Kamefile" || (len(name) > 8 && name[len(name)-8:] == "Kamefile" && (name[len(name)-9] == '/' || name[len(name)-9] == '\\')) {
-		return "kmk"
-	}
 	if len(name) >= 5 && name[len(name)-5:] == ".kash" {
 		return "kash"
 	}
 	if len(name) >= 4 && name[len(name)-4:] == ".ksh" {
 		return "kash"
 	}
-	if len(name) >= 4 && name[len(name)-4:] == ".kmk" {
-		return "kmk"
-	}
-	if len(name) >= 3 && name[len(name)-3:] == ".km" {
+	if IsKameProgramPath(name) {
 		return "km"
 	}
 	return ""
@@ -348,9 +347,9 @@ func runFile(inv *Invocation, name string, language string, stdin *bool) bool {
 	return true
 }
 
-func runAcceptsEntries(language string) bool { return language == "km" || language == "kmk" }
+func runAcceptsEntries(language string) bool { return language == "km" }
 
-func runProcessLanguage(language string) bool { return language == "kmk" || language == "kash" }
+func runProcessLanguage(language string) bool { return language == "kash" }
 
 func runEntry(inv *Invocation, name string) bool {
 	if len(inv.Inputs) == 0 {

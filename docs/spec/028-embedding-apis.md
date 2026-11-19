@@ -32,7 +32,7 @@ const kame = await Kame.create({ wasmPath: './dist/kame.wasm' });
 try {
   const program = await kame.compile(source, { name: 'project.km' });
   try {
-    const value = await program.evaluate('(count [1 2 3])');
+    const value = await program.evaluate('count [1, 2, 3]');
     const watch = await program.watch(['./public/index.txt']);
     await watch.close();
   } finally {
@@ -44,7 +44,9 @@ try {
 ```
 
 `compile(source, options)` copies the source and its name into a reusable
-program descriptor and validates it before returning. Program operations may
+program descriptor and validates it before returning. JavaScript compilation
+defaults to the Kame program grammar, also selected explicitly with
+`language: 'km'`. Program operations may
 be repeated; each operation owns an isolated ABI instance so parser/runtime
 state cannot leak across operations. Within long-lived watches, copied inputs
 and results reuse bounded scratch slots and freed heap blocks; linear memory
@@ -82,6 +84,7 @@ managed CLI process; cancellation terminates and reaps its process group, and
 `close()` awaits all active requests before returning. No third-party Python
 dependency is required.
 
+Python compilation follows Kame source suffixes and accepts an explicit language.
 The Python client uses Kame's configured CLI host services. It forwards explicit
 grants and follows the CLI's documented default grant policy. Its watch API
 currently accepts Kame programs (`.km`, `.kame`) that declare rules and yields the CLI's copied JSON events.

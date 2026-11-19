@@ -30,7 +30,7 @@ type KashToken struct {
 var kashStatementKeywords = map[string]bool{
 	"alias": true, "unalias": true,
 	"def": true, "defer": true, "elif": true, "else": true, "exit": true, "for": true, "if": true,
-	"let": true, "match": true, "case": true, "return": true, "while": true, "with": true,
+	"let": true, "match": true, "return": true, "while": true, "with": true,
 }
 
 // KashTokens lexes Kash text for highlighting. It never fails: unclosed
@@ -95,12 +95,7 @@ func (l *kashLexer) commands(i int, closing byte) int {
 			i = l.emit(KashTokenOperator, i, l.redirection(i))
 			i = l.word(i, KashTokenText)
 		case c == '(':
-			end := l.expression(i, command)
-			if command && l.definitionFollows(end) {
-				i = l.definitionValue(end)
-				continue
-			}
-			i, command = end, false
+			i, command = l.expression(i, command), false
 		case setup:
 			i, setup = l.word(i, KashTokenText), false
 		case command && c == ':':
@@ -110,9 +105,6 @@ func (l *kashLexer) commands(i int, closing byte) int {
 			end := l.wordEnd(i)
 			word := text[start:end]
 			switch {
-			case l.definitionFollows(end) && kashName(word):
-				l.emit(KashTokenDefinition, start, end)
-				i = l.definitionValue(end)
 			case kashStatementKeywords[word]:
 				i = l.emit(KashTokenKeyword, start, end)
 				i = l.afterKeyword(word, i)
@@ -215,7 +207,14 @@ func (l *kashLexer) afterKeyword(word string, i int) int {
 		skip()
 		i = l.emit(KashTokenDefinition, i, l.wordEnd(i))
 		for {
+			if l.definitionFollows(i) {
+				return l.definitionValue(i)
+			}
 			skip()
+			if strings.HasPrefix(l.text[i:], "()") {
+				i = l.emit(KashTokenPunct, i, i+2)
+				continue
+			}
 			end := l.wordEnd(i)
 			if end == i {
 				return i
@@ -230,7 +229,7 @@ func (l *kashLexer) afterKeyword(word string, i int) int {
 			i = l.emit(KashTokenKeyword, i, i+2)
 		}
 		return l.expressionLine(i)
-	case "match", "case", "return", "exit", "with":
+	case "match", "return", "exit", "with":
 		return l.expressionLine(i)
 	}
 	return i

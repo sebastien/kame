@@ -872,7 +872,7 @@ service dev
 DECL        = FILE-RULE | TASK | SERVICE
 FILE-RULE   = "rule" ("always")? OUTPUTS (":" INPUTS?)? META? BODY?
 TASK        = "task" ("cached")? TARGET-NAME TARGET-ARGS? (":" INPUTS?)? META? BODY?
-SERVICE     = "service" TARGET-NAME (":" INPUTS?)? META? BODY?
+SERVICE     = "service" TARGET-NAME TARGET-ARGS? (":" INPUTS?)? META? BODY?
 OUTPUTS     = OUTPUT (WS+ OUTPUT)*
 OUTPUT      = PATH-ATOM | QUOTED-STRING | "@{" EXPR "}"
 TARGET-NAME = NAME | NAME-TEMPLATE | QUOTED-STRING | "@{" EXPR "}"
@@ -886,8 +886,8 @@ BODY        = "=" EXPR | NEWLINE INDENTED-BLOCK
 The colon is optional when there are no inputs (`task clean`). Separators
 inside quoted strings, path atoms and balanced `@{…}` or record delimiters are
 not header punctuation. Whitespace inside quoted strings and balanced
-interpolations does not split header items. Named task arguments
-(`TARGET-ARGS`) after a task name are specified in `022-target-arguments.md`.
+interpolations does not split header items. `022-target-arguments.md` specifies the named
+arguments (`TARGET-ARGS`) that can follow a task or service name.
 
 ### 8.2 Classification
 

@@ -6,6 +6,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
+	"strings"
 )
 
 // Keep recursive evaluation within the native and WASM stack budgets.
@@ -60,7 +61,10 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	if expression == nil {
 		return failure(context.Run, "EXPR_INVALID", source.Span{}, "definition needs an expression value")
 	}
-	if expression.ActionPrefix != "" {
+	if context.pureValueBlock && (expression.ActionPrefix != "" || expression.Kind == expr.CommandList || expression.Kind == expr.CommandGraph || expression.Kind == expr.CommandCapture || expression.Kind == expr.CommandTest) {
+		return failure(context.Run, "PHASE_INVALID", expression.Span, "commands require an action phase")
+	}
+	if expression.ActionPrefix != "" && !(expression.Kind == expr.CommandCapture && expression.ActionPrefix == "$?(") {
 		return failure(context.Run, "EXPR_INVALID", expression.Span, "action form does not yet support evaluation")
 	}
 	context.Engine, context.Scope, context.Requests = engine, scope, p.Requests
@@ -104,8 +108,27 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.finishDefers(context.Deferred, context, false)
 	case expr.KashDefer:
 		return p.registerDefer(expression, context)
-	case expr.KashFunction:
+	case expr.ValueBlock:
 		return p.nativeKash(expression, scope, context)
+	case expr.ValueReturn:
+		result := Result{Value: core.Value{Kind: core.Nil}}
+		if len(expression.Items) != 0 {
+			result = p.evaluate(engine, scope, expression.Items[0], context)
+		}
+		result.Returned = !result.Waiting && result.Diagnostic.Code == ""
+		return result
+	case expr.KashFunction:
+		if expression.Bool {
+			return failure(context.Run, "FEATURE_UNSUP", expression.Span, "generator execution is unavailable")
+		}
+		return p.nativeKash(expression, scope, context)
+	case expr.KashSet:
+		if context.pureValueBlock && strings.HasPrefix(expression.Text, "env/") {
+			return failure(context.Run, "PHASE_INVALID", expression.Span, "environment assignment requires an action phase")
+		}
+		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "assignment execution is unavailable")
+	case expr.KashYield:
+		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "yield requires generator execution")
 	case expr.KashReturn:
 		return p.kashReturn(scope, expression, context)
 	case expr.KashLet:
@@ -115,7 +138,7 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	case expr.KashWith:
 		return p.kashWith(scope, expression, context)
 	case expr.KashBreak, expr.KashContinue:
-		if context.Phase != EvaluatePhase || context.PurePredicate || context.loopDepth == 0 {
+		if context.loopDepth == 0 || (!context.pureValueBlock && (context.Phase != EvaluatePhase || context.PurePredicate)) {
 			return failure(context.Run, "PHASE_INVALID", expression.Span, "loop transfer requires an active local loop")
 		}
 		return Result{LoopTransfer: expression.Kind}

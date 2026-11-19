@@ -33,13 +33,13 @@ func freeKashLoop(a mem.Allocator, value any) {
 }
 
 func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
-	if c.Phase != EvaluatePhase || c.PurePredicate {
+	if (c.Phase != EvaluatePhase || c.PurePredicate) && (!c.pureValueBlock || e.Kind == expr.KashRecords) {
 		return failure(c.Run, "PHASE_INVALID", e.Span, "Kash iteration requires runtime execution")
 	}
-	if p.DryRun {
+	if p.DryRun && !c.pureValueBlock {
 		return Result{}
 	}
-	if c.Engine == nil {
+	if c.Engine == nil && !c.pureValueBlock {
 		return failure(c.Run, "HOST_FAIL", e.Span, "Kash iteration requires an execution engine")
 	}
 	start, end := c.operationStart, c.operationEnd
@@ -54,7 +54,11 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 		state.Control = mem.Alloc[kashControlState](p.Alloc)
 		state.Budget.TimedIndex = -1
 		state.Budget.TimeoutLimitMS = c.TimeoutMS
-		c.SetOperationState(state, freeKashLoop)
+		if c.Engine == nil {
+			defer freeKashLoop(p.Alloc, state)
+		} else {
+			c.SetOperationState(state, freeKashLoop)
+		}
 	}
 	c.operationStart, c.operationEnd = start, end
 	replayControlEffects(state.Control, c)
@@ -87,14 +91,21 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 		p.retainControlEffects(state.Control, c, scope, before, beforePaths)
 	}
 	previousPath, previousTimeout := c.CallPath, c.TimeoutMS
-	c.CallPath = invocationPath(c.Run, previousPath, e.Span.Start, state.Iteration)
 	c.loopDepth++
-	r := p.advanceKashLoop(scope, e, state, c)
+	var r Result
+	for {
+		c.CallPath = invocationPath(c.Run, previousPath, e.Span.Start, state.Iteration)
+		r = p.advanceKashLoop(scope, e, state, c)
+		mem.FreeString(c.Run, c.CallPath)
+		if !c.pureValueBlock || state.Done || r.Waiting || r.Returned || r.Diagnostic.Code != "" {
+			break
+		}
+		r.Free(c.Run)
+	}
 	if e.Kind == expr.KashRecords && (state.Done || r.Returned || r.Diagnostic.Code != "") {
 		closeKashReader(state)
 	}
 	c.loopDepth--
-	mem.FreeString(c.Run, c.CallPath)
 	c.CallPath, c.TimeoutMS = previousPath, previousTimeout
 	return r
 }
@@ -106,12 +117,14 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	}
 	// One clock boundary per iteration yields to the host even for pure infinite
 	// loops, so interruption and deadlines remain serviceable on native and WASM.
-	clock := p.kashBudget(&state.Budget, c)
-	if clock.Waiting || clock.Diagnostic.Code != "" {
-		return clock
-	}
-	if state.Budget.TimeoutLimitMS > 0 {
-		c.TimeoutMS = state.Budget.RemainingMS
+	if !c.pureValueBlock {
+		clock := p.kashBudget(&state.Budget, c)
+		if clock.Waiting || clock.Diagnostic.Code != "" {
+			return clock
+		}
+		if state.Budget.TimeoutLimitMS > 0 {
+			c.TimeoutMS = state.Budget.RemainingMS
+		}
 	}
 	control, branch := state.Control, e.Items[0]
 	if !state.InBody {
@@ -136,6 +149,14 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 				return Result{}
 			}
 		}
+		if c.pureValueBlock {
+			// Pure phases do not submit clock requests between iterations.
+			const maxPureLoopIterations = 100000
+			if c.pureLoopIterations >= maxPureLoopIterations || state.Iteration >= maxPureLoopIterations {
+				return failure(c.Run, "EVAL_LIMIT", e.Span, "pure value blocks exceeded the loop iteration limit")
+			}
+			c.pureLoopIterations++
+		}
 		control.Scope = newScope(p.Alloc, scope)
 		if e.Kind == expr.KashFor || e.Kind == expr.KashRecords {
 			value := state.Iterable
@@ -157,7 +178,11 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	if e.Kind == expr.KashRecords {
 		c.RecordBody = true
 	}
-	r := p.kashBodyBudget(control, branch.Body, c, &state.Budget)
+	var budget *kashInvocation
+	if !c.pureValueBlock {
+		budget = &state.Budget
+	}
+	r := p.kashBodyBudget(control, branch.Body, c, budget)
 	c.RecordBody = previousBody
 	if r.Waiting || r.Returned || r.Diagnostic.Code != "" {
 		return r
@@ -175,7 +200,9 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	// A completed iteration is never replayed: the loop state alone resumes
 	// later ones. Retiring its progress keeps operation-state lookups bounded
 	// by one iteration rather than growing with every completed one.
-	p.retireRecordProgress(c)
+	if c.Engine != nil {
+		p.retireRecordProgress(c)
+	}
 	if transfer == expr.KashBreak {
 		state.Done = true
 		return Result{}
@@ -187,5 +214,8 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 		return Result{}
 	}
 	// Submit the next iteration's clock now, with no recursive evaluation.
-	return p.kashBudget(&state.Budget, c)
+	if !c.pureValueBlock {
+		return p.kashBudget(&state.Budget, c)
+	}
+	return Result{}
 }

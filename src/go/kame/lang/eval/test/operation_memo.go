@@ -40,7 +40,7 @@ func TestPipeLoweringPreservesRetainedEffects(t *testing.T) {
 }
 
 func TestFunctionArgumentsSurviveSiblingWait(t *testing.T) {
-	checkRetainedOperands(t, "(pair first second) = (list first second)\nresult = (pair (once ()) (async ()))")
+	checkRetainedOperands(t, "def pair first second = (list first second)\nresult = (pair (once ()) (async ()))")
 }
 
 func TestRecreatedLexicalScopeRetainsCompletedOperands(t *testing.T) {

@@ -4,9 +4,24 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
+	"kame/lang/rule"
 	"kame/lang/source"
 	"strings"
 )
+
+// KameFileLanguage selects declaration-only parsing for a file-backed Kame source.
+// The host uses this selector without exposing it as a CLI language.
+const KameFileLanguage = "km-file"
+
+// ParseKameFile parses and owns a complete Kame program source.
+func ParseKameFile(a mem.Allocator, name, text string) *Script {
+	authored := source.New(a, name, text)
+	parsed := ParseFragment(a, authored, KameFileLanguage, 0, len(text))
+	// ParseFragment copies the source descriptor. The returned script owns its strings.
+	mem.Free(a, authored)
+	parsed.BorrowedSource = false
+	return parsed
+}
 
 // ParseFragment parses only this bounded range, in the selected language. The
 // source is shared storage, not a grammar stream: syntax cannot cross fragments.
@@ -21,10 +36,6 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		parseKash(s, start)
 		return s
 	}
-	if lang == "kmk" {
-		parseScript(s, start)
-		return s
-	}
 	if lang == "expr" {
 		part := expr.ParseRange(a, s.Source, start, end, "")
 		s.takeDiagnostics(part.Diagnostics)
@@ -33,8 +44,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		}
 		return s
 	}
-	// Definitions and top-level statements share expression grammar, never
-	// recipe syntax.
+	// Definitions and inline statements share the value expression grammar.
 	text := s.Source.Text
 	for pos := start; pos < end; {
 		for pos < end && (space(text[pos]) || text[pos] == '\n') {
@@ -59,12 +69,29 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			continue
 		}
 		lineStart := strings.LastIndexByte(text[:pos], '\n') + 1
-		if item, next, ok := s.sourceDeclaration(lineStart, pos, source.LogicalLineEnd(text, pos)); ok {
+		if item, next, ok := s.sourceDeclaration(lineStart, pos, source.LogicalLineEnd(text, pos), false); ok {
+			s.Items = append(s.Items, item)
+			pos = next
+			continue
+		}
+		if rule.DeclarationStart(text[pos:lineEnd]) {
+			part := rule.ParseDeclaration(a, s.Source, pos, end)
+			s.takeDiagnostics(part.Diagnostics)
+			s.Items = append(s.Items, ScriptItem{Kind: Rule, Span: part.Rule.Span, Rule: part.Rule})
+			pos = nextLine(text, part.Rule.Span.End)
+			continue
+		}
+		if item, next, ok := s.blockFunction(pos, lineEnd); ok {
 			s.Items = append(s.Items, item)
 			pos = next
 			continue
 		}
 		headerEnd := definition.ValueHeaderEnd(a, s.Source, pos)
+		if item, next, ok := s.blockValue(pos, headerEnd); ok {
+			s.Items = append(s.Items, item)
+			pos = next
+			continue
+		}
 		if headerEnd != 0 {
 			if headerEnd > lineEnd {
 				lineEnd = source.LogicalLineEnd(text, headerEnd)
@@ -90,13 +117,20 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			last := s.Items[len(s.Items)-1].Expression
 			ruleHead := last != nil && (last.Kind == expr.Name || last.Kind == expr.Path)
 			if ruleHead && text[pos] == ':' && (pos+1 == end || space(text[pos+1])) && source.TopLevelByte(text[from:lineEnd], ':') == pos-from {
-				s.error(pos, pos+1, "build rule syntax is not accepted in a km value script; use --lang kmk for definitions and build rules")
+				s.error(pos, pos+1, "expected a declaration keyword before the target")
 			} else {
 				s.error(pos, pos+1, "expected statement separator")
 			}
 		}
 		if len(s.Diagnostics) != 0 || pos <= from {
 			break
+		}
+	}
+	if lang == KameFileLanguage && len(s.Diagnostics) == 0 {
+		for _, item := range s.Items {
+			if item.Kind == Expression || item.Kind == Command {
+				s.error(item.Span.Start, item.Span.End, "Kame program files require declarations at the top level")
+			}
 		}
 	}
 	return s

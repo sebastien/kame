@@ -270,7 +270,7 @@ func TestNativeInteractiveKashTerminalHandoff(t *testing.T) {
 	s.waitFor("all-terminal-42")
 	s.send("sh -c 'ps -o stat= -p $$ | grep -q + && echo foreground-$((40+2))'\r")
 	s.waitFor("foreground-42")
-	s.send("x = $(sh -c '[ -t 1 ] && echo terminal || echo pi''pe')\r")
+	s.send("def x = $(sh -c '[ -t 1 ] && echo terminal || echo pi''pe')\r")
 	s.send("echo captured-$x\r")
 	s.waitFor("captured-pipe")
 	s.send("sleep 30\r")
@@ -408,19 +408,19 @@ func TestNativeInteractiveKashHistory(t *testing.T) {
 // non-string prompt falls back to the default.
 func TestNativeInteractiveKashPromptFunction(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"P\" info.status \"-\" info.name \"> \")\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = (str \"P\" info.status \"-\" info.name \"> \")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	name := filepath.Base(directory)
 	s.waitFor("P0-" + name + "> ")
 	s.send("sh -c 'exit 3'\r")
 	s.waitFor("P3-" + name + "> ")
-	s.send("(kash-prompt info) = (fail! \"prompt-broke\")\r")
+	s.send("def kash-prompt info = (fail! \"prompt-broke\")\r")
 	s.waitFor("kash " + name + "> ")
 	if strings.Count(s.text(), "prompt-broke") < 2 {
 		t.Fatalf("failing prompt was not reported: %q", s.text())
 	}
-	s.send("(kash-prompt info) = 42\r")
-	s.send("(kash-prompt info) = \"custom> \"\r")
+	s.send("def kash-prompt info = 42\r")
+	s.send("def kash-prompt info = \"custom> \"\r")
 	s.waitFor("\ncustom> ")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("prompt session status %d: %q", status, s.text())
@@ -431,7 +431,7 @@ func TestNativeInteractiveKashPromptFunction(t *testing.T) {
 // failing right prompt is reported and leaves none.
 func TestNativeInteractiveKashRightPrompt(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = \"P> \"\n(kash-rprompt info) = (str \"[R\" info.status \"]\")\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = \"P> \"\ndef kash-rprompt info = (str \"[R\" info.status \"]\")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("[R0]")
 	// A narrow terminal hides the right prompt; widening redraws it.
@@ -449,7 +449,7 @@ func TestNativeInteractiveKashRightPrompt(t *testing.T) {
 	}
 	s.send("\x15sh -c 'exit 4'\r")
 	s.waitFor("[R4]")
-	s.send("(kash-rprompt info) = (fail! \"rprompt-broke\")\r")
+	s.send("def kash-rprompt info = (fail! \"rprompt-broke\")\r")
 	s.waitFor("rprompt-broke")
 	s.send("sh -c 'echo $((40 + 2))x'\r")
 	s.waitFor("42x")
@@ -464,7 +464,7 @@ func TestNativeInteractiveKashRightPrompt(t *testing.T) {
 func TestNativeInteractiveKashRightPromptUnicodeEditing(t *testing.T) {
 	directory := t.TempDir()
 	left, right := "\x1b[36m🐢 ▷ \x1b[0m", "\x1b[35m界🧰[R]\x1b[0m"
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = "+kameString(left)+"\n(kash-rprompt info) = "+kameString(right)+"\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = "+kameString(left)+"\ndef kash-rprompt info = "+kameString(right)+"\n")
 	nativeCLIWrite(t, directory+"/unique-prompt-file", "completion-ok\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("[R]")
@@ -656,27 +656,27 @@ func TestNativeRecipeTerminalHandoff(t *testing.T) {
 	directory := t.TempDir()
 	nativeCLIWrite(t, directory+"/Kamefile", `SHELL = kash
 
-handoff : ; {tty: true, foreground: true}
+task handoff ; {tty: true, foreground: true}
 	sh -c '[ -t 0 ] && [ -t 1 ] && [ -t 2 ] && echo all-terminal-$((40+2))'
 	sh -c 'ps -o stat= -p $$ | grep -q + && echo foreground-$((40+2))'
-	x = $(sh -c '[ -t 1 ] && echo terminal || echo pi''pe')
+	def x = $(sh -c '[ -t 1 ] && echo terminal || echo pi''pe')
 	echo captured-$x
 
-selective : ; {tty: true, foreground: true}
+task selective ; {tty: true, foreground: true}
 	sh -c '[ -t 1 ] && echo first-terminal || echo first-pi''pe'
 	:tty true sh -c '[ -t 1 ] && echo second-terminal || echo second-pipe'
 
-background : ; {tty: true}
+task background ; {tty: true}
 	sh -c '[ -t 1 ] && echo attached-$((40+2))'
 	sh -c 'ps -o stat= -p $$ | grep -q + && echo fore''ground || echo background-$((40+2))'
 
-denied :
+task denied
 	:tty true sh -c 'true'
 
-capture : ; {tty: true}
+task capture ; {tty: true}
 	echo $(:tty true sh -c 'true')
 
-invalid : ; {foreground: true}
+task invalid ; {foreground: true}
 	true
 `)
 	for _, check := range []struct{ target, want string }{
@@ -718,7 +718,7 @@ func TestNativeInteractiveKashHighlightingAndBlocks(t *testing.T) {
 	}
 	s.send("\x03")
 	s.waitFor("^C")
-	s.send("def f\r\tsh -c 'echo block-$((40+2))'\r\r(f ())\r")
+	s.send("def f ()\r\tsh -c 'echo block-$((40+2))'\r\r(f ())\r")
 	s.waitFor("block-42")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("highlighting session status %d: %q", status, s.text())

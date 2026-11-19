@@ -10,15 +10,15 @@ import (
 func TestSessionExitIsTypedAndStopsLaterFragments(t *testing.T) {
 	texts := []string{
 		"exit 23\n(out! \"forbidden\")",
-		"def stop\n\texit 23\n(stop ()) ?? \"fallback\"\n(out! \"forbidden\")",
-		"runner = (kash \"exit 23\")\n((runner ()) ?? \"fallback\")\n(out! \"forbidden\")",
-		"def stop\n\texit 23\nif (stop ())\n\t(out! \"forbidden\")\n",
+		"def stop ()\n\texit 23\n(stop ()) ?? \"fallback\"\n(out! \"forbidden\")",
+		"def runner = (kash \"exit 23\")\n((runner ()) ?? \"fallback\")\n(out! \"forbidden\")",
+		"def stop ()\n\texit 23\nif (stop ())\n\t(out! \"forbidden\")\n",
 	}
 	for i := range texts {
 		a := t.Allocator()
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
-		fragments := []program.Fragment{{Name: "first.kash", Lang: "kash", Text: texts[i]}, {Name: "second.km", Lang: "km", Text: "(out! \"forbidden\")"}}
+		fragments := []program.Fragment{{Name: "first.kash", Lang: "kash", Text: texts[i]}, {Name: "second.km", Lang: "km", Inline: true, Text: "(out! \"forbidden\")"}}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{})
 		if compiled.Session == nil {
 			t.Fatal("exit session compilation failed")

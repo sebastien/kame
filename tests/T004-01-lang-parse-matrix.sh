@@ -48,11 +48,11 @@ test-step "string templates"
 parse_matrix "$(lang_fixture template/string)" template
 
 test-step "definitions and rules parse as scripts"
-parse_matrix "$(lang_fixture rule/definition)" script
-parse_matrix "$(lang_fixture rule/rules)" script
+parse_matrix "$(lang_fixture rule/definition)" km
+parse_matrix "$(lang_fixture rule/rules)" km
 
 test-step "scripts"
-parse_matrix "$(lang_fixture script)" script
+parse_matrix "$(lang_fixture script)" km
 
 test-step "target templates are excluded from the CLI parse matrix"
 test_log_message "tests/data/lang/template/target has no do parse language; Go fixture tests cover target parsing"

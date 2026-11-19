@@ -23,7 +23,7 @@ import process, { argv, env, stderr, stdout } from 'node:process';
 const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3, list: 4, listReport: 5 });
 
 // The native cli.BuildSourceCandidates list is authoritative; keep this mirror aligned.
-const BUILD_SOURCE_CANDIDATES = ['Kamefile', 'Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'];
+const BUILD_SOURCE_CANDIDATES = ['Kamefile', 'Makefile.km', 'make.km', 'src/km/main.km'];
 const BUILD_SOURCE_LIST = BUILD_SOURCE_CANDIDATES.join(', ');
 const BUILD_NO_SOURCE_MESSAGE = `no build source found (tried ${BUILD_SOURCE_LIST})`;
 
@@ -255,6 +255,7 @@ function configurePresentation(inv) {
   outputColor = resolveColor(inv.color, 'human', stdout);
 }
 function processExitStatus(diagnostic, explicitRun) {
+  if (diagnostic?.code === 'OPT_CONFLICT') return 2;
   const cause = diagnostic?.cause;
   if (!explicitRun || diagnostic?.code !== 'RECIPE_FAIL' || cause?.kind !== 'process' || !Number.isSafeInteger(cause.status)) return 1;
   if (Number.isSafeInteger(cause.signal) && cause.signal > 0) return 128 + cause.signal;
@@ -286,7 +287,7 @@ function writeReport(heading, document, verbose = false) {
     stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
   };
   if (data.type === 'list') writeTargetReport(data);
-  else if (data.schema === 2) writeInspectionReport(data, write, verbose);
+  else if (data.schema === 2 && data.type) writeInspectionReport(data, write, verbose);
   else write(data, '', 1, true);
 }
 
@@ -2428,14 +2429,13 @@ class Module {
     return this.completeFailure(instance, request, 'CAP_DENIED', message);
   }
 
-  async evaluate(source, expression, context) {
+  async evaluate(source, expression, context, name) {
     if (context.signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     let failure, primaryDiagnostic;
     try {
-      const compiled = this.write(source, 'expressionSource');
-      if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
       this.inspectionGrant(instance, '', '');
       for (const grant of context.portableGrants ?? []) {
@@ -2923,9 +2923,13 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit ?? context.captureLimit ?? 0, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
+      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, jobs: inv.jobs, shell: inv.shell, requireRuleWork: inv.requireRuleWork ? 1 : 0, requireProcessWork: inv.requireProcessWork ? 1 : 0, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit ?? context.captureLimit ?? 0, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
-        if (inv.json) { this.drainEvents(instance, context); return 1; }
+        if (inv.json) {
+          const failure = diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
+          this.drainEvents(instance, context);
+          return failure.code === 'OPT_CONFLICT' ? 2 : 1;
+        }
         throw this.compileFailure(instance, 'PARSE_ERR');
       }
       this.recordCaptureLimit(instance, context);
@@ -2997,8 +3001,8 @@ class Module {
   async selfTest() {
     const info = this.abiInfo();
     const context = { grants: { read: true, write: true, run: true, env: true } };
-    const pure = this.decode0(await this.evaluate('', '(join ":" ["a" "b"])', context));
-    const expression = this.decode0(await this.evaluate('', '(count [1 2 3])', context));
+    const pure = this.decode0(await this.evaluate('', 'join ":" ["a", "b"]', context));
+    const expression = this.decode0(await this.evaluate('', 'count [1, 2, 3]', context));
     return { ...info, selfTest: { pure, expression } };
   }
 
@@ -3171,22 +3175,27 @@ export class Kame {
 
   async compile(source, options = {}) {
     const name = options.name ?? 'input.km';
-    const language = options.language ?? 'script';
+    const language = options.language ?? 'km';
+    if (!['km', 'expr', 'kash', 'template'].includes(language)) {
+      throw diagnosticError('unsupported compilation language', 'OPT_VALUE_INVALID');
+    }
     return this.operation(null, options, async () => {
       const module = await Module.load(this.module.path);
-      const bytes = await module.parse(language, name, source);
+      const bytes = await module.parse(language === 'km' ? 'km-file' : language, name, source);
       const ast = JSON.parse(module.decode0(bytes));
-      if (['script', 'km', 'kmk'].includes(language)) {
+      const error = ast.diagnostics?.find((diagnostic) => diagnostic.severity === 'error');
+      if (error) throw Object.assign(new Error(error.message), { code: error.code, diagnostics: ast.diagnostics });
+      const program = new KameProgram(this, module, source, name, language, ast);
+      if (language === 'km') {
         const instance = module.exports.kame_wasm_instance_create();
         if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
         try {
-          module.compileBuild(instance, source, name);
+          module.compileBuild(instance, program.source, name);
           if (module.exports.kame_wasm_prepare(instance) !== 0) throw module.compileFailure(instance, 'PARSE_ERR');
         } finally {
           module.exports.kame_wasm_instance_free(instance);
         }
       }
-      const program = new KameProgram(this, module, source, name, language, ast);
       this.programs.add(program);
       return program;
     });
@@ -3246,7 +3255,7 @@ export class KameProgram {
       // or another owner can still use. Long-lived watches reuse their buffers.
       const module = await Module.load(this.module.path);
       this.module = module;
-      const result = await module.evaluate(this.source, expression, context);
+      const result = await module.evaluate(this.source, expression, context, this.name);
       return module.decode0(result);
     }));
   }
@@ -4322,7 +4331,7 @@ function contextFor(inv) {
   return {
     // Match native data-input policy without initializing process.stdin and
     // allowing libuv to change shared descriptor flags or read ahead.
-    inputFD: inv.name === 'run' && !isatty(0) && (inv.inputs ?? []).some((input) => input.lang !== 'kmk') && !(inv.inputs ?? []).some((input) => input.kind === 'stdin') ? 0 : undefined,
+    inputFD: inv.name === 'run' && !isatty(0) && !(inv.inputs ?? []).some((input) => input.kind === 'stdin') ? 0 : undefined,
     portableGrants: inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }],
     toolCache: new Map(),
     grants: effectiveGrants(inv),
@@ -4412,7 +4421,7 @@ async function runParse(module, inv) {
   } else {
     text = await readStdin();
   }
-  const bytes = await module.parse(inv.lang, name, text);
+  const bytes = await module.parse(inv.lang === 'km' && inv.file ? 'km-file' : inv.lang, name, text);
   const document = JSON.parse(new TextDecoder().decode(bytes));
   if (document.diagnostics?.some((entry) => entry.severity === 'error')) {
     primarySource = { name, text };
@@ -4442,14 +4451,10 @@ async function runSession(module, inv, sourceDirectory) {
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
     sourceTexts.set(name, text);
-    if (input.lang === 'km' || input.lang === 'kmk' || input.lang === 'kash') {
+    if (input.lang === 'km' || input.lang === 'kash') {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection, [], sourceBytes);
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, ...(fileBacked ? { sourceDirectory: dirname(resolve(sourceDirectory, name)) } : {}), lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
-  }
-  if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1 && !inv.timeoutMS) {
-    const input = inv.inputs[0];
-    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
   resetProgress();
   buildStartedAt = performance.now();
@@ -4472,13 +4477,12 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   watchedSources?.add(resolve(sourceDirectory, name));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
   const selection = { defines: [...inv.defines, ...inv.parameters], environment, parts: [], watchedSources };
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, selection, [], source.bytes ?? null);
-  parts.defines = inv.defines;
-  parts.parameters = inv.parameters;
-  parts.toolOverrides = inv.toolOverrides;
-  parts.force = inv.force ? 1 : 0;
-  parts.environment = environment;
-  const compiled = parts.length === 1 && !inv.defines.length && !inv.parameters.length && !inv.toolOverrides.length && !environment.length && !inv.force ? source.text : parts;
+  const compiled = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'km', [], !inv.command, true, selection, [], source.bytes ?? null);
+  compiled.defines = inv.defines;
+  compiled.parameters = inv.parameters;
+  compiled.toolOverrides = inv.toolOverrides;
+  compiled.force = inv.force ? 1 : 0;
+  compiled.environment = environment;
   // Tools has a command operand; list has a search query, not a build root.
   // Neither should normalize operands or implicitly select default.
   const catalogue = inv.name === 'tools' || inv.name === 'list';
@@ -4493,7 +4497,8 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   selection.watchedSources?.add(identity);
   sourceTexts.set(name, text);
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
-  const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
+  const parseLang = lang === 'km' ? fileBacked ? 'composition:km-file' : 'composition:km' : lang;
+  const document = JSON.parse(new TextDecoder().decode(await module.parse(parseLang, name, text)));
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
   if (invalid) {
     primarySource = { name, text };
@@ -4503,15 +4508,17 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   const sourceSignature = fileBacked ? createHash('sha256').update(sourceBytes ?? bytes).digest('hex') : null;
   const parts = [];
   const slice = (span) => new TextDecoder().decode(bytes.subarray(span.start, span.end));
+  const appendPart = (start, end, partLang) => {
+    parts.push({ name, text: slice({ start, end }), lang: partLang, offset: start, ...(fileBacked ? { sourceDirectory: dirname(identity) } : {}), ...(sourceSignature ? { sourceSignature } : {}), ...(includes.length ? { includes } : {}) });
+  };
   const append = (end) => {
-    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), lang, offset: start, ...(fileBacked ? { sourceDirectory: dirname(identity) } : {}), ...(sourceSignature ? { sourceSignature } : {}), ...(includes.length ? { includes } : {}) };
-    parts.push(part);
+    appendPart(start, end, lang);
     selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), lang, offset: item.span.start, ...(includes.length ? { includes } : {}) })));
   };
   const include = async (path, optional, span) => {
     if (!fileBacked) {
       primarySource = { name, text };
-      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km, .kmk or .kash file and run that file'] };
+      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km or .kash file and run that file'] };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
     const included = normalize(isAbsolute(path) ? path : join(dirname(name), path));
@@ -4532,39 +4539,43 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     const childLang = lang === 'kash' || /\.(?:kash|ksh)$/.test(included) ? 'kash' : lang;
     parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child.toString('utf8'), childLang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }], child));
   };
-  // All branches have already been validated by the portable parser. Walk only
-  // the selected application AST; never interpret source text as JS grammar.
-  const compose = async (expression) => {
-    if (expression.kind === 'nil') return;
-    const [head, ...args] = expression.items;
-    if (head.text === 'include' || head.text === 'include?') {
-      const path = args[0];
-      if (path.kind === 'path' && typeof path.text === 'string' && !path.parts) return include(path.text, head.text === 'include?', expression.span);
-      if (path.kind === 'string' && path.parts.every((part) => typeof part.text === 'string' && !part.expression)) return include(path.parts.map((part) => part.text).join(''), head.text === 'include?', expression.span);
-      throw Object.assign(new Error('invalid literal include path in validated AST'), { code: 'PARSE_ERR', span: path.span });
-    }
-    for (let i = 0; i + 1 < args.length; i += 2) {
-      const condition = args[i];
-      let selected;
-      try {
-        selected = await module.compositionCondition({ sources: selection.parts, condition: { name, text: slice(condition.span), offset: condition.span.start, ...(includes.length ? { includes } : {}) }, defines: selection.defines, environment: selection.environment, directory: process.cwd() });
-      } catch (error) {
-        primarySource = { name, text };
-        error.span ??= condition.span;
-        const details = error.diagnostics ?? [{ code: error.code ?? 'EXPR_INVALID', severity: 'error', message: error.message }];
-        error.diagnostics = details.map((detail) => detail.source ? detail : { ...detail, source: name, span: condition.span });
-        throw error;
+  // The portable parser validates every branch before the host selects one.
+  const compose = async (branches) => {
+    for (const branch of branches) {
+      const condition = branch.condition;
+      if (condition) {
+        let selected;
+        try {
+          selected = await module.compositionCondition({ sources: selection.parts, condition: { name, text: slice(condition.span), offset: condition.span.start, ...(includes.length ? { includes } : {}) }, defines: selection.defines, environment: selection.environment, directory: process.cwd() });
+        } catch (error) {
+          primarySource = { name, text };
+          error.span ??= condition.span;
+          const details = error.diagnostics ?? [{ code: error.code ?? 'EXPR_INVALID', severity: 'error', message: error.message }];
+          error.diagnostics = details.map((detail) => detail.source ? detail : { ...detail, source: name, span: condition.span });
+          throw error;
+        }
+        if (!selected) continue;
       }
-      if (selected) return compose(args[i + 1]);
+      for (const item of branch.items) {
+        if (item.kind === 'include') await include(item.path, item.optional, item.span);
+        else if (item.kind === 'composition') await compose(item.branches);
+        else if (item.kind === 'rule' || item.kind === 'for' || item.kind === 'generate') appendPart(item.span.start, item.span.end, 'km');
+        else if (item.kind === 'let') {
+          primarySource = { name, text };
+          const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: 'execution of declaration-time let is not available', source: name, span: item.span };
+          if (includes.length) detail.frames = includes.map((frame) => ({ kind: 'include', source: frame.source, label: frame.label, span: { start: frame.start, end: frame.end } }));
+          throw Object.assign(diagnosticError(detail.message, detail.code), { span: item.span, diagnostics: [detail] });
+        }
+      }
+      break;
     }
-    if (args.length % 2) await compose(args.at(-1));
   };
   let start = 0;
   for (const item of document.ast.items) {
     if (item.kind !== 'include' && item.kind !== 'composition') continue;
     append(item.span.start);
     if (item.kind === 'include') await include(item.path, item.optional, item.span);
-    else await compose(item.expression);
+    else await compose(item.branches);
     start = item.span.end;
   }
   append(bytes.length);
@@ -4596,7 +4607,7 @@ async function runFmt(module, inv) {
       return failure('FS_ERR', `cannot read source: ${file}`);
     }
     primarySource = { name, text };
-    const bytes = await module.format(inv.lang, name, text, inv.indent, inv.indentWidth, inv.comment);
+    const bytes = await module.format(inv.lang === 'km' ? 'km-file' : inv.lang, name, text, inv.indent, inv.indentWidth, inv.comment);
     const changed = new TextDecoder().decode(bytes) !== text;
     if (inv.check && changed) different = true;
     if (inv.inPlace && changed) {
@@ -5228,12 +5239,10 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   context.human = inv.json !== true;
   const targets = source.targets;
   if (inv.dryRun) {
-    const parts = Array.isArray(source.compiled) ? source.compiled : source.compiled?.parts;
-    const sourceParts = parts?.length ? parts : [{ name: source.name, text: source.text }];
+    const sourceParts = source.compiled;
     const fragments = sourceParts.map((part, index) => ({
+      ...part,
       name: part.name ?? source.name,
-      text: part.text,
-      lang: 'kmk',
       entries: index + 1 === sourceParts.length ? targets : [],
       inline: index + 1 === sourceParts.length ? 0 : 1,
     }));
@@ -5351,7 +5360,7 @@ async function dispatchCommand(module, inv, noArguments) {
     return runCat(module, inv, sourceDirectory);
   }
   if (inv.dryRun) {
-    const input = { kind: inv.command ? 'command' : inv.file === '-' ? 'stdin' : inv.file ? 'file' : 'discover', value: inv.command || inv.file || '', lang: 'kmk', entries: inv.targets };
+    const input = { kind: inv.command ? 'command' : inv.file === '-' ? 'stdin' : inv.file ? 'file' : 'discover', value: inv.command || inv.file || '', lang: 'km', entries: inv.targets };
     return runSession(module, { ...inv, name: 'run', inputs: [input] }, sourceDirectory);
   }
   return runPrimary(module, inv, noArguments === true, sourceDirectory);

@@ -98,7 +98,7 @@ func TestKashFileRecordReaderClosesAfterTransitiveDependencyFailure(t *testing.T
 	operations.Register(registry)
 	memory := wasm.NewMemoryHost(a)
 	memory.SetFile("items", []byte("one\ntwo\n"))
-	fragments := []program.Fragment{{Name: "failure.kash", Lang: "kash", Text: "bad = (fail! \"boom\")\nfor line from ./items :lines\n\tlet unused = bad\n"}}
+	fragments := []program.Fragment{{Name: "failure.kash", Lang: "kash", Text: "def bad = (fail! \"boom\")\nfor line from ./items :lines\n\tlet unused = bad\n"}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
 	if compiled.Session == nil {
 		t.Fatal("record session compilation failed")

@@ -15,7 +15,7 @@ func TestSessionKashEagerBindingsFollowFragmentOrderAndExecutionPolicy(t *testin
 		operations.Register(registry)
 		fragments := []program.Fragment{
 			{Name: "first.kash", Lang: "kash", Text: "let value = 42\n", SkipStatements: mode == 2},
-			{Name: "second.km", Lang: "km", Text: "value\n"},
+			{Name: "second.km", Lang: "km", Inline: true, Text: "value\n"},
 		}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{DryRun: mode == 1})
 		if compiled.Session == nil {
@@ -66,7 +66,7 @@ func TestSessionKashEagerBindingsFollowFragmentOrderAndExecutionPolicy(t *testin
 }
 
 func TestSessionKashEagerBindingsRejectCrossFragmentCollisions(t *testing.T) {
-	pairs := []string{"let value = 1", "value = 1", "value ?= 1", "value += [1]", "def value\n\treturn 0"}
+	pairs := []string{"let value = 1", "def value = 1", "value ?= 1", "value += [1]", "def value ()\n\treturn 0"}
 	for i := range pairs {
 		for order := 0; order < 2; order++ {
 			a := t.Allocator()

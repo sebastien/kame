@@ -74,15 +74,15 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 	defines := selectionOverrides(options.Defines, options.Parameters)
 	defer mem.FreeSlice(nil, defines)
 	if options.Command != "" {
-		return inlineRunSource("<command>", options.Command, "kmk", options.JSON, defines, options.Environment, errOut, prefix, options.Directory)
+		return inlineRunSource("<command>", options.Command, "km", options.JSON, defines, options.Environment, errOut, prefix, options.Directory)
 	}
 	if options.File != "" {
 		name := options.File
 		if path.IsAbs(name) {
-			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
+			return readRunSourceConfigured(name, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
 		}
 		name = path.Join(options.Directory, name)
-		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
+		result := readRunSourceConfigured(name, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
 		mem.FreeString(mem.System, name)
 		return result
 	}
@@ -91,7 +91,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 		candidate := path.Join(options.Directory, candidates[i])
 		_, statErr := os.Stat(candidate)
 		if statErr == nil {
-			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
+			result := readRunSourceConfigured(candidate, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
 			mem.FreeString(mem.System, candidate)
 			return result
 		}
@@ -179,7 +179,11 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	rememberDiagnosticSource(file.Name, file.Text)
 	authored := source.New(mem.System, file.Name, file.Text)
 	defer authored.Free(mem.System)
-	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(file.Text))
+	parseLang := lang
+	if lang == "km" && file.FileBacked {
+		parseLang = script.KameFileLanguage
+	}
+	parsed := script.ParseFragment(mem.System, authored, parseLang, 0, len(file.Text))
 	defer parsed.Free()
 	if lang == "kash" && file.Parent >= 0 {
 		script.ValidateKashLibrary(parsed)
@@ -203,7 +207,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
 				return false
 			}
-		} else if !s.expandSourceComposition(fileIndex, item.Branches, errOut, authored, lang) {
+		} else if !s.expandSourceComposition(fileIndex, signature, item.Branches, errOut, authored, lang) {
 			return false
 		}
 	}

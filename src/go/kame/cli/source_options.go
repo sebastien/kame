@@ -4,12 +4,18 @@ import (
 	"strings"
 )
 
+// IsKameProgramPath identifies Kamefile and the Kame program suffixes.
+func IsKameProgramPath(name string) bool {
+	base := name[strings.LastIndexAny(name, "/\\")+1:]
+	return base == "Kamefile" || strings.HasSuffix(base, ".km") || strings.HasSuffix(base, ".kame")
+}
+
 // BuildSourceCandidates returns the ordered build sources tried by discovery.
 // Native and Node runners share this list; keep the JS mirror aligned. Callers
 // must not mutate the returned slice.
 func BuildSourceCandidates() []string { return buildSourceCandidates }
 
-var buildSourceCandidates = []string{"Kamefile", "Makefile.kmk", "make.kmk", "src/kmk/main.kmk"}
+var buildSourceCandidates = []string{"Kamefile", "Makefile.km", "make.km", "src/km/main.km"}
 
 // BuildSourceList returns the candidates in human-readable diagnostic form.
 // The caller owns and frees the returned string.

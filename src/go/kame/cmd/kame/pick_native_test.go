@@ -27,7 +27,7 @@ func TestPickOversizedOutputIsDrainedAndRejected(t *testing.T) {
 import errno, os, pty, select, signal, sys, time
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(sys.argv[1], [sys.argv[1], "--color=never", "do", "pick", "-c", "task default :", "--picker", sys.argv[2]])
+    os.execv(sys.argv[1], [sys.argv[1], "--color=never", "do", "pick", "-c", "task default", "--picker", sys.argv[2]])
 output = bytearray()
 status = None
 deadline = time.monotonic() + 5

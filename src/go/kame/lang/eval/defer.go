@@ -52,7 +52,7 @@ func (p *Program) NewDeferScope(group int64, owner int64) *DeferScope {
 }
 
 func (p *Program) registerDefer(e *expr.Expr, c *Context) Result {
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.pureValueBlock {
 		return failure(c.Run, "PHASE_INVALID", e.Span, "defer requires runtime execution")
 	}
 	if c.Engine == nil || c.Deferred == nil {

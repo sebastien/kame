@@ -70,7 +70,7 @@ func TestContributionOverrideReplacesUnevaluatedOperands(t *testing.T) {
 
 func TestContributionFailuresRetainOrdinaryDiagnostics(t *testing.T) {
 	a := t.Allocator()
-	sources := []string{"items += 1", "items = 1\nitems += []", "items += items", "items += later\nlater = items", "items += []\nitems = []", "(items) = []\nitems += []"}
+	sources := []string{"items += 1", "items = 1\nitems += []", "items += items", "items += later\nlater = items", "items += []\nitems = []", "def items () = []\nitems += []"}
 	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "DEP_CYCLE", "DEP_CYCLE", "DEF_INVALID", "DEF_INVALID"}
 	for i := range sources {
 		parsed := script.Parse(a, "contributions.km", sources[i])

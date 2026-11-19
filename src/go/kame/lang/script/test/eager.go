@@ -9,7 +9,7 @@ import (
 
 func TestKashEagerBindingsPreserveDeclarationAndStatementIdentity(t *testing.T) {
 	a := t.Allocator()
-	text := "lazy = 1\nlet value = $(printf %s typed) ?? \"fallback\"\ndef probe arg\n\tlet local = [arg, value]\n\treturn (count local)\n"
+	text := "def lazy = 1\nlet value = $(printf %s typed) ?? \"fallback\"\ndef probe arg\n\tlet local = [arg, value]\n\treturn (count local)\n"
 	s := script.ParseKash(a, "eager.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 3 {
@@ -34,7 +34,7 @@ func TestKashEagerBindingsPreserveDeclarationAndStatementIdentity(t *testing.T) 
 func TestKashEagerBindingsRejectMalformedAndConflictingDeclarations(t *testing.T) {
 	texts := []string{
 		"let", "let = 1", "let value", "let value =", "let value =\nprintf must-not-run", "let env = 1", "let (helper) = 1", "let value += 1", "let value ?= 1",
-		"let value = 1\nvalue = 2", "value = 1\nlet value = 2", "let value = 1\nlet value = 2", "def value\n\treturn 0\nlet value = 1",
+		"let value = 1\ndef value = 2", "def value = 1\nlet value = 2", "let value = 1\nlet value = 2", "def value ()\n\treturn 0\nlet value = 1",
 		"for item in [1]\n\tlet item = 2\n", "def unused item\n\tlet item = 1\n", "def unused rest...\n\tlet rest = 1\n",
 	}
 	for i := range texts {

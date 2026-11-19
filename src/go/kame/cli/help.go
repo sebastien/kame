@@ -55,7 +55,7 @@ const BuildHelp = `  -f, --file FILE         select/append source (repeatable in
       --shell SHELL       recipe shell executable/arguments (repeatable)
       --env NAME=VALUE    replace a process environment entry
       env.NAME=VALUE     shorthand for --env NAME=VALUE
-      NAME=VALUE         override a declared value or bind a task argument
+      NAME=VALUE         override a declared value or bind a target argument
       --timeout MS        timeout in milliseconds
       --retry N           retry failed commands
       --log-limit N       retained recipe bytes per stream
@@ -72,7 +72,7 @@ func HelpText(topic string) string {
 		mem.FreeString(mem.System, list)
 		b.WriteString(".\nWithout targets, select default; without a source or arguments, show help.\n\nBuild options:\n")
 		b.WriteString(BuildHelp)
-		b.WriteString("\nExplicit execution: -l, --lang km|kmk|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
+		b.WriteString("\nExplicit execution: -l, --lang km|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
 	} else if topic != "do" {
 		for i := range Commands {
 			if Commands[i].Name == topic {
@@ -86,7 +86,7 @@ func HelpText(topic string) string {
 		}
 		if topic == "run" {
 			b.WriteString("Source: -f, --file FILE; -c, --command TEXT; - selects stdin.\n-C, --directory DIR; -n, --dry-run suppresses effects in every language.\n--timeout MS; --capture-limit N; --verbose; --define NAME=VALUE; --set NAME=LITERAL; --tool NAME=PATH.\nRule work also accepts -j/--jobs N, --force, --retry N, --shell SHELL, --log-limit N.\nRule/Kash process environments accept --env NAME=VALUE or env.NAME=VALUE.\n")
-			b.WriteString("-l, --lang km|kmk|kash|expr; --entry NAME selects the preceding source entry.\nFiles/-f and -c compose ordered fragments; inline input defaults to km.\n-i, --interactive reads Kash entries from stdin after any sources; on a terminal this is the REPL, also started by bare kash,\nwhere foreground commands get the terminal and cd/export/unset change the session directory and child environment.\n--login loads the Kash login profile before sources; standalone kash also accepts -l (not a language option).\nInteractive alias NAME = [\"command\" \"arg\"] defines an argv prefix invoked by bare NAME; unalias NAME removes it.\n")
+			b.WriteString("-l, --lang km|kash|expr; --entry NAME selects the preceding source entry.\nFiles/-f and -c compose ordered fragments; inline input defaults to km.\n-i, --interactive reads Kash entries from stdin after any sources; on a terminal this is the REPL, also started by bare kash,\nwhere foreground commands get the terminal and cd/export/unset change the session directory and child environment.\n--login loads the Kash login profile before sources; standalone kash also accepts -l (not a language option).\nInteractive alias NAME = [\"command\" \"arg\"] defines an argv prefix invoked by bare NAME; unalias NAME removes it.\n")
 			b.WriteString("Interactive option [-l|--local|-g|--global] [NAME [VALUE]] inspects or changes shell settings;\nlocal (default) affects this shell, global saves user defaults in the XDG kash/options file.\n")
 			b.WriteString("km scripts emit explicit out/err effects; --print-result also displays their final value (requires km work).\nexpr and explicitly selected value entries retain result display.\nArguments after -- bind args (@*); each operand remains one literal string.\nNAME=VALUE is literal configuration, even when VALUE ends in a source suffix.\n")
 		}
@@ -94,7 +94,7 @@ func HelpText(topic string) string {
 			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
 		}
 		if topic == "parse" || topic == "fmt" {
-			b.WriteString("-l, --lang expr|template|rule|script|km|kmk|kash\n")
+			b.WriteString("-l, --lang expr|template|rule|script|km|kash\n")
 		}
 		if topic == "parse" || topic == "fmt" || topic == "render" {
 			b.WriteString("Source: -f, --file FILE; -c, --command TEXT; FILE or - (stdin).\n-C, --directory DIR resolves files/resources beneath DIR, independent of option order.\nOmitted source reads stdin; -- ends option parsing. Inline sources may be empty.\n")
@@ -104,7 +104,7 @@ func HelpText(topic string) string {
 		}
 		if topic == "fmt" {
 			b.WriteString("-i, --in-place replaces files atomically; -n, --check lists differences (exit 1).\n--indent-width N accepts 1..16; --comment STYLE selects template comment syntax.\n")
-			b.WriteString("Default language: script. Multiple sources must all be files; --in-place requires files.\n--indent tabs|spaces (default tabs) requires rule/script/kmk/kash; width defaults to 4 and accepts 1..16, requiring spaces.\n--comment requires template language.\n")
+			b.WriteString("Default language: km. Multiple sources must all be files; --in-place requires files.\n--indent tabs|spaces (default tabs) requires km/kash/rule/script; width defaults to 4 and accepts 1..16, requiring spaces.\n--comment requires template language.\n")
 		}
 		if topic == "render" {
 			b.WriteString("--define NAME=VALUE supplies literal payload; template reads need an explicit grant.\n--comment STYLE selects template comment syntax; --check emits no document.\n")
@@ -135,7 +135,7 @@ func HelpText(topic string) string {
 		if topic == "list" || topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\n")
 			if topic != "list" {
-				b.WriteString("NAME=VALUE overrides a declared value or binds a task argument.\n")
+				b.WriteString("NAME=VALUE overrides a declared value or binds a target argument.\n")
 			}
 			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
 			if topic != "cat" {
@@ -170,7 +170,7 @@ func HelpText(topic string) string {
 	}
 	b.WriteString("\nPresentation options (all commands):\n")
 	b.WriteString(GlobalHelp)
-	b.WriteString("\nHuman output is the default. Exact artifact/source/document bytes are never decorated.\nUse --output json for machine data: execution is JSON Lines; AST/graph/tool/cache lists are JSON documents.\n\nExamples:\n  kame\n  kame -f Build.kmk dist\n  kame do plan --json dist\n  kame do fmt -i Makefile.kmk\n  kame do run --lang expr -c '42'\n\nRun 'kame do COMMAND --help' for command-specific help.\n")
+	b.WriteString("\nHuman output is the default. Exact artifact/source/document bytes are never decorated.\nUse --output json for machine data: execution is JSON Lines; AST/graph/tool/cache lists are JSON documents.\n\nExamples:\n  kame\n  kame -f Build.km dist\n  kame do plan --json dist\n  kame do fmt -i Makefile.km\n  kame do run --lang expr -c '42'\n\nRun 'kame do COMMAND --help' for command-specific help.\n")
 	text := cloneText(b.String())
 	b.Reset()
 	return text

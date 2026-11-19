@@ -5,6 +5,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/internal/mem"
+	"kame/lang/script"
 	"kame/program"
 	"slices"
 )
@@ -40,8 +41,12 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			}
 		}
 		name := host.PayloadText(inputs[i], "name")
+		lang := host.PayloadText(inputs[i], "lang")
+		if lang == "" {
+			lang = script.KameFileLanguage
+		}
 		offset := host.PayloadInt(inputs[i], "offset")
-		if !valid || !hasName || !hasText || name == "" {
+		if !valid || !hasName || !hasText || name == "" || (lang != "km" && lang != script.KameFileLanguage && lang != "kash" && lang != "expr") {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build source fragment")}
 		}
@@ -55,7 +60,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			return PureResult{Code: pureText(r.Alloc, "NO_MEMORY"), Message: pureText(r.Alloc, "build sources exceed instance capacity")}
 		}
 		total += len(text)
-		r.BuildSources = append(r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), Lang: pureText(r.Alloc, host.PayloadText(inputs[i], "lang")), SourceDirectory: pureText(r.Alloc, host.PayloadText(inputs[i], "sourceDirectory")), Signature: descriptorSourceSignature(inputs[i]), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
+		r.BuildSources = append(r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), Lang: pureText(r.Alloc, lang), SourceDirectory: pureText(r.Alloc, host.PayloadText(inputs[i], "sourceDirectory")), Signature: descriptorSourceSignature(inputs[i]), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
 	}
 	tools := host.PayloadList(descriptor, "toolOverrides")
 	for i := range tools {

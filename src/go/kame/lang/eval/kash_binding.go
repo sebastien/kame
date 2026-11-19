@@ -5,10 +5,10 @@ import (
 )
 
 func (p *Program) kashLet(scope *Scope, e *expr.Expr, c *Context) Result {
-	if c.Phase != EvaluatePhase || c.PurePredicate {
+	if !c.pureValueBlock && (c.Phase != EvaluatePhase || c.PurePredicate) {
 		return failure(c.Run, "PHASE_INVALID", e.Span, "Kash let requires runtime execution")
 	}
-	if p.DryRun {
+	if p.DryRun && !c.pureValueBlock {
 		c.deferred = true
 		return Result{Completed: true}
 	}

@@ -10,6 +10,7 @@ import (
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
+	"strings"
 )
 
 // WriteAST parses text as lang and writes its schema-2 AST JSON to out. It
@@ -18,7 +19,12 @@ import (
 // Rule captures use pattern. Quoted operands use template for their decoded
 // string and interpolation AST.
 func WriteAST(out io.Writer, lang string, name string, text string) int {
-	enc := newASTEncoder(out, lang, name)
+	lang, composition := strings.CutPrefix(lang, "composition:")
+	label := lang
+	if lang == script.KameFileLanguage {
+		label = "km"
+	}
+	enc := newASTEncoder(out, label, name)
 	failed := false
 	if lang == "expr" {
 		result := expr.Parse(mem.System, name, text)
@@ -32,17 +38,29 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 		result.Free()
 	} else if lang == "rule" {
 		result := rule.ParseRule(mem.System, name, text)
-		enc.rule(result.Rule)
-		failed = enc.diagnostics(result.Diagnostics)
+		var body *script.Script
+		diagnostics := result.Diagnostics
+		if len(diagnostics) == 0 {
+			body = script.InspectStandaloneKashRule(mem.System, result.Source, result.Rule)
+			if body != nil {
+				diagnostics = body.Diagnostics
+			}
+		}
+		enc.rule(result.Rule, body)
+		failed = enc.diagnostics(diagnostics)
+		body.Free()
 		result.Free()
 	} else {
 		var result *script.Script
 		var authored *source.Source
 		if lang == "kash" {
 			result = script.ParseKash(mem.System, name, text)
-		} else if lang == "km" {
+		} else if lang == "km" || lang == script.KameFileLanguage {
 			authored = source.New(mem.System, name, text)
 			result = script.ParseFragment(mem.System, authored, lang, 0, len(text))
+			if !composition {
+				script.InspectKashRecipes(result)
+			}
 		} else {
 			result = script.Parse(mem.System, name, text)
 		}
@@ -285,7 +303,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashLet || value.Kind == expr.KashComment {
+	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashLet || value.Kind == expr.KashSet || value.Kind == expr.KashComment {
 		e.Str("text")
 		e.Str(value.Text)
 	}
@@ -335,7 +353,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.KashReturn || value.Kind == expr.KashExit || value.Kind == expr.KashLet || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
+	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.ValueReturn || value.Kind == expr.KashSet || value.Kind == expr.KashYield || value.Kind == expr.KashReturn || value.Kind == expr.KashExit || value.Kind == expr.KashLet || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -398,6 +416,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
+	if value.Kind == expr.KashBranch && value.Bool {
+		e.Str("inline")
+		e.Bool(true)
+	}
 	if value.Kind == expr.KashBranch || value.Kind == expr.KashWith {
 		e.Str("body")
 		e.exprs(value.Body)
@@ -417,6 +439,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 	if value.Kind == expr.KashFunction {
 		e.Str("name")
 		e.Str(value.Text)
+		if value.Bool {
+			e.Str("generator")
+			e.Bool(true)
+		}
 	}
 	if value.Kind == expr.Lambda || value.Kind == expr.KashDefinition || value.Kind == expr.KashFunction {
 		e.Str("parameters")
@@ -433,6 +459,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 			e.EndObject()
 		}
 		e.EndArray()
+		e.Str("body")
+		e.exprs(value.Body)
+	}
+	if value.Kind == expr.ValueBlock {
 		e.Str("body")
 		e.exprs(value.Body)
 	}
@@ -533,6 +563,18 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.KashSet {
+		return "set"
+	}
+	if k == expr.KashYield {
+		return "yield"
+	}
+	if k == expr.ValueBlock {
+		return "value-block"
+	}
+	if k == expr.ValueReturn {
+		return "return"
+	}
 	if k == expr.ListSpread {
 		return "list-spread"
 	}
@@ -753,7 +795,7 @@ func templateKind(k template.PartKind) string {
 	return "selector"
 }
 
-func (e *astEncoder) rule(value *rule.Rule) {
+func (e *astEncoder) rule(value *rule.Rule, body *script.Script) {
 	if value == nil {
 		e.Null()
 		return
@@ -851,6 +893,14 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		e.EndObject()
 	}
 	e.EndArray()
+	if value.BodyExpression != nil {
+		e.Str("bodyExpression")
+		e.expr(value.BodyExpression)
+	}
+	if body != nil {
+		e.Str("bodyStatements")
+		e.scriptItems(body.Items)
+	}
 	e.Str("body")
 	e.BeginArray()
 	for i := range value.Body {
@@ -970,7 +1020,10 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 				e.Bool(true)
 			}
 		}
-		if item.Kind == script.Generate {
+		if item.Module != nil {
+			e.moduleDeclaration(item.Module)
+		}
+		if item.Kind == script.Generate && item.GenerateName != "" {
 			e.Str("name")
 			e.Str(item.GenerateName)
 		}
@@ -980,7 +1033,7 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 		}
 		if item.Rule != nil {
 			e.Str("rule")
-			e.rule(item.Rule)
+			e.rule(item.Rule, item.KashBody)
 		}
 		if item.Kind == script.Composition {
 			e.Str("branches")
@@ -999,6 +1052,14 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 			}
 			e.EndArray()
 		}
+		if item.Loop != nil {
+			e.Str("binding")
+			e.Str(item.Loop.Name)
+			e.Str("bindingSpan")
+			e.span(item.Loop.NameSpan)
+			e.Str("items")
+			e.scriptItems(item.Loop.Items)
+		}
 		if item.Expression != nil {
 			e.Str("expression")
 			e.expr(item.Expression)
@@ -1008,7 +1069,53 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 	e.EndArray()
 }
 
+func (e *astEncoder) moduleDeclaration(module *script.ModuleDeclaration) {
+	if module.Path != "" {
+		e.Str("path")
+		e.Str(module.Path)
+		e.Str("pathSpan")
+		e.span(module.PathSpan)
+	}
+	if module.Alias != "" {
+		e.Str("alias")
+		e.Str(module.Alias)
+		e.Str("aliasSpan")
+		e.span(module.AliasSpan)
+	}
+	if len(module.Names) != 0 {
+		e.Str("names")
+		e.BeginArray()
+		for _, name := range module.Names {
+			e.BeginObject()
+			e.Str("name")
+			e.Str(name.Name)
+			e.Str("span")
+			e.span(name.Span)
+			if name.Alias != "" {
+				e.Str("alias")
+				e.Str(name.Alias)
+				e.Str("aliasSpan")
+				e.span(name.AliasSpan)
+			}
+			e.EndObject()
+		}
+		e.EndArray()
+	}
+}
+
 func scriptKind(k script.ScriptItemKind) string {
+	switch k {
+	case script.ModuleImport:
+		return "import"
+	case script.ModuleFrom:
+		return "from"
+	case script.ModuleExport:
+		return "export"
+	case script.DeclarationFor:
+		return "for"
+	case script.DeclarationLet:
+		return "let"
+	}
 	if k == script.SessionCommand {
 		return "session-command"
 	}

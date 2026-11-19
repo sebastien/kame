@@ -90,6 +90,10 @@ func (p *Program) constructKash(values []core.Value, c *Context, span source.Spa
 			parsed.Free()
 			return failure(c.Run, "FEATURE_UNSUP", span, "include requires a file-backed source")
 		}
+		if parsed.Items[i].Module != nil {
+			parsed.Free()
+			return failure(c.Run, "FEATURE_UNSUP", span, "module declarations require a file-backed source")
+		}
 		if parsed.Items[i].Kind == script.SessionCommand {
 			parsed.Free()
 			return failure(c.Run, "FEATURE_UNSUP", span, "session commands require an interactive session entry or startup file")
@@ -155,6 +159,7 @@ type kashInvocation struct {
 	PropagateReturn bool
 	Returned        bool
 	LoopTransfer    expr.Kind
+	ValueBlock      bool
 }
 
 func freeKashInvocation(a mem.Allocator, value any) {
@@ -189,7 +194,7 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 		parsed = state.Parsed
 	}
 	if parsed == nil {
-		parsed = script.ParseKash(p.Alloc, "<recipe>", text)
+		parsed = script.ParseKashRuleBody(p.Alloc, "<recipe>", text)
 		if len(parsed.Diagnostics) != 0 {
 			d := parsed.Diagnostics[0]
 			r := failure(c.Run, d.Code, d.Span, d.Message)
@@ -216,7 +221,7 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 }
 
 func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope *Scope, args []core.Value, c *Context) Result {
-	if c.Phase != EvaluatePhase || c.PurePredicate {
+	if (c.Phase != EvaluatePhase || c.PurePredicate) && (native == nil || native.Kind != expr.ValueBlock) {
 		return failure(c.Run, "PHASE_INVALID", c.Span, "Kash execution is invalid in this phase")
 	}
 	if c.Engine == nil {
@@ -229,6 +234,9 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 	if state == nil {
 		if parsed != nil {
 			for _, item := range parsed.Items {
+				if item.Module != nil {
+					return failure(c.Run, "FEATURE_UNSUP", item.Span, "module declarations require a file-backed source")
+				}
 				if item.Kind == script.Include {
 					return failure(c.Run, "FEATURE_UNSUP", item.Span, "include requires a file-backed source")
 				}
@@ -248,6 +256,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		}
 		if native != nil {
 			state.Native = true
+			state.ValueBlock = native.Kind == expr.ValueBlock
 			state.PropagateReturn = native.Kind == expr.KashWith
 			initialized := p.kashBodyDefinitions(state.Scope, native.Body, c)
 			if initialized.Diagnostic.Code != "" {
@@ -379,7 +388,7 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		return r
 	}
 	r.Free(c.Run)
-	return Result{Value: state.Value.Clone(c.Run), Returned: state.PropagateReturn && state.Returned, LoopTransfer: state.LoopTransfer}
+	return Result{Value: state.Value.Clone(c.Run), Returned: state.Returned && (state.PropagateReturn || state.Parsed != nil && state.Parsed.RuleBody), LoopTransfer: state.LoopTransfer}
 }
 
 func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
@@ -392,7 +401,7 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 			state.Index++
 			continue
 		}
-		if c.TimeoutMS > 0 {
+		if c.TimeoutMS > 0 && !c.pureValueBlock {
 			clock := p.kashBudget(state, c)
 			if clock.Waiting || clock.Diagnostic.Code != "" {
 				return clock
@@ -416,7 +425,7 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		}
 		freeCallables(p.Alloc, &state.Value)
 		state.Value.Free(p.Alloc)
-		if item.Kind == script.Expression && !r.Returned {
+		if (item.Kind == script.Expression || state.ValueBlock) && !r.Returned {
 			freeCallables(p.Alloc, &r.Value)
 			r.Value.Free(p.Alloc)
 			state.Value = core.Value{}

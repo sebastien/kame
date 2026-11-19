@@ -18,7 +18,7 @@ func TestBuildSourceDescriptorCopiesBytesAndMapsAuthoredSpans(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	data := slices.Clone([]byte(`{"sources":[{"name":"main.kmk","text":"","offset":0},{"name":"child.kmk","text":"task child : ; {shell: kash}\n\t(out! \"ok\")\n","offset":42}]}`))
+	data := slices.Clone([]byte(`{"sources":[{"name":"main.km","text":"","offset":0},{"name":"child.km","text":"task child ; {shell: kash}\n\t(out! \"ok\")\n","offset":42}]}`))
 	defer mem.FreeSlice(nil, data)
 	configured := r.SetBuildSources(data)
 	if configured.Code != "" {
@@ -38,7 +38,7 @@ func TestBuildSourceDescriptorCopiesBytesAndMapsAuthoredSpans(t *testing.T) {
 		return
 	}
 	location := r.Program.Eval.LocateSource(r.Program.Parsed.Source.Name, source.Span{Start: 1, End: 12})
-	if location.Source != "child.kmk" || location.Span.Start != 42 {
+	if location.Source != "child.km" || location.Span.Start != 42 {
 		t.Error("authored rule span was lost")
 	}
 }
@@ -52,7 +52,7 @@ func TestBuildSourceCompileFailureKeepsCompleteDiagnosticJSON(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"first.kmk","text":"name = 1\n","offset":0,"includes":[{"source":"main.kmk","label":"first.kmk","start":0,"end":20}]},{"name":"second.kmk","text":"name = 2\n","offset":17,"includes":[{"source":"main.kmk","label":"second.kmk","start":21,"end":42}]}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"first.km","text":"name = 1\n","offset":0,"includes":[{"source":"main.km","label":"first.km","start":0,"end":20}]},{"name":"second.km","text":"name = 2\n","offset":17,"includes":[{"source":"main.km","label":"second.km","start":21,"end":42}]}]}`))
 	if configured.Code != "" {
 		t.Error("configure sources")
 	}
@@ -62,10 +62,10 @@ func TestBuildSourceCompileFailureKeepsCompleteDiagnosticJSON(t *testing.T) {
 		t.Error("duplicate diagnostic lost code or authored offset")
 	}
 	prepared.Free(a)
-	if !strings.Contains(string(r.EventJSON), "second.kmk") || !strings.Contains(string(r.EventJSON), "DEF_INVALID") {
+	if !strings.Contains(string(r.EventJSON), "second.km") || !strings.Contains(string(r.EventJSON), "DEF_INVALID") {
 		t.Error("compile diagnostic JSON lost source")
 	}
-	if !strings.Contains(string(r.EventJSON), "first.kmk") || !strings.Contains(string(r.EventJSON), "main.kmk") || !strings.Contains(string(r.EventJSON), "original declaration") {
+	if !strings.Contains(string(r.EventJSON), "first.km") || !strings.Contains(string(r.EventJSON), "main.km") || !strings.Contains(string(r.EventJSON), "original declaration") {
 		t.Error("compile diagnostic lost copied related location or include provenance")
 	}
 }
@@ -79,17 +79,17 @@ func TestBuildSourceDescriptorRejectsInvalidInputWithoutPoisoningRuntime(t *test
 	}
 	r := start.Runtime
 	defer r.Free()
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"valid.kmk","text":"x = 1","offset":0,"includes":[{"source":"main.kmk","label":"valid.kmk","start":0,"end":20}]},{"name":"","text":"","offset":0}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"valid.km","text":"x = 1","offset":0,"includes":[{"source":"main.km","label":"valid.km","start":0,"end":20}]},{"name":"","text":"","offset":0}]}`))
 	if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 {
 		t.Error("invalid partial descriptor retained sources")
 	}
 	configured.Free(a)
-	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"valid.kmk","text":"x = 1","offset":0}]}`))
+	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"valid.km","text":"x = 1","offset":0}]}`))
 	if configured.Code != "" {
 		t.Error("valid retry was rejected")
 	}
 	configured.Free(a)
-	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"other.kmk","text":"x = 2","offset":0}]}`))
+	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"other.km","text":"x = 2","offset":0}]}`))
 	if configured.Code != "PHASE_INVALID" {
 		t.Error("second descriptor replaced configured sources")
 	}
@@ -105,18 +105,18 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 	}
 	r := start.Runtime
 	defer r.Free()
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":"x = 1","offset":2147483648}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.km","text":"x = 1","offset":2147483648}]}`))
 	if configured.Code != "PARSE_ERR" {
 		t.Error("overflowing source offset accepted")
 	}
 	configured.Free(a)
-	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":"x = 1","offset":2147483647}]}`))
+	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"source.km","text":"x = 1","offset":2147483647}]}`))
 	if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 {
 		t.Error("overflowing source end accepted")
 	}
 	configured.Free(a)
 	b := strings.Builder{}
-	b.WriteString(`{"sources":[{"name":"source.kmk","text":"`)
+	b.WriteString(`{"sources":[{"name":"source.km","text":"`)
 	for i := 0; i < 65537; i++ {
 		b.WriteString(" ")
 	}
@@ -139,10 +139,11 @@ func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
 	r := start.Runtime
 	defer r.Free()
 	bad := []string{
-		`{"sources":[{"name":"source.kmk","text":"","offset":"1"}]}`,
-		`{"sources":[{"name":"source.kmk","text":1,"offset":0}]}`,
-		`{"sources":[{"name":"source.kmk","offset":0}]}`,
+		`{"sources":[{"name":"source.km","text":"","offset":"1"}]}`,
+		`{"sources":[{"name":"source.km","text":1,"offset":0}]}`,
+		`{"sources":[{"name":"source.km","offset":0}]}`,
 		`{"sources":[{"name":1,"text":"","offset":0}]}`,
+		`{"sources":[{"name":"source.km","text":"","lang":"kmk"}]}`,
 	}
 	for i := range bad {
 		configured := r.SetBuildSources([]byte(bad[i]))
@@ -151,7 +152,7 @@ func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
 		}
 		configured.Free(a)
 	}
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":""}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.km","text":""}]}`))
 	if configured.Code != "" {
 		t.Error("optional zero offset rejected")
 	}
@@ -167,7 +168,7 @@ func TestBuildSourceConfigurationCopiesOverrideAndEnvironment(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	data := slices.Clone([]byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
+	data := slices.Clone([]byte(`{"sources":[{"name":"config.km","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
 	configured := r.SetBuildSources(data)
 	for i := range data {
 		data[i] = 0
@@ -200,9 +201,9 @@ func TestBuildSourceDescriptorPreservesForce(t *testing.T) {
 			return
 		}
 		r := started.Runtime
-		data := `{"sources":[{"name":"force.kmk","text":"./out :\n\ttrue\n","offset":0}],"force":0}`
+		data := `{"sources":[{"name":"force.km","text":"rule ./out\n\ttrue\n","offset":0}],"force":0}`
 		if scenario == 1 {
-			data = `{"sources":[{"name":"force.kmk","text":"./out :\n\ttrue\n","offset":0}],"force":1}`
+			data = `{"sources":[{"name":"force.km","text":"rule ./out\n\ttrue\n","offset":0}],"force":1}`
 		}
 		configured := r.SetBuildSources([]byte(data))
 		if configured.Code != "" {

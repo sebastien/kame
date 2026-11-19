@@ -37,15 +37,15 @@ func TestModuleSourceIdentityAndResumedLexicalScope(t *testing.T) {
 			text := ""
 			switch name {
 			case "/project/a.kash":
-				text = "child = (kash ./one.kash)\n"
+				text = "def child = (kash ./one.kash)\n"
 			case "/project/b.kash":
-				text = "child = (kash ./two.kash)\n"
+				text = "def child = (kash ./two.kash)\n"
 			case "/project/one.kash":
-				text = "value = 1\n"
+				text = "def value = 1\n"
 			case "/project/two.kash":
-				text = "value = 2\n"
+				text = "def value = 2\n"
 			case "/project/scope.kash":
-				text = "value = x\n"
+				text = "def value = x\n"
 			}
 			if text == "" || request.Request.Kind != host.RequestLoadSource {
 				t.Error("unexpected source request: " + name)
@@ -81,7 +81,7 @@ func TestModuleSuspendsLoadsAndKeepsIdentity(t *testing.T) {
 		t.Error("module did not submit its authored source path")
 	}
 	if request.OK {
-		engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("value = 42\nunused = (fail! \"unreached\")\n"))})
+		engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("def value = 42\ndef unused = (fail! \"unreached\")\n"))})
 		request.Request.Free(a)
 	}
 	for i := 0; i < 5 && !module.Current; i++ {
@@ -155,7 +155,7 @@ func TestModuleCancellationReleasesPartialNestedLoad(t *testing.T) {
 		t.Error("root source load missing")
 	}
 	if root.OK {
-		engine.Complete(core.Completion{NodeID: root.Request.NodeID, Generation: root.Request.Generation, Attempt: root.Request.Attempt, RequestID: root.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("include ./child.kash\nvalue = 1\n"))})
+		engine.Complete(core.Completion{NodeID: root.Request.NodeID, Generation: root.Request.Generation, Attempt: root.Request.Attempt, RequestID: root.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("include ./child.kash\ndef value = 1\n"))})
 		root.Request.Free(a)
 	}
 	child := program.Requests.Next()
@@ -168,7 +168,7 @@ func TestModuleCancellationReleasesPartialNestedLoad(t *testing.T) {
 	}
 	engine.Invalidate(node)
 	if child.OK {
-		engine.Complete(core.Completion{NodeID: child.Request.NodeID, Generation: child.Request.Generation, Attempt: child.Request.Attempt, RequestID: child.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("helper = 1\n"))})
+		engine.Complete(core.Completion{NodeID: child.Request.NodeID, Generation: child.Request.Generation, Attempt: child.Request.Attempt, RequestID: child.Request.ID, HasValue: true, Value: core.NewBytes(a, []byte("def helper = 1\n"))})
 		child.Request.Free(a)
 	}
 	engine.Free()

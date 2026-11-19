@@ -65,7 +65,7 @@ func sourceCompile(handle uint64, src, length uint32) uint32 {
 	if !ok {
 		return 4
 	}
-	started := wasm.NewRuntime(mem.System, s)
+	started := wasm.NewKameRuntime(mem.System, i.name, s)
 	if started.Runtime == nil {
 		return i.status(started.Result)
 	}

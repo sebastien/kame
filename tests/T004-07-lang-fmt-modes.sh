@@ -13,33 +13,37 @@ cli_require_tools
 cli_build
 
 test-step "stdin formats per language"
-printf 'value=42\n' >definition.kmk
-cli_run --stdin definition.kmk -- do fmt
+printf 'value=42\n' >definition.km
+cli_run --stdin definition.km -- do fmt
 cli_expect_status 0
 cli_expect_stdout "value = 42
 "
 cli_expect_stderr_empty
 
-printf './x :\n  true\n' >rule.kmk
-cli_run --stdin rule.kmk -- do fmt --lang rule
+printf 'rule ./x\n  true\n' >rule.km
+cli_run --stdin rule.km -- do fmt --lang km
 cli_expect_status 0
-cli_expect_stdout "./x :
-	true"
+cli_expect_stdout "rule ./x
+	true
+"
 
-cli_run --stdin rule.kmk -- do fmt --lang rule --indent spaces
+cli_run --stdin rule.km -- do fmt --lang km --indent spaces
 cli_expect_status 0
-cli_expect_stdout "./x :
-    true"
+cli_expect_stdout "rule ./x
+    true
+"
 
-cli_run --stdin rule.kmk -- do fmt --lang rule --indent spaces --indent-width 2
+cli_run --stdin rule.km -- do fmt --lang km --indent spaces --indent-width 2
 cli_expect_status 0
-cli_expect_stdout "./x :
-  true"
+cli_expect_stdout "rule ./x
+  true
+"
 
-printf '( join "," [a b] )' >expression.km
+printf '( join "," [a,b] )' >expression.km
 cli_run --stdin expression.km -- do fmt --lang expr
 cli_expect_status 0
-cli_expect_stdout '(join "," [a b])'
+cli_expect_stdout '(join "," [a, b])
+'
 
 printf 'echo @(count [a b])' >template.km
 cli_run --stdin template.km -- do fmt --lang template
@@ -50,24 +54,24 @@ test-step "-n lists changed files and exits 1"
 fixture_copy fmt fmt-modes
 (
 	cd fmt-modes
-	cli_run -- do fmt --lang script -n canonical.kmk
+	cli_run -- do fmt --lang km -n canonical.km
 	cli_expect_status 0
 	cli_expect_stdout_empty
 
-	cli_run -- do fmt --lang script -n unformatted.kmk
+	cli_run -- do fmt --lang km -n unformatted.km
 	cli_expect_status 1
-	cli_expect_stdout "unformatted.kmk
+	cli_expect_stdout "unformatted.km
 "
 )
 
 test-step "-i replaces files atomically"
 (
 	cd fmt-modes
-	cp unformatted.kmk replace.kmk
-	cli_run -- do fmt --lang script -i replace.kmk
+	cp unformatted.km replace.km
+	cli_run -- do fmt --lang km -i replace.km
 	cli_expect_status 0
 	cli_expect_stdout_empty
-	if cmp -s replace.kmk canonical.kmk; then
+	if cmp -s replace.km canonical.km; then
 		test-ok "in-place formatting matches the canonical fixture"
 	else
 		test-fail "in-place formatting differs from the canonical fixture"
@@ -82,7 +86,7 @@ test-step "-i replaces files atomically"
 test-step "format usage errors"
 (
 	cd fmt-modes
-	cli_run -- do fmt -i -n canonical.kmk
+	cli_run -- do fmt -i -n canonical.km
 	cli_expect_status 2
 	cli_expect_stderr_contains "OPT_CONFLICT"
 

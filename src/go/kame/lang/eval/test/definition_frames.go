@@ -12,7 +12,7 @@ func TestScopedDefinitionsOwnDistinctRuleFrames(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "frames.km", "(newer UNUSED) = (if true then @<? else @<?)\nSELECTED = (newer nil)\nFORWARD = (if true then SELECTED else nil)\n")
+	parsed := script.Parse(a, "frames.km", "def newer UNUSED = (if true then @<? else @<?)\nSELECTED = (newer nil)\nFORWARD = (if true then SELECTED else nil)\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	outer, first, second := core.NewString(a, "outer"), core.NewString(a, "first"), core.NewString(a, "second")
 	frames := []eval.RuleFrame{{FileRule: true, NewerInputs: []core.Value{outer}}, {FileRule: true, NewerInputs: []core.Value{first}}}

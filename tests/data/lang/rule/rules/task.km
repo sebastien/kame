@@ -1,8 +1,8 @@
-build : ./app
+task build : ./app
 	echo building
 
-clean :
+task clean
 	rm -rf ./dist
 
-test-{name} : ./{name}.o
-	echo testing @>
+task test-{name} : ./{name}.o
+	echo testing $name

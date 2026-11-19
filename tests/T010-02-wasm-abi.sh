@@ -24,17 +24,17 @@ printf 'x' >"$marker"
 trap 'rm -f "$marker"' EXIT
 
 test-step "async host services exists, stat, and glob distinctly"
-if exists="$("${cli[@]}" -c "(exists? \"$marker\")")" && [ "$exists" = ':true' ]; then
+if exists="$("${cli[@]}" -c "(exists? \"$marker\")")" && [ "$exists" = 'true' ]; then
 	test-ok "exists? on a present path is true"
 else
 	test-fail "exists? on a present path = ${exists:-<error>}"
 fi
-if missing="$("${cli[@]}" -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = ':false' ]; then
+if missing="$("${cli[@]}" -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = 'false' ]; then
 	test-ok "exists? on an absent path is false"
 else
 	test-fail "exists? on an absent path = ${missing:-<error>}"
 fi
-if size="$("${cli[@]}" -c "(let [s (stat \"$marker\")] s.size)")" && [ "$size" = "1" ]; then
+if size="$("${cli[@]}" -c "(stat \"$marker\").size")" && [ "$size" = "1" ]; then
 	test-ok "stat returns a record with a size field"
 else
 	test-fail "stat size = ${size:-<error>}"
@@ -106,11 +106,11 @@ if (exports.kame_wasm_result_copy(jsonInstance, 0, 0, outLength) !== 3) throw ne
 const resultLength = new DataView(exports.memory.buffer, outLength, 4).getUint32(0, true);
 const output = alloc(resultLength || 1);
 if (exports.kame_wasm_result_copy(jsonInstance, output, resultLength, outLength) !== 0) throw new Error('result copy failed');
-if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, resultLength)) !== ':true') throw new Error('json completion value was not preserved');
+if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, resultLength)) !== 'true') throw new Error('json completion value was not preserved');
 if (exports.kame_wasm_instance_free(jsonInstance) !== 0) throw new Error('json instance did not free');
 
 // Synchronous queries are public ABI paths, separate from the production async host.
-const [sourceText, sourceLength] = write('unused = (fail! "unused definition evaluated")\nresult = (join ":" ["source" "pure"])\n');
+const [sourceText, sourceLength] = write('unused = (fail! "unused definition evaluated")\nresult =\n  let words = ["source", "pure"]\n  return join ":" words\n');
 const [selected, selectedLength] = write('result');
 const syncInstance = exports.kame_wasm_instance_create();
 if (syncInstance === 0n || exports.kame_wasm_source_compile(syncInstance, sourceText, sourceLength) !== 0) throw new Error('synchronous source did not compile');
@@ -131,8 +131,10 @@ if (exports.kame_wasm_instance_free(syncInstance) !== 0) throw new Error('synchr
 // Instance diagnostics are isolated to their instance.
 const instanceA = exports.kame_wasm_instance_create();
 const instanceB = exports.kame_wasm_instance_create();
-const [badSource, badLength] = write('result = (');
-if (exports.kame_wasm_source_compile(instanceA, badSource, badLength) !== 5) throw new Error('malformed source did not diagnose');
+for (const source of ['result = (', 'target :', '(nop 7)']) {
+  const [badSource, badLength] = write(source);
+  if (exports.kame_wasm_source_compile(instanceA, badSource, badLength) !== 5) throw new Error(`invalid Kame file was accepted: ${source}`);
+}
 if (exports.kame_wasm_instance_diagnostic_length(instanceA) === 0) throw new Error('instance A had no diagnostic');
 if (exports.kame_wasm_instance_diagnostic_length(instanceB) !== 0) throw new Error('instance B observed instance A diagnostic');
 const diagnosticLength = exports.kame_wasm_instance_diagnostic_length(instanceA);

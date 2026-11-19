@@ -4,72 +4,46 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
-	"kame/lang/source"
-
-	"strings"
 )
 
-func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definition.Definition {
+func (s *Script) blockFunction(start, end int) (ScriptItem, int, bool) {
+	word, _ := declarationWord(s.Source.Text, start, end)
+	if word != "def" || definition.ValueHeaderEnd(s.Alloc, s.Source, start) != 0 {
+		return ScriptItem{}, start, false
+	}
+	p := kashParser{Script: s, Pos: start}
+	d := p.functionBlock(0, start)
+	return ScriptItem{Kind: Definition, Span: d.Span, Definition: d}, p.Pos, true
+}
+
+func (p *kashParser) functionBlock(level, start int) *definition.Definition {
 	s, text := p.Script, p.Script.Source.Text
-	d := mem.Alloc[definition.Definition](s.Alloc)
-	d.Function, d.Span.Start = true, start
+	end := physicalLineEnd(text, start)
+	part := definition.ParseFunctionHeader(s.Alloc, s.Source, start, end)
+	s.takeDiagnostics(part.Diagnostics)
+	d := part.Definition
 	e := mem.Alloc[expr.Expr](s.Alloc)
-	e.Kind, e.Span.Start, d.Expression = expr.KashFunction, start, e
-	pos := wordEnd
-	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
-		pos++
+	e.Kind, e.Span, e.Text, d.Expression = expr.KashFunction, d.Span, d.Name, e
+	if d.Name == "env" {
+		s.error(d.NameSpan.Start, d.NameSpan.End, "expected non-reserved function name")
 	}
-	nameStart := pos
-	for pos < len(text) && !space(text[pos]) && text[pos] != '\n' && text[pos] != ';' {
-		pos++
+	for _, parameter := range d.Parameters {
+		if parameter.Name == "env" {
+			s.error(parameter.Span.Start, parameter.Span.End, "invalid or reserved function parameter")
+		}
+		e.Parameters = append(e.Parameters, expr.Parameter{Name: parameter.Name, Span: parameter.Span, Rest: parameter.Rest})
 	}
-	d.Name, d.NameSpan = text[nameStart:pos], source.Span{Start: nameStart, End: pos}
-	e.Text = d.Name
-	if !expr.ValidBindingName(d.Name) || d.Name == "env" {
-		s.error(nameStart, pos, "expected non-reserved function name")
+	p.Pos = nextLine(text, end)
+	if len(s.Diagnostics) != 0 {
+		return d
 	}
-	for pos < len(text) && text[pos] != '\n' && text[pos] != '#' && len(s.Diagnostics) == 0 {
-		if !space(text[pos]) {
-			s.error(pos, pos+1, "function parameters need whitespace")
-			break
-		}
-		for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
-			pos++
-		}
-		if pos == len(text) || text[pos] == '\n' || text[pos] == '#' {
-			break
-		}
-		parameterStart := pos
-		for pos < len(text) && !space(text[pos]) && text[pos] != '\n' {
-			pos++
-		}
-		name := text[parameterStart:pos]
-		rest := strings.HasSuffix(name, "...")
-		if rest {
-			name = name[:len(name)-3]
-		}
-		if !expr.ValidBindingName(name) || name == "env" {
-			s.error(parameterStart, pos, "invalid or reserved function parameter")
-		}
-		for i := range d.Parameters {
-			if d.Parameters[i].Name == name || d.Parameters[i].Rest {
-				s.error(parameterStart, pos, "duplicate parameter or non-final rest parameter")
-			}
-		}
-		span := source.Span{Start: parameterStart, End: pos}
-		d.Parameters = append(d.Parameters, definition.Parameter{Name: name, Span: span, Rest: rest})
-		e.Parameters = append(e.Parameters, expr.Parameter{Name: name, Span: span, Rest: rest})
-	}
-	for pos < len(text) && text[pos] != '\n' {
-		pos++
-	}
-	p.Pos = nextLine(text, pos)
 	p.Functions++
-	previousLoops := p.Loops
-	p.Loops = 0
+	previousLoops, valueBlock, ruleBody := p.Loops, p.ValueBlock, p.RuleBody
+	p.Loops, p.ValueBlock, p.RuleBody = 0, false, false
 	p.branchBody(e, level+1)
-	p.Loops = previousLoops
+	p.Loops, p.ValueBlock, p.RuleBody = previousLoops, valueBlock, ruleBody
 	p.Functions--
+	p.checkGenerator(e)
 	for i := range e.Body {
 		statement := e.Body[i]
 		if statement.Kind != expr.KashDefinition && statement.Kind != expr.KashLet {
@@ -86,26 +60,26 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 }
 
 func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *expr.Expr {
+	if (p.ValueBlock || p.RuleBody) && kind == expr.KashReturn {
+		return p.valueReturn(start, wordEnd)
+	}
 	s, text := p.Script, p.Script.Source.Text
-	missing := "return requires a status expression"
 	single := "return requires one status expression"
 	trailing := "return has unexpected trailing operands or process syntax"
 	if kind == expr.KashExit {
-		missing = "exit requires a status expression"
 		single = "exit requires one status expression"
 		trailing = "exit has unexpected trailing operands or process syntax"
 	}
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Span.Start = kind, start
 	if kind == expr.KashReturn && p.Functions == 0 {
-		s.error(start, wordEnd, "return requires an enclosing def")
+		s.error(start, wordEnd, "return requires an enclosing def, value block or rule body")
 	}
 	pos := wordEnd
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
 		pos++
 	}
 	if pos == len(text) || text[pos] == '\n' || text[pos] == ';' || text[pos] == '#' {
-		s.error(wordEnd, pos, missing)
 		p.Pos, e.Span.End = pos, pos
 		return e
 	}

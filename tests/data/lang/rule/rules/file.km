@@ -1,9 +1,8 @@
-./app : ./main.o ./util.o
-	cc -o @> @<
+rule ./app : ./main.o ./util.o
+	cc -o $outputs.0 $...inputs
 
-./generated.c :
-	echo generated > @>
+rule ./generated.c = "int main(void) { return 0; }\n"
 
-./a.o ./b.o : ./a.c
-	cc -c @< -o @>
-	cp @> @>1
+rule ./a.o ./b.o : ./a.c
+	cc -c $inputs.0 -o $outputs.0
+	cp $outputs.0 $outputs.1

@@ -78,6 +78,28 @@ func ParseRange(a mem.Allocator, s *source.Source, start int, end int) Part {
 	return Part{Definition: p.definition(), Diagnostics: p.diags}
 }
 
+// ParseFunctionHeader parses a block-bodied def header. The script parser
+// owns the following action block.
+func ParseFunctionHeader(a mem.Allocator, s *source.Source, start, end int) Part {
+	p := parser{a: a, s: s, start: start, end: end}
+	d := mem.Alloc[Definition](a)
+	d.ExplicitDef = true
+	d.Span = source.Span{Start: start, End: end}
+	if !defPrefix(s.Text[:end], start) {
+		p.error(start, end, "expected def and a function name")
+		return Part{Definition: d, Diagnostics: p.diags}
+	}
+	if comment := strings.IndexByte(s.Text[start:end], '#'); comment > 0 && space(s.Text[start+comment-1]) {
+		end = start + comment
+	}
+	p.namedLHS(d, start+len("def"), end)
+	if d.Name != "" && !d.Function && len(p.diags) == 0 {
+		p.error(d.NameSpan.End, end, "expected parameters or () in a function header")
+	}
+	p.validateNames(d)
+	return Part{Definition: d, Diagnostics: p.diags}
+}
+
 func Free(a mem.Allocator, d *Definition) {
 	if d == nil {
 		return
@@ -98,17 +120,17 @@ type parser struct {
 
 // KashHeaderEnd recognizes standalone '=' and contribution headers so unsupported
 // Kash contributions receive an authored diagnostic, not a missing-tool error.
-func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
-	return headerEnd(a, s, start, false)
+func KashHeaderEnd(_ mem.Allocator, s *source.Source, start int) int {
+	return headerEnd(s, start, false)
 }
 
 // ValueHeaderEnd recognizes compact value headers as ParseRange does; only Kash
 // requires a standalone operator. The complete name/function head stays valid.
-func ValueHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
-	return headerEnd(a, s, start, true)
+func ValueHeaderEnd(_ mem.Allocator, s *source.Source, start int) int {
+	return headerEnd(s, start, true)
 }
 
-func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int {
+func headerEnd(s *source.Source, start int, defaults bool) int {
 	text := s.Text
 	if start >= len(text) {
 		return 0
@@ -124,31 +146,11 @@ func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int 
 		}
 		return start + equals + 1
 	}
-	end := start
-	if text[start] == '(' {
-		for end < len(text) && text[end] != ')' && (defaults || text[end] != '\n') {
-			end++
-		}
-		if end == len(text) || text[end] != ')' {
-			return 0
-		}
-		end++
-		p := parser{a: a, s: s}
-		d := Definition{}
-		p.functionLHS(&d, start, end)
-		valid := len(p.diags) == 0
-		mem.FreeSlice(nil, d.Parameters)
-		mem.FreeSlice(nil, p.diags)
-		if !valid {
-			return 0
-		}
-	} else {
-		name := scanName(text, start)
-		if !name.OK {
-			return 0
-		}
-		end = name.End
+	name := scanName(text, start)
+	if !name.OK {
+		return 0
 	}
+	end := name.End
 	pos := end
 	for pos < len(text) && space(text[pos]) {
 		pos++
@@ -188,60 +190,7 @@ func (p *parser) definition() *Definition {
 		return nil
 	}
 	equals += p.start
-	d := mem.Alloc[Definition](p.a)
-	d.Span = source.Span{Start: p.start, End: p.end}
-	lhsStart, lhsEnd := trim(p.s.Text, p.start, equals)
-	if equals > lhsStart && p.s.Text[equals-1] == '?' {
-		d.Default = true
-		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
-	}
-	if equals > lhsStart && p.s.Text[equals-1] == '+' {
-		d.Contribution = true
-		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
-		if p.kash {
-			p.error(lhsStart, equals+1, "+= contributions require a .km or .kmk source, not Kash")
-		}
-	}
-	if lhsStart == lhsEnd {
-		p.error(p.start, equals, "expected definition name")
-		return d
-	}
-	if defPrefix(p.s.Text[:lhsEnd], lhsStart) {
-		d.ExplicitDef = true
-		if d.Default || d.Contribution {
-			p.error(lhsStart, equals+1, "def requires =")
-		}
-		p.namedLHS(d, lhsStart+3, lhsEnd)
-	} else if p.s.Text[lhsStart] == '(' {
-		if d.Default {
-			p.error(lhsStart, lhsEnd, "default definitions must name a value")
-		}
-		if d.Contribution {
-			p.error(lhsStart, lhsEnd, "contributions must name a value, not a function")
-		}
-		d.Function = true
-		p.functionLHS(d, lhsStart, lhsEnd)
-	} else {
-		name := scanName(p.s.Text[:lhsEnd], lhsStart)
-		if !name.OK || name.End != lhsEnd {
-			p.error(lhsStart, lhsEnd, "invalid definition name")
-		} else {
-			d.Name, d.NameSpan = name.Text, source.Span{Start: lhsStart, End: lhsEnd}
-		}
-	}
-	if d.Name != "" && !expr.ValidBindingName(d.Name) {
-		p.error(d.NameSpan.Start, d.NameSpan.End, "expected a binding name")
-	}
-	parameters := make(map[string]bool, len(d.Parameters))
-	for _, parameter := range d.Parameters {
-		if !expr.ValidBindingName(parameter.Name) {
-			p.error(parameter.Span.Start, parameter.Span.End, "expected a parameter name")
-		}
-		if parameters[parameter.Name] {
-			p.error(parameter.Span.Start, parameter.Span.End, "duplicate parameter name")
-		}
-		parameters[parameter.Name] = true
-	}
+	d := p.bindingHeader(equals)
 	rhsStart, _ := trim(p.s.Text, equals+1, p.end)
 	rhsEnd := p.end
 	for rhsStart < rhsEnd {
@@ -254,7 +203,7 @@ func (p *parser) definition() *Definition {
 	if p.kash {
 		var prefix expr.Prefix
 		if d.ExplicitDef {
-			prefix = expr.ParseValuePrefix(p.a, p.s, rhsStart)
+			prefix = expr.ParseKashValueExpressionPrefix(p.a, p.s, rhsStart)
 		} else {
 			prefix = expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
 		}
@@ -304,17 +253,69 @@ func (p *parser) definition() *Definition {
 	return d
 }
 
-func (p *parser) functionLHS(d *Definition, start int, end int) {
-	if end-start < 3 || p.s.Text[end-1] != ')' {
-		p.error(start, end, "unclosed function definition")
-		return
+// ParseBindingHeader parses the declaration through its equals token.
+func ParseBindingHeader(a mem.Allocator, s *source.Source, start, afterEquals int) Part {
+	p := parser{a: a, s: s, start: start, end: afterEquals}
+	return Part{Definition: p.bindingHeader(afterEquals - 1), Diagnostics: p.diags}
+}
+
+func (p *parser) bindingHeader(equals int) *Definition {
+	d := mem.Alloc[Definition](p.a)
+	d.Span = source.Span{Start: p.start, End: p.end}
+	lhsStart, lhsEnd := trim(p.s.Text, p.start, equals)
+	if equals > lhsStart && p.s.Text[equals-1] == '?' {
+		d.Default = true
+		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
 	}
-	p.namedLHS(d, start+1, end-1)
+	if equals > lhsStart && p.s.Text[equals-1] == '+' {
+		d.Contribution = true
+		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
+		if p.kash {
+			p.error(lhsStart, equals+1, "+= contributions require a Kame program")
+		}
+	}
+	if lhsStart == lhsEnd {
+		p.error(p.start, equals, "expected definition name")
+		return d
+	}
+	if defPrefix(p.s.Text[:lhsEnd], lhsStart) {
+		d.ExplicitDef = true
+		if d.Default || d.Contribution {
+			p.error(lhsStart, equals+1, "def requires =")
+		}
+		p.namedLHS(d, lhsStart+3, lhsEnd)
+
+	} else {
+		name := scanName(p.s.Text[:lhsEnd], lhsStart)
+		if !name.OK || name.End != lhsEnd {
+			p.error(lhsStart, lhsEnd, "invalid definition name")
+		} else {
+			d.Name, d.NameSpan = name.Text, source.Span{Start: lhsStart, End: lhsEnd}
+		}
+	}
+	p.validateNames(d)
+	return d
+}
+
+func (p *parser) validateNames(d *Definition) {
+	if d.Name != "" && !expr.ValidBindingName(d.Name) {
+		p.error(d.NameSpan.Start, d.NameSpan.End, "expected a binding name")
+	}
+	parameters := make(map[string]bool, len(d.Parameters))
+	for _, parameter := range d.Parameters {
+		if !expr.ValidBindingName(parameter.Name) {
+			p.error(parameter.Span.Start, parameter.Span.End, "expected a parameter name")
+		}
+		if parameters[parameter.Name] {
+			p.error(parameter.Span.Start, parameter.Span.End, "duplicate parameter name")
+		}
+		parameters[parameter.Name] = true
+	}
 }
 
 func (p *parser) namedLHS(d *Definition, start, end int) {
 	text := p.s.Text[:end]
-	if d.ExplicitDef && strings.ContainsRune(text[start:], '\n') {
+	if strings.ContainsRune(text[start:], '\n') {
 		p.error(start, end, "def header must fit on one line")
 		return
 	}
@@ -326,7 +327,7 @@ func (p *parser) namedLHS(d *Definition, start, end int) {
 	}
 	d.Name, d.NameSpan = name.Text, source.Span{Start: nameStart, End: name.End}
 	pos := name.End
-	if d.ExplicitDef && pos < end && space(text[pos]) && strings.TrimSpace(text[pos:end]) == "()" {
+	if pos < end && space(text[pos]) && strings.TrimSpace(text[pos:end]) == "()" {
 		d.Function = true
 		return
 	}
@@ -432,19 +433,7 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 		return expr.FormatKashControl(a, d.Expression, "\t")
 	}
 	b := strings.Builder{}
-	headerWidth := expr.Columns(d.Name, 1) + 1
-	for i := range d.Parameters {
-		headerWidth = expr.Columns(d.Parameters[i].Name, headerWidth+1)
-		if d.Parameters[i].Rest {
-			headerWidth += 3
-		}
-	}
-	headerWidth += 2
-	if d.Default {
-		headerWidth++
-	}
-	expandedHeader := !compact && !d.ExplicitDef && d.Function && headerWidth > 80
-	if d.ExplicitDef {
+	if d.ExplicitDef || d.Function {
 		b.WriteString("def ")
 		b.WriteString(d.Name)
 		if d.Function && len(d.Parameters) == 0 {
@@ -457,21 +446,7 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 				b.WriteString("...")
 			}
 		}
-	} else if d.Function {
-		b.WriteByte('(')
-		b.WriteString(d.Name)
-		for i := range d.Parameters {
-			if expandedHeader {
-				b.WriteString("\n  ")
-			} else {
-				b.WriteByte(' ')
-			}
-			b.WriteString(d.Parameters[i].Name)
-			if d.Parameters[i].Rest {
-				b.WriteString("...")
-			}
-		}
-		b.WriteByte(')')
+
 	} else {
 		b.WriteString(d.Name)
 	}
@@ -487,7 +462,12 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	v.WriteString(value)
 	mem.FreeString(a, value)
 	column := expr.Columns(b.String(), 0) + 1
-	if compact || (!expandedHeader && expr.Fits(v.String(), column)) {
+	if d.Expression != nil && d.Expression.Kind == expr.Match {
+		b.WriteByte(' ')
+		formatted := expr.FormatAtIndent(a, d.Expression, column, 0)
+		b.WriteString(formatted)
+		mem.FreeString(a, formatted)
+	} else if compact || expr.Fits(v.String(), column) {
 		b.WriteByte(' ')
 		b.WriteString(v.String())
 	} else {

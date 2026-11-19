@@ -14,7 +14,7 @@ func TestSchemaTwoSemanticFields(t *testing.T) {
 	definitionLanguages := []string{"km", "kmk", "kash"}
 	for _, lang := range definitionLanguages {
 		buffer := bytes.Buffer{}
-		if ast.WriteAST(&buffer, lang, "functions", "(f) = 1\nv = 1\n") != 0 || !strings.Contains(buffer.String(), "\"function\":true") || !strings.Contains(buffer.String(), "\"function\":false") {
+		if ast.WriteAST(&buffer, lang, "functions", "def f () = 1\ndef v = 1\n") != 0 || !strings.Contains(buffer.String(), "\"function\":true") || !strings.Contains(buffer.String(), "\"function\":false") {
 			t.Error("schema-2 definition lost zero-parameter function/value distinction")
 		}
 		buffer.Reset()
@@ -23,10 +23,10 @@ func TestSchemaTwoSemanticFields(t *testing.T) {
 	for _, lang := range patternLanguages {
 		text := "[./{name:~[a-z]+}, ./{name:*}]"
 		if lang == "kash" {
-			text = "p = " + text
+			text = "def p = " + text
 		}
 		if lang == "rule" {
-			text = "./{name:~[a-z]+} ./{name:*} : @{PREP}, @{BUILD} ./in/{name:~[a-z]+}"
+			text = "rule ./{name:~[a-z]+} ./{name:*} : @{PREP}, @{BUILD} ./in/{name:~[a-z]+}"
 		}
 		if lang == "template" {
 			text = "@(nop " + text + ")"
@@ -60,7 +60,7 @@ func TestValueASTPreservesCommentItems(t *testing.T) {
 
 func TestRuleCapturePatternFieldAndAuthoredCoordinates(t *testing.T) {
 	_ = t.Allocator()
-	texts := []string{`"./out\t{name}.o" :`, `./out/{name}.o : ./in/{name}.c`, `"./out\"/{name:~[a-z]+}.o" :`}
+	texts := []string{`rule "./out\t{name}.o"`, `rule ./out/{name}.o : ./in/{name}.c`, `rule "./out\"/{name:~[a-z]+}.o"`}
 	for i := range texts {
 		buffer := bytes.Buffer{}
 		if ast.WriteAST(&buffer, "rule", "captures", texts[i]) != 0 {
@@ -70,13 +70,13 @@ func TestRuleCapturePatternFieldAndAuthoredCoordinates(t *testing.T) {
 		if !strings.Contains(text, `"pattern":{"kind":"target-template"`) {
 			t.Error("capture AST lacks stable pattern field")
 		}
-		if i == 0 && (!strings.Contains(text, `"span":{"start":8,"end":14},"kind":"capture"`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":16}`)) {
+		if i == 0 && (!strings.Contains(text, `"span":{"start":13,"end":19},"kind":"capture"`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":6,"end":21}`)) {
 			t.Error("quoted target AST lost authored content or capture spans")
 		}
 		if i == 1 && strings.Count(text, `"pattern":{"kind":"target-template"`) != 2 || strings.Contains(text, `"template":{"kind":"target-template"`) {
 			t.Error("capture fields should appear only as patterns")
 		}
-		if i == 2 && (!strings.Contains(text, `"span":{"start":9,"end":23},"kind":"capture"`) || !strings.Contains(text, `"regex":true`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":25}`)) {
+		if i == 2 && (!strings.Contains(text, `"span":{"start":14,"end":28},"kind":"capture"`) || !strings.Contains(text, `"regex":true`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":6,"end":30}`)) {
 			t.Error("quoted regex target AST lost authored coordinates")
 		}
 		buffer.Reset()

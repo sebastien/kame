@@ -24,8 +24,8 @@ func TestKashExitParsesAndFormatsAsATransfer(t *testing.T) {
 	}
 }
 
-func TestKashExitRejectsMissingOperandsAcceptanceAndProcessSyntax(t *testing.T) {
-	texts := []string{"exit", "exit; printf forbidden", "exit 0 ?", "exit 0 ?? 1", "exit 0 1", "exit 0 > ./out", "exit 0 | cat", "exit 0 &", "defer exit 0", "defer exit; printf forbidden", "printf x | exit 0"}
+func TestKashExitRejectsAcceptanceAndProcessSyntax(t *testing.T) {
+	texts := []string{"exit 0 ?", "exit 0 ?? 1", "exit 0 1", "exit 0 > ./out", "exit 0 | cat", "exit 0 &", "defer exit 0", "defer exit; printf forbidden", "printf x | exit 0"}
 	for i := range texts {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", texts[i])
 		if len(s.Diagnostics) == 0 {

@@ -4,6 +4,7 @@ package main
 import (
 	"io"
 	"kame/cli"
+	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/internal/mem"
@@ -48,7 +49,7 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 	return result
 }
 
-func (s *buildSource) expandSourceComposition(fileIndex int, branches []script.DeclarationBranch, out io.Writer, authored *source.Source, lang string) bool {
+func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Signature, branches []script.DeclarationBranch, out io.Writer, authored *source.Source, lang string) bool {
 	for _, branch := range branches {
 		if branch.Condition != nil {
 			result := s.compositionCondition(branch.Condition, out, authored, s.Files[fileIndex].Includes)
@@ -69,9 +70,16 @@ func (s *buildSource) expandSourceComposition(fileIndex int, branches []script.D
 					return false
 				}
 			case script.Composition:
-				if !s.expandSourceComposition(fileIndex, item.Branches, out, authored, lang) {
+				if !s.expandSourceComposition(fileIndex, signature, item.Branches, out, authored, lang) {
 					return false
 				}
+			case script.Rule, script.DeclarationFor, script.Generate:
+				file := s.Files[fileIndex]
+				s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[item.Span.Start:item.Span.End], Lang: "km", Signature: signature, SourceDirectory: file.SourceDirectory, Offset: item.Span.Start, Includes: file.Includes})
+			case script.DeclarationLet:
+				file := s.Files[fileIndex]
+				emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "execution of declaration-time let is not available", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}, Frames: file.Includes}, s.JSON, authored)
+				return false
 			}
 		}
 		break
@@ -86,7 +94,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 		if file.Name == "<stdin>" {
 			message = "include requires a file-backed source; this fragment was supplied on stdin"
 		}
-		tips := []string{"save this fragment as a .km, .kmk or .kash file and run that file"}
+		tips := []string{"save this fragment as a .km or .kash file and run that file"}
 		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}, Tips: tips}, s.JSON, authored)
 		return false
 	}
@@ -155,7 +163,7 @@ func inlineRunSource(name string, text string, lang string, json bool, defines [
 func selectionPrefix(fragments []program.Fragment) []program.CompileSource {
 	var sources []program.CompileSource
 	for i := range fragments {
-		if fragments[i].Lang == "km" || fragments[i].Lang == "kmk" || (fragments[i].Lang == "kash" && len(fragments[i].Includes) != 0) {
+		if fragments[i].Lang == "km" || (fragments[i].Lang == "kash" && len(fragments[i].Includes) != 0) {
 			f := fragments[i]
 			sources = selectionDefinitions(sources, program.CompileSource{Name: f.Name, Text: f.Text, Offset: f.Offset, Includes: f.Includes}, f.Lang)
 		}

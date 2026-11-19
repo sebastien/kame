@@ -1,2 +1,1 @@
-output.o : input.c
-	cc -o @> @<
+task output.o : ./input.c

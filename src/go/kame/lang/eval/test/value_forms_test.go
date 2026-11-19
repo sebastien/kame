@@ -225,7 +225,7 @@ func TestGroupingDoesNotInvokeCallable(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "groups.km", "(example) = 42")
+	parsed := script.Parse(a, "groups.km", "def example () = 42")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()

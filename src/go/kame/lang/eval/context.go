@@ -84,6 +84,8 @@ type Context struct {
 	DisableMemo        bool
 	sequencedOperand   bool // Reached let/exit operands retain in-flight progress.
 	loopDepth          int  // Native function and constructed-script boundaries reset it.
+	pureValueBlock     bool
+	pureLoopIterations int
 	InputClosed        bool // Capture, background and cleanup cannot recover invocation input.
 	// Terminal is the recipe's terminal-handoff authority from rule metadata.
 	Terminal   TerminalAuthority

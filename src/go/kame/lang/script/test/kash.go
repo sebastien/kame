@@ -10,11 +10,11 @@ import (
 func TestKashCommentFormattingPreservesAuthoredDepth(t *testing.T) {
 	a := t.Allocator()
 	texts := []string{
-		"def example\n    if test -e ./file\n        echo present\n    # Next phase.\n    echo next\n",
-		"def example\n    if test -e ./file\n        echo present\n\n    # Next phase.\n    echo next\n",
-		"def example\n\tif test -e ./file\n\t\techo present\n\t# Next phase.\n\techo next\n",
+		"def example ()\n    if $?(test -e ./file).ok\n        echo present\n    # Next phase.\n    echo next\n",
+		"def example ()\n    if $?(test -e ./file).ok\n        echo present\n\n    # Next phase.\n    echo next\n",
+		"def example ()\n\tif $?(test -e ./file).ok\n\t\techo present\n\t# Next phase.\n\techo next\n",
 	}
-	want := "def example\n\tif test -e ./file\n\t\techo present\n\t# Next phase.\n\techo next\n"
+	want := "def example ()\n\tif $?(test -e ./file).ok\n\t\techo present\n\t# Next phase.\n\techo next\n"
 	for i := range texts {
 		s := script.ParseKash(a, "comments.kash", texts[i])
 		formatted := script.Format(a, s)
@@ -32,7 +32,7 @@ func TestKashCommentFormattingPreservesAuthoredDepth(t *testing.T) {
 
 func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := "# source\nname = \"world\"; number = 1;\necho revision=$name # inline\n(banner WHO) = (cat \"hi \" WHO)\ncopy = ${name}; files = ./output;\n:cwd . printf \"%s\" (banner name) | cat > \"output file\"\n"
+	text := "# source\ndef name = \"world\"; def number = 1;\necho revision=$name # inline\ndef banner WHO = (cat \"hi \" WHO)\ndef copy = name; def files = ./output;\n:cwd . printf \"%s\" (banner name) | cat > \"output file\"\n"
 	s := script.ParseKash(a, "test.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 9 {
@@ -71,7 +71,7 @@ func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 
 func TestKashStatementDelimitersAndMultilineValues(t *testing.T) {
 	a := t.Allocator()
-	text := ";;\r\nquoted = \"$(literal)\"; flag = true;\nvalue = (cat\n \"nested;\"\n \"value\")\nprintf \"line one\nline two;still quoted\"; echo a\\;b\necho one \\\n two; echo $(printf nested\n | cat)\n// literal\n"
+	text := ";;\r\ndef quoted = \"$(literal)\"; def flag = true;\ndef value = (cat\n \"nested;\"\n \"value\")\nprintf \"line one\nline two;still quoted\"; echo a\\;b\necho one \\\n two; echo $(printf nested\n | cat)\n// literal\n"
 	s := script.ParseKash(a, "test.ksh", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 8 {
@@ -120,7 +120,7 @@ func TestKashSingleQuotedWords(t *testing.T) {
 }
 
 func TestKashRejectsMalformedAndUnsupportedSource(t *testing.T) {
-	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "(f X) = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo &&", "value = 1 ??", "echo \"unclosed"}
+	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "def f X = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo &&", "value = 1 ??", "echo \"unclosed"}
 	for i := range invalid {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", invalid[i])
 		if len(s.Diagnostics) == 0 {
@@ -135,22 +135,22 @@ func TestKashRejectsMalformedAndUnsupportedSource(t *testing.T) {
 
 func TestKashValueRecoveryKeepsExpressionBoundary(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "recover.kash", "value = $(false) ?? missing ?? \"fallback\"; printf $value")
+	s := script.ParseKash(a, "recover.kash", "def value = $(false) ?? missing ?? \"fallback\"; printf $value")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 {
 		t.Fatal("Kash recovery did not parse")
 		return
 	}
 	e := s.Items[0].Definition.Expression
-	if e.Kind != expr.ValueRecovery || e.Items[1].Kind != expr.ValueRecovery || e.Items[0].Kind != expr.CommandCapture {
+	if e.Infix != "??" || e.Items[2].Infix != "??" || e.Items[1].Kind != expr.CommandCapture {
 		t.Error("value recovery lost right-associative binding")
 	}
-	group := script.ParseKash(a, "recover.kash", "value = (nil ?? 1)")
+	group := script.ParseKash(a, "recover.kash", "def value = (nil ?? 1)")
 	defer group.Free()
 	if len(group.Diagnostics) != 0 || len(group.Items) != 1 || group.Items[0].Definition.Expression.Kind != expr.Group {
 		t.Error("grouped fallback did not parse as a value")
 	}
-	invalid := []string{"value = [1]?? [2]", "value = nil ??\nnext = 1"}
+	invalid := []string{"def value = [1] ??? [2]", "def value = nil ??\ndef next = 1"}
 	for i := range invalid {
 		bad := script.ParseKash(a, "bad.kash", invalid[i])
 		if len(bad.Diagnostics) == 0 {
@@ -162,14 +162,14 @@ func TestKashValueRecoveryKeepsExpressionBoundary(t *testing.T) {
 
 func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "control.kash", "if (nop true)\n  name = \"inner\"\n  if false\n    printf no\n  else\n    printf $name\nelif true\n  printf fallback\nelse\n  printf no\nprintf after\n")
+	s := script.ParseKash(a, "control.kash", "if (nop true)\n  def name = \"inner\"\n  if false\n    printf no\n  else\n    printf $name\nelif true\n  printf fallback\nelse\n  printf no\nprintf after\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 {
 		t.Fatal("nested conditional did not parse")
 		return
 	}
 	e := s.Items[0].Expression
-	if e.Kind != expr.KashIf || len(e.Items) != 3 || e.Items[0].Body[0].Kind != expr.KashDefinition || e.Items[0].Body[1].Kind != expr.KashIf || e.Items[1].Items[0].Kind != expr.CommandTest {
+	if e.Kind != expr.KashIf || len(e.Items) != 3 || e.Items[0].Body[0].Kind != expr.KashDefinition || e.Items[0].Body[1].Kind != expr.KashIf || e.Items[1].Items[0].Kind != expr.Boolean {
 		t.Error("conditional AST lost its language or lexical boundaries")
 	}
 	formatted := script.Format(a, s)
@@ -186,24 +186,24 @@ func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 	}
 }
 
-func TestKashCommandConditionListCanContinueAfterOperator(t *testing.T) {
-	sourceText := "if false ||\n\ttrue\n\tprintf yes\nelse\n\tprintf no"
+func TestKashValueConditionCanContinueAfterOperator(t *testing.T) {
+	sourceText := "if false or\n\ttrue\n\tprintf yes\nelse\n\tprintf no"
 	s := script.ParseKash(t.Allocator(), "condition-list.kash", sourceText)
 	if len(s.Diagnostics) != 0 {
-		t.Error("multiline command condition list did not parse")
-	} else if s.Items[0].Expression.Items[0].Items[0].Kind != expr.CommandList || !s.Items[0].Expression.Items[0].Items[0].CommandCondition {
-		t.Error("conditional command list lost its condition marker")
+		t.Error("multiline value condition did not parse")
+	} else if s.Items[0].Expression.Items[0].Items[0].Infix != "or" {
+		t.Error("conditional header lost its logical operator")
 	}
 	s.Free()
 }
 
-func TestKashCommandConditionKeepsArgumentControlBoundaries(t *testing.T) {
+func TestKashConditionsUseValueGrammar(t *testing.T) {
 	valid := []string{
-		"if test \"$(printf x)\" = x\n\tprintf yes",
-		"if false || test \"$(printf x)\" = x\n\tprintf yes",
-		"if false\n\tprintf no\nelif test \"$(printf x)\" = x\n\tprintf yes",
-		"while test \"$(printf x)\" = y\n\tprintf no",
-		"if test \"$(false?)\" = \"\"\n\tprintf yes",
+		"if $?(test \"$(printf x)\" = x).ok\n\tprintf yes",
+		"if false or $?(test \"$(printf x)\" = x).ok\n\tprintf yes",
+		"if false\n\tprintf no\nelif $?(test \"$(printf x)\" = x).ok\n\tprintf yes",
+		"while $?(test \"$(printf x)\" = y).ok\n\tprintf no",
+		"if $?(test \"$(false?)\" = \"\").ok\n\tprintf yes",
 	}
 	for i := range valid {
 		s := script.ParseKash(t.Allocator(), "condition.kash", valid[i])
@@ -216,7 +216,7 @@ func TestKashCommandConditionKeepsArgumentControlBoundaries(t *testing.T) {
 		"if true && false?\n\tprintf no",
 		"if false || false ? true\n\tprintf no",
 		"if true &\n\tprintf no",
-		"if $(printf x)\n\tprintf no",
+		"if $?(printf x\n\tprintf no",
 	}
 	for i := range invalid {
 		s := script.ParseKash(t.Allocator(), "invalid-condition.kash", invalid[i])
@@ -245,7 +245,7 @@ func TestKashCommandListRejectsLeadingOperators(t *testing.T) {
 
 func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := "(nop {result: nil})\nprintf \"%s\" (join\n \"-\" [\"a\", \"b\"])\nif (eq?\n 1 1)\n  (nop nil)\nmatch (nop\n \"value\")\n  case \"value\"\n    printf yes\n"
+	text := "(nop {result: nil})\nprintf \"%s\" (join\n \"-\" [\"a\", \"b\"])\nif (eq?\n 1 1)\n  (nop nil)\nmatch (nop\n \"value\")\n  \"value\" =>\n    printf yes\n"
 	s := script.ParseKash(a, "direct.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
@@ -276,7 +276,7 @@ func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 
 func TestKashRejectsLegacyBoundariesButKeepsQuotedData(t *testing.T) {
 	a := t.Allocator()
-	invalid := []string{"printf @(name ())", "printf \\@(name)", "@(out! \"bad\")", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  case \"x\"\n    printf bad", "printf > @(name ())", ":cwd @(name ()) printf bad", "@if(true)"}
+	invalid := []string{"printf @(name ())", "printf \\@(name)", "@(out! \"bad\")", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  \"x\" =>\n    printf bad", "printf > @(name ())", ":cwd @(name ()) printf bad", "@if(true)"}
 	for i := range invalid {
 		s := script.ParseKash(a, "legacy.kash", invalid[i])
 		if len(s.Diagnostics) == 0 {
@@ -306,7 +306,7 @@ func TestKashRejectsLegacyBoundariesButKeepsQuotedData(t *testing.T) {
 
 func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "match.kash", "match $(printf main.c)\n  case \"{name:*}.c\"\n    local = name\n    printf $local\n  else\n    printf no\nprintf after\n")
+	s := script.ParseKash(a, "match.kash", "match $(printf main.c)\n  \"{name:*}.c\" =>\n    def local = name\n    printf $local\n  else =>\n    printf no\nprintf after\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 {
 		t.Fatal("match did not parse")
@@ -329,7 +329,7 @@ func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {
 
 func TestKashListSpreadPreservesReferenceAndFormat(t *testing.T) {
 	a := t.Allocator()
-	text := "$...CMD $...{project.args} | cat\nprintf \"%s\" $($...commands.0)\nif $...check\n  $...CMD\n"
+	text := "$...CMD $...{project.args} | cat\nprintf \"%s\" $($...commands.0)\nif $?($...check).ok\n  $...CMD\n"
 	s := script.ParseKash(a, "spread.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 3 {
@@ -360,7 +360,7 @@ func TestKashListSpreadPreservesReferenceAndFormat(t *testing.T) {
 	if formatted != again {
 		t.Error("list spread formatting is not idempotent")
 	}
-	invalid := []string{"$...", "$...{CMD", "$....CMD", "printf \"$...CMD\"", "printf prefix$...CMD", "printf $...{CMD}suffix", "printf $...CMD\"\"", "printf $...CMD$other", "value = $...CMD", ":cwd $...CMD printf bad", ":env $...CMD printf bad", "printf > $...CMD", "match $...CMD\n  case \"x\"\n    printf bad"}
+	invalid := []string{"$...", "$...{CMD", "$....CMD", "printf \"$...CMD\"", "printf prefix$...CMD", "printf $...{CMD}suffix", "printf $...CMD\"\"", "printf $...CMD$other", "value = $...CMD", ":cwd $...CMD printf bad", ":env $...CMD printf bad", "printf > $...CMD", "match $...CMD\n  \"x\" =>\n    printf bad"}
 	for i := range invalid {
 		bad := script.ParseKash(a, "invalid.kash", invalid[i])
 		if len(bad.Diagnostics) == 0 {

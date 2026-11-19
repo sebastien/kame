@@ -629,7 +629,7 @@ func TestNestedDefReleasesItsFunction(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.ParseKash(a, "test.kash", "def outer\n\tdef foo x = x\n\treturn (foo 0)\nresult = (outer ()).status\n")
+	parsed := script.ParseKash(a, "test.kash", "def outer ()\n\tdef foo x = x\n\treturn (foo 0)\ndef result = (outer ()).status\n")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := program.Definition("result")
 	if result == nil {
@@ -674,7 +674,7 @@ func TestKashLetRejectsBindingsWithEscapingCallables(t *testing.T) {
 		a := t.Allocator()
 		engine := core.NewEngine(a)
 		registry := eval.NewRegistry(a)
-		parsed := script.ParseKash(a, "test.kash", "def probe\n\tlet bound = ((captured => "+value+") 42)\n\treturn 0\nresult = (probe ())\n")
+		parsed := script.ParseKash(a, "test.kash", "def probe ()\n\tlet bound = ((captured => "+value+") 42)\n\treturn 0\ndef result = (probe ())\n")
 		if len(parsed.Diagnostics) != 0 {
 			t.Errorf("eager binding did not parse: %v", parsed.Diagnostics)
 		}
@@ -1215,7 +1215,7 @@ func TestNestedOperationResumesThroughFunctionCall(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "(wrap value) = (async ())\nresult = (wrap \"value\")")
+	parsed := script.Parse(a, "test", "def wrap value = (async ())\nresult = (wrap \"value\")")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1577,7 +1577,7 @@ func TestFunctionDefinitionsEvaluateExpressionStrings(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "(prefix value) = \"pre-@{value}\"\n(quoted value) = \"@{value}!\"")
+	parsed := script.Parse(a, "test", "def prefix value = \"pre-@{value}\"\ndef quoted value = \"@{value}!\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(prefix \"fix\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "pre-fix" {
@@ -1600,8 +1600,8 @@ func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "depth.km", `(walk TEXT) = (if (count TEXT == 0) then 0 else (character TEXT))
-(character TEXT) = (walk (slice 1 TEXT))`)
+	parsed := script.Parse(a, "depth.km", `def walk TEXT = (if (count TEXT == 0) then 0 else (character TEXT))
+def character TEXT = (walk (slice 1 TEXT))`)
 	program := eval.Compile(a, engine, parsed, registry)
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
 	texts := []string{`(walk "x,y\n")`, `(walk (reduce (TEXT STEP => (str TEXT TEXT)) "x,y\n" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))`, `(walk "x,y\n")`, `(count (reduce (TEXT STEP => (str TEXT TEXT)) "x,y\n" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))`}
@@ -1631,7 +1631,7 @@ func TestZeroArgumentScriptFunctionIsCallable(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "(constant) = \"value\"")
+	parsed := script.Parse(a, "test", "def constant () = \"value\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(constant ())")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "value" {
@@ -1735,7 +1735,7 @@ func TestNestedFunctionSelectorsUseNearestArguments(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "(inner value) = @_\n(outer value) = (inner \"inner\")")
+	parsed := script.Parse(a, "test", "def inner value = @_\ndef outer value = (inner \"inner\")")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(outer \"outer\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "inner" {
@@ -1781,7 +1781,7 @@ func TestPlaceholderSectionsEvaluateAsLambdas(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "(helper x) = (nop x)")
+	parsed := script.Parse(a, "test", "def helper x = (nop x)")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `(_0) 7`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 7 {

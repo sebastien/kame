@@ -8,7 +8,7 @@ import (
 
 func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {
 	a := t.Allocator()
-	result := rule.ParseRule(a, "order.kmk", "./out : \"./input|literal\" | prepare @(nop [./directory]) ; env \"MODE=debug\"\n\tcat @<* > @>\n")
+	result := rule.ParseRule(a, "order.km", "rule ./out : \"./input|literal\" | prepare @(nop [./directory]) ; {env: {MODE: \"debug\"}}\n\tcat @<* > @>\n")
 	if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 3 {
 		t.Fatal("order-only rule failed to parse")
 		result.Free()
@@ -18,7 +18,7 @@ func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {
 		t.Error("input purpose was not preserved")
 	}
 	formatted := rule.FormatRule(a, result.Rule)
-	again := rule.ParseRule(a, "formatted.kmk", formatted)
+	again := rule.ParseRule(a, "formatted.km", formatted)
 	if len(again.Diagnostics) != 0 || len(again.Rule.Inputs) != 3 || !again.Rule.Inputs[2].OrderOnly {
 		t.Error("formatter lost ordering syntax")
 	}
@@ -28,9 +28,9 @@ func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {
 }
 func TestOrderOnlySeparatorRejectsEmptyAndRepeatedSections(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{"./out : ./input |\n", "./out : ./input | prepare | other\n"}
+	texts := []string{"rule ./out : ./input |\n", "rule ./out : ./input | prepare | other\n"}
 	for i := range texts {
-		result := rule.ParseRule(a, "invalid.kmk", texts[i])
+		result := rule.ParseRule(a, "invalid.km", texts[i])
 		if len(result.Diagnostics) == 0 {
 			t.Error("malformed order-only section was accepted")
 		}
@@ -38,23 +38,12 @@ func TestOrderOnlySeparatorRejectsEmptyAndRepeatedSections(t *testing.T) {
 	}
 }
 
-func TestAlternativeBuildSeparatorParsesAndFormatsCanonically(t *testing.T) {
-	a := t.Allocator()
-	result := rule.ParseRule(a, "arrow.kmk", "./out <- ./input | prepare\n\tcat @<* > @>\n")
-	if len(result.Diagnostics) != 0 || len(result.Rule.Outputs) != 1 || len(result.Rule.Inputs) != 2 || !result.Rule.Inputs[1].OrderOnly {
-		t.Fatal("alternative rule separator failed to preserve rule structure")
-		result.Free()
-		return
+func TestRuleRequiresDeclarationKeywordAndColonSeparator(t *testing.T) {
+	for _, text := range []string{"rule ./out <- ./input", "./out : ./input", "task first\ntask second"} {
+		parsed := rule.ParseRule(t.Allocator(), "invalid.km", text)
+		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Errorf("invalid standalone declaration was accepted: %q", text)
+		}
+		parsed.Free()
 	}
-	formatted := rule.FormatRule(a, result.Rule)
-	if formatted != "./out : ./input | prepare\n\tcat @<* > @>" {
-		t.Error("formatter did not canonicalize the alternative separator")
-	}
-	colon := rule.ParseRule(a, "colon.kmk", formatted)
-	if len(colon.Diagnostics) != 0 || len(colon.Rule.Inputs) != len(result.Rule.Inputs) {
-		t.Error("canonical rule did not round-trip")
-	}
-	colon.Free()
-	mem.FreeString(a, formatted)
-	result.Free()
 }

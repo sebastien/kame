@@ -28,7 +28,7 @@ func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
 		t.Fatal("input mtime setup failed")
 		return
 	}
-	source := "(newer UNUSED) = @<?\n./output : ./a named ./b ./a | ./order\n\tprintf '%s\\n' @(newer nil) > @>\nnamed :\n\ttrue\n"
+	source := "def newer UNUSED = @<?\n./output : ./a named ./b ./a | ./order\n\tprintf '%s\\n' @(newer nil) > @>\nnamed :\n\ttrue\n"
 	code, _ := materializeSource(t, dir, source, false, false)
 	if code != "" || !tempMatches(t, dir+"/output", "./a\n./b\n") {
 		t.Fatal("existing output without a record did not select unique normal files")
@@ -85,7 +85,7 @@ func TestKashNewerInputsSurviveSuspendedFunctionRead(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "(newer UNUSED) = (if (read \"./order\") then @<? else @<?)\nSELECTED = (newer nil)\n./output : ./a ./b ./a | ./order ; {shell: kash}\n\tprintf \"%s\\n\" $SELECTED > ./output\n"
+	source := "def newer UNUSED = (if (read \"./order\") then @<? else @<?)\nSELECTED = (newer nil)\n./output : ./a ./b ./a | ./order ; {shell: kash}\n\tprintf \"%s\\n\" $SELECTED > ./output\n"
 	code := materializeNewerKash(t, dir, source)
 	if code != "" || !tempMatches(t, dir+"/output", "./a\n./b\n") {
 		t.Fatal("Kash function lost initial newer-input frame: " + code)

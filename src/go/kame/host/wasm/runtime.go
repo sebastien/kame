@@ -31,7 +31,7 @@ type Runtime struct {
 	Registry             *eval.Registry
 	Node                 *core.Node
 	Expr                 *expr.Expr
-	ExprParsed           *script.Script
+	ExprParsed           *expr.Result
 	// Target mode uses the portable build runtime with an in-memory host. It is
 	// mutually exclusive with the single-expression mode above.
 	Host               *MemoryHost
@@ -99,6 +99,11 @@ func NewRuntime(a mem.Allocator, source string) RuntimeStart {
 	return newRuntime(a, nil, "<wasm-source>", source)
 }
 
+// NewKameRuntime compiles a named Kame program for embedding operations.
+func NewKameRuntime(a mem.Allocator, name, text string) RuntimeStart {
+	return newRuntime(a, nil, name, text)
+}
+
 // NewRuntimeIn creates an instance whose logical lifetime is bounded by buf.
 // The private heap descriptor uses mem.System and is released by Runtime.Free.
 // Failed construction returns diagnostics owned by mem.System, not buf.
@@ -132,7 +137,10 @@ func newRuntime(a mem.Allocator, arena *Heap, name string, source string) Runtim
 	if name == "" {
 		name = "<wasm-source>"
 	}
-	parsed := script.Parse(a, name, source)
+	return startRuntime(a, arena, script.ParseKameFile(a, name, source))
+}
+
+func startRuntime(a mem.Allocator, arena *Heap, parsed *script.Script) RuntimeStart {
 	if len(parsed.Diagnostics) != 0 {
 		return RuntimeStart{Result: parseFailure(a, parsed)}
 	}
@@ -141,11 +149,12 @@ func newRuntime(a mem.Allocator, arena *Heap, name string, source string) Runtim
 	engine := core.NewEngine(a)
 	compiled := eval.CompileChecked(a, engine, parsed, registry)
 	if compiled.Program == nil {
+		out := compilationFailure(a, compiled.Diagnostics)
 		compiled.Free(a)
 		engine.Free()
 		registry.Free()
 		parsed.Free()
-		return RuntimeStart{Result: PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "source cannot be compiled")}}
+		return RuntimeStart{Result: out}
 	}
 	evalProgram := compiled.Program
 	compiled.Free(a)
@@ -167,12 +176,12 @@ func (r *Runtime) RequestExpression(text string) PureResult {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "runtime already has an active expression")}
 	}
-	parsed := script.Parse(r.Alloc, "<wasm-expr>", text)
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 1 || parsed.Items[0].Expression == nil {
+	parsed := expr.Parse(r.Alloc, "<wasm-expr>", text)
+	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil {
 		parsed.Free()
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "expected one valid expression")}
 	}
-	r.Expr, r.ExprParsed = parsed.Items[0].Expression, parsed
+	r.Expr, r.ExprParsed = parsed.Expr, parsed
 	state := mem.Alloc[runtimeState](r.Alloc)
 	state.Runtime = r
 	key := core.NewResourceKey(r.Alloc, core.ResourceTarget, "<wasm-expr>")

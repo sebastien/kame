@@ -94,7 +94,7 @@ func (p *parser) matchArm(indent string) *Expr {
 
 // ParseMatchPatternPrefix reads one matcher operand under match-arm grammar.
 func ParseMatchPatternPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
-	p := parser{a: a, s: s, pos: start}
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent}
 	pattern := p.armPattern()
 	if len(p.diags) == 0 {
 		p.checkPlaceholders(pattern)

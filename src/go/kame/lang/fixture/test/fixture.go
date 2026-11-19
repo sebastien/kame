@@ -23,6 +23,11 @@ func fixtureText(t *testing.T, path string) string {
 	return text
 }
 
+func parseKameFixture(a mem.Allocator, name, text string) (*source.Source, *script.Script) {
+	authored := source.New(a, name, text)
+	return authored, script.ParseFragment(a, authored, script.KameFileLanguage, 0, len(text))
+}
+
 func TestRepresentativeFixtures(t *testing.T) {
 	a := t.Allocator()
 	text := fixtureText(t, "../../../../../../tests/data/lang/expr/pipe-chain.km")
@@ -40,26 +45,29 @@ func TestRepresentativeFixtures(t *testing.T) {
 	}
 	target.Free()
 	text = fixtureText(t, "../../../../../../tests/data/lang/rule/definition/quoted.km")
-	s := script.Parse(a, "quoted.km", text)
+	authored, s := parseKameFixture(a, "quoted.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
 		t.Errorf("quoted definition fixture diagnostics=%d %s", len(s.Diagnostics), s.Diagnostics[0].Message)
 	}
 	s.Free()
+	authored.Free(a)
 	text = fixtureText(t, "../../../../../../tests/data/lang/rule/rules/inputs.km")
-	s = script.Parse(a, "inputs.km", text)
+	authored, s = parseKameFixture(a, "inputs.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
 		t.Errorf("rule input fixture diagnostics=%d %s", len(s.Diagnostics), s.Diagnostics[0].Message)
 	}
 	s.Free()
+	authored.Free(a)
 	text = fixtureText(t, "../../../../../../tests/data/lang/script/default-task.km")
-	s = script.Parse(a, "default-task.km", text)
+	authored, s = parseKameFixture(a, "default-task.km", text)
 	mem.FreeString(a, text)
 	if len(s.Diagnostics) != 0 {
 		t.Errorf("script fixture diagnostics=%d %s", len(s.Diagnostics), s.Diagnostics[0].Message)
 	}
 	s.Free()
+	authored.Free(a)
 }
 
 func TestInvalidFixture(t *testing.T) {
@@ -100,19 +108,11 @@ func TestInvalidFixture(t *testing.T) {
 			}
 			parsed.Free()
 		} else {
-			parsed := script.Parse(t.Allocator(), name, text)
+			parsed := script.ParseKameFile(t.Allocator(), name, text)
+			script.InspectKashRecipes(parsed)
 			count = len(parsed.Diagnostics)
 			if count != 0 {
 				diagnostic = parsed.Diagnostics[0]
-			}
-			for j := range parsed.Items {
-				r := parsed.Items[j].Rule
-				if r != nil && len(r.RecipeDiagnostics) != 0 {
-					if count == 0 {
-						diagnostic = r.RecipeDiagnostics[0]
-					}
-					count += len(r.RecipeDiagnostics)
-				}
 			}
 			parsed.Free()
 		}
@@ -122,7 +122,7 @@ func TestInvalidFixture(t *testing.T) {
 			continue
 		}
 		expected := source.Error
-		if name == "rule-recipe-malformed-interpolation.km" || strings.HasPrefix(name, "template-string-malformed-") {
+		if strings.HasPrefix(name, "template-string-malformed-") {
 			expected = source.Warning
 		}
 		if diagnostic.Code != "PARSE_ERR" || diagnostic.Severity != expected {
@@ -220,11 +220,12 @@ func checkFixtureDirectory(t *testing.T, path string, kind int) {
 			}
 			parsed.Free()
 		} else {
-			parsed := script.Parse(t.Allocator(), entry.Name(), text)
+			authored, parsed := parseKameFixture(t.Allocator(), entry.Name(), text)
 			if len(parsed.Diagnostics) != 0 {
 				t.Errorf("%s: script diagnostics=%d", name, len(parsed.Diagnostics))
 			}
 			parsed.Free()
+			authored.Free(t.Allocator())
 		}
 		mem.FreeString(t.Allocator(), text)
 	}

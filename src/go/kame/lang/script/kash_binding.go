@@ -13,7 +13,7 @@ func (p *kashParser) eagerBinding(start int, wordEnd int) *definition.Definition
 	for pos < len(text) && space(text[pos]) {
 		pos++
 	}
-	headerEnd := definition.KashHeaderEnd(s.Alloc, s.Source, pos)
+	headerEnd := definition.ValueHeaderEnd(s.Alloc, s.Source, pos)
 	if headerEnd == 0 {
 		s.error(start, pos, "let requires NAME = VALUE")
 		return nil
@@ -26,15 +26,18 @@ func (p *kashParser) eagerBinding(start int, wordEnd int) *definition.Definition
 		s.error(headerEnd, valueStart, "let requires an initializer")
 		return nil
 	}
-	part := definition.ParseKashPrefix(s.Alloc, s.Source, pos)
+	part := definition.ParseBindingHeader(s.Alloc, s.Source, pos, headerEnd)
 	s.takeDiagnostics(part.Diagnostics)
 	d := part.Definition
 	if d == nil {
 		return nil
 	}
-	if d.Function || d.Default || d.Contribution || d.Name == "env" {
+	if d.ExplicitDef || d.Function || d.Default || d.Contribution || d.Name == "env" {
 		s.error(start, d.Span.End, "let requires one non-reserved value name and =")
 	}
+	value := expr.ParseKashValueExpressionPrefix(s.Alloc, s.Source, valueStart)
+	s.takeDiagnostics(value.Diagnostics)
+	d.Expression, d.Span.End = value.Expr, value.End
 	d.Eager, d.Span.Start = true, start
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Text, e.Span, e.Kash = expr.KashLet, d.Name, d.Span, true

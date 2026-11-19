@@ -121,7 +121,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 		}
 	}
 	var global eval.Result
-	if !explicit && p.Eval.Definition("SHELL") != nil {
+	if entry.Rule.BodyExpression == nil && !explicit && p.Eval.Definition("SHELL") != nil {
 		key := core.ResourceKey{Kind: core.ResourceDefinition, Name: "SHELL"}
 		global = resolveRecipeDefinition(&state, key, c)
 		if global.Waiting || global.Diagnostic.Code != "" {
@@ -139,12 +139,14 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	expr.Free(p.Alloc, entry.KameExpression)
 	entry.KameExpression = nil
 	kame := false
-	if explicit && p.Eval.IsKameSelector(shell) {
+	if entry.Rule.BodyExpression != nil || explicit && p.Eval.IsKameSelector(shell) {
 		kame = true
 		if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 || entry.Executor != "local" {
-			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell kame requires exactly one local file output")
+			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "expression body requires exactly one local file output")
 		}
-		if d := p.parseKameRecipe(entry); d.Code != "" {
+		if entry.Rule.BodyExpression != nil {
+			entry.KameExpression = expr.Clone(p.Alloc, entry.Rule.BodyExpression)
+		} else if d := p.parseKameRecipe(entry); d.Code != "" {
 			return d
 		}
 	} else if explicit {
@@ -164,6 +166,8 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 		} else {
 			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
 		}
+	} else if entry.Rule.Declaration {
+		entry.Kash = true
 	} else {
 		entry.Shell = cloneStrings(p.Alloc, p.Options.Shell)
 	}
@@ -332,7 +336,7 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 
 // kashUsesSetup reports whether any stage of a recipe's own Kash text sets key.
 func kashUsesSetup(a mem.Allocator, text string, key string) bool {
-	parsed := script.ParseKash(a, "<recipe>", text)
+	parsed := script.ParseKashRuleBody(a, "<recipe>", text)
 	defer parsed.Free()
 	for _, item := range parsed.Items {
 		if expr.UsesSetup(item.Expression, key) || (item.Definition != nil && expr.UsesSetup(item.Definition.Expression, key)) {
@@ -408,7 +412,7 @@ func kashAuthoredOffset(entry *instance, text string, offset int) int {
 }
 
 func (p *Program) validateRenderedKash(index int, text string) diagnostic.Diagnostic {
-	parsed := script.ParseKash(p.Alloc, "<recipe>", text)
+	parsed := script.ParseKashRuleBody(p.Alloc, "<recipe>", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) == 0 {
 		return diagnostic.Diagnostic{}
@@ -496,6 +500,20 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	}
 	mem.FreeString(p.Alloc, entry.Script)
 	entry.Script = ""
+	if result.Returned && result.Value.Kind != core.Nil {
+		span := entry.Rule.Header
+		if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 {
+			d := failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "returning an artifact value requires one file output")
+			p.failRule(c, index, d)
+			return core.ProducerFailed
+		}
+		effect, d := p.ruleBodyOutput(result.Value, span)
+		if d.Code != "" {
+			p.failRule(c, index, d)
+			return core.ProducerFailed
+		}
+		context.Effects = append(context.Effects, effect)
+	}
 	if d := validateEffects(p.Alloc, entry, context.Effects); d.Code != "" {
 		p.failRule(c, index, d)
 		return core.ProducerFailed

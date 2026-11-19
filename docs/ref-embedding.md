@@ -23,10 +23,10 @@ const cwd = await mkdtemp(join(tmpdir(), 'kame-example-'));
 const kame = await Kame.create({ wasmPath: './dist/kame.wasm' });
 try {
   const values = await kame.compile('answer = 42\n');
-  console.log(await values.evaluate('(count [1 2 3])')); // 3
+  console.log(await values.evaluate('count [1, 2, 3]')); // 3
   console.log((await values.build('answer')).results[0].value); // 42
-  const program = await kame.compile('./hello.txt : ; [shell: kame]\n\t"hello"\n',
-    { name: 'example.kmk' });
+  const program = await kame.compile('rule ./hello.txt = "hello"\n',
+    { name: 'example.km' });
   await program.build('./hello.txt', {
     cwd,
     grants: [
@@ -45,7 +45,7 @@ Importing does not dispatch the CLI. `src/js/kame.js` also works with an explici
 `wasmPath` or `KAME_WASM`; otherwise it needs adjacent `kame.wasm`. No bare-package
 embedding export is configured.
 
-`compile(source, { name, language })` defaults to `input.km` and `script` parsing;
+`compile(source, { name, language })` defaults to `input.km` and the Kame program grammar;
 the filename alone does not select a parser. `kame.parse(language, source)` returns
 an AST document, `kame.format(language, source)` formatted text, and `program.ast`
 a copied AST document. `format` also accepts `indentStyle` and `indentWidth`.
@@ -67,11 +67,11 @@ async def main():
     executable = str(Path('dist/kame').resolve())
     with tempfile.TemporaryDirectory() as cwd:
         async with Kame(executable, cwd=cwd) as kame:
-            print(await kame.evaluate('(count [1 2 3])'))  # 3
+            print(await kame.evaluate('count [1, 2, 3]'))  # 3
             values = await kame.compile('answer = 42\n')
             print((await values.build('answer'))['results'][0]['value']['data'])  # 42
             program = await kame.compile(
-                './hello.txt : ; [shell: kame]\n\t"hello"\n', name='example.kmk')
+                'rule ./hello.txt = "hello"\n', name='example.km')
             await program.build('./hello.txt', grants={'read': ['.'], 'write': ['.']})
             print(Path(cwd, 'hello.txt').read_text())  # hello
 
@@ -80,8 +80,10 @@ asyncio.run(main())
 
 `Kame()` otherwise uses executable `kame` on PATH. Constructor `cwd`, `env`, and
 `grants` apply to its requests; a call's `grants` replaces the constructor mapping.
-`compile` infers `km`, `kmk`, or `kash` from the name (default `embedded.km`), or
-accepts explicit `language`. Program expression evaluation requires `km`.
+`compile` infers Kame (`.km`, `.kame`, and `Kamefile`), Kash (`.kash`, `.ksh`),
+or template (`.kmt`) from the name, which defaults to `embedded.km`. An explicit
+`language` overrides inference. Program expression evaluation and watching require
+Kame programs.
 Each operation launches a CLI process; compiled sources live in temporary files.
 
 ## Results
@@ -104,8 +106,8 @@ Each operation launches a CLI process; compiled sources live in temporary files.
   that capability, not a denial. Filesystem roots resolve relative to call `cwd`.
 - Python uses `{'read': ['./data'], 'run': True, 'env': ['HOME']}`. `True` emits an
   unrestricted grant; `False` or `[]` emits no option. Empty mappings do **not**
-  disable CLI defaults: `km`/`expr` deny capabilities; `kmk`/`kash` and watches
-  default to cwd read/write plus process execution. Explicit grant options replace
+  disable CLI defaults. Standalone value evaluation denies capabilities by default.
+  Kash and watches default to cwd read/write plus process execution. Explicit grant options replace
   those defaults. The wrapper has no separate deny-all-defaults option.
 - Scoped run grants require explicit executable paths; legacy shell-text execution
   needs unrestricted run authority. Grants do not sandbox a child's internal I/O.

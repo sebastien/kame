@@ -128,7 +128,7 @@ func TestNativeInteractiveKashStopDuringEvaluation(t *testing.T) {
 	}
 	s.send("fg\r")
 	s.waitFor("got-captured")
-	s.send("if sh -c 'echo $$ > test; sleep 0.5'\r\tsh -c 'echo test-$((40+2))'\r\r")
+	s.send("if $?(sh -c 'echo $$ > test; sleep 0.5').ok\r\tsh -c 'echo test-$((40+2))'\r\r")
 	s.readPID(directory + "/test")
 	s.send("\x1a")
 	s.waitCount("stopped", 2)
@@ -279,7 +279,7 @@ func TestNativeInteractiveKashJobTerminalModes(t *testing.T) {
 // missing jobs, and unknown signals without other effect.
 func TestNativeInteractiveKashJobCommandsAndPrompt(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"J\" info.jobs \"> \")\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = (str \"J\" info.jobs \"> \")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("J0> ")
 	s.send("fg\r")
@@ -333,7 +333,7 @@ func TestNativeInteractiveKashAsyncGraphTerminal(t *testing.T) {
 
 func TestNativeInteractiveKashNestedAsyncAttribution(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("S0J0> ")
 	s.send("let job = (run! :async true \"/bin/sleep\" (if (run! :async true \"/bin/false\") then \"0.1\" else \"0.1\"))\r")
@@ -352,7 +352,7 @@ func TestNativeInteractiveKashNestedAsyncAttribution(t *testing.T) {
 // jobs, which jobs marks; a job cancelled by kill is listed as killed.
 func TestNativeInteractiveKashWaitAndJobSelectors(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, directory+"/init.kash", "(kash-prompt info) = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
+	nativeCLIWrite(t, directory+"/init.kash", "def kash-prompt info = (str \"S\" info.status \"J\" info.jobs \"> \")\n")
 	s := startTerminalSession(t, nativeCLIBinary(t), directory, []string{"KASH_INIT=" + directory + "/init.kash"}, "do", "run", "-i")
 	s.waitFor("S0J0> ")
 	s.send("sh -c 'sleep 0.5; exit 3' &\r")

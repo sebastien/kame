@@ -74,7 +74,16 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 			freeIndent(a, indentBuf)
 			return out
 		}
-		formatted := rule.FormatRuleWithIndent(a, result.Rule, indent)
+		body := script.InspectStandaloneKashRule(a, result.Source, result.Rule)
+		if body != nil && len(body.Diagnostics) != 0 {
+			out := diagnosticResult(a, body.Diagnostics[0].Code, body.Diagnostics[0].Message, body.Diagnostics[0].Span)
+			body.Free()
+			result.Free()
+			freeIndent(a, indentBuf)
+			return out
+		}
+		formatted := script.FormatInspectedRule(a, result.Rule, body, indent)
+		body.Free()
 		result.Free()
 		freeIndent(a, indentBuf)
 		return Result{Text: formatted, OK: true}
@@ -83,9 +92,10 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 	var authored *source.Source
 	if lang == "kash" {
 		result = script.ParseKash(a, name, text)
-	} else if lang == "km" {
+	} else if lang == "km" || lang == script.KameFileLanguage {
 		authored = source.New(a, name, text)
 		result = script.ParseFragment(a, authored, lang, 0, len(text))
+		script.InspectKashRecipes(result)
 	} else {
 		result = script.Parse(a, name, text)
 	}

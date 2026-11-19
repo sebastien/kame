@@ -24,9 +24,9 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.directory.cleanup()
 
     async def test_compile_parse_evaluate_and_build_return_copies(self):
-        program = await self.client.compile("answer = 42\n", name="answers.km")
+        program = await self.client.compile("answer = 42\n", name="answers.kame")
         self.assertEqual(program.ast["ast"]["items"][0]["kind"], "definition")
-        self.assertEqual(await program.evaluate("(count [1 2 3])"), "3")
+        self.assertEqual(await program.evaluate("count [1, 2, 3]"), "3")
         built = await program.build("answer")
         self.assertEqual(built["results"][0]["target"], "answer")
         self.assertEqual(built["results"][0]["value"]["data"], 42)
@@ -35,7 +35,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await program.build("answer"))["events"])
 
     async def test_build_forwards_job_limit(self):
-        program = await self.client.compile("answer :\n\tprintf hi\n", name="jobs.kmk")
+        program = await self.client.compile('task answer ; {shell: kash}\n\t(nop nil)\n', name="jobs.km")
         run = program._run
         invocation = []
 
@@ -56,7 +56,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value, "readable")
 
     async def test_direct_kash_parse_and_format_preserve_expression_boundaries(self):
-        source = 'printf "%s" (str "two " "words")\n(nop [value: 1])\n'
+        source = 'printf "%s" (str "two " "words")\n(nop {value: 1})\n'
         sourcePath = self.root / 'direct.kash'
         sourcePath.write_text(source, encoding='utf-8')
         await self.client._run(['do', 'fmt', '--lang', 'kash', str(sourcePath)])
@@ -68,32 +68,33 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
             argument = items[0]['expression']['items'][0]['items'][2]
             self.assertEqual(argument['kind'], 'command-word')
             self.assertEqual(argument['parts'][0]['form'], '(')
-            expression = argument['parts'][0]['expression']
+            self.assertEqual(argument['parts'][0]['expression']['kind'], 'group')
+            expression = argument['parts'][0]['expression']['expression']
             self.assertEqual(expression['kind'], 'application')
             self.assertEqual(expression['items'][0]['text'], 'str')
-            self.assertEqual(items[1]['expression']['items'][1]['kind'], 'record')
+            self.assertEqual(items[1]['expression']['expression']['items'][1]['kind'], 'record')
             await program.close()
 
     async def test_typed_expression_argv_is_not_template_reparsed(self):
         program = await self.client.compile(
-            'SHELL = kash\n./argv.txt :\n'
-            '\tprintf "<%s>" (concat [(str """@(missing)""" " two words")] ["*.c" """$(touch injected)""" ""]) > ./argv.txt\n'
-            '\t(nop [value: 1])\n', name='typed-argv.kmk',
+            'SHELL = kash\nrule ./argv.txt\n'
+            '\tprintf "<%s>" (concat [(str """@(missing)""" " two words")] ["*.c", """$(touch injected)""", ""]) > ./argv.txt\n'
+            '\t(nop {value: 1})\n', name='typed-argv.km',
         )
         await program.build('./argv.txt', grants={'run': True, 'write': ['.']})
         self.assertEqual((self.root / 'argv.txt').read_text(), '<@(missing) two words><*.c><$(touch injected)><>')
         self.assertFalse((self.root / 'injected').exists())
 
     async def test_scalar_str_and_explicit_json_round_trip(self):
-        for collection in ('[1 2]', '[value: [1 2]]'):
+        for collection in ('[1, 2]', '{value: [1, 2]}'):
             with self.assertRaisesRegex(KameError, 'EXPR_INVALID'):
                 await self.client.evaluate(f'(str {collection})')
-            self.assertEqual(await self.client.evaluate(f'(= (parse-json (json {collection})) {collection})'), ':true')
-        self.assertEqual(json.loads(json.loads(await self.client.evaluate('(json [value: [1 2]])'))), {'value': [1, 2]})
+            self.assertEqual(await self.client.evaluate(f'(parse-json (json {collection})) == {collection}'), 'true')
+        self.assertEqual(json.loads(json.loads(await self.client.evaluate('json {value: [1, 2]}'))), {'value': [1, 2]})
 
     async def test_canonical_action_effects_and_authored_failure_are_not_display_or_recovery(self):
-        self.assertEqual(await self.client.evaluate('[value: 1]'), '[value: 1]')
-        self.assertEqual(await self.client.evaluate('(let [emit out!] (emit "out"))'), 'out"out"')
+        self.assertEqual(await self.client.evaluate('{value: 1}'), '[value: 1]')
+        self.assertEqual(await self.client.evaluate('out! "out"'), 'out"out"')
         communicate = self.client._communicate
         captured = []
 
@@ -109,13 +110,13 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(KameError, 'USER_ERROR'):
             await self.client.evaluate('(fail! "stop")')
         program = await self.client.compile(
-            'value = (fail! "stop") ?? (nop "fallback")\n(out! value)\n', name='failure.kash',
+            'let value = (fail! "stop") ?? (nop "fallback")\n(out! value)\n', name='failure.kash',
         )
         with self.assertRaisesRegex(KameError, 'USER_ERROR'):
             await program._run(['do', 'run', '--lang', 'kash', '-f', program._source_path])
 
     async def test_watch_yields_events_and_close_reaps(self):
-        program = await self.client.compile("answer :\n\tprintf hi > answer\n", name="watch.kmk")
+        program = await self.client.compile("task answer\n", name="watch.km")
         start = program._start
         invocation = []
 
@@ -139,14 +140,19 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(program._processes)
 
     async def test_rule_compile_parses_the_entire_source(self):
+        for options in ({"name": "legacy.kmk"}, {"language": "kmk"}):
+            with self.assertRaises(ValueError):
+                await self.client.compile("task default\n", **options)
         with self.assertRaisesRegex(KameError, 'PARSE_ERR'):
-            await self.client.compile('default :\nbroken = (\n', name='invalid.kmk')
-        program = await self.client.compile('first : ; [shell: kash]\n\t(out! "first")\nsecond : ; [shell: kash]\n\t(out! "second")\n', name='rules.kmk')
+            await self.client.compile('(count [1, 2])\n', name='Kamefile')
+        with self.assertRaisesRegex(KameError, 'PARSE_ERR'):
+            await self.client.compile('task default\nbroken = (\n', name='invalid.km')
+        program = await self.client.compile('task first ; {shell: kash}\n\t(out! "first")\ntask second ; {shell: kash}\n\t(out! "second")\n', name='rules.km')
         self.assertEqual(len(program.ast['ast']['items']), 2)
 
     async def test_watch_preserves_cwd_and_grants(self):
         (self.root / 'data.txt').write_text('watched bytes', encoding='utf-8')
-        program = await self.client.compile('./output : ./data.txt ; [shell: kame]\n\t(read "./data.txt")\n', name='watch.kmk')
+        program = await self.client.compile('rule ./output : ./data.txt = read "./data.txt"\n', name='watch.km')
         watch = await program.watch('./output', grants={'read': ['.'], 'write': ['.']})
         while True:
             event = await asyncio.wait_for(watch.__anext__(), timeout=5)
@@ -155,7 +161,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.root / 'output').read_text(), 'watched bytes')
         self.assertFalse(Path(program._tempdir, 'output').exists())
         await watch.close()
-        denied = await self.client.compile('./denied : ; [shell: kame]\n\t(read "./data.txt")\n', name='denied.kmk')
+        denied = await self.client.compile('rule ./denied = read "./data.txt"\n', name='denied.km')
         watch = await denied.watch('./denied', grants={'write': ['.']})
         while True:
             event = await asyncio.wait_for(watch.__anext__(), timeout=5)
@@ -195,7 +201,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         for operation in ("evaluate", "compile", "program", "watch", "cancel"):
             with self.subTest(operation=operation):
                 client = Kame(CLI, cwd=self.root)
-                program = await client.compile("answer :\n\tprintf hi\n", name="watch.kmk")
+                program = await client.compile("task answer\n", name="watch.km")
                 entered, release = asyncio.Event(), asyncio.Event()
                 children = []
 
@@ -240,7 +246,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
                 await client.close()
 
     async def test_watch_cancelled_reader_closes_without_self_wait(self):
-        program = await self.client.compile("answer :\n\tprintf hi\n", name="watch.kmk")
+        program = await self.client.compile("task answer\n", name="watch.km")
         watch = await program.watch("answer")
         while (await asyncio.wait_for(watch.__anext__(), 3))["type"] != "watch-idle":
             pass
@@ -253,7 +259,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(program._processes)
 
     async def test_watch_drains_stderr_and_close_has_shared_barrier(self):
-        program = KameProgram(self.client, "", "", "kmk", "watch.kmk")
+        program = KameProgram(self.client, "", "", "km", "watch.km")
         process = await program._start(
             [sys.executable, "-c", 'import sys, time; sys.stderr.write("x" * 1000000); sys.stderr.flush(); print("{}", flush=True); time.sleep(30)'],
             cwd=self.client.cwd, env=None,

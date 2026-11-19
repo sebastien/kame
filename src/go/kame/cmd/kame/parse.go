@@ -7,6 +7,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/internal/mem"
+	"kame/lang/script"
 	"kame/lang/source"
 	"os"
 )
@@ -41,7 +42,11 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 		name, data, text = file, readData, string(readData)
 	}
 	var buffer = bytes.Buffer{}
-	status := writeAST(&buffer, lang, name, text)
+	parseLang := lang
+	if lang == "km" && file != "" {
+		parseLang = script.KameFileLanguage
+	}
+	status := writeAST(&buffer, parseLang, name, text)
 	if status == 0 && parsed.Check {
 		// Parse-only validation intentionally emits no AST.
 	} else if cliDiagnosticJSON && status == 0 {

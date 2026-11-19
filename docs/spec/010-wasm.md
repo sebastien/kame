@@ -72,7 +72,7 @@ carry a smaller `captureLimit` for a nested command-list budget.
 The exported C ABI provides conceptual operations for:
 
 - Instance create and free.
-- Source compile.
+- Complete Kame program compilation with `kame_wasm_source_compile`.
 - Target or expression request and cancellation.
 - Engine step.
 - Next event metadata and payload copy.
@@ -149,6 +149,10 @@ as 0 or 1, and `timeoutMS`, `retryCount`, and `captureLimit` as nonnegative
 integers, into portable runtime options; `--force` bypasses file freshness and
 cached-task lookup on either host. Registration failures expose their complete diagnostic list through
 the target-event query, including in non-JSON presentation modes.
+
+Build fragments use Kame file grammar by default. A host can set `lang` to
+`km` for an inline Kame fragment, `kash` for a Kash fragment, or `expr` for
+an expression fragment.
 
 Optional `trackTimings` is 0 or 1. Timing collection defaults off for embedding
 clients; the CLI opts in. It uses the driver's existing monotonic tick clock and

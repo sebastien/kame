@@ -26,6 +26,11 @@ const (
 	Generate
 	Composition
 	SessionCommand
+	ModuleImport
+	ModuleFrom
+	ModuleExport
+	DeclarationFor
+	DeclarationLet
 )
 
 type ScriptItem struct {
@@ -34,11 +39,15 @@ type ScriptItem struct {
 	Text            string
 	Definition      *definition.Definition
 	Rule            *rule.Rule
+	KashBody        *Script
 	Expression      *expr.Expr
 	Include         string
 	OptionalInclude bool
 	GenerateName    string
 	Branches        []DeclarationBranch
+	Loop            *DeclarationLoop
+	Module          *ModuleDeclaration
+	commentDepth    int
 }
 
 type DeclarationBranch struct {
@@ -48,6 +57,13 @@ type DeclarationBranch struct {
 	Span      source.Span
 }
 
+type DeclarationLoop struct {
+	Name     string
+	NameSpan source.Span
+	Comment  string
+	Items    []ScriptItem
+}
+
 type Script struct {
 	Alloc          mem.Allocator
 	Source         *source.Source
@@ -55,6 +71,8 @@ type Script struct {
 	Diagnostics    []source.Diagnostic
 	BorrowedSource bool
 	Kash           bool
+	RuleBody       bool
+	start          int
 }
 
 func (s *Script) Free() {
@@ -77,13 +95,22 @@ func freeItems(a mem.Allocator, items []ScriptItem) {
 	for _, item := range items {
 		definition.Free(a, item.Definition)
 		rule.FreeRule(a, item.Rule)
+		item.KashBody.Free()
 		expr.Free(a, item.Expression)
 		mem.FreeString(a, item.Include)
+		if item.Module != nil {
+			mem.FreeString(a, item.Module.Path)
+			mem.FreeSlice(nil, item.Module.Names)
+		}
 		for _, branch := range item.Branches {
 			expr.Free(a, branch.Condition)
 			freeItems(a, branch.Items)
 		}
 		mem.FreeSlice(nil, item.Branches)
+		if item.Loop != nil {
+			freeItems(a, item.Loop.Items)
+			mem.Free(a, item.Loop)
+		}
 	}
 	mem.FreeSlice(nil, items)
 }
@@ -147,23 +174,24 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, lineEnd)
 			continue
 		}
-		if item, next, ok := s.sourceDeclaration(pos, start, end); ok {
+		if item, next, ok := s.sourceDeclaration(pos, start, end, false); ok {
+			s.Items = append(s.Items, item)
+			pos = next
+			continue
+		}
+		if item, next, ok := s.blockFunction(start, end); ok {
+			s.Items = append(s.Items, item)
+			pos = next
+			continue
+		}
+		headerEnd := definition.ValueHeaderEnd(a, s.Source, start)
+		if item, next, ok := s.blockValue(start, headerEnd); ok {
 			s.Items = append(s.Items, item)
 			pos = next
 			continue
 		}
 		if source.TopLevelByte(text[start:end], '=') >= 0 {
 			definitionEnd := multilineDefinitionEnd(a, s.Source, start, end)
-			part := definition.ParseRange(a, s.Source, start, definitionEnd)
-			s.takeDiagnostics(part.Diagnostics)
-			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
-			pos = nextLine(text, definitionEnd)
-			continue
-		}
-		// A canonical long function header can span physical lines.
-		headerEnd := definition.ValueHeaderEnd(a, s.Source, start)
-		if text[start] == '(' && headerEnd > end {
-			definitionEnd := multilineDefinitionEnd(a, s.Source, start, source.LogicalLineEnd(text, headerEnd))
 			part := definition.ParseRange(a, s.Source, start, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
 			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
@@ -326,7 +354,7 @@ func Format(a mem.Allocator, s *Script) string {
 func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 	b := strings.Builder{}
 	text := s.Source.Text
-	previousEnd := 0
+	previousEnd := s.start
 	for i := range s.Items {
 		item := s.Items[i]
 		gapStart, gapEnd := previousEnd, item.Span.Start
@@ -356,7 +384,12 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
-		if item.Kind == Include || item.Kind == Composition {
+		if item.Module != nil {
+			writeModuleDeclaration(&b, item)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == Include || item.Kind == Composition || item.Kind == DeclarationFor || item.Kind == Generate && item.GenerateName == "" {
 			writeSourceDeclaration(a, &b, text, item, indent, 0)
 			previousEnd = item.Span.End
 			continue
@@ -394,7 +427,16 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == Definition {
 			value := ""
-			if s.Kash {
+			if item.Definition.Expression != nil && item.Definition.Expression.Kind == expr.ValueBlock {
+				if item.Definition.ExplicitDef {
+					b.WriteString("def ")
+				}
+				b.WriteString(item.Definition.Name)
+				b.WriteString(" =")
+				value = expr.FormatKashControl(a, item.Definition.Expression, indent)
+			} else if item.Definition.Expression != nil && item.Definition.Expression.Kind == expr.KashFunction {
+				value = expr.FormatKashControl(a, item.Definition.Expression, indent)
+			} else if s.Kash {
 				value = definition.FormatCompact(a, item.Definition)
 			} else {
 				value = definition.Format(a, item.Definition)
@@ -405,7 +447,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			continue
 		}
 		if item.Kind == Rule {
-			value := rule.FormatRuleWithIndent(a, item.Rule, indent)
+			value := FormatInspectedRule(a, item.Rule, item.KashBody, indent)
 			b.WriteString(value)
 			mem.FreeString(a, value)
 			previousEnd = item.Span.End

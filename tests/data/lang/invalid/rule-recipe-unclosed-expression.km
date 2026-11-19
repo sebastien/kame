@@ -1,0 +1,2 @@
+rule ./out : ./in
+  (nop name

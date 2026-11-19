@@ -1,4 +1,4 @@
-./app : ./main.c ./util.c
-	echo inputs: @< @<* count=@<#
-	echo outputs: @> @>* count=@>#
-	echo @{version} and @(count ./src)
+rule ./app : ./main.c ./util.c
+	echo inputs: $...inputs count=(count inputs)
+	echo outputs: $...outputs count=(count outputs)
+	echo $version and (count ./src)

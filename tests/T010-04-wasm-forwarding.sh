@@ -131,7 +131,7 @@ const writeRun = run(`result = (write! "${process.env.KAME_WRITE_PATH}" "forward
   writeFileSync(target, data);
   if (exports.kame_wasm_complete_nil(handle, request) !== 0) throw new Error('write completion failed');
 });
-if (writeRun.text !== ':nil') throw new Error('write target value was not nil');
+if (writeRun.text !== 'nil') throw new Error('write target value was not nil');
 exports.kame_wasm_instance_free(writeRun.handle);
 if (readFileSync(process.env.KAME_WRITE_PATH, 'utf8') !== 'forwarded-write') throw new Error('write target did not write the file');
 NODE

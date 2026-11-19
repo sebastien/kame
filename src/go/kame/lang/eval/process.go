@@ -252,7 +252,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 			}
 		}
-		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest, e.TypedCapture)
+		outcome := e.ActionPrefix == "$?("
+		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest || outcome, e.TypedCapture)
 		if e.Topology && r.Diagnostic.Code == "RECIPE_FAIL" {
 			stages := host.PayloadStages(completion.Value)
 			for i := range stages {
@@ -284,6 +285,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if e.Kind == expr.CommandTest && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)
 			r.Value = core.Value{Kind: core.Bool, Bool: host.EffectiveStatus(completion.Value) == 0 && host.PayloadInt(completion.Value, "signal") == 0}
+		}
+		if outcome && r.Diagnostic.Code == "" {
+			captured := r.Value
+			r = captureOutcome(c, e, completion.Value, captured)
+			if e.Topology && r.Diagnostic.Code == "" {
+				r = processGraphResult(c.Run, r, e, completion.Value, state.Stages)
+			}
+			captured.Free(c.Run)
 		}
 		if r.Diagnostic.Code == "RECIPE_FAIL" && !r.Diagnostic.Protected {
 			c.handledFinalizerFailure()
@@ -730,6 +739,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if e.Kind == expr.CommandTest {
 			return Result{Value: core.Value{Kind: core.Bool, Bool: false}}
 		}
+		if e.ActionPrefix == "$?(" {
+			return captureOutcome(c, e, core.Value{}, core.Value{})
+		}
 		if e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph {
 			fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int}}}
 			completion := core.NewRecord(c.Run, fields)
@@ -759,7 +771,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 	}
 	var payload core.Value
-	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	} else {
 		payload = host.ArgvPayload(c.Run, state.Stages[0].List)
@@ -900,7 +912,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if captureLimit > 0 {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(captureLimit)}})
 	}
-	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
 		if state.CapturePolicy.Kind == core.Record {
 			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "capture"), Value: state.CapturePolicy.Clone(c.Run)})
 		}

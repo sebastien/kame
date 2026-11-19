@@ -143,7 +143,7 @@ func (p *Program) collectKashTools(r *rule.Rule, target string, stack []string, 
 		}
 		b.WriteString(r.Body[i].Text)
 	}
-	parsed := script.ParseKash(p.Alloc, "<recipe>", b.String())
+	parsed := script.ParseKashRuleBody(p.Alloc, "<recipe>", b.String())
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if result == nil {

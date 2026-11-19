@@ -15,7 +15,7 @@ func resolveInlineDefinition(value any, key core.ResourceKey, context *eval.Cont
 
 func TestInlineGlobalDefinitionPreservesFunctionOperandScope(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "inline.km", "mode = \"release\"\n(matches wanted) = (eq mode wanted)\n")
+	parsed := script.Parse(a, "inline.km", "mode = \"release\"\ndef matches wanted = (eq mode wanted)\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)

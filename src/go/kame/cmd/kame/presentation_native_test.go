@@ -37,13 +37,13 @@ func TestEarlyPresentationDoesNotEmitStreamRecords(t *testing.T) {
 
 func TestDiagnosticBacktraceUsesRetainedAuthoredSource(t *testing.T) {
 	directory := t.TempDir()
-	text := "bad = (first 1)\n(sh! \"rm ./source.km\")\nbad\n"
+	text := "bad = (first 1)\n"
 	filename := filepath.Join(directory, "source.km")
 	if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	status := runNativeCLIIn(t, directory, []string{"--color=never", "--diagnostic-format=plain", "do", "run", "--allow-run", "-f", "source.km"}, nil, &out, &errOut)
+	status := runNativeCLIIn(t, directory, []string{"--color=never", "--diagnostic-format=plain", "do", "run", "--allow-run", "-f", "source.km", "-c", "(sh! \"rm ./source.km\")\nbad"}, nil, &out, &errOut)
 	if status != 1 {
 		t.Fatalf("status=%d stderr=%s", status, errOut.String())
 	}
@@ -63,7 +63,7 @@ func TestDiagnosticBacktraceUsesRetainedAuthoredSource(t *testing.T) {
 func TestPresentationDefaultAndStructuredResults(t *testing.T) {
 	for _, mode := range []string{"", "ansi", "text", "json"} {
 		var out, errOut bytes.Buffer
-		args := []string{"do", "inputs", "-c", "task default :"}
+		args := []string{"do", "inputs", "-c", "task default"}
 		if mode != "" {
 			args = append([]string{"-o", mode}, args...)
 		}
@@ -97,7 +97,7 @@ func TestPresentationDefaultAndStructuredResults(t *testing.T) {
 
 func TestFailurePresentationDoesNotRepeatDiagnosticDetails(t *testing.T) {
 	directory := t.TempDir()
-	nativeCLIWrite(t, filepath.Join(directory, "Makefile.kmk"), "root : broken\nbroken : ; {shell: kash}\n\t$(sh -c \"exit 123\")\n")
+	nativeCLIWrite(t, filepath.Join(directory, "Makefile.km"), "task root : broken\ntask broken\n\t$(sh -c \"exit 123\")\n")
 	for _, mode := range []string{"ansi", "text"} {
 		for _, format := range []string{"human", "plain"} {
 			var out, errOut bytes.Buffer
@@ -116,7 +116,7 @@ func TestFailurePresentationDoesNotRepeatDiagnosticDetails(t *testing.T) {
 					t.Fatalf("%s/%s: repeated %q in:\n%s", mode, format, once, text)
 				}
 			}
-			if format == "human" && !strings.Contains(text, "\n     │ broken : ; {shell: kash}\n") {
+			if format == "human" && !strings.Contains(text, "\n     │ task broken\n") {
 				t.Fatalf("trace excerpt is not nested under its frame:\n%s", text)
 			}
 		}

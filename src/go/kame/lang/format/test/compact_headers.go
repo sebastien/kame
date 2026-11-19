@@ -8,8 +8,8 @@ import (
 
 func TestValueFormatterCanonicalizesCompactHeaders(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{"value=42\n", "(identity x)=x\n", "(f)=42\n", "items+=[1]\n", "value?=42\n", "value??=42\n", "ready!=true\n", "ready? =true\n"}
-	wants := []string{"value = 42\n", "(identity x) = x\n", "(f) = 42\n", "items += [1]\n", "value ?= 42\n", "value? ?= 42\n", "ready! = true\n", "ready? = true\n"}
+	texts := []string{"value=42\n", "def identity x =x\n", "def f () =42\n", "items+=[1]\n", "value?=42\n", "value??=42\n", "ready!=true\n", "ready? =true\n"}
+	wants := []string{"value = 42\n", "def identity x = x\n", "def f () = 42\n", "items += [1]\n", "value ?= 42\n", "value? ?= 42\n", "ready! = true\n", "ready? = true\n"}
 	for i := range texts {
 		result := format.Source(a, "km", "compact.km", texts[i], "tabs", 4)
 		if !result.OK || result.Text != wants[i] {

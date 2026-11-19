@@ -39,6 +39,8 @@ type Source struct {
 	Text string
 	// Expanded text combines authored include segments and is not a file excerpt.
 	Expanded bool
+	// StructuralIndent belongs to an enclosing recipe, outside nested literals.
+	StructuralIndent string
 }
 
 func clone(a mem.Allocator, text string) string {

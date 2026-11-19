@@ -350,6 +350,9 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	if context.PurePredicate && operation.Category != PureOperation {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
 	}
+	if context.pureValueBlock && operation.HasContract() && !operation.AllowsPhase(context.Phase) {
+		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in this value block's phase")
+	}
 	if context.deferred {
 		return Result{Completed: true}
 	}

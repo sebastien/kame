@@ -18,10 +18,10 @@ const instanceDiagnostic = handle => { assert.equal(e.kame_wasm_instance_diagnos
 assert.equal(e.kame_wasm_alloc(0xffffffff,16),0);
 assert.equal(e.kame_wasm_copy(0xffffffff,1,output,1),4);
 assert.equal(e.kame_wasm_free(0,0),0);
-const recursiveSource = write('(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))\n(character TEXT) = (walk (slice 1 TEXT))\n');
+const recursiveSource = write('def walk TEXT = if count TEXT == 0 then 0 else character TEXT\ndef character TEXT = walk (slice 1 TEXT)\n');
 for (const [expression, code] of [
   ['(walk "x,y\\n")', ''],
-  ['(walk (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\\n" [1 2 3 4 5 6 7 8 9 10]))', 'EVAL_DEPTH'],
+  ['(walk (reduce (TEXT STEP => str TEXT TEXT) "x,y\\n" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))', 'EVAL_DEPTH'],
   ['(walk "x,y\\n")', ''],
 ]) {
   const bounded = e.kame_wasm_instance_create();

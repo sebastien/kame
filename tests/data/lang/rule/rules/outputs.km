@@ -1,13 +1,13 @@
-default : build
+task default : build
 
-./out.o : ./in.c
-	cc -c @< -o @>
+rule ./out.o : ./in.c
+	cc -c $inputs.0 -o $outputs.0
 
-"./build dir/out.o" : ./in.c
-	cc -c @< -o @>
+rule "./build dir/out.o" : ./in.c
+	cc -c $inputs.0 -o $outputs.0
 
-live-{name} : ./{name}.c
-	echo live @>
+task live-{name} : ./{name}.c
+	echo live $name
 
-./{path:**}/{name:*}.c : ./src/{name:*}.c
-	echo @{name}
+rule ./{path:**}/{name:*}.c : ./src/{name:*}.c
+	echo $name

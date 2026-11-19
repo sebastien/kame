@@ -54,7 +54,7 @@ const resultText = (handle) => {
 };
 
 const handle = exports.kame_wasm_instance_create();
-const [source, sourceLength] = write('./out.txt :\n\tprintf written\n');
+const [source, sourceLength] = write('rule ./out.txt ; {shell: "sh"}\n\tprintf written\n');
 if (exports.kame_wasm_source_compile(handle, source, sourceLength) !== 0) throw new Error('source did not compile');
 if (exports.kame_wasm_set_forwarding(handle, 1) !== 0) throw new Error('forwarding was rejected');
 const [target, targetLength] = write('./out.txt');

@@ -6,24 +6,25 @@ revision: 2
 
 ## Rule declarations
 
-A task may declare zero or more standalone argument blocks after its single
-target name:
+A task or service may declare standalone argument blocks after its single
+literal target name:
 
 ```kame
 task deploy {environment} {region=us-east} : configure ./config/@{environment}/@{region}.json
 	ship $environment $region
+
+service dev {port=8080}
+	npm run dev -- --port $port
 ```
 
-After `task` or `task cached`, the first token is the literal target name and
-every following standalone brace block is an argument declaration. A leading
-target-template block such as `task {name}` is a template output, not an
-argument declaration.
+In an argument declaration, the target name comes after `task`, `task cached`
+or `service`, followed by one or more standalone brace blocks. A leading
+target-template block such as `task {name}` is a template output.
 
 `{name}` declares a required argument. `{name=literal}` declares an optional
-argument with a literal string default. The declaration is part of the target
-header, not an additional output or a target-template capture. It is valid only
-on a single named task target; file rules and multi-output rules use only
-capture semantics. Argument names follow definition identifier rules,
+argument with a literal string default. Argument declarations are part of the
+header of a single named task or service target. File rules and multi-output
+rules use captures. Argument names follow definition identifier rules,
 are unique within the declaration, and cannot collide with target captures or
 reserved selectors.
 
@@ -43,8 +44,8 @@ kame deploy environment=production
 
 An assignment-only primary invocation selects `default` and binds its declared
 arguments. `env/NAME=value` is an explicit CLI process-environment override,
-not a task argument; a bare assignment naming a global definition overrides
-that definition rather than becoming a task argument.
+and a bare assignment naming a global definition overrides that definition.
+Each kind of override takes precedence over target arguments.
 
 Each assignment must name an argument declared by the selected rule and may
 appear at most once. Missing required arguments, unknown names, duplicate
@@ -93,7 +94,7 @@ without exposing unrelated environment values.
   filesystem, process, cache-write or output-publication effects.
 - Literal defaults do not evaluate Kame expressions or perform host requests.
 - Assignment ordering is canonical; changed values change cache identity;
-  equivalent values share one prerequisite and one task execution.
+  equivalent values share prerequisites and a target execution.
 - Rule captures and target arguments remain distinct in selectors, plans,
   diagnostics, inspection and cache records.
 - Multiple targets, `do run` program arguments, CLI options, and literal

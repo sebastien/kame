@@ -45,27 +45,29 @@ type Invocation struct {
 	Verbose     bool
 	PrintResult bool
 	// Interactive reads Kash entries from stdin after preloaded sources run.
-	Interactive      bool
-	Login            bool
-	Color            string
-	DiagnosticFormat string
-	Grants           []eval.Grant
-	NoDefaultGrants  bool
-	Shell            []string
-	Environment      []string
-	TimeoutMS        int64
-	RetryCount       int
-	RetainBytes      int
-	CaptureLimit     int
-	Lang             string
-	Indent           string
-	IndentWidth      int
-	InPlace          bool
-	Check            bool
-	Comment          string
-	Defines          []string
-	Parameters       []string
-	ToolOverrides    []string
+	Interactive        bool
+	Login              bool
+	Color              string
+	DiagnosticFormat   string
+	Grants             []eval.Grant
+	NoDefaultGrants    bool
+	RequireRuleWork    bool
+	RequireProcessWork bool
+	Shell              []string
+	Environment        []string
+	TimeoutMS          int64
+	RetryCount         int
+	RetainBytes        int
+	CaptureLimit       int
+	Lang               string
+	Indent             string
+	IndentWidth        int
+	InPlace            bool
+	Check              bool
+	Comment            string
+	Defines            []string
+	Parameters         []string
+	ToolOverrides      []string
 	// Picker borrows the --picker executable name. It is not a shell command.
 	Picker   string
 	Depth    int
@@ -220,6 +222,7 @@ func parseCommand(command string, args []string) Invocation {
 		return inv
 	}
 	if command == "fmt" {
+		inv.Lang = "km"
 		parseFormat(&inv, args)
 		return inv
 	}
@@ -402,7 +405,7 @@ func assignWatchDebounce(inv *Invocation, value string) bool {
 }
 
 // assignmentOperand records literal shorthand without deciding whether a name
-// is a definition or a task argument; that requires the compiled declarations.
+// is a definition or a target argument; that requires the compiled declarations.
 func assignmentOperand(inv *Invocation, arg string) bool {
 	for i := range arg {
 		if arg[i] != '=' {
@@ -772,7 +775,7 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_CONFLICT", "-i and -n cannot be used together")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kmk" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}
@@ -784,8 +787,8 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_VALUE_INVALID", "invalid comment style: "+inv.Comment)
 		return
 	}
-	if (indentSelected || widthSelected) && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kmk" && inv.Lang != "kash" {
-		inv.fail("OPT_CONFLICT", "indent options require rule, script, kmk, or kash language")
+	if (indentSelected || widthSelected) && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
+		inv.fail("OPT_CONFLICT", "indent options require km, kash, rule, or script language")
 		return
 	}
 	if widthSelected && inv.Indent != "spaces" {
@@ -886,7 +889,7 @@ func parseParse(inv *Invocation, args []string) {
 		inv.fail("OPT_NO_VALUE", "missing required --lang")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kmk" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}

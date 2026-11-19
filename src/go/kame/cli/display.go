@@ -77,7 +77,7 @@ func writeReport(out io.Writer, heading string, data string, styled bool, verbos
 		value.Free(mem.System)
 		return true
 	}
-	if reportField(value, "schema").Int == 2 {
+	if reportField(value, "schema").Int == 2 && reportField(value, "type").Text != "" {
 		writeInspectionReport(out, value, styled, verbose)
 		value.Free(mem.System)
 		return true

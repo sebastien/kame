@@ -26,19 +26,19 @@ func TestDefinitionClassifiesExpressionAndSpans(t *testing.T) {
 }
 
 func TestFunctionDefinitionRetainsRestParameter(t *testing.T) {
-	result := definition.Parse(t.Allocator(), "test.km", "(copy source rest...) = output")
+	result := definition.Parse(t.Allocator(), "test.km", "def copy source rest... = output")
 	defer result.Free()
 	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Name != "copy" || len(result.Definition.Parameters) != 2 || !result.Definition.Parameters[1].Rest {
 		t.Error("function definition did not retain rest parameter")
 	}
-	for _, input := range []string{"match = 1", "(service name) = name", "(f with) = 1", "(f _0) = 1"} {
+	for _, input := range []string{"match = 1", "def service name = name", "def f with = 1", "def f _0 = 1"} {
 		bad := definition.Parse(t.Allocator(), "test.km", input)
 		if len(bad.Diagnostics) == 0 || bad.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Errorf("%q accepted a reserved binding or parameter", input)
 		}
 		bad.Free()
 	}
-	sep := definition.Parse(t.Allocator(), "test.km", "(join sep) = sep")
+	sep := definition.Parse(t.Allocator(), "test.km", "def join sep = sep")
 	defer sep.Free()
 	if len(sep.Diagnostics) != 0 {
 		t.Errorf("contextual template separator cannot be bound: %v", sep.Diagnostics)
@@ -108,7 +108,7 @@ func TestFormatDefinitionCanonicalizesWhitespace(t *testing.T) {
 }
 
 func TestDefinitionAtomsUseExpressionGrammar(t *testing.T) {
-	texts := []string{"alias = other", "number = 42", "flag = false", "nothing = nil", "path = ./file", "shell = kash", "(identity value) = value"}
+	texts := []string{"alias = other", "number = 42", "flag = false", "nothing = nil", "path = ./file", "shell = kash", "def identity value = value"}
 	kinds := []expr.Kind{expr.Name, expr.Integer, expr.Boolean, expr.Nil, expr.Path, expr.Name, expr.Name}
 	for i := range texts {
 		result := definition.Parse(t.Allocator(), "test.km", texts[i])

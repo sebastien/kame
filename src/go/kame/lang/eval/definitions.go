@@ -149,7 +149,7 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		if item.Kind == script.SessionCommand {
 			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "session commands require interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
-		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+		if item.Module != nil || item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 			continue
 		}
@@ -211,7 +211,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			p.Valid = false
 			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "session commands require interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
-		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+		if item.Module != nil || item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			p.Valid = false
 			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}

@@ -18,7 +18,7 @@ func TestNativeKashBuiltinsMatchSystemUtilities(t *testing.T) {
 	if err := os.Symlink(binary, interpreter); err != nil {
 		t.Fatal(err)
 	}
-	nativeCLIWrite(t, filepath.Join(directory, "script"), "tool = (first args)\nrest = (slice 1 (count args) args)\n$tool $rest\n")
+	nativeCLIWrite(t, filepath.Join(directory, "script"), "def tool = (first args)\ndef rest = (slice 1 (count args) args)\n$tool $rest\n")
 	nativeCLIWrite(t, filepath.Join(directory, "file"), "data")
 	if err := os.Mkdir(filepath.Join(directory, "dir"), 0o755); err != nil {
 		t.Fatal(err)

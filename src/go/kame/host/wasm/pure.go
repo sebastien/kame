@@ -2,6 +2,7 @@ package wasm
 
 import (
 	"kame/core"
+	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
@@ -54,6 +55,14 @@ func parseFailure(a mem.Allocator, parsed *script.Script) PureResult {
 	return out
 }
 
+func compilationFailure(a mem.Allocator, diagnostics []diagnostic.Diagnostic) PureResult {
+	if len(diagnostics) == 0 {
+		return PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "source cannot be compiled")}
+	}
+	d := diagnostics[0]
+	return PureResult{Code: pureText(a, d.Code), Message: pureText(a, d.Message), SpanStart: d.Span.Start, SpanEnd: d.Span.End}
+}
+
 // EvaluatePure compiles and evaluates exactly one expression. It provides the
 // wasm target's initial no-host vertical slice; requests are surfaced as
 // HostNeeded instead of being serviced implicitly.
@@ -64,17 +73,24 @@ func EvaluatePure(a mem.Allocator, text string) PureResult {
 // EvaluateSourcePure evaluates expression against one compiled source text.
 // It is the synchronous, host-free half of the instance ABI.
 func EvaluateSourcePure(a mem.Allocator, source string, text string) PureResult {
-	parsed := script.Parse(a, "<wasm-source>", source)
+	parsed := script.ParseKameFile(a, "<wasm-source>", source)
 	if len(parsed.Diagnostics) != 0 {
 		return parseFailure(a, parsed)
 	}
-	parsedExpression := script.Parse(a, "<wasm-expr>", text)
-	if len(parsedExpression.Diagnostics) != 0 || len(parsedExpression.Items) != 1 || parsedExpression.Items[0].Expression == nil {
+	parsedExpression := expr.Parse(a, "<wasm-expr>", text)
+	if len(parsedExpression.Diagnostics) != 0 || parsedExpression.Expr == nil {
+		code, message := "PARSE_ERR", "expected one valid expression"
+		start, end := 0, 0
+		if len(parsedExpression.Diagnostics) != 0 {
+			d := parsedExpression.Diagnostics[0]
+			code, message, start, end = d.Code, d.Message, d.Span.Start, d.Span.End
+		}
+		result := PureResult{Code: pureText(a, code), Message: pureText(a, message), SpanStart: start, SpanEnd: end}
 		parsedExpression.Free()
 		parsed.Free()
-		return PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "expected one valid expression")}
+		return result
 	}
-	result := evaluateParsed(a, parsed, parsedExpression.Items[0].Expression)
+	result := evaluateParsed(a, parsed, parsedExpression.Expr)
 	parsedExpression.Free()
 	return result
 }
@@ -83,7 +99,7 @@ func EvaluateSourcePure(a mem.Allocator, source string, text string) PureResult 
 // requested expression. The C ABI uses it before retaining copied source in an
 // instance slot.
 func ValidateSource(a mem.Allocator, source string) PureResult {
-	parsed := script.Parse(a, "<wasm-source>", source)
+	parsed := script.ParseKameFile(a, "<wasm-source>", source)
 	if len(parsed.Diagnostics) != 0 {
 		return parseFailure(a, parsed)
 	}
@@ -92,7 +108,7 @@ func ValidateSource(a mem.Allocator, source string) PureResult {
 	engine := core.NewEngine(a)
 	compiled := eval.CompileChecked(a, engine, parsed, registry)
 	if compiled.Program == nil {
-		out := PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "source cannot be compiled")}
+		out := compilationFailure(a, compiled.Diagnostics)
 		compiled.Free(a)
 		engine.Free()
 		registry.Free()
@@ -112,35 +128,29 @@ func resolvePureDefinition(state any, key core.ResourceKey, context *eval.Contex
 }
 
 func evaluateParsed(a mem.Allocator, parsed *script.Script, expression *expr.Expr) PureResult {
+	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
+	defer registry.Free()
 	engine := core.NewEngine(a)
-	program := eval.Compile(a, engine, parsed, registry)
+	defer engine.Free()
+	compiled := eval.CompileChecked(a, engine, parsed, registry)
+	defer compiled.Free(a)
+	program := compiled.Program
+	if program == nil {
+		return compilationFailure(a, compiled.Diagnostics)
+	}
+	defer program.Free()
 	context := &eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read}}, ResolveDefinition: resolvePureDefinition, ResolverState: program}
 	result := program.EvaluateWith(expression, context)
+	defer result.Free(a)
 	eval.FreeEffects(a, context.Effects)
 	if result.Waiting {
-		result.Free(a)
-		program.Free()
-		engine.Free()
-		registry.Free()
-		parsed.Free()
 		return PureResult{HostNeeded: true, Code: pureText(a, "HOST_REQUIRED"), Message: pureText(a, "expression requires a host request")}
 	}
 	if result.Diagnostic.Code != "" {
-		out := PureResult{Code: pureText(a, result.Diagnostic.Code), Message: pureText(a, result.Diagnostic.Message)}
-		result.Free(a)
-		program.Free()
-		engine.Free()
-		registry.Free()
-		parsed.Free()
-		return out
+		d := result.Diagnostic
+		return PureResult{Code: pureText(a, d.Code), Message: pureText(a, d.Message), SpanStart: d.Span.Start, SpanEnd: d.Span.End}
 	}
-	value := eval.Display(a, result.Value)
-	result.Free(a)
-	program.Free()
-	engine.Free()
-	registry.Free()
-	parsed.Free()
-	return PureResult{Text: value}
+	return PureResult{Text: eval.Display(a, result.Value)}
 }

@@ -161,3 +161,55 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 	mem.FreeSlice(nil, stages)
 	return Result{Value: value}
 }
+
+// captureOutcome exposes process status without turning an ordinary nonzero
+// exit into an evaluator failure. The stdout value has passed capture checks.
+func captureOutcome(c *Context, action *expr.Expr, completion, stdout core.Value) Result {
+	a := c.Run
+	span := action.Span
+	dryRun := completion.Kind == core.Nil
+	if completion.Kind == core.String || dryRun {
+		completion = core.Value{Kind: core.Record}
+	}
+	r := processResult(a, completion, span)
+	if r.Diagnostic.Code != "" {
+		return r
+	}
+	state, problem := "completed", core.Value{}
+	effectiveStatus, effectiveSignal := host.EffectiveStatus(completion), host.EffectiveSignal(completion)
+	if action.AcceptExit && effectiveSignal == 0 {
+		effectiveStatus = 0
+	}
+	if dryRun {
+		state = "suspended"
+	} else if effectiveStatus != 0 || effectiveSignal != 0 {
+		state = "failed"
+		fields := []core.RecordField{
+			{Key: "code", Value: core.Value{Kind: core.String, Text: "RECIPE_FAIL"}},
+			{Key: "message", Value: core.Value{Kind: core.String, Text: "process exited unsuccessfully"}},
+			{Key: "source", Value: core.Value{Kind: core.String, Text: c.Source}},
+			{Key: "start", Value: core.Value{Kind: core.Int, Int: int64(span.Start)}},
+			{Key: "end", Value: core.Value{Kind: core.Int, Int: int64(span.End)}},
+		}
+		problem = core.NewRecord(a, fields)
+	}
+	for i := range r.Value.Record {
+		switch r.Value.Record[i].Key {
+		case "stdoutCaptured":
+			r.Value.Record[i].Value.Bool = !dryRun
+		case "effectiveStatus":
+			r.Value.Record[i].Value.Int = effectiveStatus
+		}
+	}
+	status, signal := host.PayloadInt(completion, "status"), host.PayloadInt(completion, "signal")
+	r.Value.Record = append(r.Value.Record,
+		core.RecordField{Key: owned(a, "state"), Value: core.NewString(a, state)},
+		core.RecordField{Key: owned(a, "ok"), Value: core.Value{Kind: core.Bool, Bool: state == "completed" && status == 0 && signal == 0}},
+		core.RecordField{Key: owned(a, "value"), Value: stdout.Clone(a)},
+		core.RecordField{Key: owned(a, "error"), Value: problem},
+	)
+	if dryRun || !action.Topology {
+		r.Value.Record = append(r.Value.Record, core.RecordField{Key: owned(a, "graph")})
+	}
+	return r
+}

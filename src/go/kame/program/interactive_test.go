@@ -31,6 +31,11 @@ func interactiveTestSession(t testing.TB) *Session {
 
 func interactiveTestEntry(t testing.TB, s *Session, name, text string) {
 	t.Helper()
+	interactiveTestEntryResult(t, s, name, text, "")
+}
+
+func interactiveTestEntryResult(t testing.TB, s *Session, name, text, code string) {
+	t.Helper()
 	first, diagnostics := s.AppendKash(name, text)
 	if len(diagnostics) != 0 {
 		t.Fatalf("append %s: %+v", name, diagnostics)
@@ -54,7 +59,7 @@ func interactiveTestEntry(t testing.TB, s *Session, name, text string) {
 			if !result.Done {
 				continue
 			}
-			if result.Result.Diagnostic.Code != "" {
+			if result.Result.Diagnostic.Code != code {
 				t.Fatalf("run %s: %+v", name, result.Result.Diagnostic)
 			}
 			result.Result.Free(mem.System)
@@ -102,7 +107,7 @@ func TestSessionRetiresStatementsWithoutReplayingLazyEffects(t *testing.T) {
 			outputs++
 		}
 	}, nil)
-	interactiveTestEntry(t, s, "<definition>", "saved = (out! \"once\")")
+	interactiveTestEntry(t, s, "<definition>", "def saved = (out! \"once\")")
 	for i := 0; i < 256; i++ {
 		interactiveTestEntry(t, s, "<use>", "(nop saved)\nfor i in [1, 2]\n\tif (nop true)\n\t\t(nop i)\n")
 		if len(s.Program.Eval.OperationStates) != 0 || len(s.Program.Eval.OperationMemos) != 0 {
@@ -278,7 +283,7 @@ func TestInteractiveRebindingPreservesSuspendedCallsAndCleanup(t *testing.T) {
 			s.Program.Eval.SetDefinitionEffectSink(func(_ any, effect eval.Effect) {
 				out.Write(effect.Data)
 			}, nil)
-			interactiveTestEntry(t, s, "<old>", "def worker value\n\tlocal = (str \"cleanup-\" value)\n\tdefer (out! local)\n\t(out! (str \"started-\" value))\n\tfor i in [1, 2]\n\t\t(nop i)\n\t(out! (str \"old-\" value))\n")
+			interactiveTestEntry(t, s, "<old>", "def worker value\n\tdef local = (str \"cleanup-\" value)\n\tdefer (out! local)\n\t(out! (str \"started-\" value))\n\tfor i in [1, 2]\n\t\t(nop i)\n\t(out! (str \"old-\" value))\n")
 			old := s.Program.Eval.Scope.Bindings[0].Function.Definition
 			first, diagnostics := s.AppendKash("<pending>", "((if (out! \"head-\") then worker else worker) \"a\")")
 			if len(diagnostics) != 0 {
@@ -347,9 +352,9 @@ func TestInteractiveRebindingPreservesSuspendedCallsAndCleanup(t *testing.T) {
 
 func TestInteractiveLazyDefinitionCannotBeRedeclaredAfterShadowing(t *testing.T) {
 	s := interactiveTestSession(t)
-	interactiveTestEntry(t, s, "<lazy>", "saved = 1")
+	interactiveTestEntry(t, s, "<lazy>", "def saved = 1")
 	interactiveTestEntry(t, s, "<shadow>", "let saved = 2")
-	_, diagnostics := s.AppendKash("<duplicate>", "saved = 3")
+	_, diagnostics := s.AppendKash("<duplicate>", "def saved = 3")
 	if len(diagnostics) != 1 || diagnostics[0].Code != "DEF_INVALID" {
 		t.Fatal("shadowing allowed duplicate registration of a lazy engine resource")
 	}
@@ -449,12 +454,12 @@ func TestInteractiveAsyncFailureRetainedUntilObserved(t *testing.T) {
 	if handle.State() != core.NodeFailed || handle.Observed() || len(p.Eval.Processes) != 1 {
 		t.Fatal("unreported failure was lost before its owning join")
 	}
-	interactiveTestEntry(t, s, "<handled>", `let handled = (await job) ?? nil`)
+	interactiveTestEntryResult(t, s, "<handled>", `(await job)`, "RECIPE_FAIL")
 	drainInteractiveProcesses(t, s)
 	if !handle.Observed() || handle.Diagnostic().Code == "" {
 		t.Fatal("observed failure lost its saved diagnostic")
 	}
-	interactiveTestEntry(t, s, "<repeat>", `let handled = (await job) ?? nil`)
+	interactiveTestEntryResult(t, s, "<repeat>", `(await job)`, "RECIPE_FAIL")
 	h := s.Start(len(s.Work)).Handle
 	if h == nil {
 		t.Fatal("cannot start invocation join")
@@ -573,7 +578,7 @@ func TestInteractiveAsyncKeepsReboundCallableScope(t *testing.T) {
 	p.Options.ResolveTool = posix.ResolveTool
 	var out strings.Builder
 	p.Eval.SetDefinitionEffectSink(func(_ any, effect eval.Effect) { out.Write(effect.Data) }, nil)
-	interactiveTestEntry(t, s, "<old>", "def worker duration\n\tlocal = \"old-scope\"\n\tdefer (out! local)\n\t/bin/sleep $duration &\n")
+	interactiveTestEntry(t, s, "<old>", "def worker duration\n\tdef local = \"old-scope\"\n\tdefer (out! local)\n\t/bin/sleep $duration &\n")
 	old := p.Eval.Scope.Bindings[0].Function.Definition
 	first, diagnostics := s.AppendKash("<call>", `(worker "0.02")`)
 	if len(diagnostics) != 0 {

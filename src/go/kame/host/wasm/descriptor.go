@@ -48,7 +48,7 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 			if session && !descriptorStrings(field.Value) {
 				return false
 			}
-		case "environment", "parameters", "toolOverrides":
+		case "environment", "parameters", "toolOverrides", "shell":
 			if !descriptorStrings(field.Value) {
 				return false
 			}
@@ -56,7 +56,7 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 			if field.Value.Kind != core.Int || field.Value.Int < 0 {
 				return false
 			}
-		case "retryCount", "retainBytes":
+		case "jobs", "retryCount", "retainBytes":
 			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 {
 				return false
 			}
@@ -72,7 +72,7 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1 {
 				return false
 			}
-		case "dryRun", "printResult", "json":
+		case "dryRun", "printResult", "json", "requireRuleWork", "requireProcessWork":
 			if session && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1) {
 				return false
 			}

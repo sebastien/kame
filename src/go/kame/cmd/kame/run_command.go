@@ -102,7 +102,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			name = cloneCommandText("<command:" + strconv.Itoa(i+1) + ">")
 			names = append(names, name)
 		}
-		if input.Lang == "km" || input.Lang == "kmk" || input.Lang == "kash" {
+		if input.Lang == "km" || input.Lang == "kash" {
 			file := inlineRunSourceInput(inv, name, text, input.Lang, fragments, diagnosticWriter(out, errOut, inv.JSON))
 			loaded = append(loaded, file)
 			if file.Status != 0 {
@@ -149,12 +149,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		defines = nil
 	}
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult}
+	programOptions.RequireRuleWork, programOptions.RequireProcessWork = inv.RequireRuleWork, inv.RequireProcessWork
 	programOptions.TrackTimings = true
-	for i := range inv.Inputs {
-		if inv.Name == "run" && inv.Inputs[i].Lang != "kmk" {
-			programOptions.HasInput = true
-		}
-	}
+	programOptions.HasInput = inv.Name == "run"
 	for i := range inv.Inputs {
 		if inv.Inputs[i].Kind == "stdin" {
 			programOptions.HasInput = false
@@ -182,10 +179,14 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	posix.FreeEnvironment(mem.System, environment)
 	defer compiled.Free(mem.System)
 	if compiled.Session == nil {
+		status := 1
 		for i := range compiled.Diagnostics {
 			emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), compiled.Diagnostics[i], inv.JSON, fragments, loaded)
+			if compiled.Diagnostics[i].Code == "OPT_CONFLICT" {
+				status = 2
+			}
 		}
-		return 1
+		return status
 	}
 	session := compiled.Session
 	p := session.Program
@@ -253,24 +254,10 @@ func processExitStatus(d diagnostic.Diagnostic, explicitRun bool) int {
 }
 
 func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer, errOut io.Writer, fragments []program.Fragment, loaded []buildSource) int {
-	p := session.Program
-	workStart := 0
 	startedAt := time.Now().UnixNano()
-	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" && inv.TimeoutMS == 0 {
-		var targets []string
-		for i := range session.Work {
-			targets = append(targets, session.Work[i].Target)
-		}
-		status := materializeTargets(p, targets, out, errOut, inv.JSON)
-		mem.FreeSlice(nil, targets)
-		if status != 0 {
-			return status
-		}
-		workStart = len(session.Work) // Recipes ran already; only owned async joins remain.
-	}
 	run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: startedAt}
 	defer run.Last.Free(mem.System)
-	for i := workStart; i <= len(session.Work); i++ {
+	for i := 0; i <= len(session.Work); i++ {
 		if i == len(session.Work) && !run.joinNeeded() {
 			break
 		}

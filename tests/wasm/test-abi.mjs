@@ -22,7 +22,7 @@ const pathCases = [
   { name: 'glob dispatch', expression: '(wildcard "./*")', requests: [glob], result: paths },
   ...stats.map((request) => ({ name: `lstat ${request.path}`, expression: `(lstat ${request.path})`, requests: [request], result: request.value })),
   { name: 'readlink dispatch', expression: '(readlink ./link)', requests: [{ kind: 31, path: './link', value: '../target' }], result: '../target' },
-  { name: 'compiled readlink helper', source: 'op = [readlink: readlink]\n', expression: '(op.readlink ./link)', requests: [{ kind: 31, path: './link', value: '../target' }], result: '../target' },
+  { name: 'compiled readlink helper', source: 'op = {readlink: readlink}\n', expression: '(op.readlink ./link)', requests: [{ kind: 31, path: './link', value: '../target' }], result: '../target' },
   ...[['+files', ['./file']], ['+dir', ['./dir']], ['+symlinks', ['./link']], ['-symlinks', ['./dir', './file']]].map(([mask, result]) => ({
     name: `glob normalized no-follow ${mask}`, expression: `(wildcard "${mask}" "./*")`, requests: [glob, ...stats], result,
   })),

@@ -53,10 +53,10 @@ test-step "string templates"
 fmt_stable_ast "$(lang_fixture template/string)" template
 
 test-step "definitions and rules"
-fmt_stable_ast "$(lang_fixture rule/definition)" script
-fmt_stable_ast "$(lang_fixture rule/rules)" script
+fmt_stable_ast "$(lang_fixture rule/definition)" km
+fmt_stable_ast "$(lang_fixture rule/rules)" km
 
 test-step "scripts"
-fmt_stable_ast "$(lang_fixture script)" script
+fmt_stable_ast "$(lang_fixture script)" km
 
 test-end

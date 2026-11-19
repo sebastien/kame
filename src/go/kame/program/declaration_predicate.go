@@ -132,7 +132,7 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		parsed = parseSourceFragments(a, parseName, request.Prefix, request.Origins, offsets)
 		mem.FreeSlice(nil, offsets)
 	} else {
-		parsed = script.Parse(a, parseName, request.Prefix)
+		parsed = script.ParseKameFile(a, parseName, request.Prefix)
 	}
 	defer parsed.Free()
 	var known []string

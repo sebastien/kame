@@ -38,7 +38,7 @@ func TestModuleWatchStartsFromAcceptedSourceBytes(t *testing.T) {
 			if next.Request.Kind != host.RequestLoadSource {
 				t.Error("unexpected module watch request")
 			}
-			p.Complete(next.Request, core.NewBytes(a, []byte("value = 42\n")), core.Diagnostic{})
+			p.Complete(next.Request, core.NewBytes(a, []byte("def value = 42\n")), core.Diagnostic{})
 			next.Request.Free(a)
 		}
 		polled := root.PollRetained()
@@ -71,13 +71,13 @@ func TestModuleWatchStartsFromAcceptedSourceBytes(t *testing.T) {
 	if !found {
 		t.Error("accepted module source missing from watch resources")
 	}
-	memory.SetFile("/project/main.kash", []byte("value = 42\n"))
+	memory.SetFile("/project/main.kash", []byte("def value = 42\n"))
 	expected := p.ResourceFingerprint(key)
 	defer mem.FreeString(a, expected)
 	before := p.ResourceAcceptedFingerprint(key)
 	defer mem.FreeString(a, before)
 	// The embedding's live bytes change before watch first subscribes.
-	memory.SetFile("/project/main.kash", []byte("value = 99\n"))
+	memory.SetFile("/project/main.kash", []byte("def value = 99\n"))
 	after := p.ResourceAcceptedFingerprint(key)
 	defer mem.FreeString(a, after)
 	live := p.ResourceFingerprint(key)

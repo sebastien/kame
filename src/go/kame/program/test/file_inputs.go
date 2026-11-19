@@ -117,8 +117,8 @@ func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
 	directories := []string{"/sdk/first", "/sdk/first", "/sdk/second"}
 	for i := range directories {
 		sources := []program.CompileSource{
-			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "(assets) = (source-dir ())\n"},
-			{Name: "build.kmk", Text: "./output : ./input ; {shell: kame}\n\t(assets ())\n"},
+			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "def assets () = (source-dir ())\n"},
+			{Name: "build.kmk", Text: "rule ./output : ./input = assets ()\n"},
 		}
 		compiled := program.CompileMany(a, sources, registry, program.Options{Host: posix.New(a), Directory: dir})
 		if compiled.Program == nil {
@@ -160,8 +160,8 @@ func TestFileFreshnessTracksReachedSignedSources(t *testing.T) {
 			if phase >= 3 {
 				value = "new"
 			}
-			root := "SHELL = kash\n./output : ./input\n\t(yield! (payload ()))\n"
-			helper := "(payload) = \"" + value + "\"\n"
+			root := "SHELL = kash\nrule ./output : ./input\n\t(yield! (payload ()))\n"
+			helper := "def payload () = \"" + value + "\"\n"
 			if mode == 0 {
 				root += helper
 				helper = ""

@@ -7,7 +7,7 @@ import (
 
 func TestDeclarationPredicateUsesLiteralOverridesAndLazyDefinitions(t *testing.T) {
 	a := t.Allocator()
-	text := "mode ?= \"debug\"\nmode ?= (sh! \"never executed\")\n(selected value) = (eq mode value)\nunused = (read \"never read\")\n"
+	text := "mode ?= \"debug\"\nmode ?= (sh! \"never executed\")\ndef selected value = (eq mode value)\nunused = (read \"never read\")\n"
 	result := program.DeclarationPredicate(a, "conditions.kmk", text, "(selected \"release\")", []string{"mode=first", "future=later", "mode=release"}, []string{"KAME_mode=environment"}, "")
 	if result.Diagnostic.Code != "" || !result.Selected {
 		t.Error("override predicate: " + result.Diagnostic.Code + " " + result.Diagnostic.Message)

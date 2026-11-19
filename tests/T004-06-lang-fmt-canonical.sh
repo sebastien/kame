@@ -17,21 +17,21 @@ test-step "fixture formatting matches the canonical fixture"
 fixture_copy fmt fmtcheck
 (
 	cd fmtcheck
-	cli_run -- do fmt --lang script canonical.kmk
+	cli_run -- do fmt --lang km canonical.km
 	cli_expect_status 0
-	cli_expect_stdout_file canonical.kmk
+	cli_expect_stdout_file canonical.km
 
-	cli_run -- do fmt --lang script unformatted.kmk
+	cli_run -- do fmt --lang km unformatted.km
 	cli_expect_status 0
-	cli_expect_stdout_file canonical.kmk
+	cli_expect_stdout_file canonical.km
 
-	cli_run -- do fmt --lang script -n canonical.kmk
+	cli_run -- do fmt --lang km -n canonical.km
 	cli_expect_status 0
 	cli_expect_stdout_empty
 
-	cli_run -- do fmt --lang script -n unformatted.kmk
+	cli_run -- do fmt --lang km -n unformatted.km
 	cli_expect_status 1
-	cli_expect_stdout "unformatted.kmk
+	cli_expect_stdout "unformatted.km
 "
 )
 
@@ -75,10 +75,10 @@ test-step "string templates"
 fmt_stable "$(lang_fixture template/string)" template
 
 test-step "definitions and rules"
-fmt_stable "$(lang_fixture rule/definition)" script
-fmt_stable "$(lang_fixture rule/rules)" script
+fmt_stable "$(lang_fixture rule/definition)" km
+fmt_stable "$(lang_fixture rule/rules)" km
 
 test-step "scripts"
-fmt_stable "$(lang_fixture script)" script
+fmt_stable "$(lang_fixture script)" km
 
 test-end

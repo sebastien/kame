@@ -87,7 +87,7 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 	}
 	bodies := []string{"42", "nil", "[1, 2]", "(x => x)", "(yield! \"bad\")", "(out! \"bad\")", "(write! ./side \"bad\")", "$(touch side)", "(now ())", "VALUE", "(helper ())"}
 	for i := range bodies {
-		text := "VALUE = (sh! \"touch side\")\n(helper) = (out! \"bad\")\n./output : ; {shell: kame}\n\t" + bodies[i] + "\n"
+		text := "VALUE = (sh! \"touch side\")\ndef helper () = (out! \"bad\")\n./output : ; {shell: kame}\n\t" + bodies[i] + "\n"
 		code, _ := materializeSource(t, dir, text, true, false)
 		want := "PHASE_INVALID"
 		if i < 4 {

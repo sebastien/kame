@@ -320,12 +320,12 @@ func TestFinallyStatementsRetainBindingsAndAcceptedWrites(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.ParseKash(a, "sequence.kash", `def body
+	parsed := script.ParseKash(a, "sequence.kash", `def body ()
 	let saved = 42
 	(write! "first" "one")
 	(write! "second" "two")
 	return $saved ?
-result = (finally! body (() => out! "cleanup")).status
+def result = (finally! body (() => out! "cleanup")).status
 `)
 	if len(parsed.Diagnostics) != 0 {
 		t.Errorf("finalization fixture did not parse: %v", parsed.Diagnostics)

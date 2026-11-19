@@ -42,14 +42,14 @@ func TestValueFragmentRetainsBoundedCommentOrderAndOffsets(t *testing.T) {
 	}
 }
 
-func TestValueScriptRuleDiagnosticNamesTheLanguage(t *testing.T) {
+func TestValueScriptRuleDiagnosticRequiresKeyword(t *testing.T) {
 	a := t.Allocator()
 	s := source.New(a, "wrong.km", "default : ./out")
 	defer s.Free(a)
 	part := script.ParseFragment(a, s, "km", 0, len(s.Text))
 	defer part.Free()
-	if len(part.Diagnostics) != 1 || part.Diagnostics[0].Code != "PARSE_ERR" || part.Diagnostics[0].Message != "build rule syntax is not accepted in a km value script; use --lang kmk for definitions and build rules" {
-		t.Error("rule diagnostic does not explain the grammar mismatch")
+	if len(part.Diagnostics) != 1 || part.Diagnostics[0].Code != "PARSE_ERR" || part.Diagnostics[0].Message != "expected a declaration keyword before the target" {
+		t.Error("rule diagnostic does not identify the missing keyword")
 	}
 }
 

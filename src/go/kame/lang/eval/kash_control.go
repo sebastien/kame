@@ -21,7 +21,7 @@ type localDefinition struct {
 }
 
 func (p *Program) localValue(local *localDefinition, c *Context) Result {
-	if c.PurePredicate {
+	if c.PurePredicate || (c.pureValueBlock && c.Engine == nil) {
 		if local.Done {
 			return Result{Value: local.Value.Clone(c.Run), Diagnostic: local.Diagnostic.Clone(c.Run)}
 		}
@@ -158,7 +158,7 @@ func replayControlEffects(state *kashControlState, c *Context) {
 }
 
 func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
-	if c.Engine == nil && e.Kind != expr.Match {
+	if c.Engine == nil && e.Kind != expr.Match && !c.pureValueBlock {
 		return failure(c.Run, "HOST_FAIL", e.Span, "Kash control requires an execution engine")
 	}
 	previousStart, previousEnd := c.operationStart, c.operationEnd
@@ -184,10 +184,6 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
 		}
-		if e.Kind == expr.KashMatch && r.Value.Kind != core.String && r.Value.Kind != core.Pattern {
-			r.Free(c.Run)
-			return failure(c.Run, "EXPR_INVALID", e.Body[0].Span, "match subject must be text")
-		}
 		switch r.Value.Kind {
 		case core.String, core.Pattern, core.Bool, core.Int, core.Float, core.Nil:
 			state.Subject = r.Value.Clone(p.Alloc)
@@ -205,7 +201,7 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		if len(branch.Items) != 0 {
 			pattern := branch.Items[0]
 			operand := pattern
-			glob := e.Kind == expr.Match && pattern.Kind == expr.Path && pattern.Pattern == nil && expr.PathHasGlob(pattern.Text)
+			glob := isMatch && pattern.Kind == expr.Path && pattern.Pattern == nil && expr.PathHasGlob(pattern.Text)
 			if glob {
 				literal := *pattern
 				literal.LiteralPath = true
@@ -216,12 +212,7 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 				return r
 			}
 			if isMatch {
-				var matched matchOutcome
-				if e.Kind == expr.Match {
-					matched = matchArmValue(c.Run, &state.Subject, &r.Value, glob, pattern.Span)
-				} else {
-					matched = matchPattern(c.Run, state.Subject.Text, &r.Value, pattern.Span)
-				}
+				matched := matchArmValue(c.Run, &state.Subject, &r.Value, glob, pattern.Span)
 				for i := range matched.Names {
 					if (e.Kind == expr.KashMatch || e.Kash) && matched.Names[i] == "env" && matched.Diag.Code == "" {
 						denied := failure(c.Run, "DEF_INVALID", branch.Items[0].Span, "env is reserved in Kash")

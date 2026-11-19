@@ -33,14 +33,14 @@ func (p *parser) commandCapture() *Expr {
 // ParseCommandPrefix parses one raw Kash graph on the original source. Nested
 // substitutions keep the same parser and source spans; no shell text is lowered.
 func ParseCommandPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
-	p := parser{a: a, s: s, pos: start}
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent}
 	e := p.commandGraph(start, false)
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
 // ParseCommandSetupValuePrefix shares stage setup's scalar/typed word grammar.
 func ParseCommandSetupValuePrefix(a mem.Allocator, s *source.Source, start int, key string) Prefix {
-	p := parser{a: a, s: s, pos: start}
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent}
 	e := p.commandSetupValue(key)
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
@@ -91,7 +91,7 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 			}
 		}
 	}
-	p := parser{a: a, s: bounded, pos: start, kash: true, valuePathStart: start + 1}
+	p := parser{a: a, s: bounded, pos: start, kash: true, valuePathStart: start + 1, indent: s.StructuralIndent}
 	var e *Expr
 	if start < len(s.Text) && s.Text[start] == '$' && actionPrefix(s.Text[start:]) == "" {
 		word := p.commandWord(false)
@@ -821,6 +821,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
+		if b == '\n' && (quoted || singleQuoted) && p.indent != "" && strings.HasPrefix(p.s.Text[p.pos+1:], p.indent) {
+			text.WriteByte(b)
+			p.pos += 1 + len(p.indent)
+			continue
+		}
 		if singleQuoted {
 			p.pos++
 			if b == '\'' {

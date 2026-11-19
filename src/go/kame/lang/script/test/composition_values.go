@@ -10,7 +10,7 @@ import (
 
 func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
 	a := t.Allocator()
-	cases := []string{"(include? ./a.km)", "(if false then (include ./a.km) else nil)", "unused = (() => (include ./a.km))", "if (if true then false else true)\n\tunused = (() => (include? ./a.km))\n", "def library\n\tinclude ./a.kash\n"}
+	cases := []string{"(include? ./a.km)", "(if false then (include ./a.km) else nil)", "def unused = (() => (include ./a.km))", "if (if true then false else true)\n\tdef unused = (() => (include? ./a.km))\n", "def library ()\n\tinclude ./a.kash\n"}
 	for i := range cases {
 		parsed := script.ParseKash(a, "hidden.kash", cases[i])
 		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
@@ -46,7 +46,7 @@ func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
 
 func TestKashLibraryCompositionAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.ParseKash(a, "library.kash", "# library\ninclude ./nested.kash\nvalue = 1\ndef check\n\tprintf %s $value\n")
+	parsed := script.ParseKash(a, "library.kash", "# library\ninclude ./nested.kash\ndef value = 1\ndef check ()\n\tprintf %s $value\n")
 	defer parsed.Free()
 	script.ValidateKashLibrary(parsed)
 	if len(parsed.Diagnostics) != 0 || parsed.Items[1].Kind != script.Include {

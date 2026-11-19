@@ -1,2 +1,2 @@
-task deploy : ./dist/app
-	rsync @< @>
+task cached deploy : ./dist/app
+	rsync $inputs.0 ./deploy/

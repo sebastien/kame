@@ -1,11 +1,9 @@
 VERSION = "1.0"
-SOURCES = [./src/a.c ./src/b.c]
+SOURCES = [./src/a.c, ./src/b.c]
 
-default : ./app
+task default : ./app
 
-./app : @(wildcard ./src/*.c)
-	cc -o @> @<
+rule ./app : @{wildcard ./src/*.c}
+	cc -o $outputs.0 $...inputs
 
-(version) = VERSION
-
-(version ())
+def version () = VERSION

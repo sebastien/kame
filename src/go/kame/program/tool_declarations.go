@@ -81,9 +81,11 @@ func (p *Program) declareTemplateTools(value *template.String) {
 func (p *Program) declareBuildTools(parsed *script.Script) {
 	shellIsKame := false
 	shellIsKash := false
+	hasShell := false
 	for i := range parsed.Items {
 		definition := parsed.Items[i].Definition
 		if definition != nil && definition.Name == "SHELL" && definition.Expression != nil {
+			hasShell = true
 			shellIsKame = definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame"
 			shellIsKash = definition.Expression.Kind == expr.Name && definition.Expression.Text == "kash"
 		}
@@ -95,6 +97,7 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
 			p.declareExpressionTools(item.Definition.Expression)
 		}
 		if item.Rule != nil {
+			p.declareExpressionTools(item.Rule.BodyExpression)
 			for j := range item.Rule.Inputs {
 				p.declareTemplateTools(item.Rule.Inputs[j].Template)
 			}
@@ -110,7 +113,7 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
 				expr.Free(p.Alloc, value.Expr)
 				mem.FreeSlice(nil, value.Diagnostics)
 			}
-			if len(item.Rule.Body) != 0 && ruleSelectsShell(item.Rule, shellIsKash, "kash") {
+			if len(item.Rule.Body) != 0 && ruleSelectsShell(item.Rule, shellIsKash || item.Rule.Declaration && !hasShell, "kash") {
 				p.collectKashTools(item.Rule, "", nil, nil)
 			}
 		}

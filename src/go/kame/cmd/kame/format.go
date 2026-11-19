@@ -7,6 +7,7 @@ import (
 	"kame/host/posix"
 	"kame/internal/mem"
 	"kame/lang/format"
+	"kame/lang/script"
 	"kame/lang/source"
 	"os"
 )
@@ -72,6 +73,10 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 		return 0
 	}
 	different := false
+	lang := parsed.Lang
+	if lang == "km" {
+		lang = script.KameFileLanguage
+	}
 	for i := range parsed.Files {
 		data, readErr := os.ReadFile(parsed.Files[i])
 		if readErr != nil {
@@ -79,7 +84,7 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 			cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i])
 			return 1
 		}
-		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
+		formatted, ok := formatSource(lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
 		changed := ok && string(data) != formatted
 		mem.FreeSlice(mem.System, data)
 		if !ok {

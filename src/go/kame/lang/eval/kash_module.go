@@ -205,6 +205,12 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 				state.Module.Fields = append(state.Module.Fields, owned(p.Alloc, current.Definition.Name))
 			}
 		}
+		if current.Module != nil {
+			result := failure(c.Run, "FEATURE_UNSUP", current.Span, "module declarations must be resolved before registration")
+			result.Diagnostic.Source = owned(c.Run, frame.Path)
+			c.clearFailedModuleLoad(state)
+			return result
+		}
 		if current.Kind == script.Include {
 			if !script.IsKashSource(current.Include) {
 				result := failure(c.Run, "RES_INVALID", current.Span, "Kash includes require a .kash or .ksh source")

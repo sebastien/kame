@@ -59,6 +59,15 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 	var names []string
 	for i := range p.Parsed.Items {
 		item := p.Parsed.Items[i]
+		if item.Kind == script.DeclarationFor || item.Kind == script.Generate && item.GenerateName == "" {
+			kind := "for"
+			if item.Kind == script.Generate {
+				kind = "generate"
+			}
+			d := generatedDiagnostic(p, item, "FEATURE_UNSUP", "execution of declaration-time "+kind+" is not available", "")
+			freeGeneratedBatch(p.Alloc, rules, metadata, names)
+			return d
+		}
 		if item.Kind != script.Generate {
 			continue
 		}

@@ -82,7 +82,7 @@ func TestWasmPresentationOwnsInvocationState(t *testing.T) {
 
 func TestWasmPreparedWorkPrecedesSynchronousDispatch(t *testing.T) {
 	a := t.Allocator()
-	start := wasm.NewRuntime(a, "task root :\n")
+	start := wasm.NewRuntime(a, "task root\n")
 	if start.Runtime == nil {
 		start.Result.Free(a)
 		t.Error("runtime failed to compile")

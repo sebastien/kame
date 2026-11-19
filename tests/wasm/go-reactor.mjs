@@ -8,7 +8,7 @@ wasi.initialize(instance);
 const e=instance.exports;
 assert.equal(e.kame_wasm_abi_version(),1);
 function buffer(text){const data=new TextEncoder().encode(text);const pointer=e.kame_wasm_alloc(data.length||1,8);new Uint8Array(e.memory.buffer,pointer,data.length).set(data);return {pointer,length:data.length,allocated:data.length||1};}
-const source=buffer('(join ":" ["left" "right"])');
+const source=buffer('(join ":" ["left", "right"])');
 const output=e.kame_wasm_alloc(4096,8);
 const length=e.kame_wasm_alloc(4,4);
 assert.equal(e.kame_wasm_eval_pure(source.pointer,source.length,output,4096,length),0);

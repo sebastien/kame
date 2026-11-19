@@ -13,19 +13,22 @@ func (p *Program) kashExit(scope *Scope, e *expr.Expr, c *Context) Result {
 	if p.DryRun {
 		return Result{}
 	}
-	previous := c.sequencedOperand
-	c.sequencedOperand = true
-	r := p.evaluate(c.Engine, scope, e.Items[0], c)
-	c.sequencedOperand = previous
-	if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
-		return r
-	}
-	if r.Value.Kind != core.Int || r.Value.Int < 0 || r.Value.Int > 255 {
+	status := 0
+	if len(e.Items) != 0 {
+		previous := c.sequencedOperand
+		c.sequencedOperand = true
+		r := p.evaluate(c.Engine, scope, e.Items[0], c)
+		c.sequencedOperand = previous
+		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+			return r
+		}
+		if r.Value.Kind != core.Int || r.Value.Int < 0 || r.Value.Int > 255 {
+			r.Free(c.Run)
+			return failure(c.Run, "EXPR_INVALID", e.Items[0].Span, "exit status must be an integer from 0 through 255")
+		}
+		status = int(r.Value.Int)
 		r.Free(c.Run)
-		return failure(c.Run, "EXPR_INVALID", e.Items[0].Span, "exit status must be an integer from 0 through 255")
 	}
-	status := int(r.Value.Int)
-	r.Free(c.Run)
 	// Use the engine's existing unsuppressible propagation channel. Hosts consume
 	// the typed intent, not the carrier code, message, or a process-shaped value.
 	return Result{Diagnostic: diagnostic.Diagnostic{Code: "CONTROL_EXIT", Protected: true, Exit: diagnostic.Termination{Requested: true, Status: status}}}

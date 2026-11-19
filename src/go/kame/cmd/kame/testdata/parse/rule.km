@@ -1,1 +1,1 @@
-default : input
+task default : input

@@ -43,7 +43,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 			entries = append(entries, items[j].Text)
 		}
 		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), SourceDirectory: host.PayloadText(inputs[i], "sourceDirectory"), Signature: descriptorSourceSignature(inputs[i]), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
-		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
+		if f.Lang != "km" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
 			for j := range fragments {
 				freeDescriptorIncludes(r.Alloc, fragments[j].Includes)
 				mem.FreeSlice(nil, fragments[j].Entries)
@@ -79,12 +79,19 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	for i := range fields {
 		tools = append(tools, fields[i].Text)
 	}
-	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
+	var shell []string
+	fields = host.PayloadList(value, "shell")
+	for i := range fields {
+		shell = append(shell, fields[i].Text)
+	}
+	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: max(1, int(host.PayloadInt(value, "jobs"))), Shell: shell, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
 	options.HasInput = host.PayloadInt(value, "dataInput") == 1
 	options.TrackTimings = host.PayloadInt(value, "trackTimings") != 0
 	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.RetainBytes = int(host.PayloadInt(value, "retainBytes"))
 	options.PrintResult = host.PayloadInt(value, "printResult") != 0
+	options.RequireRuleWork = host.PayloadInt(value, "requireRuleWork") != 0
+	options.RequireProcessWork = host.PayloadInt(value, "requireProcessWork") != 0
 	var parameters []string
 	fields = host.PayloadList(value, "parameters")
 	for i := range fields {
@@ -92,6 +99,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	}
 	options.Parameters = parameters
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
+	mem.FreeSlice(nil, shell)
 	mem.FreeSlice(nil, parameters)
 	mem.FreeSlice(nil, tools)
 	mem.FreeSlice(nil, overrides)

@@ -25,8 +25,8 @@ func TestMixedKashLibraryFragments(t *testing.T) {
 	r := eval.NewRegistry(a)
 	operations.Register(r)
 	sources := []program.CompileSource{
-		{Name: "lib.kash", Lang: "kash", Text: "def helper\n\t(write! \"./proof\" \"ok\")\n"},
-		{Name: "Kamefile", Lang: "kmk", Text: "SHELL = kash\ndefault :\n\t(helper ())\n"},
+		{Name: "lib.kash", Lang: "kash", Text: "def helper ()\n\t(write! \"./proof\" \"ok\")\n"},
+		{Name: "Kamefile", Lang: "km", Text: "SHELL = kash\ntask default\n\t(helper ())\n"},
 	}
 	h := wasm.NewMemoryHost(a)
 	compiled := program.CompileMany(a, sources, r, program.Options{Host: h, Directory: ".", Grants: []eval.Grant{{Capability: eval.Write}}})
@@ -52,7 +52,7 @@ func TestMixedKashLibraryFragments(t *testing.T) {
 func TestKashLoopsRetainDeferredWritesWithOutputSink(t *testing.T) {
 	a := t.Allocator()
 	h := wasm.NewMemoryHost(a)
-	s := script.Parse(a, "loops.kmk", "SHELL = kash\ndefault :\n\tfor item in [\"first\", \"second\"]\n\t\tif (nop true)\n\t\t\t(write! (joinpath \".\" (str \"direct-\" item)) item)\n\t\t\twritten = (write! (joinpath \".\" item) item)\n\t\t\t(nop written)\n\t\t(out! item)\n")
+	s := script.Parse(a, "loops.kmk", "SHELL = kash\ndefault :\n\tfor item in [\"first\", \"second\"]\n\t\tif (nop true)\n\t\t\t(write! (joinpath \".\" (str \"direct-\" item)) item)\n\t\t\tdef written = (write! (joinpath \".\" item) item)\n\t\t\t(nop written)\n\t\t(out! item)\n")
 	r := eval.NewRegistry(a)
 	if !operations.Register(r) {
 		t.Error("library registration failed")

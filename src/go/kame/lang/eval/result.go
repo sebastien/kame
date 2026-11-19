@@ -14,7 +14,7 @@ type Result struct {
 	Value        core.Value
 	Waiting      bool
 	Completed    bool
-	Returned     bool      // call-local Kash control flow, consumed by its def invocation
+	Returned     bool      // explicit return from the current function, value block or rule body
 	LoopTransfer expr.Kind // KashBreak/KashContinue, consumed by the nearest loop.
 	Stream       *core.Source
 	Diagnostic   diagnostic.Diagnostic

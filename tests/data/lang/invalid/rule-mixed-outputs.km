@@ -1,2 +1,1 @@
-./out.o name : ./in.c
-	echo @>
+rule ./out.o name : ./in.c

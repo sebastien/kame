@@ -151,6 +151,7 @@ meaning by themselves.
 | `ARGS_INVALID` | error | Script argv violates a `parse-args` schema; identifies a zero-based argument index without disclosing argv values |
 | `USER_ERROR` | error | Explicit user failure from `fail!` |
 | `EVAL_DEPTH` | error | Recursive evaluation exceeds the 32-expression stack-depth limit |
+| `EVAL_LIMIT` | error | A value block exceeds the 100,000-iteration limit for pure evaluation |
 | `DEF_INVALID` | error | Invalid definition or binding form |
 | `DEF_ESCAPE` | error | Binding a callable into an ancestor would strand its captured scope; ordinary returned callables may retain their owners |
 | `BINDING_UNINITIALIZED` | error | Reserved eager binding read before initialization; nonrecoverable binding-validation failure, not an unknown reference |

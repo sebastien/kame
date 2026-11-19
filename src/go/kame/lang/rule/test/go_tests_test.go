@@ -7,7 +7,7 @@ import (
 )
 
 func TestGoSuite(t *testing.T) {
-	t.Run("AlternativeBuildSeparatorParsesAndFormatsCanonically", func(t *testing.T) { TestAlternativeBuildSeparatorParsesAndFormatsCanonically(legacy.Wrap(t)) })
+	t.Run("RuleRequiresDeclarationKeywordAndColonSeparator", func(t *testing.T) { TestRuleRequiresDeclarationKeywordAndColonSeparator(legacy.Wrap(t)) })
 	t.Run("AlwaysPreservesFileKindOutputsAndFormatting", func(t *testing.T) { TestAlwaysPreservesFileKindOutputsAndFormatting(legacy.Wrap(t)) })
 	t.Run("ComputedOutputsPreserveExpressionsAndFormatting", func(t *testing.T) { TestComputedOutputsPreserveExpressionsAndFormatting(legacy.Wrap(t)) })
 	t.Run("ComputedPrerequisitePathsRoundTrip", func(t *testing.T) { TestComputedPrerequisitePathsRoundTrip(legacy.Wrap(t)) })
@@ -27,8 +27,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("RecipeDocumentScannerRespectsValuesPrefixesAndRawClosing", func(t *testing.T) { TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(legacy.Wrap(t)) })
 	t.Run("RecipeTemplateRecoversMalformedExpansion", func(t *testing.T) { TestRecipeTemplateRecoversMalformedExpansion(legacy.Wrap(t)) })
 	t.Run("RecipeUsesDocumentScannerForInlineTrimmedMatch", func(t *testing.T) { TestRecipeUsesDocumentScannerForInlineTrimmedMatch(legacy.Wrap(t)) })
-	t.Run("RuleEnvironmentLiteralMetadataAndRoundTrip", func(t *testing.T) { TestRuleEnvironmentLiteralMetadataAndRoundTrip(legacy.Wrap(t)) })
-	t.Run("RuleEnvironmentRejectsInvalidOrComputedAssignments", func(t *testing.T) { TestRuleEnvironmentRejectsInvalidOrComputedAssignments(legacy.Wrap(t)) })
+	t.Run("RuleRejectsNonRecordEnvironmentSuffix", func(t *testing.T) { TestRuleRejectsNonRecordEnvironmentSuffix(legacy.Wrap(t)) })
 	t.Run("RuleHeaderBalancesQuotedAndExpressionInputs", func(t *testing.T) { TestRuleHeaderBalancesQuotedAndExpressionInputs(legacy.Wrap(t)) })
 	t.Run("RuleMetadataAllowsCustomFieldsAndRejectsDuplicates", func(t *testing.T) { TestRuleMetadataAllowsCustomFieldsAndRejectsDuplicates(legacy.Wrap(t)) })
 	t.Run("RuleMetadataUsesKameRecordExpressions", func(t *testing.T) { TestRuleMetadataUsesKameRecordExpressions(legacy.Wrap(t)) })

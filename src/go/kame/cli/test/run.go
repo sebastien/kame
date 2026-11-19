@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunInputsRetainOrderAndForwardLanguage(t *testing.T) {
-	args := []string{"values.km", "answer", "-c", "(out! answer)", "-l", "kash", "-c", "echo hello", "--lang=kmk", "-f", "script.mk", "build", "--entry=check", "--lang", "km", "functions.km", "-c", "(report answer)", "--", "-l", "--help", "argument.kash"}
+	args := []string{"values.km", "answer", "-c", "(out! answer)", "-l", "kash", "-c", "echo hello", "--lang=km", "-f", "script.mk", "build", "--entry=check", "--lang", "km", "functions.km", "-c", "(report answer)", "--", "-l", "--help", "argument.kash"}
 	inv := cli.ParseRun(args)
 	defer inv.Free()
 	if !inv.OK || len(inv.Inputs) != 6 {
@@ -18,7 +18,7 @@ func TestRunInputsRetainOrderAndForwardLanguage(t *testing.T) {
 	if inv.Inputs[0].Lang != "km" || inv.Inputs[0].Entries[0] != "answer" || inv.Inputs[1].Kind != "command" || inv.Inputs[1].Lang != "km" || inv.Inputs[2].Lang != "kash" {
 		t.Error("language override applied retroactively or lost inline default")
 	}
-	if inv.Inputs[3].Lang != "kmk" || inv.Inputs[3].Value != "script.mk" || len(inv.Inputs[3].Entries) != 2 || inv.Inputs[3].Entries[1] != "check" {
+	if inv.Inputs[3].Lang != "km" || inv.Inputs[3].Value != "script.mk" || len(inv.Inputs[3].Entries) != 2 || inv.Inputs[3].Entries[1] != "check" {
 		t.Error("file override or per-fragment entries lost")
 	}
 	if inv.Inputs[4].Lang != "km" || inv.Inputs[5].Lang != "km" || len(inv.Args) != 3 || inv.Args[0] != "-l" || inv.Args[1] != "--help" {
@@ -30,11 +30,14 @@ func TestRunInputsRetainOrderAndForwardLanguage(t *testing.T) {
 }
 
 func TestRunInferredLanguagesAndInlineAuthority(t *testing.T) {
-	inv := cli.ParseRun([]string{"process.ksh", "-c", "name = 1", "process.kash", "rules.kmk", "values.km"})
-	if !inv.OK || len(inv.Inputs) != 5 || inv.Inputs[0].Lang != "kash" || inv.Inputs[1].Lang != "km" || inv.Inputs[2].Lang != "kash" || inv.Inputs[3].Lang != "kmk" || inv.Inputs[4].Lang != "km" {
+	inv := cli.ParseRun([]string{"process.ksh", "-c", "name = 1", "process.kash", "rules.km", "values.km", "library.kame"})
+	if !inv.OK || len(inv.Inputs) != 6 || inv.Inputs[0].Lang != "kash" || inv.Inputs[1].Lang != "km" || inv.Inputs[2].Lang != "kash" || inv.Inputs[3].Lang != "km" || inv.Inputs[4].Lang != "km" || inv.Inputs[5].Lang != "km" {
 		t.Error("file suffix inferred retroactively for inline text")
 	}
 	inv.Free()
+	if !cli.SelectsRun([]string{"library.kame"}) || cli.SelectsRun([]string{"library.KAME"}) {
+		t.Error("Kame source alias did not use case-sensitive explicit dispatch")
+	}
 	inv = cli.ParseRun([]string{"-c", "", "--lang", "kash", "-c", "echo hello"})
 	if !inv.OK || len(inv.Inputs) != 2 || inv.Inputs[0].Value != "" || !inv.NoDefaultGrants {
 		t.Error("empty inline input or first-fragment authority lost")
@@ -56,8 +59,8 @@ func TestRunKamefileLanguage(t *testing.T) {
 	names := []string{"Kamefile", "./Kamefile", "/project/Kamefile", "C:\\project\\Kamefile"}
 	for i := range names {
 		inv := cli.ParseRun([]string{names[i], "build"})
-		if !cli.SelectsRun([]string{names[i]}) || !inv.OK || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "kmk" || len(inv.Inputs[0].Entries) != 1 {
-			t.Error("Kamefile did not select a rule source")
+		if !cli.SelectsRun([]string{names[i]}) || !inv.OK || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "km" || len(inv.Inputs[0].Entries) != 1 {
+			t.Error("Kamefile did not select a Kame program source")
 		}
 		inv.Free()
 	}
@@ -67,7 +70,7 @@ func TestRunKamefileLanguage(t *testing.T) {
 }
 
 func TestRunStdinAndExplicitUnknownSuffix(t *testing.T) {
-	inv := cli.ParseRun([]string{"--lang=expr", "-", "--lang", "kmk", "-f", "Makefile", "target", "--", "-"})
+	inv := cli.ParseRun([]string{"--lang=expr", "-", "--lang", "km", "-f", "Makefile", "target", "--", "-"})
 	defer inv.Free()
 	if !inv.OK || len(inv.Inputs) != 2 || inv.Inputs[0].Kind != "stdin" || inv.Inputs[0].Lang != "expr" || inv.Inputs[1].Value != "Makefile" || inv.Inputs[1].Entries[0] != "target" || inv.Args[0] != "-" {
 		t.Error("stdin, explicit suffix override or argument '-' lost")
@@ -75,7 +78,7 @@ func TestRunStdinAndExplicitUnknownSuffix(t *testing.T) {
 }
 
 func TestParameterizedWatchSelectsBuildMode(t *testing.T) {
-	args := []string{"--watch=200", "--cancel", "-f", "Makefile.kmk", "app"}
+	args := []string{"--watch=200", "--cancel", "-f", "Makefile.km", "app"}
 	if cli.SelectsRun(args) || cli.AppendsCommands(args) {
 		t.Error("parameterized watch was routed through source execution")
 	}
@@ -88,7 +91,7 @@ func TestParameterizedWatchSelectsBuildMode(t *testing.T) {
 
 func TestRunUsageErrors(t *testing.T) {
 	invalid := [][]string{
-		{}, {"--", "argument"}, {"--lang", "shell", "-c", "echo hello"}, {"-l"}, {"-c"}, {"--entry", "name", "values.km"}, {"script.mk"}, {"-f", "unknown"}, {"-", "-"}, {"--file=-", "-"}, {"process.kash", "unexpected-entry"}, {"--lang=expr", "-c", "42", "entry"}, {"values.km", "--entry="}, {"--allow-run=", "-c", "42"}, {"--capture-limit=0", "-c", "42"}, {"--unknown", "-c", "42"}, {"--jobs=1", "values.km"}, {"--force", "process.kash"}, {"--env=KEY=value", "values.km"},
+		{}, {"--", "argument"}, {"--lang", "shell", "-c", "echo hello"}, {"-l"}, {"-c"}, {"--entry", "name", "values.km"}, {"script.mk"}, {"-f", "unknown"}, {"-", "-"}, {"--file=-", "-"}, {"process.kash", "unexpected-entry"}, {"--lang=expr", "-c", "42", "entry"}, {"values.km", "--entry="}, {"--allow-run=", "-c", "42"}, {"--capture-limit=0", "-c", "42"}, {"--unknown", "-c", "42"}, {"--jobs=1", "--lang=expr", "-c", "42"}, {"--force", "process.kash"}, {"--env=KEY=value", "--lang=expr", "-c", "42"},
 	}
 	for i := range invalid {
 		inv := cli.ParseRun(invalid[i])
@@ -166,7 +169,7 @@ func TestAffectedPlanOptionIsPlanOnly(t *testing.T) {
 }
 
 func TestPrimaryRunSelectionDoesNotProbeFilesystem(t *testing.T) {
-	runner := [][]string{{"missing.kash"}, {"-l", "expr", "source.txt"}, {"--lang=km", "-"}, {"-c", "42"}, {"-f", "missing.kmk"}, {"-l"}}
+	runner := [][]string{{"missing.kash"}, {"-l", "expr", "source.txt"}, {"--lang=km", "-"}, {"-c", "42"}, {"-f", "missing.kame"}, {"-l"}}
 	for i := range runner {
 		if !cli.SelectsRun(runner[i]) {
 			t.Error("explicit runner source was sent to build discovery")
@@ -188,7 +191,7 @@ func TestDiscoveredBuildAppendsCommandsWithoutReinterpretingTargets(t *testing.T
 		return
 	}
 	input := inv.Inputs[0]
-	if input.Kind != "discover" || input.Lang != "kmk" || len(input.Entries) != 3 || input.Entries[0] != "build" || input.Entries[1] != "./output.km" || input.Entries[2] != "--help" {
+	if input.Kind != "discover" || input.Lang != "km" || len(input.Entries) != 3 || input.Entries[0] != "build" || input.Entries[1] != "./output.km" || input.Entries[2] != "--help" {
 		t.Error("discovered build targets changed meaning")
 	}
 	if inv.Inputs[1].Value != "(out! name)" || inv.Inputs[2].Value != "42" || inv.Inputs[1].Lang != "km" || inv.NoDefaultGrants || len(inv.Args) != 0 {
@@ -297,16 +300,16 @@ func TestAssignmentShorthand(t *testing.T) {
 		t.Error("empty environment name accepted")
 	}
 	inv.Free()
-	if !cli.SelectsRun([]string{"env.HOST=local", "port=8000", "source.kmk"}) {
+	if !cli.SelectsRun([]string{"env.HOST=local", "port=8000", "source.kame"}) {
 		t.Error("leading assignments hid an explicit source")
 	}
 }
 
 func TestRunAssignmentsPrecedeSourceSuffixes(t *testing.T) {
-	values := []string{"/missing/sdk.km", "/missing/sdk.kmk", "/missing/sdk.kash", "/missing/sdk.ksh", "@(missing)=$(printf injected).km"}
+	values := []string{"/missing/sdk.km", "/missing/sdk.kame", "/missing/sdk.kash", "/missing/sdk.ksh", "@(missing)=$(printf injected).km"}
 	for i := range values {
 		assignment := "SDK_PATH=" + values[i]
-		inv := cli.ParseRun([]string{"rules.kmk", "default", assignment, "--print-result", "-c", "42"})
+		inv := cli.ParseRun([]string{"rules.km", "default", assignment, "--print-result", "-c", "42"})
 		if !inv.OK || !inv.PrintResult || len(inv.Inputs) != 2 || len(inv.Parameters) != 1 || inv.Parameters[0] != assignment || len(inv.Inputs[0].Entries) != 2 || inv.Inputs[0].Entries[1] != assignment {
 			t.Error("literal assignment was reclassified as a source")
 		}

@@ -94,8 +94,9 @@ try {
   // Fingerprinting a file larger than the entire instance heap must not
   // materialize it. Native/Node SHA-256 equivalence is checked separately.
   await writeFile(join(directory, 'large'), Buffer.alloc(20 * 1024 * 1024, 65));
-  const program = await kame.compile('./output : ./large ; [shell: kame]\n\t"ok"\n');
+  const program = await kame.compile('rule ./output : ./large = "ok"\n');
   const options = { cwd: directory, grants: [{ capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }] };
+  assert.equal(await program.evaluate('count [1, 2]', options), '2');
   await program.build('./output', options);
   assert.equal((await readFile(join(directory, 'output'), 'utf8')), 'ok');
   await program.dispose();
@@ -107,7 +108,7 @@ try {
   const executable = await open(tool, 'r+');
   try { await executable.truncate(Math.max(20 * 1024 * 1024, (await executable.stat()).size)); }
   finally { await executable.close(); }
-  const probe = await kame.compile(`SHELL = kash\ntask probe :\n\t${JSON.stringify(tool)} --version\n`);
+  const probe = await kame.compile(`task probe\n\t${JSON.stringify(tool)} --version\n`);
   await probe.build('probe', { cwd: directory, grants: [{ capability: 'run', names: [] }] });
   await probe.dispose();
 

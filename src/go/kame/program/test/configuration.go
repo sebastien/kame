@@ -199,7 +199,7 @@ func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 
 func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "typed.kmk", "flag = true\n(f x) = x\n")
+	parsed := script.Parse(a, "typed.kmk", "flag = true\ndef f x = x\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()

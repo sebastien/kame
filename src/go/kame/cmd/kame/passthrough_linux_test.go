@@ -22,7 +22,7 @@ func TestNativeKashForegroundOutputInheritsDescriptors(t *testing.T) {
 		`readlink /proc/self/fd/1`,
 		`sh -c "readlink /proc/self/fd/2 >&2"`,
 		`readlink /proc/self/fd/1 | cat`,
-		`captured = $(readlink /proc/self/fd/1)`,
+		`def captured = $(readlink /proc/self/fd/1)`,
 		`echo (starts? "pipe:" captured)`,
 	}, "\n")+"\n")
 	stdout, err := os.Create(stdoutName)

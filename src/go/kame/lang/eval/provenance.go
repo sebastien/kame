@@ -115,6 +115,7 @@ func SetScriptSourceOrigin(parsed *script.Script, start int, end int, origin int
 		}
 		if item.Rule != nil {
 			setExpressionOrigin(item.Rule.Metadata, origin, nil)
+			setExpressionOrigin(item.Rule.BodyExpression, origin, nil)
 			for j := range item.Rule.Outputs {
 				setTemplateSourceOrigin(item.Rule.Outputs[j].Expansion, origin)
 			}

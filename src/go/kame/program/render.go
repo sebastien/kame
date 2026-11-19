@@ -6,6 +6,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
+	"kame/lang/source"
 	"slices"
 	"strings"
 )
@@ -153,18 +154,25 @@ func (p *Program) renderKame(entry *instance, context *eval.Context) renderResul
 	if context.PhaseInvalid() || len(context.Effects) != 0 {
 		return renderResult{Diagnostic: failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "Kame bodies compute artifact content without effects")}
 	}
-	var data []byte
-	if result.Value.Kind == core.String {
-		data = []byte(result.Value.Text)
-	} else if result.Value.Kind == core.Bytes {
-		data = result.Value.Bytes
-	} else {
-		return renderResult{Diagnostic: failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "a Kame body must return text or bytes; use json for structured content")}
+	effect, d := p.ruleBodyOutput(result.Value, span)
+	if d.Code != "" {
+		return renderResult{Diagnostic: d}
 	}
-	// Reuse the rule's atomic publication and forwarding machinery, including empty data.
-	effects := make([]eval.Effect, 1)
-	effects[0] = eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(data), Span: span}
-	return renderResult{Effects: effects}
+	return renderResult{Effects: []eval.Effect{effect}}
+}
+
+// Both body forms publish through the same atomic and forwarded output path.
+func (p *Program) ruleBodyOutput(value core.Value, span source.Span) (eval.Effect, diagnostic.Diagnostic) {
+	var data []byte
+	switch value.Kind {
+	case core.String:
+		data = []byte(value.Text)
+	case core.Bytes:
+		data = value.Bytes
+	default:
+		return eval.Effect{}, failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "a rule body must return text or bytes; use json for structured content")
+	}
+	return eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(data), Span: span}, diagnostic.Diagnostic{}
 }
 
 func diagnosticFromSource(a mem.Allocator, code string, message string, start int, end int, src string) diagnostic.Diagnostic {

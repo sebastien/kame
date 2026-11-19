@@ -167,18 +167,22 @@ class Kame(_ProcessOwner):
 
     async def compile(self, source: str, *, name: str = "embedded.km", language: str | None = None) -> KameProgram:
         self._check_open()
-        suffix = Path(name).suffix or ".km"
-        run_lang = language or {".km": "km", ".kmk": "kmk", ".kash": "kash", ".ksh": "kash"}.get(suffix)
+        source_filename = os.path.basename(name) or "embedded.km"
+        suffix = Path(source_filename).suffix
+        run_lang = language or {
+            "": "km", ".km": "km", ".kame": "km",
+            ".kash": "kash", ".ksh": "kash", ".kmt": "template",
+        }.get(suffix)
         if run_lang is None:
             raise ValueError(f"cannot infer Kame language from {name!r}")
-        parse_lang = {"km": "script", "kmk": "script", "kash": "kash"}.get(run_lang, run_lang)
+        if run_lang not in {"km", "kash", "expr", "template"}:
+            raise ValueError(f"unsupported Kame language {run_lang!r}")
         tempdir = tempfile.mkdtemp(prefix="kame-embed-")
-        source_filename = "Makefile.kmk" if run_lang == "kmk" else (os.path.basename(name) or f"source{suffix}")
         source_path = os.path.join(tempdir, source_filename)
-        Path(source_path).write_text(source, encoding="utf-8")
         program = KameProgram(self, source_path, tempdir, run_lang, name)
         try:
-            parse = await self._run(["do", "parse", "--json", "--lang", parse_lang, source_path], grants={})
+            Path(source_path).write_text(source, encoding="utf-8")
+            parse = await self._run(["do", "parse", "--json", "--lang", run_lang, source_path], grants={})
             program.ast = json.loads(parse)
         except BaseException:
             shutil.rmtree(tempdir, ignore_errors=True)
@@ -247,7 +251,7 @@ class KameProgram(_ProcessOwner):
     async def evaluate(self, expression: str, *, grants: Mapping[str, Iterable[str] | bool] | None = None) -> str:
         self._check_open()
         if self.language != "km":
-            raise KameError("expression evaluation is supported for .km programs")
+            raise KameError("expression evaluation requires a Kame program")
         return await self._run(
             ["do", "run", "--lang", "km", "-f", self._source_path, "--lang", "expr", "-c", expression],
             grants=grants,
@@ -267,8 +271,8 @@ class KameProgram(_ProcessOwner):
 
     async def watch(self, targets: str | Iterable[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None, jobs: int | None = None, debounce_ms: int | None = None, cancel_on_change: bool = False) -> KameWatch:
         self._check_open()
-        if self.language != "kmk":
-            raise KameError("watch requires a .kmk rule program")
+        if self.language != "km":
+            raise KameError("watch requires a Kame program")
         selected = [targets] if isinstance(targets, str) else list(targets)
         args = ["--jobs", str(jobs)] if jobs is not None else []
         args.append(f"--watch={debounce_ms}" if debounce_ms is not None else "--watch")

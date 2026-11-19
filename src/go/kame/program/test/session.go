@@ -13,28 +13,32 @@ func TestCompileManyHonorsSourceLanguagesWithoutKash(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
-	languages := []string{"km", "kmk", ""}
+	languages := []string{"km", ""}
 	for i := range languages {
 		for extra := 0; extra < 2; extra++ {
 			sources := make([]program.CompileSource, 1+extra)
-			sources[0] = program.CompileSource{Name: "authored", Lang: languages[i], Text: "target :\n", Offset: 20}
+			sources[0] = program.CompileSource{Name: "authored", Lang: languages[i], Text: "task target\n", Offset: 20}
 			if extra != 0 {
-				sources[1] = program.CompileSource{Name: "unrelated.kash", Lang: "kash", Text: "unused = 42\n"}
+				sources[1] = program.CompileSource{Name: "unrelated.kash", Lang: "kash", Text: "def unused = 42\n"}
 			}
 			compiled := program.CompileMany(a, sources, registry, program.Options{})
-			if languages[i] == "km" {
-				if compiled.Program != nil || len(compiled.Diagnostics) == 0 {
-					t.Error("km source accepted rule syntax")
-				} else if compiled.Diagnostics[0].Source != "authored" || compiled.Diagnostics[0].Span.Start != 27 {
-					t.Error("language diagnostic lost authored location")
-				}
-			} else if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
-				t.Error("rule grammar changed for kmk or unspecified language")
+			if compiled.Program == nil || len(compiled.Program.Rules) != 1 || len(compiled.Diagnostics) != 0 {
+				t.Error("Kame rule grammar changed for the combined sources")
 			}
 			if compiled.Program != nil {
 				compiled.Program.Free()
 			}
 			compiled.Free(a)
+			sources[0].Text = "target :\n"
+			rejected := program.CompileMany(a, sources, registry, program.Options{})
+			if rejected.Program != nil || len(rejected.Diagnostics) == 0 || rejected.Diagnostics[0].Source != "authored" ||
+				rejected.Diagnostics[0].Span.Start != 27 {
+				t.Error("obsolete rule syntax was accepted or lost its authored offset")
+			}
+			if rejected.Program != nil {
+				rejected.Program.Free()
+			}
+			rejected.Free(a)
 			mem.FreeSlice(nil, sources)
 		}
 	}
@@ -47,19 +51,15 @@ func TestCompileManyBoundsExplicitLanguageFragments(t *testing.T) {
 	for mode := 0; mode < 2; mode++ {
 		lang := ""
 		if mode != 0 {
-			lang = "kmk"
+			lang = "km"
 		}
 		sources := []program.CompileSource{
 			{Name: "first", Lang: lang, Text: "value = (str \"one\""},
 			{Name: "second", Lang: lang, Text: "\"two\")"},
 		}
 		compiled := program.CompileMany(a, sources, registry, program.Options{})
-		if mode == 0 {
-			if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
-				t.Error("unspecified languages lost legacy combined parsing")
-			}
-		} else if compiled.Program != nil || len(compiled.Diagnostics) == 0 {
-			t.Error("explicit fragment syntax crossed source boundaries")
+		if compiled.Program != nil || len(compiled.Diagnostics) == 0 {
+			t.Error("fragment syntax crossed source boundaries")
 		}
 		if compiled.Program != nil {
 			compiled.Program.Free()
@@ -74,10 +74,10 @@ func TestSessionSharesLazyDefinitionsAndKeepsParserBoundaries(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	fragments := []program.Fragment{
-		{Name: "first.km", Lang: "km", Text: "(greet name)\n"},
-		{Name: "functions.km", Lang: "km", Text: "(greet WHO) = (str \"Hello \" WHO)\n"},
+		{Name: "first.km", Lang: "km", Inline: true, Text: "(greet name)\n"},
+		{Name: "functions.km", Lang: "km", Text: "def greet WHO = (str \"Hello \" WHO)\n"},
 		{Name: "values.km", Lang: "km", Text: "name = \"Ada\"\nunused = $(printf unused)\n"},
-		{Name: "typed.kash", Lang: "kash", Text: "number = 42\n"},
+		{Name: "typed.kash", Lang: "kash", Text: "def number = 42\n"},
 		{Name: "last", Lang: "expr", Text: "number"},
 	}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{Directory: "."})
@@ -155,7 +155,7 @@ func TestSessionSourceDirectoryUsesAuthoredTreesNotLabelsOrGeneratedSpans(t *tes
 	defer registry.Free()
 	operations.Register(registry)
 	fragments := []program.Fragment{
-		{Name: "display-label", SourceDirectory: "/sdk/library", Lang: "km", Text: "(assets) = (source-dir ())\n"},
+		{Name: "display-label", SourceDirectory: "/sdk/library", Lang: "km", Text: "def assets () = (source-dir ())\n"},
 		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(assets ())"},
 		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(assets ())\")"},
 		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(source-dir ())\")"},
@@ -198,7 +198,7 @@ func TestSessionScriptDisplayIsExplicit(t *testing.T) {
 	operations.Register(registry)
 	for display := 0; display < 2; display++ {
 		fragments := []program.Fragment{
-			{Name: "script.km", Lang: "km", Text: "(out! 42)\n42"},
+			{Name: "script.km", Lang: "km", Inline: true, Text: "(out! 42)\n42"},
 			{Name: "expression", Lang: "expr", Text: "42"},
 			{Name: "entry.km", Lang: "km", Text: "answer = 42", Entries: []string{"answer"}},
 		}
@@ -224,19 +224,18 @@ func TestSessionScriptDisplayIsExplicit(t *testing.T) {
 	}
 }
 
-func TestSessionEntryPoliciesStayWithTheirFragments(t *testing.T) {
+func TestSessionExplicitEntriesSuppressTheCombinedDefault(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	for order := 0; order < 2; order++ {
 		fragments := []program.Fragment{
-			{Name: "explicit.kmk", Lang: "kmk", Text: "chosen = 2\n", Entries: []string{"chosen"}},
-			{Name: "implicit.kmk", Lang: "kmk", Text: "default = 1\n"},
+			{Name: "explicit.km", Lang: "km", Text: "chosen = 2\n", Entries: []string{"chosen"}},
+			{Name: "implicit.km", Lang: "km", Text: "default = 1\n"},
+			{Name: "library.kash", Lang: "kash", Text: "def library = 3\n"},
 		}
 		if order == 1 {
-			first := fragments[0]
-			fragments[0] = fragments[1]
-			fragments[1] = first
+			fragments[0], fragments[1] = fragments[1], fragments[0]
 		}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{})
 		if compiled.Session == nil {
@@ -245,54 +244,51 @@ func TestSessionEntryPoliciesStayWithTheirFragments(t *testing.T) {
 			return
 		}
 		s := compiled.Session
-		if len(s.Work) != 2 {
-			t.Error("fragment entries were merged")
-		} else {
-			for i := range s.Work {
-				implicit := len(fragments[i].Entries) == 0
-				target := "chosen"
-				if implicit {
-					target = "default"
-				}
-				w := s.Work[i]
-				if w.Target != target || w.ImplicitDefault != implicit || w.Selected == implicit || !w.Value || w.Raw {
-					t.Error("normalization lost explicit or implicit entry policy")
-				}
-			}
+		if len(s.Work) != 1 || s.Work[0].Target != "chosen" || s.Work[0].ImplicitDefault ||
+			!s.Work[0].Selected || !s.Work[0].Value || s.Work[0].Raw {
+			t.Error("explicit entry policy changed across fragments")
+		}
+		s.Free()
+		compiled.Free(a)
+		for i := range fragments {
+			fragments[i].Entries = nil
+		}
+		compiled = program.CompileSession(a, fragments, registry, program.Options{})
+		s = compiled.Session
+		if s == nil {
+			compiled.Free(a)
+			t.Fatal("mixed declaration-only session failed to compile")
+			return
+		}
+		if len(s.Work) != 1 || s.Work[0].Target != "default" || !s.Work[0].ImplicitDefault || !s.Work[0].Value {
+			t.Error("mixed session did not schedule its combined default once")
 		}
 		s.Free()
 		compiled.Free(a)
 	}
 }
 
-func TestSessionImplicitDefaultDiagnosticSurvivesAdjacentExplicitEntry(t *testing.T) {
+func TestSessionReportsMissingCombinedDefault(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
-	for order := 0; order < 2; order++ {
-		fragments := []program.Fragment{
-			{Name: "explicit.kmk", Lang: "kmk", Text: "chosen :\n", Entries: []string{"chosen"}},
-			{Name: "implicit.kmk", Lang: "kmk", Text: ""},
-		}
-		if order == 1 {
-			first := fragments[0]
-			fragments[0] = fragments[1]
-			fragments[1] = first
-		}
-		compiled := program.CompileSession(a, fragments, registry, program.Options{})
-		if compiled.Session != nil {
-			compiled.Session.Free()
-			t.Error("missing implicit default was accepted")
-		}
-		if len(compiled.Diagnostics) != 1 {
-			t.Error("missing implicit default diagnostic was lost")
-		} else {
-			d := compiled.Diagnostics[0]
-			if d.Code != "TGT_NO_DEFAULT" || d.Message != "no target was requested and no default target is defined" || len(d.Notes) == 0 {
-				t.Error("implicit default became an explicit target diagnostic")
-			}
-		}
-		compiled.Free(a)
+	fragments := []program.Fragment{
+		{Name: "rules.km", Lang: "km", Text: "task chosen\n"},
+		{Name: "empty.km", Lang: "km"},
+	}
+	compiled := program.CompileSession(a, fragments, registry, program.Options{})
+	defer compiled.Free(a)
+	if compiled.Session != nil {
+		compiled.Session.Free()
+		t.Error("missing implicit default was accepted")
+	}
+	if len(compiled.Diagnostics) != 1 {
+		t.Error("missing implicit default diagnostic was lost")
+		return
+	}
+	d := compiled.Diagnostics[0]
+	if d.Code != "TGT_NO_DEFAULT" || d.Message != "no target was requested and no default target is defined" || len(d.Notes) == 0 {
+		t.Error("implicit default became an explicit target diagnostic")
 	}
 }
 
@@ -309,8 +305,8 @@ func TestSessionTargetAssignmentsJoinOnlyWithinTheirFragment(t *testing.T) {
 			entries = entries[:1]
 		}
 		fragments := []program.Fragment{
-			{Name: "target.kmk", Lang: "kmk", Text: "deploy {region=original} :\ndefault {region=original} :\n", Entries: entries},
-			{Name: "assignment.kmk", Lang: "kmk", Text: "", Entries: []string{"region=east"}},
+			{Name: "target.km", Lang: "km", Text: "task deploy {region=original}\ntask default {region=original}\n", Entries: entries},
+			{Name: "assignment.km", Lang: "km", Text: "", Entries: []string{"region=east"}},
 		}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{})
 		if compiled.Session == nil {
@@ -342,7 +338,7 @@ func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (sh! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture, legacy])\n"}}
+	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Inline: true, Text: "capture = $(printf ignored)\nlegacy = (sh! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture, legacy])\n"}}
 	grants := []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{DryRun: true, Grants: grants})
 	defer compiled.Free(a)

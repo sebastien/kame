@@ -58,7 +58,7 @@ func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 
 func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "task build {flavor=debug} : @(str \"./\" flavor)\ndefault : \"build flavor=one\" \"build flavor=two\"\ncycle : loop\nloop : cycle\n")
+	parsed := script.Parse(a, "<test>", "task build {flavor=debug} : @(str \"./\" flavor)\ndefault : \"build flavor=one\" \"build flavor=two\"\ncycle : loop\nloop : cycle\nservice dev {port=8080} :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -77,7 +77,15 @@ func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 	}
 	d.Free(a)
 	buffer.Reset()
-	buffer = bytes.Buffer{}
+	for _, service := range []struct{ target, port string }{{"dev", "8080"}, {"dev port=9090", "9090"}} {
+		roots[0] = service.target
+		d = compiled.Program.WriteInspection(&buffer, roots, -1, "plan")
+		if d.Code != "" || !strings.Contains(buffer.String(), `"kind":"service"`) || !strings.Contains(buffer.String(), `"arguments":{"port":"`+service.port+`"}`) {
+			t.Errorf("service plan did not bind port %s: %s", service.port, d.Code)
+		}
+		d.Free(a)
+		buffer.Reset()
+	}
 	roots[0] = "cycle"
 	d = compiled.Program.WriteInspection(&buffer, roots, -1, "plan")
 	if d.Code != "DEP_CYCLE" || len(d.TargetStack) != 3 || d.TargetStack[0] != d.TargetStack[2] || len(buffer.Bytes()) != 0 {

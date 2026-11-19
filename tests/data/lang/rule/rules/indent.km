@@ -1,7 +1,7 @@
-# generate the script
-./script.sh :
+# Generate the script
+rule ./script.sh ; {shell: "sh"}
 	# shell comment preserved literally
-	cat > @> <<'EOF'
+	cat > @{outputs.0} <<'EOF'
 	  echo indented body
 	EOF
-	chmod +x @>
+	chmod +x @{outputs.0}

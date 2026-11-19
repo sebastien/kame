@@ -58,7 +58,7 @@ func TestCompletionWordStart(t *testing.T) {
 		{"echo spaced\\ di", "spaced\\ di"},
 		{"x = $(ec", "ec"},
 		{"--out=./re", "./re"},
-		{"def f\n\tec", "ec"},
+		{"def f ()\n\tec", "ec"},
 		{"", ""},
 	} {
 		if got := c.line[completionWordStart(c.line, len(c.line)):]; got != c.want {
@@ -94,7 +94,7 @@ func TestCompletionsAt(t *testing.T) {
 		{name: "executables", line: "kasht", want: []string{"kashtest|commands|" + ctx.Path, "kashtool|commands|" + ctx.Path}},
 		{name: "non-executable skipped", line: "kashd"},
 		{name: "after pipe", line: "cat a | kashto", want: []string{"kashtool|commands|" + ctx.Path}},
-		{name: "continuation line", line: "def f\n\tkashto", want: []string{"kashtool|commands|" + ctx.Path}},
+		{name: "continuation line", line: "def f ()\n\tkashto", want: []string{"kashtool|commands|" + ctx.Path}},
 		{name: "files", line: "cat re", want: []string{"readme.md|files|", "release.txt|files|"}},
 		{name: "directory", line: "cat sr", want: []string{"src/|files|"}},
 		{name: "nested", line: "cat src/ma", want: []string{"src/main.go|files|"}},
@@ -125,12 +125,12 @@ func TestReplEntryComplete(t *testing.T) {
 		"echo (map":                   false,
 		"echo (map\n  uppercase [])":  true,
 		"def f":                       false,
-		"def f\n\techo hi":            false,
-		"def f\n\techo hi\n":          true,
+		"def f ()\n\techo hi":         false,
+		"def f ()\n\techo hi\n":       true,
 		"if true\n\tif false\n\t\tls": false,
 		"echo a\necho b":              true,
 		"echo a\n&":                   true,
-		"def f\n\techo hi\n  &  ":     true,
+		"def f ()\n\techo hi\n  &  ":  true,
 		"\n&":                         true, // submitted; readEntry ignores it
 	} {
 		if got := replEntryComplete(text); got != want {

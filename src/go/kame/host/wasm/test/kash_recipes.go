@@ -14,7 +14,7 @@ func TestStructuredRecipeAsyncUsesInstanceHeap(t *testing.T) {
 	buffer := make([]byte, 1024*1024)
 	defer mem.FreeSlice(nil, buffer)
 	heap := wasm.NewHeap(buffer)
-	started := wasm.NewRuntimeWithHeap(&heap, "recipe.kmk", "chosen : ; {shell: kash}\n\t/bin/sh -c \"printf async\" &\n")
+	started := wasm.NewRuntimeWithHeap(&heap, "recipe.km", "task chosen ; {shell: kash}\n\t/bin/sh -c \"printf async\" &\n")
 	if started.Runtime == nil {
 		t.Fatal("compile async recipe")
 		return

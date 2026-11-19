@@ -28,7 +28,7 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 			}
 			definition, value := "", captures[kind]
 			if scope == 1 {
-				definition, value = "(probe) = "+value+"\n", "(probe ())"
+				definition, value = "def probe () = "+value+"\n", "(probe ())"
 			} else if scope == 2 {
 				definition, value = "probe = "+value+"\n", "probe"
 			}

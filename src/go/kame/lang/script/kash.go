@@ -6,35 +6,47 @@ import (
 	"kame/lang/expr"
 	"kame/lang/source"
 	"slices"
+	"strings"
 )
 
 // ParseKash composes strict Kame definitions and structured Kash command graphs.
-// Existing .kmk parsing and shell recipe text remain entirely separate.
 func ParseKash(a mem.Allocator, name string, text string) *Script {
+	return parseKashText(a, name, text, false)
+}
+
+// ParseKashRuleBody parses a recipe after structural indentation is removed.
+func ParseKashRuleBody(a mem.Allocator, name string, text string) *Script {
+	return parseKashText(a, name, text, true)
+}
+
+func parseKashText(a mem.Allocator, name string, text string, ruleBody bool) *Script {
 	s := mem.Alloc[Script](a)
-	s.Alloc, s.Source = a, source.New(a, name, text)
+	s.Alloc, s.Source, s.RuleBody = a, source.New(a, name, text), ruleBody
 	parseKash(s, 0)
 	return s
 }
 
 func parseKash(s *Script, offset int) {
 	s.Kash = true
-	p := kashParser{Script: s, Pos: offset}
+	p := kashParser{Script: s, Pos: offset, RuleBody: s.RuleBody}
 	s.Items = p.sequence(0)
 }
 
 type kashParser struct {
-	Script    *Script
-	Pos       int
-	Style     byte
-	Unit      int
-	Channels  []string
-	Functions int
-	Loops     int
+	Script     *Script
+	Pos        int
+	Prefixes   []string
+	Channels   []string
+	Functions  int
+	ValueBlock bool
+	RuleBody   bool
+	Loops      int
 }
 
 func (p *kashParser) sequence(level int) []ScriptItem {
 	s, text := p.Script, p.Script.Source.Text
+	prefixDepth := len(p.Prefixes)
+	defer func() { p.Prefixes = p.Prefixes[:prefixDepth] }()
 	previousChannels := p.Channels
 	p.Channels = slices.Clone(previousChannels)
 	var items []ScriptItem
@@ -46,14 +58,6 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			break
 		}
 		start := p.Pos
-		if text[start] == '#' {
-			for p.Pos < len(text) && text[p.Pos] != '\n' {
-				p.Pos++
-			}
-			items = append(items, ScriptItem{Kind: Comment, Text: text[start:p.Pos], Span: source.Span{Start: start, End: p.Pos}})
-			continue
-		}
-		indent := level
 		lineStart := start
 		for lineStart > 0 && text[lineStart-1] != '\n' {
 			lineStart--
@@ -65,8 +69,16 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				break
 			}
 		}
+		if text[start] == '#' {
+			for p.Pos < len(text) && text[p.Pos] != '\n' {
+				p.Pos++
+			}
+			items = append(items, ScriptItem{Kind: Comment, Text: text[start:p.Pos], Span: source.Span{Start: start, End: p.Pos}, commentDepth: p.commentDepth(text[lineStart:start], level)})
+			continue
+		}
+		indent := level
 		if leading {
-			indent = p.indentation(start)
+			indent = p.indentation(lineStart, start, level)
 		}
 		if indent < level {
 			break
@@ -80,8 +92,19 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
+		headerEnd := definition.KashHeaderEnd(s.Alloc, s.Source, start)
+		if moduleKeyword(word) {
+			if p.Script.RuleBody || level != 0 || !leading {
+				s.error(start, wordEnd, "module declarations require a top-level line")
+				break
+			}
+			end := source.LogicalLineEnd(text, start)
+			items = append(items, s.moduleDeclaration(word, start, wordEnd, end))
+			p.Pos = nextLine(text, end)
+			continue
+		}
 		if word == "include" || word == "include?" {
-			if level != 0 || !leading {
+			if p.Script.RuleBody || level != 0 || !leading {
 				s.error(start, wordEnd, "include declarations require a whole top-level line")
 				break
 			}
@@ -90,15 +113,15 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			p.Pos = nextLine(text, end)
 			continue
 		}
-		if (word == "alias" || word == "unalias" || word == "option") && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
-			if level != 0 || !leading {
+		if (word == "alias" || word == "unalias" || word == "option") && headerEnd == 0 {
+			if p.Script.RuleBody || level != 0 || !leading {
 				s.error(start, wordEnd, "session commands require a whole top-level session entry")
 				break
 			}
 			items = append(items, p.sessionCommand(start, wordEnd))
 			continue
 		}
-		if word == "let" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+		if word == "let" {
 			d := p.eagerBinding(start, wordEnd)
 			if d == nil {
 				break
@@ -111,12 +134,18 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			items = append(items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
 			continue
 		}
-		if word == "def" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+		if word == "set" || word == "yield" {
+			e := p.valueStatement(word, start, wordEnd)
+			expr.SetCommandChannels(s.Alloc, e, p.Channels)
+			items = append(items, ScriptItem{Kind: Expression, Span: e.Span, Expression: e})
+			continue
+		}
+		if word == "def" && headerEnd == 0 {
 			if !leading {
 				s.error(start, wordEnd, "function header must occupy its own line")
 				break
 			}
-			d := p.functionBlock(level, start, wordEnd)
+			d := p.functionBlock(level, start)
 			for i := range items {
 				if items[i].Kind == Definition && items[i].Definition.Name == d.Name {
 					s.error(start, p.Pos, "duplicate Kash definition name")
@@ -158,10 +187,6 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			s.error(start, wordEnd, "orphan Kash branch keyword")
 			break
 		}
-		if word == "case" {
-			s.error(start, wordEnd, "orphan Kash case keyword")
-			break
-		}
 		if word == "if" || word == "match" || word == "for" || word == "while" || word == "with" {
 			lineStart := start
 			for lineStart > 0 && text[lineStart-1] != '\n' {
@@ -186,7 +211,22 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			items = append(items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 			continue
 		}
-		if headerEnd := definition.KashHeaderEnd(s.Alloc, s.Source, start); headerEnd != 0 {
+		if headerEnd != 0 {
+			if word != "def" {
+				s.error(start, headerEnd, "bare binding requires def, let, or set")
+				break
+			}
+			if level == 0 && leading {
+				if d := p.valueDefinition(start, headerEnd); d != nil {
+					for _, item := range items {
+						if item.Kind == Definition && item.Definition.Name == d.Name {
+							s.error(start, p.Pos, "duplicate Kash definition name")
+						}
+					}
+					items = append(items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
+					continue
+				}
+			}
 			valueStart := headerEnd
 			for valueStart < len(text) && space(text[valueStart]) {
 				valueStart++
@@ -209,8 +249,8 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if part.Definition == nil {
 				break
 			}
-			if part.Definition.Name == "env" {
-				s.error(start, part.Definition.Span.End, "env is reserved in Kash")
+			if part.Definition.Name == "env" || part.Definition.Default || part.Definition.Contribution {
+				s.error(start, part.Definition.Span.End, "Kash def requires a non-reserved name and =")
 			}
 			for i := range part.Definition.Parameters {
 				if part.Definition.Parameters[i].Name == "env" {
@@ -254,6 +294,10 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			if p.Pos == len(text) || text[p.Pos] == '\n' || text[p.Pos] == ';' || text[p.Pos] == '#' {
 				s.error(start, p.Pos, "defer requires a command or parenthesized expression")
+				break
+			}
+			if standaloneKeyword(text, p.Pos, "yield") {
+				s.error(p.Pos, p.Pos+5, "cannot defer yield")
 				break
 			}
 			if standaloneKeyword(text, p.Pos, "return") {
@@ -330,38 +374,42 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 	return items
 }
 
-func (p *kashParser) indentation(pos int) int {
-	text := p.Script.Source.Text
-	start := pos
-	for start > 0 && text[start-1] != '\n' {
-		start--
-	}
-	end := start
-	for end < len(text) && (text[end] == ' ' || text[end] == '\t') {
-		end++
-	}
-	if end == start {
-		return 0
-	}
-	style := text[start]
-	for i := start; i < end; i++ {
-		if text[i] != style {
-			p.Script.error(start, end, "mixed Kash indentation")
-			return -1
-		}
-	}
-	if p.Style == 0 {
-		p.Style = style
-		p.Unit = end - start
-		if style == '\t' {
-			p.Unit = 1
-		}
-	}
-	if p.Style != style || (end-start)%p.Unit != 0 {
-		p.Script.error(start, end, "inconsistent Kash indentation")
+// indentation compares a line with the active block prefixes. A new
+// block takes its prefix from its first statement.
+func (p *kashParser) indentation(start, end, level int) int {
+	prefix := p.Script.Source.Text[start:end]
+	if strings.Contains(prefix, " ") && strings.Contains(prefix, "\t") {
+		p.Script.error(start, end, "mixed Kash indentation")
 		return -1
 	}
-	return (end - start) / p.Unit
+	prefix = strings.TrimPrefix(prefix, p.Script.Source.StructuralIndent)
+	if prefix == "" {
+		return 0
+	}
+	for i, active := range p.Prefixes {
+		if prefix == active {
+			return i + 1
+		}
+	}
+	if level == len(p.Prefixes)+1 && (len(p.Prefixes) == 0 || strings.HasPrefix(prefix, p.Prefixes[len(p.Prefixes)-1])) {
+		p.Prefixes = append(p.Prefixes, prefix)
+		return level
+	}
+	p.Script.error(start, end, "inconsistent Kash indentation")
+	return -1
+}
+
+func (p *kashParser) commentDepth(prefix string, level int) int {
+	prefix = strings.TrimPrefix(prefix, p.Script.Source.StructuralIndent)
+	if prefix == "" {
+		return 0
+	}
+	for i, active := range p.Prefixes {
+		if prefix == active {
+			return i + 1
+		}
+	}
+	return level
 }
 
 func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
@@ -403,32 +451,8 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 			if valueStart == end || text[valueStart] == '#' {
 				s.error(wordEnd, end, "expected Kash condition")
 			} else {
-				var condition expr.Prefix
-				if text[valueStart] == '(' {
-					condition = expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
-					if condition.End > end {
-						end = condition.End
-						for end < len(text) && text[end] != '\n' {
-							end++
-						}
-					}
-				} else {
-					condition = expr.ParseCommandPrefix(s.Alloc, s.Source, valueStart)
-					if condition.Expr.Kind == expr.CommandList {
-						condition.Expr.CommandCondition = true
-						if condition.End > end {
-							end = condition.End
-							for end < len(text) && text[end] != '\n' {
-								end++
-							}
-						}
-					} else {
-						condition.Expr.Kind = expr.CommandTest
-					}
-					if hasCommandConditionControl(condition.Expr) || (valueStart+1 < end && text[valueStart:valueStart+2] == "$(") {
-						s.error(valueStart, end, "command conditions cannot use async, capture, acceptance or recovery")
-					}
-				}
+				condition := expr.ParseValuePrefix(s.Alloc, s.Source, valueStart)
+				end = physicalLineEnd(text, condition.End)
 				s.takeDiagnostics(condition.Diagnostics)
 				branch.Items = append(branch.Items, condition.Expr)
 				for condition.End < end && space(text[condition.End]) {
@@ -436,9 +460,6 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 				}
 				if condition.End < end && text[condition.End] != '#' {
 					s.error(condition.End, end, "condition header must occupy its own line")
-				}
-				if condition.Expr != nil && condition.Expr.Kind == expr.ValueRecovery {
-					s.error(valueStart, end, "condition requires one Kame expression")
 				}
 			}
 		}
@@ -454,7 +475,7 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 		if e.Kind == expr.KashWhile {
 			break
 		}
-		if p.Pos == len(text) || len(s.Diagnostics) != 0 || p.indentation(p.Pos) != level {
+		if p.Pos == len(text) || len(s.Diagnostics) != 0 || p.indentation(strings.LastIndexByte(text[:p.Pos], '\n')+1, p.Pos, level) != level {
 			break
 		}
 		nextEnd := p.Pos
@@ -511,11 +532,16 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 		s.error(pos, pos, "expected loop iterable expression")
 		return e
 	}
-	part := expr.ParseKashValuePrefix(s.Alloc, s.Source, pos)
+	var part expr.Prefix
+	if records {
+		part = expr.ParseKashRecordSourcePrefix(s.Alloc, s.Source, pos)
+	} else {
+		part = expr.ParseKashValueExpressionPrefix(s.Alloc, s.Source, pos)
+	}
 	s.takeDiagnostics(part.Diagnostics)
 	branch.Items = append(branch.Items, part.Expr)
-	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
-		s.error(pos, part.End, "loop iterable requires one Kame expression")
+	if iterable := expr.Ungroup(part.Expr); records && iterable != nil && iterable.Infix == "??" {
+		s.error(pos, part.End, "record source does not allow ??")
 	}
 	end := part.End
 	for end < len(text) && space(text[end]) {
@@ -582,6 +608,7 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 			}
 			statement = mem.Alloc[expr.Expr](s.Alloc)
 			statement.Kind, statement.Text, statement.Bool, statement.Span = expr.KashDefinition, d.Name, d.Function, d.Span
+			statement.ExplicitDef = d.ExplicitDef
 			statement.Items = append(statement.Items, d.Expression)
 			d.Expression = nil
 			for j := range d.Parameters {
@@ -592,23 +619,7 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 		} else if item.Kind == Comment {
 			statement = mem.Alloc[expr.Expr](s.Alloc)
 			statement.Kind, statement.Text, statement.Span = expr.KashComment, item.Text, item.Span
-			spaces := 0
-			pos := item.Span.Start - 1
-			for ; pos >= 0 && (s.Source.Text[pos] == ' ' || s.Source.Text[pos] == '\t'); pos-- {
-				if s.Source.Text[pos] == '\t' {
-					statement.CommentIndent++
-				} else {
-					spaces++
-				}
-			}
-			unit := 4
-			if p.Style == ' ' && p.Unit > 0 {
-				unit = p.Unit
-			}
-			statement.CommentIndent += spaces / unit
-			if pos >= 0 && s.Source.Text[pos] != '\n' {
-				statement.CommentIndent = level
-			}
+			statement.CommentIndent = item.commentDepth
 		} else {
 			statement = item.Expression
 		}
@@ -635,36 +646,22 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 	for end < len(text) && text[end] != '\n' {
 		end++
 	}
-	valueStart := wordEnd
-	for valueStart < end && space(text[valueStart]) {
-		valueStart++
-	}
-	if valueStart >= end {
-		s.error(valueStart, end, "match subject requires a Kame expression, reference or capture")
+	valueStart := trimStart(text, wordEnd, end)
+	if valueStart == end || text[valueStart] == '#' {
+		s.error(wordEnd, end, "match requires a subject expression")
 	} else {
-		if text[valueStart] == '(' {
-			value := expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
-			s.takeDiagnostics(value.Diagnostics)
-			e.Body = append(e.Body, value.Expr)
-			if value.End > end {
-				end = value.End
-				for end < len(text) && text[end] != '\n' {
-					end++
-				}
-			}
-			following := value.End
-			for following < end && space(text[following]) {
-				following++
-			}
-			if following < end && text[following] != '#' {
-				s.error(following, end, "control header requires exactly one expression")
-			}
-		} else {
-			subject := p.valueHeader(valueStart, end, true)
-			e.Body = append(e.Body, subject)
+		subject := expr.ParseValuePrefix(s.Alloc, s.Source, valueStart)
+		s.takeDiagnostics(subject.Diagnostics)
+		e.Body = append(e.Body, subject.Expr)
+		end = physicalLineEnd(text, subject.End)
+		following := trimStart(text, subject.End, end)
+		if following < end && text[following] != '#' {
+			s.error(following, end, "match header requires one expression")
 		}
 	}
 	p.Pos = nextLine(text, end)
+	prefixDepth := len(p.Prefixes)
+	defer func() { p.Prefixes = p.Prefixes[:prefixDepth] }()
 	seenElse := false
 	for p.Pos < len(text) && len(s.Diagnostics) == 0 {
 		for p.Pos < len(text) && (space(text[p.Pos]) || text[p.Pos] == '\n') {
@@ -680,10 +677,12 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 			}
 			comment := mem.Alloc[expr.Expr](s.Alloc)
 			comment.Kind, comment.Text, comment.Span = expr.KashComment, text[armStart:p.Pos], source.Span{Start: armStart, End: p.Pos}
+			lineStart := strings.LastIndexByte(text[:armStart], '\n') + 1
+			comment.CommentIndent = p.commentDepth(text[lineStart:armStart], level+1)
 			e.Body = append(e.Body, comment)
 			continue
 		}
-		indent := p.indentation(p.Pos)
+		indent := p.indentation(strings.LastIndexByte(text[:p.Pos], '\n')+1, p.Pos, level+1)
 		if indent <= level {
 			break
 		}
@@ -691,90 +690,49 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 			s.error(p.Pos, p.Pos+1, "match arms must be one indentation level deeper")
 			break
 		}
-		armEnd := p.Pos
-		for armEnd < len(text) && !space(text[armEnd]) && text[armEnd] != '\n' {
-			armEnd++
-		}
-		keyword := text[p.Pos:armEnd]
-		if keyword != "case" && keyword != "else" {
-			s.error(p.Pos, armEnd, "match requires case or else arms")
-			break
-		}
+		end = physicalLineEnd(text, armStart)
 		if seenElse {
-			s.error(p.Pos, armEnd, "branch after else")
+			s.error(armStart, end, "else must be the last match arm")
 			break
 		}
 		branch := mem.Alloc[expr.Expr](s.Alloc)
-		branch.Kind, branch.Text, branch.Span.Start = expr.KashBranch, keyword, p.Pos
+		branch.Kind, branch.Span.Start = expr.KashBranch, armStart
 		e.Items = append(e.Items, branch)
-		end = armEnd
-		for end < len(text) && text[end] != '\n' {
-			end++
-		}
-		valueStart = armEnd
-		for valueStart < end && space(text[valueStart]) {
-			valueStart++
-		}
-		if keyword == "else" {
+		arrow := armStart
+		if standaloneKeyword(text, armStart, "else") {
 			seenElse = true
-			if valueStart < end && text[valueStart] != '#' {
-				s.error(valueStart, end, "else header takes no pattern")
-			}
-		} else if valueStart == end || text[valueStart] == '#' {
-			s.error(armEnd, end, "case requires one pattern expression")
+			branch.Text = "else"
+			arrow += len("else")
 		} else {
-			branch.Items = append(branch.Items, p.valueHeader(valueStart, end, false))
+			bounded := *s.Source
+			bounded.Text = text[:end]
+			pattern := expr.ParseMatchPatternPrefix(s.Alloc, &bounded, armStart)
+			s.takeDiagnostics(pattern.Diagnostics)
+			branch.Items = append(branch.Items, pattern.Expr)
+			arrow = pattern.End
+		}
+		arrow = trimStart(text, arrow, end)
+		if !strings.HasPrefix(text[arrow:end], "=>") {
+			s.error(arrow, end, "match arm requires => after the pattern")
+			break
 		}
 		p.Pos = nextLine(text, end)
-		p.branchBody(branch, level+2)
+		resultStart := trimStart(text, arrow+2, end)
+		if resultStart == end || text[resultStart] == '#' {
+			p.branchBody(branch, level+2)
+		} else {
+			value := expr.ParseRange(s.Alloc, s.Source, resultStart, end, "")
+			s.takeDiagnostics(value.Diagnostics)
+			branch.Bool = true // Inline arm result rather than a statement body.
+			branch.Body = append(branch.Body, value.Expr)
+			branch.Span.End = end
+		}
 	}
 	if len(e.Items) == 0 {
 		s.error(start, p.Pos, "empty Kash match block")
 	}
 	e.Span.End = p.Pos
 	return e
-}
-
-func (p *kashParser) valueHeader(start int, end int, kash bool) *expr.Expr {
-	s := p.Script
-	view := mem.Alloc[source.Source](s.Alloc)
-	*view = *s.Source
-	view.Text = s.Source.Text[:end]
-	var value expr.Prefix
-	if kash {
-		value = expr.ParseKashValuePrefix(s.Alloc, view, start)
-	} else {
-		value = expr.ParseMatchPatternPrefix(s.Alloc, view, start)
-	}
-	mem.Free(s.Alloc, view)
-	s.takeDiagnostics(value.Diagnostics)
-	for value.End < end && space(s.Source.Text[value.End]) {
-		value.End++
-	}
-	if (value.End < end && s.Source.Text[value.End] != '#') || source.TopLevelByte(s.Source.Text[start:end], ';') >= 0 || (value.Expr != nil && value.Expr.Kind == expr.ValueRecovery) {
-		s.error(start, end, "control header requires exactly one expression")
-	}
-	return value.Expr
-}
-
-func hasCommandConditionControl(e *expr.Expr) bool {
-	if e == nil {
-		return false
-	}
-	if e.Async || e.AcceptExit || e.Kind == expr.CommandCapture || ((e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest) && len(e.Body) != 0) {
-		return true
-	}
-	// Argument expressions have their own control boundaries. Only list
-	// operands belong to the command condition's control syntax.
-	if e.Kind != expr.CommandList {
-		return false
-	}
-	for i := range e.Items {
-		if hasCommandConditionControl(e.Items[i]) {
-			return true
-		}
-	}
-	return false
 }
 
 // standaloneKeyword reports whether text at pos is word followed by a statement

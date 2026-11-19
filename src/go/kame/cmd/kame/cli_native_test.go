@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,7 +81,7 @@ func TestParseASTPreservesTemplateAndExpressionSpans(t *testing.T) {
 	tests := []struct {
 		lang, text, want string
 	}{
-		{"rule", "\"./{x}\" : input", "\"span\":{\"start\":3,\"end\":6}"},
+		{"rule", "rule \"./{x}\" : input", "\"span\":{\"start\":8,\"end\":11}"},
 		{"script", "value = \"\"", "\"expression\":{\"kind\":\"string\",\"span\":{\"start\":8,\"end\":10},\"parts\":[]}"},
 	}
 	for _, test := range tests {
@@ -95,7 +96,7 @@ func TestParseASTPreservesTemplateAndExpressionSpans(t *testing.T) {
 
 func TestPrimaryInvocationMaterializesInlineSource(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"-n", "-l", "kmk", "-c", "task default :\n\techo ignored"}, &input{}, &out, &errOut)
+	status := runNativeCLI(t, []string{"-n", "-c", "task default\n\techo ignored"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(errOut.String(), "[default]") || !strings.Contains(errOut.String(), " - ✓") {
 		t.Errorf("primary invocation status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -108,7 +109,7 @@ func TestPrimaryInvocationUsageAndMissingDefault(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"-n", "-l", "kmk", "-c", "task first :\ntask second :"}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "TGT_NO_DEFAULT") || !strings.Contains(errOut.String(), "available targets: first, second") {
+	if status := runNativeCLI(t, []string{"-n", "-c", "task first\ntask second"}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "TGT_NO_DEFAULT") || !strings.Contains(errOut.String(), "available targets: first, second") {
 		t.Errorf("missing default status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -121,9 +122,9 @@ func TestTargetTakingCommandsSelectDefault(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"do", "plan", "--json", "-c", "task default : ./dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"target":"default"`},
+		{[]string{"do", "plan", "--json", "-c", "task default : ./dep\n\techo ignored\ntask dep\n\techo ignored"}, `"target":"default"`},
 		{[]string{"do", "cat", "-c", `default = "value"`}, "value"},
-		{[]string{"do", "inputs", "--json", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"display":"dep"`},
+		{[]string{"do", "inputs", "--json", "-c", "task default : dep\n\techo ignored\ntask dep\n\techo ignored"}, `"display":"dep"`},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -132,7 +133,7 @@ func TestTargetTakingCommandsSelectDefault(t *testing.T) {
 		}
 	}
 	var out, errOut bytes.Buffer
-	if status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task first :"}, &input{}, &out, &errOut); status != 1 || errOut.Len() != 0 || !strings.Contains(out.String(), `"code":"TGT_NO_DEFAULT"`) || !strings.Contains(out.String(), `"notes":["available targets: first"]`) {
+	if status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task first"}, &input{}, &out, &errOut); status != 1 || errOut.Len() != 0 || !strings.Contains(out.String(), `"code":"TGT_NO_DEFAULT"`) || !strings.Contains(out.String(), `"notes":["available targets: first"]`) {
 		t.Errorf("json missing default status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -156,14 +157,47 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 
 func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task build :\n\techo should-not-run", "build"}, &input{}, &out, &errOut)
+	status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task build\n\techo should-not-run", "build"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), "\"type\":\"plan\"") || errOut.Len() != 0 {
 		t.Errorf("plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
 
+func TestBuildInspectionUsesKameGrammarForExplicitAndInlineSources(t *testing.T) {
+	directory := t.TempDir()
+	const source = "rule ./out = \"artifact\"\ntask check : ./out\n"
+	nativeCLIWrite(t, filepath.Join(directory, "arbitrary.build"), source)
+	for _, input := range [][]string{{"-f", "arbitrary.build"}, {"-c", source}} {
+		var out, errOut bytes.Buffer
+		args := append([]string{"do", "plan", "--json"}, input...)
+		status := runNativeCLIIn(t, directory, append(args, "check"), nil, &out, &errOut)
+		if status != 0 || !strings.Contains(out.String(), `"target":"./out"`) || errOut.Len() != 0 {
+			t.Fatalf("plan for %v returned status %d: %s%s", input, status, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "plan", "-c", "check :", "check"}, nil, &out, &errOut)
+	if status != 1 || !strings.Contains(errOut.String(), "expected a declaration keyword") {
+		t.Fatalf("legacy inline rule returned status %d: %s%s", status, out.String(), errOut.String())
+	}
+	for _, command := range []string{"run", "parse", "fmt"} {
+		out.Reset()
+		errOut.Reset()
+		status := runNativeCLIIn(t, directory, []string{"do", command, "--lang", "kmk", "-c", source}, nil, &out, &errOut)
+		if status != 2 || !strings.Contains(errOut.String(), "OPT_VALUE_INVALID") {
+			t.Errorf("%s accepted the removed language with status %d: %s%s", command, status, out.String(), errOut.String())
+		}
+	}
+	out.Reset()
+	errOut.Reset()
+	status = runNativeCLIIn(t, directory, []string{"do", "run", "-f", "legacy.kmk"}, nil, &out, &errOut)
+	if status != 2 || !strings.Contains(errOut.String(), "source requires a recognized suffix or explicit language") {
+		t.Fatalf("legacy source suffix returned status %d: %s%s", status, out.String(), errOut.String())
+	}
+}
+
 func TestPlanProducerDetailsAreConciseUnlessVerbose(t *testing.T) {
-	source := "./out : ./in"
+	source := "rule ./out : ./in"
 	var out, errOut bytes.Buffer
 	if status := runNativeCLI(t, []string{"do", "plan", "-c", source, "./out"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), "./out · file") || strings.Contains(out.String(), "freshness: unknown") || strings.Contains(out.String(), "captures") || strings.Contains(out.String(), "tools") {
 		t.Errorf("concise plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
@@ -187,7 +221,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	graphSource := "task root : middle\n\techo root\ntask middle : leaf\n\techo middle\ntask leaf :\n\techo leaf"
+	graphSource := "task root : middle\n\techo root\ntask middle : leaf\n\techo middle\ntask leaf\n\techo leaf"
 	if status := runNativeCLI(t, []string{"do", "inputs", "--json", "--depth", "2", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"items":[2,3]`) {
 		t.Errorf("recursive inputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -220,7 +254,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 
 func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 	var out, errOut bytes.Buffer
-	source := "task build :\n\t@{x/sh} -c 'true'\n"
+	source := "task build ; {shell: \"/bin/sh\"}\n\t@{x/sh} -c 'true'\n"
 	status := runNativeCLI(t, []string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"path":"`) {
 		t.Errorf("tools status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
@@ -228,7 +262,7 @@ func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 }
 
 func TestToolsInspectKashRecipes(t *testing.T) {
-	source := "SHELL = kash\nroot : used\nused :\n\tkame-missing-kash-tool run python | sh -c true\n\tkame-missing-kash-tool again\nunused :\n\tkame-unused-kash-tool\nshell : ; {shell: sh}\n\tkame-shell-command\nexplicit : ; {shell: kash}\n\tkame-explicit-kash-tool\n"
+	source := "SHELL = kash\ntask root : used\ntask used\n\tkame-missing-kash-tool run python | sh -c true\n\tkame-missing-kash-tool again\ntask unused\n\tkame-unused-kash-tool\ntask shell ; {shell: sh}\n\tkame-shell-command\ntask explicit ; {shell: kash}\n\tkame-explicit-kash-tool\n"
 	var out, errOut bytes.Buffer
 	status := runNativeCLI(t, []string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
 	if status != 0 || strings.Count(out.String(), `"name":"kame-missing-kash-tool"`) != 1 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"name":"kame-explicit-kash-tool"`) || strings.Contains(out.String(), `"name":"python"`) || strings.Contains(out.String(), `"name":"kame-shell-command"`) {
@@ -244,11 +278,13 @@ func TestToolsInspectKashRecipes(t *testing.T) {
 
 func TestBuildOptionsValidateAndReachRuntime(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"-n", "-l", "kmk", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), "task default\n\techo ignored\n")
+	status := runNativeCLIIn(t, directory, []string{"-n", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "default", "-c", "nil"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(errOut.String(), "[default]") || !strings.Contains(errOut.String(), " - ✓") {
 		t.Errorf("run options status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
-	if status := runNativeCLI(t, []string{"--env", "invalid", "-c", "task default :", "default"}, &input{}, &out, &errOut); status != 2 {
+	if status := runNativeCLI(t, []string{"--env", "invalid", "-c", "task default", "default"}, &input{}, &out, &errOut); status != 2 {
 		t.Errorf("invalid env status=%d", status)
 	}
 }
@@ -357,7 +393,7 @@ func TestEmptyLongOptionValuesAreInvalid(t *testing.T) {
 // JSON diagnostics are emitted on stdout; stderr stays unused after parsing.
 func TestJSONDiagnosticUsesStdout(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task build :", "missing"}, &input{}, &out, &errOut)
+	status := runNativeCLI(t, []string{"do", "plan", "--json", "-c", "task build", "missing"}, &input{}, &out, &errOut)
 	if status != 1 || !strings.Contains(out.String(), "\"type\":\"diagnostic\"") || !strings.Contains(out.String(), "\"code\":\"TGT_NO_RULE\"") || errOut.Len() != 0 {
 		t.Errorf("json diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -390,7 +426,7 @@ func TestZeroWidthSourceDiagnosticRendersEOFLocation(t *testing.T) {
 
 func TestInspectionPathOperandAcceptsExternalFile(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"do", "plan", "-c", "task build :", "missing.txt"}, &input{}, &out, &errOut)
+	status := runNativeCLI(t, []string{"do", "plan", "-c", "task build", "missing.txt"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), "./missing.txt") || errOut.Len() != 0 {
 		t.Errorf("external file status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -398,13 +434,13 @@ func TestInspectionPathOperandAcceptsExternalFile(t *testing.T) {
 
 func TestColorAlwaysIsExplicitAndColorNeverStaysPlain(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := runNativeCLI(t, []string{"--diagnostic-format", "human", "--color", "always", "-c", "task build :", "missing"}, &input{}, &out, &errOut)
+	status := runNativeCLI(t, []string{"--diagnostic-format", "human", "--color", "always", "-c", "task build", "missing"}, &input{}, &out, &errOut)
 	if status != 1 || !strings.Contains(errOut.String(), "\x1b[") {
 		t.Errorf("always color status=%d stderr=%q", status, errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	status = runNativeCLI(t, []string{"--color", "never", "-c", "task build :", "missing"}, &input{}, &out, &errOut)
+	status = runNativeCLI(t, []string{"--color", "never", "-c", "task build", "missing"}, &input{}, &out, &errOut)
 	if status != 1 || strings.Contains(errOut.String(), "\x1b[") {
 		t.Errorf("never color status=%d stderr=%q", status, errOut.String())
 	}
@@ -431,9 +467,9 @@ func TestRepeatedNativeCLICommandResults(t *testing.T) {
 		args   []string
 		status int
 	}{
-		{[]string{"-c", "task first :\ntask second :"}, 1},
+		{[]string{"-c", "task first\ntask second"}, 1},
 		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
-		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0},
+		{[]string{"do", "plan", "-c", "task build\n\techo ignored", "build"}, 0},
 		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @{SOURCE}\n\ttrue", "build"}, 0},
 		{[]string{"do", "fmt", "--lang", "expr"}, 0},
 		{[]string{"--shell", "/bin/sh", "--env", "KM_TEST=value", "--unknown"}, 2},

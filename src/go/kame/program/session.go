@@ -193,11 +193,20 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			}
 			continue
 		}
-		part := parseSourceFragment(a, parsed.Source, sources[i], offsets[i])
+		input := sources[i]
+		// SourceDirectory also identifies the file-backed parts that precede an
+		// include, which are marked Inline to suppress an implicit default.
+		if f.Lang == "km" && (!f.Inline || f.SourceDirectory != "") {
+			input.Lang = script.KameFileLanguage
+		}
+		part := parseSourceFragment(a, parsed.Source, input, offsets[i])
 		first := len(parsed.Items)
 		appendSourceFragment(parsed, part)
 		for j := first; j < len(parsed.Items); j++ {
 			item := parsed.Items[j]
+			if item.Kind == script.Rule {
+				ruleFragments = true
+			}
 			if len(f.Entries) == 0 && !f.SkipStatements && item.Kind == script.Definition && item.Definition.Eager {
 				work = append(work, SessionWork{Expression: item.Definition.Expression})
 			}
@@ -207,24 +216,18 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			if item.Kind == script.Definition && f.Lang == "km" {
 				valueDefinitions = true
 			}
-			if len(f.Entries) == 0 && !f.SkipStatements && f.Lang != "kmk" && (item.Kind == script.Expression || item.Kind == script.Command) {
+			if len(f.Entries) == 0 && !f.SkipStatements && (item.Kind == script.Expression || item.Kind == script.Command) {
 				work = append(work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash", Display: f.Lang == "expr" || (f.Lang == "km" && options.PrintResult)})
 			}
 		}
 		if f.Lang == "kash" {
 			kashFragments = true
 		}
-		if f.Lang == "kmk" {
-			ruleFragments = true
-		}
 		for j := range f.Entries {
 			work = append(work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", Display: true, entryGroup: i + 1})
 		}
-		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 {
-			work = append(work, SessionWork{Target: cloneText(a, "default"), Display: true, ImplicitDefault: true, entryGroup: i + 1})
-		}
 	}
-	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) {
+	if len(work) == 0 && (ruleFragments || valueDefinitions) {
 		work = append(work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, Display: ruleFragments || options.PrintResult, ImplicitDefault: true})
 	}
 	compiled := compileSources(a, parsed, registry, options, sources, offsets)
@@ -239,6 +242,12 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		freeSessionWork(a, work)
 	} else {
 		p.ParsedOwned = true
+		if !ruleFragments && (options.RequireRuleWork || (options.RequireProcessWork && !kashFragments)) {
+			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "OPT_CONFLICT", Severity: diagnostic.Error, Message: "option requires rule or process source work"})
+			p.Free()
+			freeSessionWork(a, work)
+			return result
+		}
 		// Normalize entry operands after declaration registration, so literal
 		// definition overrides are not requested as entries or rule arguments.
 		var normalized []SessionWork
@@ -298,7 +307,10 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 					function = true
 					break
 				}
-				if !function {
+				if !function && ruleFragments {
+					work[i].Value = false
+					work[i].Selected = false
+				} else if !function {
 					code := "TGT_NO_RULE"
 					if work[i].Target == "default" {
 						code = "TGT_NO_DEFAULT"

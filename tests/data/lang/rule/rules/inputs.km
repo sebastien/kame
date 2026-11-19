@@ -1,14 +1,14 @@
-./bundle : ./a.o ./b.o
-	echo @<
+rule ./bundle : ./a.o ./b.o
+	echo $...inputs
 
-./strings : "literal input"
-	echo @<
+rule ./strings : "literal input"
+	echo $...inputs
 
-./generated : @(wildcard ./src/*.c)
-	echo @<
+rule ./generated : @{wildcard ./src/*.c}
+	echo $...inputs
 
-./named : build clean
-	echo @<
+rule ./named : build clean
+	echo $...inputs
 
-./templated : ./src/{name:*}.c
-	echo @<
+rule ./templated : ./src/{name:*}.c
+	echo $...inputs

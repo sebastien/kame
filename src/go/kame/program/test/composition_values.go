@@ -19,7 +19,7 @@ func TestCompositionSessionRejectsValueHeadsBeforePriorWork(t *testing.T) {
 		{Name: "hidden.expr", Lang: "expr", Text: "(if false then (include ./a.km) else nil)"},
 	}
 	for i := range cases {
-		fragments := []program.Fragment{{Name: "prior.km", Lang: "km", Text: "(out! 42)\n"}, cases[i]}
+		fragments := []program.Fragment{{Name: "prior.km", Lang: "km", Inline: true, Text: "(out! 42)\n"}, cases[i]}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{})
 		if compiled.Session != nil {
 			compiled.Session.Free()

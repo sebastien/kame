@@ -26,8 +26,13 @@ func Fits(text string, column int) bool {
 
 // FormatAt lays out an expression at its actual starting column.
 func FormatAt(a mem.Allocator, e *Expr, column int) string {
+	return FormatAtIndent(a, e, column, column)
+}
+
+// FormatAtIndent lays out an inline expression within an enclosing indentation.
+func FormatAtIndent(a mem.Allocator, e *Expr, column, indent int) string {
 	b := strings.Builder{}
-	writeLayout(a, &b, e, column, column, 0)
+	writeLayout(a, &b, e, column, indent, 0)
 	text := sourceText(a, restoreTrivia(e, b.String()))
 	b.Reset()
 	return text

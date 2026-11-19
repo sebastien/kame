@@ -72,6 +72,10 @@ const (
 	Conditional
 	Match
 	MatchArm
+	ValueBlock
+	ValueReturn
+	KashSet
+	KashYield
 )
 
 // Ungroup returns the expression inside any authored parentheses.
@@ -188,6 +192,7 @@ type Expr struct {
 	Expansion    string
 	trivia       *expressionTrivia
 	wordSpelling []string
+	ExplicitDef  bool
 }
 
 type CommandEdge struct {
@@ -303,14 +308,15 @@ func Free(a mem.Allocator, e *Expr) { freeExpr(a, e) }
 func Clone(a mem.Allocator, e *Expr) *Expr { return cloneExpr(a, e) }
 
 type parser struct {
-	a              mem.Allocator
-	s              *source.Source
-	pos            int
-	diags          []source.Diagnostic
-	triviaSpans    []source.Span
-	kash           bool
-	commandGroup   bool
-	delimitedValue bool
+	a                 mem.Allocator
+	s                 *source.Source
+	pos               int
+	diags             []source.Diagnostic
+	triviaSpans       []source.Span
+	kash              bool
+	commandGroup      bool
+	delimitedValue    bool
+	stopAtRecordFrame bool
 	// One-based root position: only a top-level Kash path stops at semicolons.
 	valuePathStart int
 	// Rule indentation is structural, including inside multiline string data.
@@ -346,7 +352,26 @@ func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 
 // ParseValuePrefix reads one complete value expression from an authored source.
 func ParseValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
-	p := parser{a: a, s: s, pos: start}
+	return parseValuePrefix(a, s, start, false)
+}
+
+// ParseKashValueExpressionPrefix parses a value expression in a Kash block.
+func ParseKashValueExpressionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	return parseValuePrefix(a, s, start, true)
+}
+
+// ParseKashRecordSourcePrefix leaves the literal framing operand for the loop parser.
+func ParseKashRecordSourcePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent, kash: true, stopAtRecordFrame: true}
+	return p.valuePrefix()
+}
+
+func parseValuePrefix(a mem.Allocator, s *source.Source, start int, kash bool) Prefix {
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent, kash: kash}
+	return p.valuePrefix()
+}
+
+func (p *parser) valuePrefix() Prefix {
 	e := p.valueExpression()
 	if len(p.diags) == 0 {
 		p.checkPlaceholders(e)
@@ -359,6 +384,9 @@ func ParseValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 // A nonempty structural indent is stripped from multiline string content.
 // The caller owns the expression and diagnostics; source text stays borrowed.
 func ParseRange(a mem.Allocator, s *source.Source, start int, end int, indent string) Prefix {
+	if indent == "" {
+		indent = s.StructuralIndent
+	}
 	bounded := source.Borrow(a, s.Name, s.Text[:end])
 	defer mem.Free(a, bounded)
 	p := parser{a: a, s: bounded, pos: start, indent: indent}
@@ -631,6 +659,9 @@ func (p *parser) application() *Expr {
 			p.pos = end
 			break
 		}
+		if p.stopAtRecordFrame && !p.delimitedValue && p.atRecordFrame() {
+			break
+		}
 		if strings.HasPrefix(p.s.Text[p.pos:], "()") {
 			start := p.pos
 			p.pos += 2
@@ -660,6 +691,19 @@ func (p *parser) application() *Expr {
 		return call
 	}
 	return head
+}
+
+func (p *parser) atRecordFrame() bool {
+	rest := p.s.Text[p.pos:]
+	for _, frame := range []string{":lines", ":nul"} {
+		if tail, ok := strings.CutPrefix(rest, frame); ok {
+			tail = strings.TrimLeft(tail, " \t\r")
+			if tail == "" || strings.ContainsRune("\n#;", rune(tail[0])) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *parser) binaryOperator() (spelling, operation string) {
@@ -957,7 +1001,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 		if command && (commandOperator(b) || b == '\'' || (p.commandGroup && b == ',' && patternDepth == 0)) {
 			break
 		}
-		if p.valuePathStart == start+1 && b == ';' && patternDepth == 0 {
+		if (p.valuePathStart == start+1 || p.kash && !p.delimitedValue) && b == ';' && patternDepth == 0 {
 			break
 		}
 		if b == '{' {
@@ -1026,7 +1070,11 @@ func (p *parser) rawString() *Expr {
 	p.pos = content.End + 1
 	e := p.node(String, start)
 	e.Raw = true
-	e.Parts = []StringPart{{Text: sourceText(p.a, p.s.Text[content.Start:content.End]), Span: content}}
+	value := p.s.Text[content.Start:content.End]
+	if p.indent != "" {
+		value = strings.ReplaceAll(value, "\n"+p.indent, "\n")
+	}
+	e.Parts = []StringPart{{Text: sourceText(p.a, value), Span: content}}
 	return e
 }
 
@@ -1293,7 +1341,7 @@ func (p *parser) number() *Expr {
 	}
 	digits := p.s.Text[unsignedStart:]
 	basePrefixed := strings.HasPrefix(digits, "0x") || strings.HasPrefix(digits, "0o") || strings.HasPrefix(digits, "0b")
-	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && p.s.Text[p.pos] != ',' && p.s.Text[p.pos] != '}' && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
+	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && p.s.Text[p.pos] != ',' && p.s.Text[p.pos] != '}' && p.s.Text[p.pos] != ';' && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		if p.pos > start {
 			b := p.s.Text[p.pos]
 			if strings.ContainsRune("*%<>=!", rune(b)) || strings.HasPrefix(p.s.Text[p.pos:], "??") ||
@@ -2482,16 +2530,39 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		}
 		return
 	}
+	if e.Kind == ValueReturn {
+		b.WriteString("return")
+		if len(e.Items) != 0 {
+			b.WriteByte(' ')
+			writeExpr(b, e.Items[0])
+		}
+		return
+	}
 	if e.Kind == KashReturn || e.Kind == KashExit {
 		if e.Kind == KashExit {
-			b.WriteString("exit ")
+			b.WriteString("exit")
 		} else {
-			b.WriteString("return ")
+			b.WriteString("return")
 		}
-		writeKashValue(b, e.Items[0])
+		if len(e.Items) != 0 {
+			b.WriteByte(' ')
+			writeKashValue(b, e.Items[0])
+		}
 		if e.AcceptExit {
 			b.WriteString(" ?")
 		}
+		return
+	}
+	if e.Kind == KashYield {
+		b.WriteString("yield ")
+		writeExpr(b, e.Items[0])
+		return
+	}
+	if e.Kind == KashSet {
+		b.WriteString("set ")
+		b.WriteString(e.Text)
+		b.WriteString(" = ")
+		writeExpr(b, e.Items[0])
 		return
 	}
 	if e.Kind == KashLet {

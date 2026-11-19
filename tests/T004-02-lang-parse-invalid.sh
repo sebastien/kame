@@ -20,12 +20,8 @@ while IFS=$'\t' read -r name code severity recovery; do
 	if [ "$name" = "file" ] || [ -z "$name" ]; then
 		continue
 	fi
-	lang=script
+	lang=km
 	case "$name" in
-	rule-recipe-*)
-		# Script loading defers recipe diagnostics until the interpreter is known.
-		lang=rule
-		;;
 	expr-*)
 		lang=expr
 		;;

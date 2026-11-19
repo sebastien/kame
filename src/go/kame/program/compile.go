@@ -286,8 +286,8 @@ func (p *Program) NamedTargets() []string {
 // FreeStrings releases a string list returned by a Program query.
 func FreeStrings(a mem.Allocator, values []string) { freeStrings(a, values) }
 
-// CompileMany honors explicit source languages and qualifies authored diagnostics.
-// With no language metadata, it retains legacy combined rule-script parsing.
+// CompileMany parses independently bounded fragments and qualifies authored
+// diagnostics. Fragments without a language use Kame file grammar.
 func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Registry, options Options) CompileResult {
 	if len(sources) == 0 {
 		return CompileResult{}
@@ -303,18 +303,7 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 	}
 	text := cloneText(a, builder.String())
 	builder.Reset()
-	var parsed *script.Script
-	explicitLanguages := false
-	for i := range sources {
-		if sources[i].Lang != "" {
-			explicitLanguages = true
-		}
-	}
-	if explicitLanguages {
-		parsed = parseSourceFragments(a, "<sources>", text, sources, offsets)
-	} else {
-		parsed = script.Parse(a, "<sources>", text)
-	}
+	parsed := parseSourceFragments(a, "<sources>", text, sources, offsets)
 	parsed.Source.Expanded = len(sources) > 1 || sources[0].Offset != 0
 	mem.FreeString(a, text)
 	result := compileSources(a, parsed, registry, options, sources, offsets)
@@ -340,8 +329,8 @@ func parseSourceFragments(a mem.Allocator, name string, text string, sources []C
 	parsed.Alloc, parsed.Source = a, source.New(a, name, text)
 	for i := range sources {
 		input := sources[i]
-		if input.Lang == "" {
-			input.Lang = "kmk"
+		if input.Lang == "" || (input.Lang == "km" && input.SourceDirectory != "") {
+			input.Lang = script.KameFileLanguage
 		}
 		part := parseSourceFragment(a, parsed.Source, input, offsets[i])
 		appendSourceFragment(parsed, part)

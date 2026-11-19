@@ -18,7 +18,7 @@ func TestRunLifecycle(t *testing.T) {
 		{[]string{"do", "run", "--lang", "expr", "-c", "missing"}, 1, "", ""},
 		{[]string{"do", "fmt", "--lang", "expr", "-c", "[1,   2]"}, 0, "[1, 2]", ""},
 		{[]string{"do", "run", "--unknown"}, 2, "", ""},
-		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0, "", ""},
+		{[]string{"do", "plan", "-c", "task build\n\techo ignored", "build"}, 0, "", ""},
 		{[]string{"do", "run", "--lang", "expr", "-c", "(finally! (() => 42) (() => (out! \"cleanup\")))"}, 0, "cleanup", ""},
 	}
 	baseline := runtime.NumGoroutine()

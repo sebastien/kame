@@ -9,13 +9,14 @@ import (
 
 func TestKashRecordLoopParsingAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "records.kash", "for line from ./events :lines\n\twith\n\t\tcontinue\nfor path from $paths :nul\n\tbreak\n")
+	s := script.ParseKash(a, "records.kash", "for line from joinpath \".\" \"events\" :lines\n\twith\n\t\tcontinue\nfor path from choose :nul paths :nul\n\tbreak\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 {
 		t.Fatal("record loops rejected")
 		return
 	}
-	if s.Items[0].Expression.Kind != expr.KashRecords || s.Items[0].Expression.RecordFrame != ":lines" || s.Items[1].Expression.RecordFrame != ":nul" {
+	if s.Items[0].Expression.Kind != expr.KashRecords || s.Items[0].Expression.RecordFrame != ":lines" || s.Items[1].Expression.RecordFrame != ":nul" ||
+		s.Items[0].Expression.Items[0].Items[0].Kind != expr.Application {
 		t.Error("record source/framing lost")
 	}
 	text := script.Format(a, s)
@@ -30,7 +31,7 @@ func TestKashRecordLoopParsingAndFormatting(t *testing.T) {
 func TestKashRecordLoopsRejectAmbiguousHeadersAndCollisions(t *testing.T) {
 	texts := []string{
 		"for x from ./file\n\tbreak", "for x from ./file :bytes\n\tbreak", "for x from ./file $frame\n\tbreak",
-		"for x from ./file ?? ./other :lines\n\tbreak", "for x from cat ./file :lines\n\tbreak", "for x from ./file :lines; true\n\tbreak",
+		"for x from ./file ?? ./other :lines\n\tbreak", "for x from cat ./file | head :lines\n\tbreak", "for x from ./file :lines; true\n\tbreak",
 		"for x from ./file :lines\n\tlet x = 1", "for env from ./file :lines\n\tbreak", "for x from ./file :lines\n",
 	}
 	for i := range texts {

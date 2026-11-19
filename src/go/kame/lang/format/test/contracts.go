@@ -66,12 +66,12 @@ func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	if !definition.OK || definition.Text != "value =\n  [\n\t1, # item\n\t2,\n]\n" {
 		t.Errorf("definition lost its internal comment: %q", definition.Text)
 	}
-	text := "# before\n(f) = 1\n# between\n  (f ())\n# after\n"
+	text := "# before\ndef f () = 1\n# between\n  (f ())\n# after\n"
 	authored := source.New(a, "values.km", text)
 	defer authored.Free(a)
 	parsed := script.ParseFragment(a, authored, "km", 0, len(text))
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 5 || parsed.Items[2].Kind != script.Comment || parsed.Items[2].Span.Start != len("# before\n(f) = 1\n") {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 5 || parsed.Items[2].Kind != script.Comment || parsed.Items[2].Span.Start != len("# before\ndef f () = 1\n") {
 		t.Fatal("value fragment lost comment order or authored spans")
 		return
 	}
@@ -79,7 +79,7 @@ func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	defer mem.FreeString(a, formatted.Text)
 	defer mem.FreeString(a, formatted.Code)
 	defer mem.FreeString(a, formatted.Message)
-	if !formatted.OK || formatted.Text != "# before\n(f) = 1\n# between\n(f ())\n# after\n" {
+	if !formatted.OK || formatted.Text != "# before\ndef f () = 1\n# between\n(f ())\n# after\n" {
 		t.Error("value formatter differs from fragment grammar or drops comments")
 	}
 	languages := []string{"km", "kmk", "kash"}

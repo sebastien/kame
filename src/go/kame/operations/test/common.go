@@ -15,7 +15,7 @@ func TestRejectedArgumentCallableOwnership(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "ownership.km", "(identity value) = value")
+	parsed := script.Parse(a, "ownership.km", "def identity value = value")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"(uppercase {f: [(x => x)]})",
