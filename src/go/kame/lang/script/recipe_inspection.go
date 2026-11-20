@@ -71,18 +71,13 @@ func (s *Script) inspectKashRecipes(items []ScriptItem, defaultKash, builtinKash
 	}
 }
 
-// InspectStandaloneKashRule assumes the default interpreter for a single rule.
-func InspectStandaloneKashRule(a mem.Allocator, authored *source.Source, r *rule.Rule) *Script {
-	return inspectKashRuleBody(a, authored, r, true, true)
-}
-
 func isKashName(value *expr.Expr) bool {
 	value = expr.Ungroup(value)
 	return value != nil && value.Kind == expr.Name && value.Text == "kash"
 }
 
 func inspectKashRuleBody(a mem.Allocator, authored *source.Source, r *rule.Rule, defaultKash, builtinKash bool) *Script {
-	if !r.Declaration || len(r.Body) == 0 || !usesKashForInspection(r, defaultKash, builtinKash) {
+	if len(r.Body) == 0 || !usesKashForInspection(r, defaultKash, builtinKash) {
 		return nil
 	}
 	start := r.Body[0].Span.Start

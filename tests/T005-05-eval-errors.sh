@@ -28,20 +28,20 @@ diag() {
 
 test-step "reference failures"
 diag 'unknown-name' 'REF_MISSING'
-diag '(let [r [a: 1]] r.zzz)' 'REF_MISSING'
-diag '(let [l [1]] l.5)' 'SEL_INDEX_INVALID'
-diag '(@<)' 'SEL_NO_CONTEXT'
+diag '(r => r.zzz) {a: 1}' 'REF_MISSING'
+diag '(l => l.5) [1]' 'SEL_INDEX_INVALID'
+diag 'captures' 'SEL_NO_CONTEXT'
 
 test-step "operation failures"
 diag '(no-such-operation 1)' 'OP_UNKNOWN'
-diag '(count)' 'EXPR_INVALID'
+diag 'count ()' 'EXPR_INVALID'
 diag '(first 1)' 'EXPR_INVALID'
 diag '(join "-" [1])' 'EXPR_INVALID'
 diag '(nth "x" (list 1))' 'EXPR_INVALID'
 
 test-step "special-form failures"
-diag '(let)' 'EXPR_INVALID'
-diag '(def)' 'DEF_INVALID'
+diag 'eval "let x = 1"' 'PARSE_ERR'
+diag 'eval "def x = 1"' 'PARSE_ERR'
 diag '(eval 42)' 'EXPR_INVALID'
 
 test-step "capability failures"
@@ -51,7 +51,10 @@ diag '(sh! "true")' 'CAP_DENIED'
 diag '(write! "x" "y")' 'CAP_DENIED'
 
 test-step "deep mutual recursion reports a diagnostic instead of crashing"
-cli_run -- do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice 1 TEXT))' -c '(walk (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\n" [1 2 3 4 5 6 7 8 9 10]))'
+cli_run -- do run \
+	-c 'def walk value = if value == 0 then 0 else step (value - 1)' \
+	-c 'def step value = walk (value - 1)' \
+	-c '(walk 8192)'
 cli_expect_status 1
 cli_expect_stderr_contains EVAL_DEPTH
 cli_expect_stdout_empty

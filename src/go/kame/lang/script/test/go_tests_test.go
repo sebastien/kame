@@ -19,7 +19,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("DirectKashExpressionsKeepAuthoredBoundaries", func(t *testing.T) { TestDirectKashExpressionsKeepAuthoredBoundaries(legacy.Wrap(t)) })
 	t.Run("FormatScriptIsCanonical", func(t *testing.T) { TestFormatScriptIsCanonical(legacy.Wrap(t)) })
 	t.Run("FormatScriptPreservesBlankLines", func(t *testing.T) { TestFormatScriptPreservesBlankLines(legacy.Wrap(t)) })
-	t.Run("GeneratedDeclarationParsesFormatsAndRetainsName", func(t *testing.T) { TestGeneratedDeclarationParsesFormatsAndRetainsName(legacy.Wrap(t)) })
+	t.Run("GenerateFormatsTypedRuleExpression", func(t *testing.T) { TestGenerateFormatsTypedRuleExpression(legacy.Wrap(t)) })
 	t.Run("KashConditionsUseValueGrammar", func(t *testing.T) { TestKashConditionsUseValueGrammar(legacy.Wrap(t)) })
 	t.Run("KashValueConditionCanContinueAfterOperator", func(t *testing.T) { TestKashValueConditionCanContinueAfterOperator(legacy.Wrap(t)) })
 	t.Run("KashCommandListRejectsLeadingOperators", func(t *testing.T) { TestKashCommandListRejectsLeadingOperators(legacy.Wrap(t)) })

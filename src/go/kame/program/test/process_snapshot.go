@@ -18,7 +18,7 @@ func TestProcessSnapshotsCoalesceAndRejectStaleRequests(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	parsed := script.Parse(a, "live.kmk", "SHELL = kash\nprobe :\n\t(printf x, printf y) |(merge) cat\n")
+	parsed := script.ParseKameFile(a, "live.km", "task probe :\n\t(printf x, printf y) |(merge) cat\n")
 	defer parsed.Free()
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ForwardRequests: true, Directory: ".", Grants: []eval.Grant{{Capability: eval.Run}}})
 	defer compiled.Free(a)

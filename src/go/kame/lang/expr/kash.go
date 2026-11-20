@@ -606,16 +606,19 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			continue
 		}
-		if !hasExecutable(stage) && p.s.Text[p.pos] == ':' {
-			from := p.pos
-			p.pos++
-			keyStart := p.pos
-			for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == keyStart) {
-				p.pos++
+		key, keyEnd := "", p.pos
+		if !hasExecutable(stage) {
+			if p.s.Text[p.pos] == ':' {
+				p.error(p.pos, p.pos+1, "invalid Kash stage setup key")
+				break
 			}
-			key := p.s.Text[keyStart:p.pos]
+			key, keyEnd = CommandSetupKeyPrefix(p.s.Text, p.pos)
+		}
+		if keyEnd != p.pos {
+			from := p.pos
+			p.pos = keyEnd
 			kind, valid := ClassifySetupKey(key)
-			if !valid || kind == SetupAsync || p.pos == len(p.s.Text) || (p.s.Text[p.pos] != ' ' && p.s.Text[p.pos] != '\t' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != '\r') {
+			if !valid || kind == SetupAsync {
 				p.error(from, p.pos, "invalid Kash stage setup key")
 				break
 			}
@@ -630,7 +633,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				break
 			}
 			p.commandSpace(capture)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') {
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == ',' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') {
 				p.error(from, p.pos, "expected Kash stage setup value")
 				break
 			}
@@ -732,7 +735,7 @@ func setupKeyByte(b byte, first bool) bool {
 
 func commandWhitespace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
 
-const kashTemplateWordError = "template interpolation is invalid in a Kash word; use $name or (expr), or quote it to pass it literally"
+const kashTemplateWordError = "template interpolation is invalid in a Kash word; use ${expr}, or quote it to pass it literally"
 
 func kashTemplateWordEnd(text string, start int) int {
 	if start >= len(text) || text[start] != '@' {
@@ -921,6 +924,9 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
 				form = "$("
 				inner = p.commandCapture()
+			} else if strings.HasPrefix(p.s.Text[p.pos:], "${") {
+				form = "${"
+				inner = p.interpolation(form)
 			} else {
 				p.pos++
 				if strings.HasPrefix(p.s.Text[p.pos:], "...") {
@@ -929,11 +935,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				}
 				braced := p.pos < len(p.s.Text) && p.s.Text[p.pos] == '{'
 				if braced {
-					if spread {
-						form = "$...{"
-					} else {
-						form = "${"
-					}
+					form = "$...{"
 					p.pos++
 				}
 				if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) {

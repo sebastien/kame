@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"kame/internal/testing"
 	"kame/lang/ast"
+	"kame/lang/script"
 	"strings"
 )
 
 func TestCompositionASTPreservesFormsAndIncludeFields(t *testing.T) {
-	langs := []string{"km", "kmk"}
+	langs := []string{"km", script.KameFileLanguage}
 	for i := range langs {
 		buffer := bytes.Buffer{}
 		status := ast.WriteAST(&buffer, langs[i], "composition", "include? ./a\\ b.km\nif true\n  include ./c.km\n")

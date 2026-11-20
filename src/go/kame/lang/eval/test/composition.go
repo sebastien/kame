@@ -14,7 +14,7 @@ func TestCompositionRegistrationGuards(t *testing.T) {
 	cases := []string{"include ./a.km\nx = 42\n", "if false\n  include? ./a.km\nx = 42\n"}
 	for i := range cases {
 		engine := core.NewEngine(a)
-		parsed := script.Parse(a, "composition.km", cases[i])
+		parsed := script.ParseKameFile(a, "composition.km", cases[i])
 		checked := eval.CompileChecked(a, engine, parsed, nil)
 		if checked.Program != nil || len(checked.Diagnostics) == 0 || checked.Diagnostics[0].Code != "FEATURE_UNSUP" {
 			t.Error("checked compile accepted unresolved composition")
@@ -34,7 +34,7 @@ func TestCompositionRuntimeReservationAndConditionalArity(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	defer engine.Free()
-	parsed := script.Parse(a, "empty.km", "")
+	parsed := script.ParseKameFile(a, "empty.km", "")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, nil)
 	defer p.Free()

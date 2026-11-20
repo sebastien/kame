@@ -7,7 +7,6 @@ import (
 )
 
 func TestGoSuite(t *testing.T) {
-	t.Run("ActionMigrationPreservesBindingsAndDiagnostics", func(t *testing.T) { TestActionMigrationPreservesBindingsAndDiagnostics(legacy.Wrap(t)) })
 	t.Run("ApplyNativeAndLambdaArguments", func(t *testing.T) { TestApplyNativeAndLambdaArguments(legacy.Wrap(t)) })
 	t.Run("BoundEnvironmentObservesOnlyConsumedNames", func(t *testing.T) { TestBoundEnvironmentObservesOnlyConsumedNames(legacy.Wrap(t)) })
 	t.Run("BoundEnvironmentReadsRespectSnapshotAndGrants", func(t *testing.T) { TestBoundEnvironmentReadsRespectSnapshotAndGrants(legacy.Wrap(t)) })
@@ -65,8 +64,10 @@ func TestGoSuite(t *testing.T) {
 	t.Run("SubToken", func(t *testing.T) { TestSubToken(legacy.Wrap(t)) })
 	t.Run("SubjectLastOperationsAndPipes", func(t *testing.T) { TestSubjectLastOperationsAndPipes(legacy.Wrap(t)) })
 	t.Run("TemplateItemsOwnsInputRows", func(t *testing.T) { TestTemplateItemsOwnsInputRows(legacy.Wrap(t)) })
+	t.Run("UnknownLibraryNamesPreserveLexicalBindings", func(t *testing.T) { TestUnknownLibraryNamesPreserveLexicalBindings(legacy.Wrap(t)) })
 	t.Run("UntrackedCallbackSuspensionReleasesProgress", func(t *testing.T) { TestUntrackedCallbackSuspensionReleasesProgress(legacy.Wrap(t)) })
 	t.Run("WildcardFilteringResumesWithoutRevisitingEarlierEntries", func(t *testing.T) { TestWildcardFilteringResumesWithoutRevisitingEarlierEntries(legacy.Wrap(t)) })
+	t.Run("WildcardDeniedOrPurePredicateLeavesHostIdle", func(t *testing.T) { TestWildcardDeniedOrPurePredicateLeavesHostIdle(legacy.Wrap(t)) })
 	t.Run("WildcardFlagsRejectInvalidCallsBeforeRequests", func(t *testing.T) { TestWildcardFlagsRejectInvalidCallsBeforeRequests(legacy.Wrap(t)) })
 	t.Run("WildcardKindMasksRetainExcludedEntryObservations", func(t *testing.T) { TestWildcardKindMasksRetainExcludedEntryObservations(legacy.Wrap(t)) })
 	t.Run("WildcardUnionPreservesFirstPathProvenance", func(t *testing.T) { TestWildcardUnionPreservesFirstPathProvenance(legacy.Wrap(t)) })

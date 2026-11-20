@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"encoding/hex"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/internal/mem"
@@ -30,6 +31,49 @@ func (p *Program) EvaluateWith(expression *expr.Expr, context *Context) Result {
 	result := p.evaluate(context.Engine, context.Scope, expression, context)
 	attachContextFrames(&result, context)
 	attachSource(&result, context)
+	return result
+}
+
+// EvalText parses one value expression and evaluates it in the current
+// scope with the same grants, phase and execution state as its caller.
+func (c *Context) EvalText(text string) Result {
+	if c.PurePredicate {
+		return failure(c.Run, "KASH_PREDICATE_EFFECT", c.Span, "stream predicates require pure, nonblocking computations")
+	}
+	const name = "<eval>"
+	parsed := expr.Parse(c.Run, name, text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 {
+		d := parsed.Diagnostics[0]
+		diag := diagnostic.Diagnostic{
+			Code: d.Code, Severity: diagnosticSeverity(d.Severity), Message: d.Message,
+			Source: name, SourceText: text, Span: diagnostic.Span{Start: d.Span.Start, End: d.Span.End},
+		}
+		return Result{Diagnostic: diag.Clone(c.Run)}
+	}
+
+	span := c.Span
+	path, sourceName := c.CallPath, c.Source
+	clone := c.CloneCallableAST
+	invocation := invocationPath(c.Run, path, span.Start, span.End)
+	signature := core.ValueSignature(core.Value{Kind: core.String, Text: text})
+	// A retry can reuse work only for the same caller and generated source.
+	c.CallPath = owned(c.Run, invocation+"/eval/"+hex.EncodeToString(signature.Digest[:]))
+	mem.FreeString(c.Run, invocation)
+	c.Source, c.CloneCallableAST = name, true
+	defer func() {
+		mem.FreeString(c.Run, c.CallPath)
+		c.CallPath, c.Source, c.CloneCallableAST = path, sourceName, clone
+	}()
+	result := c.Program.evaluate(c.Engine, c.Scope, parsed.Expr, c)
+	attachSource(&result, c)
+	if result.Diagnostic.Source == name && result.Diagnostic.SourceText == "" {
+		d := result.Diagnostic
+		d.SourceText = text
+		result.Diagnostic = d.Clone(c.Run)
+		d.SourceText = ""
+		d.Free(c.Run)
+	}
 	return result
 }
 
@@ -85,7 +129,7 @@ func attachSource(result *Result, context *Context) {
 	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Source == "" {
 		span := source.Span{Start: result.Diagnostic.Span.Start, End: result.Diagnostic.Span.End}
 		location := context.Program.LocateSource(context.Source, span)
-		if context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
+		if context.EntrySource == nil && context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
 			part := context.Program.SourceParts[context.SourceOrigin-1]
 			location = Location{Source: part.Name, Span: source.Span{Start: span.Start - part.Start + part.Offset, End: span.End - part.Start + part.Offset}}
 			for i := range part.Includes {

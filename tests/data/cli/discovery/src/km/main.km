@@ -1,0 +1,2 @@
+task where
+	(out! "src/km/main.km\n")

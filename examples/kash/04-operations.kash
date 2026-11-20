@@ -1,39 +1,38 @@
 #!/usr/bin/env -S kame do kash
-# Harmless operational examples; all temporary files belong to this invocation.
-prefix = []
-command = [...prefix "printf" "%s\n"]
+let prefix = []
+let command = [...prefix, "printf", "%s\n"]
 $...command "typed argv"
 
-# One terminal LF is framing here because mktemp is a line-oriented producer.
-workspace = (line $(mktemp -d ./kash-example.XXXXXX))
+let workspace = line $(mktemp -d ./kash-example.XXXXXX)
 defer rm -rf $workspace
+let config = {name: "quotes: \" and newline\n", enabled: true}
+(write! ${workspace}/config.json (json config))
 
-config = [name: "quotes: \" and newline\n" enabled: :true]
-(write! @{workspace}/config.json (json config))
+# An accepted nonzero exit keeps its original status.
+let attempt = $?(false ?)
+if attempt.state != :completed or attempt.status != 1
+	(fail! "unexpected status")
+# Collection callbacks run in order.
+(map (item => run! "printf" "%s\n" item) ["first", "second"])
 
-# Accept a chosen nonzero status without a shell fixture.
-def attempt
-	return 1 ?
-result = (attempt)
-(if (and (= result.signal 0) (in? result.status [0 1])) :nil (fail! "unexpected status"))
-
-# Collection callbacks are ordered. Expression statements discard their results.
-(map ([item] (run! "printf" "%s\n" item)) ["first" "second"])
-
-# A native function simulates a transient failure. Paths remain typed arguments,
-# never generated source. Do not retry deployments without establishing safety.
-def probe
-	if test -f ${workspace}/ready
-		return 0
-	touch ${workspace}/ready
-	return 75 ?
-retried = (reduce ([previous number] (if (success? previous) previous (if (and (= previous.signal 0) (= previous.status 75)) (probe) (fail! "non-retryable failure")))) [status: 75 signal: 0] [1 2 3])
-(if (success? retried) :nil (fail! "retry budget exhausted"))
+# Retry only the chosen transient status. Every attempt is a fresh observation.
+def probe workspace
+	if $?(test -f $workspace/ready).ok
+		return
+	touch $workspace/ready
+	sh -c 'exit 75'
+let completed = false
+for attempt_number in [1, 2, 3]
+	let result = $?(probe $workspace)
+	if result.ok
+		set completed = true
+		break
+	if result.signal != 0 or result.status != 75
+		(fail! "non-retryable failure")
+if not completed
+	(fail! "retry budget exhausted")
 printf "recovered\n"
 
-# || runs the fallback after an ordinary unsuccessful process exit.
 false || printf "fallback\n"
-
-# out joins capture; err forwards command stdout to the error sink.
-message = $(printf payload >&out && printf "progress\n" >&err)
+let message = $(printf payload >&out && printf "progress\n" >&err)
 printf "captured=%s\n" $message

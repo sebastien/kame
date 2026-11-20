@@ -9,12 +9,15 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-03 wasm target materialization"
 cd "$CLI_ROOT"
 
-make wasm >/dev/null
+if [ -z "${KAME_WASM:-}" ]; then
+	make wasm >/dev/null
+	export KAME_WASM="$CLI_ROOT/build/wasm/kame.wasm"
+fi
 
 test-step "definition targets materialize against an in-memory host"
 if node --input-type=module - <<'NODE'
 const { readFile } = await import('node:fs/promises');
-const bytes = await readFile('./build/wasm/kame.wasm');
+const bytes = await readFile(process.env.KAME_WASM);
 const { instance } = await (await import('./tests/wasm/instantiate-reactor.mjs')).instantiateReactor(bytes);
 const { exports } = instance;
 const alloc = (size, alignment = 1) => {
@@ -81,5 +84,33 @@ then
 else
 	test-fail "wasm target materialization assertions failed"
 fi
+
+test-step "the first Kame input selects default build grants"
+work="$TMPDIR/grants"
+mkdir -p "$work"
+printf 'task default\n\tprintf built > ./written\n' >"$work/build.km"
+printf 'include ./build.km\n' >"$work/includes.km"
+printf 'VALUE = 1\n' >"$work/values.km"
+runner=(node "$CLI_ROOT/src/js/kame.js" -C "$work")
+if "${runner[@]}" -f includes.km default >"$work/out" 2>"$work/err" &&
+	[ "$(cat "$work/written")" = built ]; then
+	test-ok "rules reached through an explicit source include get build grants"
+else
+	test-fail "included rules could not run"
+	cat "$work/err"
+fi
+rm -f "$work/written"
+reject_run() {
+	local status=0
+	"${runner[@]}" "$@" >"$work/out" 2>"$work/err" || status=$?
+	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err" && [ ! -e "$work/written" ]; then
+		test-ok "process authority stays denied"
+	else
+		test-fail "process authority broadened for $*"
+		cat "$work/err"
+	fi
+}
+reject_run -f values.km -f build.km default
+reject_run --allow-read=. -f build.km default
 
 test-end

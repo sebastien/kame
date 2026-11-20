@@ -458,7 +458,7 @@ executables retain existing process-tree ownership, not a new process quota.
 Ordinary nonzero worker exits obey the graph failure policy. Under collection,
 remaining records and siblings finish; the worker node retains its last nonzero
 exit and the graph uses prepared-node aggregate ordering. Signals and
-launch/transport failures remain fatal. Template `:timeout` covers the entire
+launch/transport failures remain fatal. Template `timeout:` covers the entire
 operator lifetime, including input waits, not each record separately. Workers
 remain invocation-owned under async execution and anonymous producers.
 

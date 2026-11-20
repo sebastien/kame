@@ -67,12 +67,12 @@ test-step "span separates static and dynamic resources"
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.expanded' 'true'
 
-	cli_run -- do span --json --expand -c $'SOURCE = ./src/main.c\ntask inspect : @{SOURCE}\n\ttrue\n' inspect
+	cli_run -- do span --json --expand -c $'SOURCE = ./src/main.c\ntask inspect : ${SOURCE}\n\ttrue\n' inspect
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'
 	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
 
-	cli_run -- do span --json --expand --depth 2 -c $'SOURCE = ./src/main.c\ntask child : @{SOURCE}\n\ttrue\ntask inspect : child\n\ttrue\n' inspect
+	cli_run -- do span --json --expand --depth 2 -c $'SOURCE = ./src/main.c\ntask child : ${SOURCE}\n\ttrue\ntask inspect : child\n\ttrue\n' inspect
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' 'child'
 	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
@@ -81,7 +81,7 @@ test-step "span separates static and dynamic resources"
 	touch expanded/src/one.c expanded/src/two.c
 	(
 		cd expanded
-		cli_run -- do span --json --expand -c $'task inspect : @(wildcard ./src/*.c)\n\tfalse\n' inspect
+		cli_run -- do span --json --expand -c $'task inspect : ${files ./src/*.c}\n\tfalse\n' inspect
 		cli_expect_status 0
 		cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/one.c,./src/two.c'
 	)
@@ -131,12 +131,12 @@ test-step "graph commands select the default target when none is given"
 )
 
 test-step "graph commands without a default fail with the available targets"
-cli_run -- do inputs -c 'task first :'
+cli_run -- do inputs -c 'task first'
 cli_expect_status 1
 cli_expect_stdout_empty
 cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
 
-cli_run -- do span -c 'task first :'
+cli_run -- do span -c 'task first'
 cli_expect_status 1
 cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
 

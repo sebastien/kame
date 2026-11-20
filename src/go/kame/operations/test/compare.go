@@ -14,20 +14,20 @@ func TestStructuralEqualityAndFilterShorthand(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "equality.km", "def identity value = value")
+	parsed := script.ParseKameFile(a, "equality.km", "def identity value = value")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		"(eq [1, [2, nil], {a: 3, b: [4]}] [1.0, [2, nil], {b: [4], a: 3}])",
-		"(is {a: 1, b: 2} {b: 2, a: 1})", "(ne [1, 2] [2, 1])",
-		"(eq [] [])", "(eq (parse-json \"{}\") (parse-json \"{}\"))",
-		"(ne [] (parse-json \"{}\"))", "(ne {a: 1} {b: 1})",
-		"(ne {a: 1} {a: 1, b: 2})", "(ne [1] [1, 2])",
-		"(ne [1] [\"1\"])", "(ne nil false)",
-		"(ne 9007199254740992 9007199254740993)",
-		"(ne 9007199254740993 9007199254740992.0)",
-		"(eq 9007199254740992 9007199254740992.0)",
-		"(ne 9223372036854775807 9223372036854775808.0)",
-		"(eq -9223372036854775808 -9223372036854775808.0)",
+		"(eq? [1, [2, nil], {a: 3, b: [4]}] [1.0, [2, nil], {b: [4], a: 3}])",
+		"(eq? {a: 1, b: 2} {b: 2, a: 1})", "(ne? [1, 2] [2, 1])",
+		"(eq? [] [])", "(eq? (parse-json \"{}\") (parse-json \"{}\"))",
+		"(ne? [] (parse-json \"{}\"))", "(ne? {a: 1} {b: 1})",
+		"(ne? {a: 1} {a: 1, b: 2})", "(ne? [1] [1, 2])",
+		"(ne? [1] [\"1\"])", "(ne? nil false)",
+		"(ne? 9007199254740992 9007199254740993)",
+		"(ne? 9007199254740993 9007199254740992.0)",
+		"(eq? 9007199254740992 9007199254740992.0)",
+		"(ne? 9223372036854775807 9223372036854775808.0)",
+		"(eq? -9223372036854775808 -9223372036854775808.0)",
 		// Ordering preserves exact int64 values, just like equality.
 		"(lt? 9007199254740992 9007199254740993)",
 		"(gt? 9007199254740993 9007199254740992)",
@@ -46,7 +46,7 @@ func TestStructuralEqualityAndFilterShorthand(t *testing.T) {
 		t.Error("filter did not use structural equality")
 	}
 	r.Free(a)
-	invalid := []string{"(eq count nil)", "(ne [0, count] [1])", "(is [] [count])", "(eq {f: count} {other: 1})", "(eq ./a/{name:*} \"a\")", "(eq (resource \"mem://test/a\") nil)", "(filter [] [[count]])", "(eq [(x => x)] [])", "((xs => (eq xs xs)) [identity])", "((xs => (filter xs [xs])) [identity])", "(lt [] [])"}
+	invalid := []string{"(eq? count nil)", "(ne? [0, count] [1])", "(eq? [] [count])", "(eq? {f: count} {other: 1})", "(eq? ./a/{name:*} \"a\")", "(eq? (resource \"mem://test/a\") nil)", "(filter [] [[count]])", "(eq? [(x => x)] [])", "((xs => (eq? xs xs)) [identity])", "((xs => (filter xs [xs])) [identity])", "(lt? [] [])"}
 	for i := range invalid {
 		r = evaluate(t, p, invalid[i])
 		if r.Diagnostic.Code != "EXPR_INVALID" {
@@ -65,9 +65,9 @@ func TestByteEqualityAndHostValueLimits(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "equality.km", "")
+	parsed := script.ParseKameFile(a, "equality.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	function := evaluate(t, p, "eq")
+	function := evaluate(t, p, "eq?")
 	c := eval.Context{Program: p, Scope: p.Scope, Run: a}
 	first := core.Value{Kind: core.Bytes, Bytes: []byte{0, 255, 13, 10}}
 	second := core.Value{Kind: core.Bytes, Bytes: []byte{0, 255, 13, 10}}
@@ -147,21 +147,21 @@ func TestMembershipBlankAndRelativeJoinpath(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "helpers.km", "")
+	parsed := script.ParseKameFile(a, "helpers.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	checks := []string{
-		`(has? "py" ["js", "py"])`, `(not (has? "p" ["py"]))`, `(not (has? nil []))`,
-		`(has? {b: [1], a: nil} [{a: nil, b: [1.0]}])`, `(has? false [nil, false])`,
-		`(has? nil [nil])`, `(not (has? 9007199254740993 [9007199254740992.0]))`,
+		`(in? "py" ["js", "py"])`, `(not (in? "p" ["py"]))`, `(not (in? nil []))`,
+		`(in? {b: [1], a: nil} [{a: nil, b: [1.0]}])`, `(in? false [nil, false])`,
+		`(in? nil [nil])`, `(not (in? 9007199254740993 [9007199254740992.0]))`,
 		`(blank? nil)`, `(blank? "")`, `(not (blank? " "))`, `(not (blank? false))`,
 		`(not (blank? 0))`, `(not (blank? []))`, `(not (blank? {x: nil}))`,
 		`(not (blank? (x => x)))`, `(not (blank? (list (x => x))))`,
-		`(eq (joinpath ./sdk "src") "./sdk/src")`, `(eq (joinpath "." "src") "./src")`,
-		`(eq (joinpath "" "./sdk" ".." "src") "./src")`, `(eq (joinpath "./sdk" "..") "./")`,
-		`(eq (joinpath "./sdk" ".." ".." "src") "../src")`,
-		`(eq (joinpath "../sdk" "src") "../sdk/src")`, `(eq (joinpath "sdk" "src") "sdk/src")`,
-		`(eq (joinpath "/sdk" "src") "/sdk/src")`, `(eq (joinpath ()) "")`,
-		`(eq (split " " "") [""])`,
+		`(eq? (joinpath ./sdk "src") ./sdk/src)`, `(eq? (joinpath "." "src") "./src")`,
+		`(eq? (joinpath "" "./sdk" ".." "src") "./src")`, `(eq? (joinpath "./sdk" "..") "./")`,
+		`(eq? (joinpath "./sdk" ".." ".." "src") "../src")`,
+		`(eq? (joinpath "../sdk" "src") "../sdk/src")`, `(eq? (joinpath "sdk" "src") "sdk/src")`,
+		`(eq? (joinpath "/sdk" "src") "/sdk/src")`, `(eq? (joinpath ()) "")`,
+		`(eq? (split " " "") [""])`,
 	}
 	for i := range checks {
 		r := evaluate(t, p, checks[i])
@@ -170,7 +170,7 @@ func TestMembershipBlankAndRelativeJoinpath(t *testing.T) {
 		}
 		r.Free(a)
 	}
-	invalid := []string{`(has? "py" "py js")`, `(has? count [])`, `(has? 1 [1, count])`, `(has? (x => x) [])`, `(has? 1 [1, {f: (x => x)}])`, `(has? ./a/{name:*} [])`}
+	invalid := []string{`(in? "py" "py js")`, `(in? count [])`, `(in? 1 [1, count])`, `(in? (x => x) [])`, `(in? 1 [1, {f: (x => x)}])`, `(in? ./a/{name:*} [])`}
 	for i := range invalid {
 		r := evaluate(t, p, invalid[i])
 		if r.Diagnostic.Code != "EXPR_INVALID" {

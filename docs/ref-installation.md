@@ -1,30 +1,28 @@
 # Installation and backends
 
-Kame runs as a host-native CLI, a standalone Actually Portable Executable (APE),
-or a JavaScript CLI backed by WebAssembly. The build language is shared; host
-support and prerequisites differ. For a source build, use the
+Kame runs as a native Go CLI on Linux and macOS or as a JavaScript CLI backed
+by WebAssembly. A Windows launcher bundle includes the JavaScript and WASM
+runtime files. For a source build, use the
 [contributor guide](ref-contributing.md).
 
 ## Choose a backend
 
 | Form | Requirements and use |
 | --- | --- |
-| Source-built `dist/kame` | Native compiler toolchain at build time; no Node at runtime. |
-| Released `kame.com` | APE-compatible host; no Node or Make at runtime. On Windows, rename to `kame.exe`. |
+| Source-built `dist/kame` | Go toolchain at build time. The native binary runs without Node. |
+| Released native binary | Linux or macOS, on x86-64 or ARM64. Rename the downloaded binary to `kame`. |
+| Released `kame-windows-x64.zip` | Windows x64 and Node.js 18+. Keep all extracted files together and run `kame.exe`. |
 | Released `kame.js` + `kame.wasm` | Node.js 18+; keep both files adjacent and rename `kame.js` to `kame.mjs`, or set `"type": "module"` in their directory's `package.json`. |
 | npm package | Node.js 18+ and npm; packages the WASM pair. |
 
-APE targets include Linux, macOS, FreeBSD, NetBSD, and Windows on supported
-Cosmopolitan architectures. The pinned Cosmopolitan 4.0.2 APE is incompatible
-with OpenBSD 7.5+: use Node/WASM there. The table describes backend selection,
-not proof of conformance on every host. Check [remaining host validation](../TODO.md)
-and the corresponding CI run before depending on platform-specific behavior.
+Check [remaining host validation](../TODO.md) and the corresponding CI run for
+platform-specific coverage.
 
 ### Automatic cleanup support
 
 Ownership-aware `do clean` is implemented by the native POSIX host, with Linux
 acceptance coverage. It requires descriptor-relative filesystem operations and
-project locking; native/APE Windows currently lacks that support.
+project locking.
 
 The Node/WASM CLI (including npm) rejects `do clean`, including its `--dry-run`,
 `--keep` and `--release` forms, with exit status 1; files and ownership records
@@ -36,8 +34,8 @@ an implicit target or fallback for `do clean`. Cache eviction through
 
 Choose an existing tag from [GitHub Releases](https://github.com/sebastien/kame/releases).
 `VERSION` in a checkout and locally staged assets do not establish publication.
-The seven flat release assets are the three runtime files, `VERSION`,
-`PROVENANCE.json`, `SHA256SUMS`, and `SHA256SUMS.sig`.
+The release contains four native binaries, the Windows bundle, the standalone
+WASM pair, `VERSION`, `PROVENANCE.json`, `SHA256SUMS`, and `SHA256SUMS.sig`.
 
 Obtain the release operator's Ed25519 **public** key in PEM format and verify its
 fingerprint through an independently authenticated channel. No trusted key is
@@ -56,7 +54,9 @@ public_key=${KAME_RELEASE_PUBLIC_KEY:?Set an absolute trusted PEM key path}
 base="https://github.com/sebastien/kame/releases/download/v$version"
 mkdir kame-download
 cd kame-download
-for asset in kame.com kame.js kame.wasm VERSION PROVENANCE.json SHA256SUMS SHA256SUMS.sig; do
+for asset in kame-linux-x86_64 kame-linux-arm64 \
+  kame-darwin-x86_64 kame-darwin-arm64 kame-windows-x64.zip \
+  kame.js kame.wasm VERSION PROVENANCE.json SHA256SUMS SHA256SUMS.sig; do
   curl -fL "$base/$asset" -o "$asset"
 done
 openssl pkeyutl -verify -pubin -inkey "$public_key" -rawin \
@@ -69,11 +69,13 @@ fi
 test "$(cat VERSION)" = "$version"
 ```
 
-Stop on any failure. After verification, on a supported Unix APE host:
+Stop on any failure. After verification, select your platform binary. For
+example, on Linux x86-64:
 
 ```sh
-chmod +x kame.com
-./kame.com --help
+mv kame-linux-x86_64 kame
+chmod +x kame
+./kame --help
 ```
 
 Or run the verified WASM pair:
@@ -102,7 +104,7 @@ KAME_NO_DOWNLOAD=1 bin/kame --help
 ```
 
 The first execution needs curl/wget, OpenSSL, and `sha256sum`/`shasum`.
-`KAME_BACKEND=ape|wasm` overrides automatic selection; WASM also needs Node.
+`KAME_BACKEND=native|wasm` overrides automatic selection. WASM needs Node.
 `KAME_HOME` selects the launcher cache, otherwise XDG data home or
 `$HOME/.local/share/kame` is used. Concrete versions reuse verified cached
 assets offline. `KAME_VERSION=latest` requires a selector download on each

@@ -32,37 +32,22 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
 	} else if lang == "template" {
-		result := template.ParseString(mem.System, name, text)
-		enc.template(result)
+		result := template.ParseDocument(mem.System, name, text, "auto")
+		enc.templateDocument(result)
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
-	} else if lang == "rule" {
-		result := rule.ParseRule(mem.System, name, text)
-		var body *script.Script
-		diagnostics := result.Diagnostics
-		if len(diagnostics) == 0 {
-			body = script.InspectStandaloneKashRule(mem.System, result.Source, result.Rule)
-			if body != nil {
-				diagnostics = body.Diagnostics
-			}
-		}
-		enc.rule(result.Rule, body)
-		failed = enc.diagnostics(diagnostics)
-		body.Free()
-		result.Free()
-	} else {
+	} else if lang == "kash" || lang == "km" || lang == script.KameFileLanguage {
 		var result *script.Script
 		var authored *source.Source
-		if lang == "kash" {
+		if lang == "kash" && !composition {
 			result = script.ParseKash(mem.System, name, text)
-		} else if lang == "km" || lang == script.KameFileLanguage {
+		} else {
 			authored = source.New(mem.System, name, text)
 			result = script.ParseFragment(mem.System, authored, lang, 0, len(text))
 			if !composition {
+				result.ValidateAssignments()
 				script.InspectKashRecipes(result)
 			}
-		} else {
-			result = script.Parse(mem.System, name, text)
 		}
 		enc.script(result)
 		failed = enc.diagnostics(result.Diagnostics)
@@ -70,6 +55,9 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 		if authored != nil {
 			authored.Free(mem.System)
 		}
+	} else {
+		enc.Null()
+		failed = enc.diagnostics([]source.Diagnostic{{Code: "OPT_VALUE_INVALID", Severity: source.Error, Message: "invalid language: " + lang}})
 	}
 	enc.finish()
 	if enc.err() != nil {
@@ -163,7 +151,15 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.pattern(value)
 		return
 	}
-	e.node(exprKind(value.Kind), value.Span)
+	kind := exprKind(value.Kind)
+	if value.Kind == expr.Path && value.PathGlob {
+		kind = "path-pattern"
+	}
+	e.node(kind, value.Span)
+	if value.RuleSyntax != nil {
+		e.Str("declaration")
+		e.rule(value.RuleSyntax.Declaration.(*rule.Rule), nil)
+	}
 	if value.Kind == expr.CommandMux {
 		e.Str("operator")
 		e.Str(value.Text)
@@ -303,7 +299,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashLet || value.Kind == expr.KashSet || value.Kind == expr.KashComment {
+	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashLet || value.Kind == expr.KashSet || value.Kind == expr.KashComment {
 		e.Str("text")
 		e.Str(value.Text)
 	}
@@ -483,7 +479,14 @@ func (e *astEncoder) expr(value *expr.Expr) {
 }
 
 func (e *astEncoder) pattern(value *expr.Expr) {
-	e.node("pattern", value.Span)
+	kind := "pattern"
+	if value.Kind == expr.Path {
+		kind = "path-pattern"
+		if value.Pattern.References != 0 {
+			kind = "path-template"
+		}
+	}
+	e.node(kind, value.Span)
 	e.Str("text")
 	e.Str(value.Text)
 	e.Str("parts")
@@ -495,7 +498,7 @@ func (e *astEncoder) pattern(value *expr.Expr) {
 		e.Str(patternPartKind(p.Kind))
 		e.Str("span")
 		e.span(p.Span)
-		if p.Kind == expr.PatternLiteral {
+		if p.Kind == expr.PatternLiteral || p.Kind == expr.PatternGlob {
 			e.Str("text")
 			e.Str(p.Text)
 		}
@@ -552,6 +555,9 @@ func patternPartKind(k expr.PatternPartKind) string {
 	if k == expr.PatternMatcher {
 		return "matcher"
 	}
+	if k == expr.PatternGlob {
+		return "glob"
+	}
 	return "reference"
 }
 
@@ -565,6 +571,9 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 func exprKind(k expr.Kind) string {
 	if k == expr.KashSet {
 		return "set"
+	}
+	if k == expr.RuleValue {
+		return "rule-value"
 	}
 	if k == expr.KashYield {
 		return "yield"
@@ -713,9 +722,6 @@ func exprKind(k expr.Kind) string {
 	if k == expr.Path {
 		return "path"
 	}
-	if k == expr.Selector {
-		return "selector"
-	}
 	if k == expr.Reference {
 		return "reference"
 	}
@@ -776,6 +782,14 @@ func (e *astEncoder) template(value *template.String) {
 	e.EndArray()
 	e.EndObject()
 }
+
+func (e *astEncoder) templateDocument(value *template.Document) {
+	e.node("template", value.Root.Span)
+	e.Str("body")
+	e.expr(value.Root)
+	e.EndObject()
+}
+
 func templateKind(k template.PartKind) string {
 	if k == template.Literal {
 		return "literal"
@@ -786,10 +800,7 @@ func templateKind(k template.PartKind) string {
 	if k == template.Reference {
 		return "reference"
 	}
-	if k == template.Tool {
-		return "tool"
-	}
-	return "selector"
+	return "tool"
 }
 
 func (e *astEncoder) rule(value *rule.Rule, body *script.Script) {
@@ -805,14 +816,6 @@ func (e *astEncoder) rule(value *rule.Rule, body *script.Script) {
 	if value.Always {
 		e.Str("always")
 		e.Bool(true)
-	}
-	if len(value.Environment) != 0 {
-		e.Str("environment")
-		e.BeginArray()
-		for i := range value.Environment {
-			e.Str(value.Environment[i].Value)
-		}
-		e.EndArray()
 	}
 	e.Str("header")
 	e.span(value.Header)
@@ -898,6 +901,10 @@ func (e *astEncoder) rule(value *rule.Rule, body *script.Script) {
 		e.Str("bodyStatements")
 		e.scriptItems(body.Items)
 	}
+	if value.BodyDoc != nil {
+		e.Str("bodyDocument")
+		e.templateDocument(value.BodyDoc)
+	}
 	e.Str("body")
 	e.BeginArray()
 	for i := range value.Body {
@@ -907,8 +914,10 @@ func (e *astEncoder) rule(value *rule.Rule, body *script.Script) {
 		e.Str(line.Text)
 		e.Str("span")
 		e.span(line.Span)
-		e.Str("template")
-		e.template(line.Template)
+		if value.BodyDoc == nil {
+			e.Str("template")
+			e.template(line.Template)
+		}
 		e.EndObject()
 	}
 	e.EndArray()
@@ -1020,10 +1029,6 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 		if item.Module != nil {
 			e.moduleDeclaration(item.Module)
 		}
-		if item.Kind == script.Generate && item.GenerateName != "" {
-			e.Str("name")
-			e.Str(item.GenerateName)
-		}
 		if item.Definition != nil {
 			e.Str("definition")
 			e.definition(item.Definition)
@@ -1118,15 +1123,6 @@ func scriptKind(k script.ScriptItemKind) string {
 	}
 	if k == script.Composition {
 		return "composition"
-	}
-	if k == script.When {
-		return "when"
-	}
-	if k == script.Otherwise {
-		return "otherwise"
-	}
-	if k == script.EndWhen {
-		return "end-when"
 	}
 	if k == script.Command {
 		return "command"

@@ -7,7 +7,7 @@ test-step "build native and WASM artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 for backend in native wasm; do
 	test-step "$backend native data acceptance"
 	if python3 tests/native-data.py "$CLI_ROOT" "$backend" "$CLI_BIN" values; then test-ok "$backend typed data and symlinks"; else test-fail "$backend native data acceptance failed"; fi

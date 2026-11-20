@@ -7,120 +7,125 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
   # Bash supplies different '_' and SHLVL values for foreground/background commands.
   # Keep the child environment equal when comparing a warm build with a watch.
-  if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$CLI_ROOT/dist/kame.js"); fi
+  if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$wasm_wrapper"); fi
+  # Explicit grants select the unified runner. Give those cache checks a
+  # terminal on stdin so they do not supply an opaque build input.
+  cache_runner=(cli_with_terminal_stdin "${runner[@]}")
   test-step "$backend Kame environment references share named read authority"
-  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '[env.NO_COLOR (env "NO_COLOR") "@{env.NO_COLOR}" (let [read-env env] (read-env "NO_COLOR"))]' > "$project/out" 2> "$project/err"
-  if [ "$(cat "$project/out")" = '["two words" "two words" "two words" "two words"]' ]; then test-ok "$backend expression, interpolation and existing env operation agree"; else test-fail "$backend environment reference values"; fi
-  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '(let [env [NO_COLOR: "local"]] [env.NO_COLOR (get "NO_COLOR" env)])' > "$project/out" 2> "$project/err"
-  if [ "$(cat "$project/out")" = '["two words" "local"]' ]; then test-ok "$backend environment namespace is distinct from lexical record access"; else test-fail "$backend lexical binding changed environment authority"; fi
-  env -u NO_COLOR "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env.NO_COLOR > "$project/out" 2> "$project/err"
-  if [ "$(cat "$project/out")" = :nil ]; then test-ok "$backend missing environment reference yields nil"; else test-fail "$backend missing environment reference"; fi
-  NO_COLOR= "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env.NO_COLOR > "$project/out" 2> "$project/err"
+  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '[env/NO_COLOR, env "NO_COLOR", "${env/NO_COLOR}", (read-env => read-env "NO_COLOR") env]' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '["two words", "two words", "two words", "two words"]' ]; then test-ok "$backend expression, interpolation and existing env operation agree"; else test-fail "$backend environment reference values"; fi
+  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '(env => [env/NO_COLOR, env.NO_COLOR]) {NO_COLOR: "local"}' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '["two words", "local"]' ]; then test-ok "$backend environment namespace is distinct from lexical record access"; else test-fail "$backend lexical binding changed environment authority"; fi
+  env -u NO_COLOR "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env/NO_COLOR > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = nil ]; then test-ok "$backend missing environment reference yields nil"; else test-fail "$backend missing environment reference"; fi
+  NO_COLOR= "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env/NO_COLOR > "$project/out" 2> "$project/err"
   if [ "$(cat "$project/out")" = '""' ]; then test-ok "$backend empty environment reference stays distinct from nil"; else test-fail "$backend empty environment reference"; fi
-  for source in 'env.NO_COLOR' '(? env.NO_COLOR "fallback")' '"@{env.NO_COLOR}"' 'env.OTHER_COLOR'; do
+  for source in 'env/NO_COLOR' 'env/NO_COLOR ?? "fallback"' '"${env/NO_COLOR}"' 'env/OTHER_COLOR'; do
     status=0
     NO_COLOR=reference-secret OTHER_COLOR=reference-secret "${runner[@]}" do run --lang expr --allow-env=UNRELATED_REFERENCE -c "$source" > "$project/out" 2> "$project/err" || status=$?
     if [ "$status" = 1 ] && grep -q CAP_DENIED "$project/err" && [ ! -s "$project/out" ] && ! grep -q reference-secret "$project/err"; then test-ok "$backend denied reference remains protected"; else test-fail "$backend environment reference bypassed authority"; fi
   done
-  "${runner[@]}" do run --lang expr -c '(if :false env.NO_COLOR "lazy")' > "$project/out" 2> "$project/err"
+  "${runner[@]}" do run --lang expr -c 'if false then env/NO_COLOR else "lazy"' > "$project/out" 2> "$project/err"
   if [ "$(cat "$project/out")" = '"lazy"' ]; then test-ok "$backend unselected environment reference performs no read"; else test-fail "$backend eager environment reference"; fi
-  for language in km kmk; do
-    source=$'COLOR = env.NO_COLOR\n(out! COLOR)'
+  for source_kind in fragment task; do
+    source=$'COLOR = env/NO_COLOR\n(out! COLOR)'
     entries=()
-    if [ "$language" = kmk ]; then source=$'COLOR = env.NO_COLOR\nshow : ; [shell: kash]\n\t(out! COLOR)'; entries=(show); fi
-    NO_COLOR='two words' timeout 30 "${runner[@]}" do run --lang "$language" --allow-env=NO_COLOR -C "$project" -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
-    if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend $language definitions read named environment"; else test-fail "$backend $language environment reference"; fi
+    if [ "$source_kind" = task ]; then source=$'COLOR = env/NO_COLOR\ntask show\n\t(out! COLOR)'; entries=(show); fi
+    NO_COLOR='two words' timeout 30 "${runner[@]}" do run --lang km --allow-env=NO_COLOR -C "$project" -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
+    if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend $source_kind definitions read named environment"; else test-fail "$backend $source_kind environment reference"; fi
   done
-  NO_COLOR='two words' "${runner[@]}" do render --allow-env=NO_COLOR --comment plain -c '@{env.NO_COLOR}' > "$project/out" 2> "$project/err"
+  NO_COLOR='two words' "${runner[@]}" do render --allow-env=NO_COLOR --comment plain -c '@{env/NO_COLOR}' > "$project/out" 2> "$project/err"
   if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend document interpolation reads named environment"; else test-fail "$backend template environment reference"; fi
   status=0
-  NO_COLOR=reference-secret "${runner[@]}" do plan --json --allow-env=NO_COLOR -c '@{env.NO_COLOR} :' > "$project/out" 2> "$project/err" || status=$?
-  if [ "$status" = 1 ] && grep -Eq 'PHASE_INVALID|CAP_DENIED' "$project/out" && ! grep -q reference-secret "$project/out" "$project/err"; then test-ok "$backend environment references cannot read during output registration"; else test-fail "$backend registration widened environment authority"; fi
-  cat > "$project/Makefile.kmk" <<'KMK'
-root : child local ; env "MODE=first" "MODE=debug" "MESSAGE=spaces; equal=ok"
-child :
+  NO_COLOR=reference-secret "${runner[@]}" do plan --json --allow-env=UNRELATED_REFERENCE -c 'rule ${env/NO_COLOR}' > "$project/out" 2> "$project/err" || status=$?
+  if [ "$status" = 1 ] && grep -q CAP_DENIED "$project/out" && ! grep -q reference-secret "$project/out" "$project/err"; then test-ok "$backend output registration enforces named environment read grants"; else test-fail "$backend registration widened environment authority"; fi
+  cat > "$project/Makefile.km" <<'KM'
+SHELL = "sh"
+task root : child local ; {env: {MODE: "debug", MESSAGE: "spaces; equal=ok"}}
+task child :
 	printf '%s|%s' "$MODE" "$MESSAGE" > child-log
-local : ; env "MODE=release"
+task local : ; {env: {MODE: "release"}}
 	printf '%s|%s' "$MODE" "$MESSAGE" > local-log
-plain :
+task plain :
 	printf '%s' "$MODE" > plain-log
-cache-root : cached ; env "MODE=debug"
-task cached :
+task cache-root : cache-entry ; {env: {MODE: "debug"}}
+task cached cache-entry :
 	printf %s "$MODE" > cache-log; printf x >> cache-runs
-other-cache-root : cached ; env "MODE=release"
-equivalent-root : equivalent-a equivalent-b
-equivalent-a : equivalent-shared ; env "A=one" "B=two"
-equivalent-b : equivalent-shared ; env "B=two" "A=one"
-equivalent-shared :
+task other-cache-root : cache-entry ; {env: {MODE: "release"}}
+task equivalent-root : equivalent-a equivalent-b
+task equivalent-a : equivalent-shared ; {env: {A: "one", B: "two"}}
+task equivalent-b : equivalent-shared ; {env: {B: "two", A: "one"}}
+task equivalent-shared :
 	printf '%s|%s' "$A" "$B" > equivalent-log; printf x >> equivalent-runs
-conflict-root : conflict-a conflict-b
-conflict-a : shared ; env "MODE=debug"
-conflict-b : shared ; env "MODE=release"
-shared :
+task conflict-root : conflict-a conflict-b
+task conflict-a : shared ; {env: {MODE: "debug"}}
+task conflict-b : shared ; {env: {MODE: "release"}}
+task shared :
 	sleep 0.1; printf %s "$MODE" > shared-log
-dynamic-root : ; env "MODE=dynamic"
-	printf '%s' @(text (read ./dynamic-input)) > dynamic-log
-./dynamic-input : ./input
-	printf '%s' "$MODE" > @>
-retry : ; env "MODE=retry"
+task dynamic-root : ; {env: {MODE: "dynamic"}}
+	printf '%s' @{text (read ./dynamic-input)} > dynamic-log
+rule ./dynamic-input : ./input
+	printf '%s' "$MODE" > @{outputs.0}
+task retry : ; {env: {MODE: "retry"}}
 	printf %s "$MODE" >> retry-log; if [ ! -e retry-marker ]; then touch retry-marker; exit 1; fi
-./output : ./input ; env "MODE=debug"
-	printf %s "$MODE" > @>; printf x >> file-runs
+rule ./output : ./input ; {env: {MODE: "debug"}}
+	printf %s "$MODE" > @{outputs.0}; printf x >> file-runs
 SETTING = "authored"
 NEXT = (env "NEXT")
-MODE = env.MODE
-(mode) = (str MODE)
-VALUE = (mode)
-definition-root : definition-cached ; env "MODE=debug" "KAME_SETTING=debug"
-release-definition-root : definition-cached ; env "MODE=release" "KAME_SETTING=release"
-task definition-cached :
+MODE = env/MODE
+def mode () = str MODE
+VALUE = (mode ())
+task definition-root : definition-cached ; {env: {MODE: "debug", KAME_SETTING: "debug"}}
+task release-definition-root : definition-cached ; {env: {MODE: "release", KAME_SETTING: "release"}}
+task cached definition-cached :
 	printf '%s|%s' '@{VALUE}' '@{SETTING}' > definition-log; printf x >> definition-runs
-definition-select : @{NEXT} ; env "NEXT=definition-selected" "MODE=chosen"
-definition-selected :
+task definition-select : ${NEXT} ; {env: {NEXT: "definition-selected", MODE: "chosen"}}
+task definition-selected :
 	printf %s @{VALUE} > definition-selected-log
-definition-denied : ; env "MODE=secret"
+task definition-denied : ; {env: {MODE: "secret"}}
 	printf %s @{VALUE}; touch forbidden-definition
 GENERATED = (text (read ./definition-input))
-definition-generated-root : ; env "MODE=generated"
+task definition-generated-root : ; {env: {MODE: "generated"}}
 	printf %s @{GENERATED} > definition-generated-log
-./definition-input :
-	printf %s "$MODE" > @>
+rule ./definition-input :
+	printf %s "$MODE" > @{outputs.0}
 COLLECTED = (sh! "printf %s \"$MODE\"; printf captured-error >&2")
 COLLECTED_VALUE = (text (get "stdout" COLLECTED))
-collected-root : collected-cached ; env "MODE=debug"
-collected-release-root : collected-cached ; env "MODE=release"
-task collected-cached : ; [shell: kash]
+task collected-root : collected-cached ; {env: {MODE: "debug"}}
+task collected-release-root : collected-cached ; {env: {MODE: "release"}}
+task cached collected-cached : ; {shell: kash}
 	printf %s $COLLECTED_VALUE > collected-log
 	printf x >> collected-runs
-kash-collected : ; [shell: kash env: [MODE: "kash"]]
-	value = (sh! "printf %s \"$MODE\"")
+task kash-collected : ; {shell: kash, env: {MODE: "kash"}}
+	let value = (sh! "printf %s \"$MODE\"")
 	printf %s (text (get "stdout" value))
-collected-denied : ; [shell: kash env: [MODE: "secret"]]
-	value = (sh! "touch forbidden-collected")
+task collected-denied : ; {shell: kash, env: {MODE: "secret"}}
+	let value = (sh! "touch forbidden-collected")
 	(out! (get "status" value))
 BAD = (sh! "touch forbidden-phase")
-definition-phase : @{BAD} ; env "MODE=debug"
+task definition-phase : ${BAD} ; {env: {MODE: "debug"}}
 CYCLE = (str CYCLE)
-definition-cycle :
+task definition-cycle :
 	printf %s @{CYCLE}; touch forbidden-cycle
-read-root : read-cached ; env "MODE=debug"
-release-read-root : read-cached ; env "MODE=release"
-task read-cached :
-	printf %s @(env "MODE") > read-log; printf x >> read-runs
-select-root : @(env "NEXT") ; env "NEXT=selected" "MODE=chosen"
-selected :
-	printf %s @(env "MODE") > select-log
-ambient-selected :
+task read-root : read-cached ; {env: {MODE: "debug"}}
+task release-read-root : read-cached ; {env: {MODE: "release"}}
+task cached read-cached :
+	printf %s @{env "MODE"} > read-log; printf x >> read-runs
+task select-root : ${env "NEXT"} ; {env: {NEXT: "selected", MODE: "chosen"}}
+task selected :
+	printf %s @{env "MODE"} > select-log
+task ambient-selected :
 	touch forbidden-selection
-read-denied : ; env "MODE=secret"
-	printf %s @(env "MODE"); touch forbidden-read
-KMK
+task read-denied : ; {env: {MODE: "secret"}}
+	printf %s @{env "MODE"}; touch forbidden-read
+KM
  test-step "$backend inherits values and applies local overrides"
  MODE=ambient "${runner[@]}" -C "$project" root plain > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/child-log")" = 'debug|spaces; equal=ok' ] && [ "$(cat "$project/local-log")" = 'release|spaces; equal=ok' ] && [ "$(cat "$project/plain-log")" = ambient ]; then test-ok "$backend inheritance, override and root isolation"; else test-fail "$backend scoped values"; fi
@@ -131,40 +136,40 @@ KMK
  MODE=ambient "${runner[@]}" -C "$project" other-cache-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/cache-runs")" = xx ] && [ "$(cat "$project/cache-log")" = release ]; then test-ok "$backend changed inherited environment invalidates cache"; else test-fail "$backend inherited cache identity"; fi
  test-step "$backend scopes expression environment reads and cache identity"
- MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk read-root > "$project/out" 2> "$project/err"
- MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk read-root > "$project/out" 2> "$project/err"
+ MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km read-root > "$project/out" 2> "$project/err"
+ MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km read-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/read-log")" = debug ] && [ "$(cat "$project/read-runs")" = x ]; then test-ok "$backend expression reads inherit and reuse the scoped cache"; else test-fail "$backend expression environment or cache reuse"; fi
- MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk release-read-root > "$project/out" 2> "$project/err"
+ MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km release-read-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/read-log")" = release ] && [ "$(cat "$project/read-runs")" = xx ]; then test-ok "$backend scoped expression cache invalidates on changed values"; else test-fail "$backend expression cache leaked earlier scoped values"; fi
  test-step "$backend resolves dynamic prerequisites using scoped expression reads"
- NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE --allow-env=NEXT -C "$project" -f Makefile.kmk select-root > "$project/out" 2> "$project/err"
+ NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE --allow-env=NEXT -C "$project" -f Makefile.km select-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/select-log")" = chosen ] && [ ! -e "$project/forbidden-selection" ]; then test-ok "$backend dynamic prerequisite selection uses target environment"; else test-fail "$backend dynamic prerequisite used ambient environment"; fi
  test-step "$backend preserves grants for scoped expression reads"
  if MODE=ambient "${runner[@]}" -C "$project" read-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped expression bypassed environment grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-read" ]; then test-ok "$backend denied scoped reads have no recipe effects"; else test-fail "$backend scoped expression grant diagnostic"; fi
  test-step "$backend isolates lazy definitions, functions and KAME_NAME configuration"
- KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
- KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
+ KAME_SETTING=ambient MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km definition-root > "$project/out" 2> "$project/err"
+ KAME_SETTING=ambient MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km definition-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/definition-log")" = 'debug|debug' ] && [ "$(cat "$project/definition-runs")" = x ]; then test-ok "$backend scoped definitions reuse equivalent snapshots"; else test-fail "$backend scoped definition cache or value"; fi
- KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk release-definition-root > "$project/out" 2> "$project/err"
+ KAME_SETTING=ambient MODE=ambient "${cache_runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.km release-definition-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/definition-log")" = 'release|release' ] && [ "$(cat "$project/definition-runs")" = xx ]; then test-ok "$backend scoped definitions invalidate changed snapshots"; else test-fail "$backend scoped definition changed value"; fi
- "${runner[@]}" --allow-run --allow-env=MODE --define 'SETTING=@(missing)=literal' -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
+ "${cache_runner[@]}" --allow-run --allow-env=MODE --define 'SETTING=@(missing)=literal' -C "$project" -f Makefile.km definition-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/definition-log")" = 'debug|@(missing)=literal' ]; then test-ok "$backend explicit literal definitions win over scoped KAME_NAME"; else test-fail "$backend scoped definition precedence"; fi
- NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=NEXT --allow-env=MODE -C "$project" -f Makefile.kmk definition-select > "$project/out" 2> "$project/err"
+ NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=NEXT --allow-env=MODE -C "$project" -f Makefile.km definition-select > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/definition-selected-log")" = chosen ]; then test-ok "$backend dynamic inputs traverse scoped definitions"; else test-fail "$backend dynamic definition context"; fi
  if "${runner[@]}" -C "$project" definition-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped definitions bypassed grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-definition" ]; then test-ok "$backend scoped definitions retain grants before effects"; else test-fail "$backend definition denial"; fi
  "${runner[@]}" -C "$project" definition-generated-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/definition-generated-log")" = generated ]; then test-ok "$backend produced files reached through definitions inherit environment"; else test-fail "$backend generated definition prerequisite context"; fi
- if "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk definition-phase > "$project/out" 2> "$project/err"; then test-fail "$backend launched definition during input resolution"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden-phase" ]; then test-ok "$backend scoped definitions keep dynamic inputs read-only"; else test-fail "$backend scoped definition phase"; fi
+ if "${runner[@]}" --allow-run -C "$project" -f Makefile.km definition-phase > "$project/out" 2> "$project/err"; then test-fail "$backend launched definition during input resolution"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden-phase" ]; then test-ok "$backend scoped definitions keep dynamic inputs read-only"; else test-fail "$backend scoped definition phase"; fi
  if "${runner[@]}" -C "$project" definition-cycle > "$project/out" 2> "$project/err"; then test-fail "$backend accepted scoped definition cycle"; elif rg -q DEP_CYCLE "$project/err" && [ ! -e "$project/forbidden-cycle" ]; then test-ok "$backend scoped definition cycles fail without effects"; else test-fail "$backend scoped cycle diagnostic"; fi
  test-step "$backend forwards target environments into collected shell requests"
-  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
-  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${cache_runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.km collected-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${cache_runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.km collected-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/collected-log")" = debug ] && [ "$(cat "$project/collected-runs")" = x ]; then test-ok "$backend collected shell inherits target snapshot and cache identity"; else test-fail "$backend collected shell scoped cache"; fi
-  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-release-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${cache_runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.km collected-release-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/collected-log")" = release ] && [ "$(cat "$project/collected-runs")" = xx ]; then test-ok "$backend collected shell changes with inherited environment"; else test-fail "$backend collected shell changed context"; fi
- MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk kash-collected > "$project/out" 2> "$project/err"
+ MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.km kash-collected > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/out")" = kash ]; then test-ok "$backend collected shell in structured recipes inherits metadata"; else test-fail "$backend structured collected shell snapshot"; fi
- if "${runner[@]}" --allow-env=MODE -C "$project" -f Makefile.kmk collected-denied > "$project/out" 2> "$project/err"; then test-fail "$backend collected shell bypassed run grant"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-collected" ]; then test-ok "$backend collected shell retains run policy before effects"; else test-fail "$backend collected shell denial"; fi
+ if "${runner[@]}" --allow-env=MODE -C "$project" -f Makefile.km collected-denied > "$project/out" 2> "$project/err"; then test-fail "$backend collected shell bypassed run grant"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-collected" ]; then test-ok "$backend collected shell retains run policy before effects"; else test-fail "$backend collected shell denial"; fi
  test-step "$backend shares equivalent environments regardless of assignment order"
  MODE=ambient "${runner[@]}" -C "$project" equivalent-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/equivalent-log")" = 'one|two' ] && [ "$(cat "$project/equivalent-runs")" = x ]; then test-ok "$backend equivalent environments share a prerequisite"; else test-fail "$backend assignment ordering changed environment identity"; fi
@@ -178,11 +183,11 @@ KMK
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/file-runs")" = x ]; then test-ok "$backend unchanged scoped file is fresh"; else test-fail "$backend unchanged scoped file rebuilt"; fi
  test-step "$backend rebuilds when its scoped environment changes"
- sed -i 's/env "MODE=debug"$/env "MODE=release"/' "$project/Makefile.kmk"
+ sed -i '/^rule \.\/output /s/{MODE: "debug"}/{MODE: "release"}/' "$project/Makefile.km"
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/file-runs")" = xx ] && [ "$(cat "$project/output")" = release ]; then test-ok "$backend changed file environment rebuilds"; else test-fail "$backend changed file environment stayed fresh"; fi
  test-step "$backend rebuilds after removing the scoped environment"
- sed -i 's/\(\.\/output : \.\/input\) ; env "MODE=release"/\1/' "$project/Makefile.kmk"
+ sed -i 's/\(\.\/output : \.\/input\) ; {env: {MODE: "release"}}/\1/' "$project/Makefile.km"
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/file-runs")" = xxx ] && [ "$(cat "$project/output")" = ambient ]; then test-ok "$backend scope removal rebuilds once"; else test-fail "$backend scope removal freshness"; fi
@@ -198,36 +203,36 @@ KMK
   test-step "$backend validates file bytes rather than timestamps"
   signatures="$project/signatures"
   mkdir -p "$signatures"
-  cat > "$signatures/Makefile.kmk" <<'KMK'
-SHELL = /bin/sh
+  cat > "$signatures/Makefile.km" <<'KM'
+SHELL = "/bin/sh"
 VALUE ?= "baseline"
 CONTENT = (text (read "./definition-input"))
-./output : ./input
-	cp @< @>; printf x >> runs
-./override : ./input
-	printf %s @{VALUE} > @>
-./discovered : ./input ; [shell: kash]
-	(yield! (text (read "./extra")))
-./constant : ./input
-	printf fixed > @>; printf x >> child-runs
-./downstream : ./constant
-	cp @< @>; printf x >> parent-runs
-task read-task : ./input ; [shell: kash]
+rule ./output : ./input
+	cp @{inputs.0} @{outputs.0}; printf x >> runs
+rule ./override : ./input
+	printf %s @{VALUE} > @{outputs.0}
+rule ./discovered : ./input ; {shell: kash}
+	return (text (read "./extra"))
+rule ./constant : ./input
+	printf fixed > @{outputs.0}; printf x >> child-runs
+rule ./downstream : ./constant
+	cp @{inputs.0} @{outputs.0}; printf x >> parent-runs
+task cached read-task : ./input ; {shell: kash}
 	printf %s (text (read "./extra")) > task-output
 	printf x >> task-runs
-task branch-task : ; [shell: kash]
+task cached branch-task : ; {shell: kash}
 	printf %s (text (read (text (read "./selection")))) > branch-output
 	printf x >> branch-runs
-./branch-file : ; [shell: kash]
+rule ./branch-file : ; {shell: kash}
 	printf %s (text (read (text (read "./selection")))) > branch-file
 	printf x >> branch-file-runs
-task definition-task : ; [shell: kash]
+task cached definition-task : ; {shell: kash}
 	printf %s $CONTENT > definition-output
 	printf x >> definition-runs
-./definition-file : ; [shell: kash]
+rule ./definition-file : ; {shell: kash}
 	printf %s $CONTENT > definition-file
 	printf x >> definition-file-runs
-KMK
+KM
   printf A > "$signatures/input"
   printf A > "$signatures/extra"
   "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
@@ -307,28 +312,27 @@ KMK
   test-step "$backend fingerprints binary environment reads for shell and Kash"
   child_env="$project/child-environment"
   mkdir -p "$child_env"
-  cat > "$child_env/Makefile.kmk" <<'KMK'
-./shell-file : ./input
-	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> shell-file-runs
-task shell-task : ./input
+  cat > "$child_env/Makefile.km" <<'KM'
+SHELL = "sh"
+rule ./shell-file : ./input
+	printf %s "$ENV_SIGNATURE_BINARY" > @{outputs.0}; printf x >> shell-file-runs
+task cached shell-task : ./input
 	printf %s "$ENV_SIGNATURE_BINARY" > shell-task; printf x >> shell-task-runs
-./kash-file : ./input ; [shell: kash]
+rule ./kash-file : ./input ; {shell: kash}
 	sh ./binary-read kash-file kash-file-runs
-task kash-task : ./input ; [shell: kash]
+task cached kash-task : ./input ; {shell: kash}
 	sh ./binary-read kash-task kash-task-runs
-task pure-task : ./input ; [shell: kash]
+task cached pure-task : ./input ; {shell: kash}
 	(out! "pure")
-./pure-file : ./input ; [shell: kame]
-	"pure"
-./overridden : ./input ; env "ENV_SIGNATURE_BINARY=fixed"
-	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> overridden-runs
-READ_ENV = env.ENV_SIGNATURE_BINARY
-(indirect-env) = (str READ_ENV)
-task pure-read-task : ./input ; [shell: kash]
-	(out! (indirect-env))
-./pure-read-file : ./input ; [shell: kame]
-	(indirect-env)
-KMK
+rule ./pure-file : ./input = "pure"
+rule ./overridden : ./input ; {env: {ENV_SIGNATURE_BINARY: "fixed"}}
+	printf %s "$ENV_SIGNATURE_BINARY" > @{outputs.0}; printf x >> overridden-runs
+READ_ENV = env/ENV_SIGNATURE_BINARY
+def indirect-env () = str READ_ENV
+task cached pure-read-task : ./input ; {shell: kash}
+	(out! (indirect-env ()))
+rule ./pure-read-file : ./input = indirect-env ()
+KM
   cat > "$child_env/binary-read" <<'SH'
 printf %s "$ENV_SIGNATURE_BINARY" > "$1"
 printf x >> "$2"
@@ -358,11 +362,11 @@ SH
   test-step "$backend pure rules track indirect named environment reads"
   for value in first second; do
     for target in pure-read-task ./pure-read-file; do
-      ENV_SIGNATURE_BINARY="$value" "${runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write -C "$child_env" -f Makefile.kmk "$target" > "$project/out" 2> "$project/err"
+      ENV_SIGNATURE_BINARY="$value" "${cache_runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write -C "$child_env" -f Makefile.km "$target" > "$project/out" 2> "$project/err"
       if [ "$target" = pure-read-task ] && [ "$(cat "$project/out")" != "$value" ]; then test-fail "$backend indirect read task returned stale value"; fi
-      ENV_SIGNATURE_BINARY="$value" UNREAD_SIGNATURE_ENV=changed "${runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write --json -C "$child_env" -f Makefile.kmk "$target" > "$project/pure-read-json" 2> "$project/err"
+      ENV_SIGNATURE_BINARY="$value" UNREAD_SIGNATURE_ENV=changed "${cache_runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write --json -C "$child_env" -f Makefile.km "$target" > "$project/pure-read-json" 2> "$project/err"
       if [ "$target" = pure-read-task ]; then
-        if jq -e -s 'any(.[]; .cached == true)' "$project/pure-read-json" >/dev/null; then test-ok "$backend indirect read task reuses $value despite unread change"; else test-fail "$backend pure indirect read task widened environment tracking"; fi
+        if jq -e -s --arg value "$value" 'any(.[]; .type == "stdout" and .target == "pure-read-task" and .cached == true and .data == $value)' "$project/pure-read-json" >/dev/null; then test-ok "$backend indirect read task replays $value despite unread change"; else test-fail "$backend pure indirect read task did not replay cached output"; fi
       else
         if [ "$(cat "$child_env/pure-read-file")" = "$value" ] && ! jq -e -s 'any(.[]; .type == "effect")' "$project/pure-read-json" >/dev/null; then test-ok "$backend indirect read file tracks $value and ignores unread change"; else test-fail "$backend pure indirect read file was stale or nonreusable"; fi
       fi
@@ -376,11 +380,13 @@ SH
  if [ "$(cat "$project/retry-log")" = retryretry ]; then test-ok "$backend retried recipe keeps its environment"; else test-fail "$backend retry environment"; fi
  test-step "$backend reports authored environment metadata"
  "${runner[@]}" do plan --json -C "$project" root > "$project/plan" 2> "$project/err"
-  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
- "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
-  if jq -e '.producers[0].environment == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.environment? == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"])' "$project/ast" >/dev/null && rg -q '; env "MODE=release"' "$project/fmt"; then test-ok "$backend plan, AST and format environment metadata"; else test-fail "$backend environment inspection"; fi
+  "${runner[@]}" do parse --json --lang km "$project/Makefile.km" > "$project/ast" 2> "$project/err"
+ "${runner[@]}" do fmt --lang km "$project/Makefile.km" > "$project/fmt" 2> "$project/err"
+  if jq -e '.producers[] | select(.target == "root") | .metadata == "{env: {MODE: \"debug\", MESSAGE: \"spaces; equal=ok\"}}"' "$project/plan" >/dev/null &&
+    jq -e '.ast.items[] | select(.rule.outputs[0].text == "root") | .rule.metadata.fields[] | select(.key == "env") | [.value.fields[] | [.key, .value.parts[0].text]] == [["MODE", "debug"], ["MESSAGE", "spaces; equal=ok"]]' "$project/ast" >/dev/null &&
+    grep -Fq '; {env: {MODE: "release"}}' "$project/fmt"; then test-ok "$backend plan, AST and format environment metadata"; else test-fail "$backend environment inspection"; fi
  test-step "$backend validates assignments before effects"
- printf 'bad : ; env "1MODE=debug"\n\ttouch forbidden\n' > "$project/bad.kmk"
- if "${runner[@]}" -C "$project" -f bad.kmk bad > "$project/out" 2> "$project/err"; then test-fail "$backend accepted invalid environment"; elif rg -q PARSE_ERR "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend invalid assignment has no effects"; else test-fail "$backend assignment validation"; fi
+ printf 'task bad ; {env: {"1MODE": "debug"}}\n\ttouch forbidden\n' > "$project/bad.km"
+ if "${runner[@]}" -C "$project" -f bad.km bad > "$project/out" 2> "$project/err"; then test-fail "$backend accepted invalid environment"; elif rg -q EXPR_INVALID "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend invalid assignment has no effects"; else test-fail "$backend assignment validation"; fi
 done
 test-end

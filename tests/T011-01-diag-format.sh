@@ -20,6 +20,14 @@ if printf '%s\n' "$registry_codes" | grep -Ev '^[A-Z]+(_[A-Z]+)*$' >/dev/null ||
 else
 	test-ok "diagnostic registry codes are unique and stable-shaped"
 fi
+stream_codes="$(awk -F'`' '/^\| `KASH_[A-Z_]+` \|/ { print $2 }' "$ORIGINAL_PATH/docs/spec/042-kash-streaming.md")"
+for code in $stream_codes KASH_TERMINAL_UNSUPPORTED OUTPUT_CONFLICT INPUT_UNSTABLE INPUT_CHANGE_CANCELLED PICK_UNAVAILABLE; do
+	if printf '%s\n' "$registry_codes" | grep -Fxq "$code"; then
+		test-ok "$code is registered"
+	else
+		test-fail "$code is missing from the diagnostic registry"
+	fi
+done
 
 fixture_copy errors diag-format
 
@@ -43,8 +51,8 @@ test-step "build failures report the stable code and a message"
 )
 
 test-step "source-qualified parse diagnostics have a separate location block"
-printf 'value = (unclosed\n' >broken.kmk
-cli_run -- --diagnostic-format plain -f broken.kmk anything
+printf 'value = (unclosed\n' >broken.km
+cli_run -- --diagnostic-format plain -f broken.km anything
 cli_expect_status 1
 	if grep -Eq '^  --> [^:]+:[0-9]+:[0-9]+$' "$CLI_ERR" && grep -Eq '^error\[PARSE_ERR\]: .+' "$CLI_ERR"; then
 	test-ok "parse diagnostic is source-qualified"
@@ -54,7 +62,7 @@ fi
 
 test-step "suggestions are separate note lines"
 (
-	cli_run -- do plan -c 'task first :'
+	cli_run -- do plan -c 'task first'
 	cli_expect_status 1
 	cli_expect_stderr_contains 'TGT_NO_DEFAULT' 'note: available targets: first'
 

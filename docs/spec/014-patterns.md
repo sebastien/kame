@@ -144,7 +144,7 @@ A path atom (055 §3.4) evaluates to one of three kinds:
 
 | Kind | Example | Meaning |
 | --- | --- | --- |
-| `Path` | `./src/main.c`, `@{dir}/x.o` | One location |
+| `Path` | `./src/main.c`, `${dir}/x.o` | One location |
 | `PathPattern` | `./src/**/*.c`, `./src/{path:**}.c` | Matches paths and strings; may capture |
 | `PathTemplate` | `./build/{path}.o` | Builds a path from captures |
 
@@ -208,8 +208,8 @@ or class is `PARSE_ERR`; it never falls back to literal text.
 ### Interpolation
 
 Path atoms may interpolate literal prefixes and suffixes around fully authored
-groups: `@{root}/{name:*}.@{ext}` is a `PathPattern` and `@{out}/{name}` is a
-`PathTemplate`. `@{…}` is evaluated when the atom is evaluated; `{name}` stays
+groups: `${root}/{name:*}.${ext}` is a `PathPattern` and `${out}/{name}` is a
+`PathTemplate`. `${…}` is evaluated when the atom is evaluated; `{name}` stays
 a deferred capture or reference. Inserted bytes are literal pattern data:
 braces, backslashes and glob or regex punctuation in an inserted value cannot
 inject groups, globs or escapes. Group names and matcher/regex syntax must
@@ -324,8 +324,8 @@ captures, and unrelated names follow normal lexical lookup:
 
 ```kame
 subst ./journal/{name:*} ./{name} "./journal/demo"
-subst ./journal/{name:*} ./@{name} "./journal/demo"
-subst ./journal/{name:*} "@{name}" "./journal/demo"
+subst ./journal/{name:*} ./${name} "./journal/demo"
+subst ./journal/{name:*} "${name}" "./journal/demo"
 subst ./journal/{name:*} name "./journal/demo"
 subst ./journal/{name:*} (uppercase name) "./journal/demo"
 ```
@@ -350,7 +350,7 @@ ordinary names in a selected expression report `REF_MISSING`; missing capture
 references in a template remain `PAT_INVALID`.
 
 Replacement results are data, not new expression, template or glob source. In
-particular, captured metacharacters in `./{name}` or `./@{name}` do not start
+particular, captured metacharacters in `./{name}` or `./${name}` do not start
 filesystem enumeration. Reached replacement reads and effects retain the
 caller's capabilities, phase restrictions, suspension and publication policy.
 
@@ -382,7 +382,7 @@ expression replacement:
 
 ```kame
 journal = files ./journal/*
-product-by-name = journal |> map (subst ./journal/{name:*} "@{name}")
+product-by-name = journal |> map (subst ./journal/{name:*} "${name}")
 product-paths = journal |> subst ./journal/{name:*} ./{name}
 ```
 
@@ -450,7 +450,7 @@ runtime pattern construction are specified in `029-pattern-extensions.md`.
 - Each successful list item evaluates its own replacement once; suspension and
   cancellation retain/release scopes and do not replay accepted effects.
 - Replacement results containing braces or glob metacharacters remain data;
-  `./{name}` expansion and `"@{name}"` interpolation both work without
+  `./{name}` expansion and `"${name}"` interpolation both work without
   implicit filesystem access.
 - String, path, template and numeric/boolean replacements render as specified;
   invalid selected values are `PAT_INVALID`, while missing ordinary expression

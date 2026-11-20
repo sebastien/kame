@@ -33,6 +33,7 @@ func (p *Program) nativeKash(e *expr.Expr, scope *Scope, c *Context) Result {
 func (p *Program) evaluatePureValueBlock(e *expr.Expr, scope *Scope, c *Context) Result {
 	state := mem.Alloc[kashControlState](p.Alloc)
 	state.Scope = newScope(p.Alloc, scope)
+	state.Scope.assignmentBoundary = true
 	defer freeKashControlState(p.Alloc, state)
 	previousDepth := c.loopDepth
 	c.loopDepth = 0

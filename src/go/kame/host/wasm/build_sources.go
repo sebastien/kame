@@ -96,18 +96,28 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	}
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
 	r.BuildTrackTimings = host.PayloadInt(descriptor, "trackTimings") != 0
+	r.BuildJobs = int(host.PayloadInt(descriptor, "jobs"))
 	r.BuildTimeoutMS = host.PayloadInt(descriptor, "timeoutMS")
 	r.BuildRetryCount = int(host.PayloadInt(descriptor, "retryCount"))
 	r.BuildRetainBytes = int(host.PayloadInt(descriptor, "retainBytes"))
 	r.BuildCaptureLimit = int(host.PayloadInt(descriptor, "captureLimit"))
+	var valid bool
+	r.BuildCompositionDiscoveries, valid = descriptorCompositionDiscoveries(r.Alloc, descriptor)
+	if !valid {
+		r.freeBuildSources()
+		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid source-selection discoveries")}
+	}
 	return PureResult{}
 }
 
 func (r *Runtime) freeBuildSources() {
 	r.BuildForce = false
 	r.BuildTrackTimings = false
+	r.BuildJobs = 0
 	r.BuildRetainBytes = 0
 	r.BuildCaptureLimit = 0
+	freeCompositionDiscoveries(r.Alloc, r.BuildCompositionDiscoveries)
+	r.BuildCompositionDiscoveries = nil
 	for i := range r.BuildSources {
 		freeDescriptorIncludes(r.Alloc, r.BuildSources[i].Includes)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
@@ -140,8 +150,11 @@ func (r *Runtime) freeBuildSources() {
 }
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
+	r.configureDeclarationRead(&options)
+	options.CompositionDiscoveries = r.BuildCompositionDiscoveries
 	options.Force = r.BuildForce
 	options.TrackTimings = r.BuildTrackTimings
+	options.Jobs = max(1, r.BuildJobs)
 	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
 	options.RetainBytes = r.BuildRetainBytes
@@ -158,10 +171,15 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	}
 	options.Environment = environment
 	defer mem.FreeSlice(nil, environment)
+	var compiled program.CompileResult
 	if len(r.BuildSources) != 0 {
-		return program.CompileMany(r.Alloc, r.BuildSources, r.Registry, options)
+		compiled = program.CompileMany(r.Alloc, r.BuildSources, r.Registry, options)
+	} else {
+		compiled = program.Compile(r.Alloc, r.Parsed, r.Registry, options)
 	}
-	return program.Compile(r.Alloc, r.Parsed, r.Registry, options)
+	r.saveDeclarationSnapshots(compiled.Discoveries)
+	compiled.Discoveries = nil
+	return compiled
 }
 
 func (r *Runtime) buildCompileFailure(compiled *program.CompileResult) PureResult {

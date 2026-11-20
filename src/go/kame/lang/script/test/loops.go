@@ -31,7 +31,7 @@ func TestKashLoopsParseFormatAndRejectInvalidHeaders(t *testing.T) {
 	round.Free()
 	s.Free()
 	bad := []string{
-		"for env in []\n\ttrue", "for x in []\n\tx = 1", "for x of []\n\ttrue",
+		"for true in []\n\ttrue", "for x in []\n\tx = 1", "for x of []\n\ttrue",
 		"for x in []; true\n\ttrue", "while true; false\n\ttrue", "while $?(true\n\ttrue",
 		"while true\ntrue", "for x in []\n\t# no body", "for x in\n\ttrue",
 	}

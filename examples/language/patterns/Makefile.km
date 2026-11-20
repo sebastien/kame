@@ -1,0 +1,5 @@
+# Each captured target name selects its corresponding source file.
+task default : ./build/alpha.txt ./build/beta.txt
+
+rule ./build/{name}.txt : ./src/{name}.txt
+	cp $inputs.0 $outputs.0

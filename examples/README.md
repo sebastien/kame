@@ -11,7 +11,7 @@ Use a CLI built from matching sources; see the
 | Lesson | Question | Source | Status |
 | --- | --- | --- | --- |
 | [Expressions](expressions/README.md) | What value do I want? | `.km` | Runnable directly or via `do run` / `-f FILE NAME` |
-| [Rules](rules/README.md) | What must exist, and what does it depend on? | `.kmk` | Runnable |
+| [Rules](rules/README.md) | What must exist, and what does it depend on? | `.km` | Runnable |
 | [Kash](kash/README.md) | How should processes cooperate? | `.kash` | Ten standalone workflows |
 | [Composition](composition/publication/README.md) | How do the descriptions fit together? | All three | Values, rules, and subprocess orchestration runnable |
 | [Reactivity](reactive/README.md) | How does a requested computation stay current? | Persistent engine | Engine demo and CLI `--watch` runnable |
@@ -61,7 +61,7 @@ installed, the blog tutorial's build, incremental updates, and cleanup.
 | Lists, records, paths, references, lazy definitions | `expressions/01-values.km` |
 | Functions, lambdas, patterns, value pipes | `expressions/02-functions.km` |
 | Resource discovery and tracked inputs | `expressions/03-resources.km` |
-| File artifacts, bare actions, captures, computed dependencies, recipes | `rules/publication/Makefile.kmk` |
+| File artifacts, bare actions, captures, computed dependencies, recipes | `rules/publication/Makefile.km` |
 | Typed argv, explicit expression boundaries, command capture | `kash/01-values.kash` and its runnable README commands |
 | Process streams and redirection versus value transformations | `kash/02-pipelines.kash` |
 | Command/value recovery and branch selection | `kash/03-recovery.kash` |
@@ -79,7 +79,7 @@ This is a teaching map, not an exhaustive syntax reference. Continue with the
 
 ## More examples
 
-- [`language/`](language/) contains the original small runnable `.kmk` projects.
+- [`language/`](language/) contains the original small runnable `.km` projects.
 - [`tutorial-blog/`](tutorial-blog/) builds a minimalist personal blog from
   Markdown into HTML/CSS with pandoc; its README is the longer tutorial.
 - [`engine/`](engine/) contains executable Go examples of the reactive engine

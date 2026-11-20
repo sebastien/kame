@@ -11,36 +11,41 @@ import (
 
 // ParseKash composes strict Kame definitions and structured Kash command graphs.
 func ParseKash(a mem.Allocator, name string, text string) *Script {
-	return parseKashText(a, name, text, false)
+	s := parseKashText(a, name, text, false, false)
+	s.ValidateAssignments()
+	return s
 }
 
 // ParseKashRuleBody parses a recipe after structural indentation is removed.
 func ParseKashRuleBody(a mem.Allocator, name string, text string) *Script {
-	return parseKashText(a, name, text, true)
-}
-
-func parseKashText(a mem.Allocator, name string, text string, ruleBody bool) *Script {
-	s := mem.Alloc[Script](a)
-	s.Alloc, s.Source, s.RuleBody = a, source.New(a, name, text), ruleBody
-	parseKash(s, 0)
+	s := parseKashText(a, name, text, true, false)
+	s.ValidateAssignments()
 	return s
 }
 
-func parseKash(s *Script, offset int) {
+func parseKashText(a mem.Allocator, name string, text string, ruleBody, interactive bool) *Script {
+	s := mem.Alloc[Script](a)
+	s.Alloc, s.Source, s.RuleBody = a, source.New(a, name, text), ruleBody
+	parseKash(s, 0, interactive)
+	return s
+}
+
+func parseKash(s *Script, offset int, interactive bool) {
 	s.Kash = true
-	p := kashParser{Script: s, Pos: offset, RuleBody: s.RuleBody}
+	p := kashParser{Script: s, Pos: offset, RuleBody: s.RuleBody, Interactive: interactive}
 	s.Items = p.sequence(0)
 }
 
 type kashParser struct {
-	Script     *Script
-	Pos        int
-	Prefixes   []string
-	Channels   []string
-	Functions  int
-	ValueBlock bool
-	RuleBody   bool
-	Loops      int
+	Script      *Script
+	Pos         int
+	Prefixes    []string
+	Channels    []string
+	Functions   int
+	ValueBlock  bool
+	RuleBody    bool
+	Interactive bool
+	Loops       int
 }
 
 func (p *kashParser) sequence(level int) []ScriptItem {
@@ -113,7 +118,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			p.Pos = nextLine(text, end)
 			continue
 		}
-		if (word == "alias" || word == "unalias" || word == "option") && headerEnd == 0 {
+		if p.Interactive && (word == "alias" || word == "unalias" || word == "option") && headerEnd == 0 {
 			if p.Script.RuleBody || level != 0 || !leading {
 				s.error(start, wordEnd, "session commands require a whole top-level session entry")
 				break
@@ -127,7 +132,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				break
 			}
 			for i := range items {
-				if items[i].Kind == Definition && items[i].Definition.Name == d.Name {
+				if items[i].Kind == Definition && items[i].Definition.Name == d.Name && !items[i].Definition.Eager {
 					s.error(start, p.Pos, "duplicate Kash definition name")
 				}
 			}
@@ -227,19 +232,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 					continue
 				}
 			}
-			valueStart := headerEnd
-			for valueStart < len(text) && space(text[valueStart]) {
-				valueStart++
-			}
-			if valueStart < len(text) && text[valueStart] == '\n' {
-				next := valueStart + 1
-				for next < len(text) && space(text[next]) {
-					next++
-				}
-				if next-(valueStart+1) > start-lineStart {
-					valueStart = next
-				}
-			}
+			valueStart := bindingValueStart(text, start, headerEnd)
 			if valueStart == len(text) || text[valueStart] == '\n' || text[valueStart] == ';' || text[valueStart] == '#' {
 				s.error(headerEnd, valueStart, "expected Kash definition value")
 				break
@@ -249,14 +242,8 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if part.Definition == nil {
 				break
 			}
-			if part.Definition.Name == "env" || part.Definition.Default || part.Definition.Contribution {
+			if part.Definition.Default || part.Definition.Contribution {
 				s.error(start, part.Definition.Span.End, "Kash def requires a non-reserved name and =")
-			}
-			for i := range part.Definition.Parameters {
-				if part.Definition.Parameters[i].Name == "env" {
-					parameter := part.Definition.Parameters[i]
-					s.error(parameter.Span.Start, parameter.Span.End, "env is reserved in Kash")
-				}
 			}
 			p.Pos = part.Definition.Span.End
 			expr.SetCommandChannels(s.Alloc, part.Definition.Expression, p.Channels)
@@ -506,7 +493,7 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 		pos++
 	}
 	name := text[nameStart:pos]
-	if !expr.ValidBindingName(name) || name == "env" {
+	if !expr.ValidBindingName(name) {
 		s.error(nameStart, pos, "expected non-reserved loop binding name")
 		return e
 	}

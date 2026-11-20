@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const modulePath = resolve(process.argv[2] ?? 'build/wasm/kame.wasm');
 const { instance } = await instantiateReactor(await readFile(modulePath));
@@ -39,7 +40,7 @@ assert.equal(e.kame_wasm_instance_diagnostic_copy(handle, output, 256), 3);
 // Caller inputs and unrelated temporary queries cannot invalidate the owned report.
 new Uint8Array(e.memory.buffer, input, 262144).fill(88);
 const other = e.kame_wasm_instance_create();
-assert.equal(query({ predicate: ':true' }, other), 0);
+assert.equal(query({ predicate: 'true' }, other), 0);
 assert.equal(diagnostic(), saved);
 assert.equal(e.kame_wasm_instance_free(other), 0);
 e.kame_wasm_collect();
@@ -51,15 +52,14 @@ for (let i = 0; i < 100; i++) {
 }
 e.kame_wasm_collect();
 assert.ok(e.kame_wasm_system_heap_used() < baseline + 1048576, 'diagnostic queries retain history');
-assert.equal(query({ name: 'configuration.km', predicate: '@<' }), 5);
-assert.deepEqual(JSON.parse(diagnostic()).diagnostic.tips,
-  ['use @< in a rule recipe, or pass the input value explicitly']);
-assert.equal(query({ predicate: ':false' }), 0);
+assert.equal(query({ name: 'configuration.km', predicate: 'missing-binding' }), 5);
+assert.equal(JSON.parse(diagnostic()).diagnostic.code, 'REF_MISSING');
+assert.equal(query({ predicate: 'false' }), 0);
 assert.equal(diagnostic(), '');
 // Legacy queries omit synthetic source names. Grow an authored include label
 // instead, without creating an oversized expression or changing the size limit.
 const largeDescriptor = (size) => ({ sources: [], condition: {
-  name: 'condition.km', text: 'UNKNOWN',
+  name: 'condition.km', text: 'unknown-name',
   includes: [{ source: 'main.km', label: 'x'.repeat(size), start: 0, end: 1 }],
 } });
 assert.equal(query(largeDescriptor(1)), 5);
@@ -87,16 +87,15 @@ assert.equal(e.kame_wasm_instance_free(handle), 0);
 console.log('PASS composition diagnostics: owned frames/tips, replacement, bounded overflow, slot reuse');
 
 if (process.argv[3]) {
-  const directory = await mkdtemp('/tmp/opencode/kame-composition-diagnostics-');
+  const directory = await mkdtemp(resolve(tmpdir(), 'kame-composition-diagnostics-'));
   try {
     for (const [name, text, expected] of [
-      ['read', `${prefix}(if NamedRead (include ./missing.km) :nil)\n`, { frames: ['read', 'text', 'NamedRead', 'source selection'] }],
-      ['tip', '(if @< (include ./missing.km) :nil)\n', { tips: ['use @< in a rule recipe, or pass the input value explicitly'] }],
-      ['inline', null, { tips: ['save this fragment as a .km or .kmk file and run that file'] }],
+      ['read', `${prefix}if NamedRead\n\tinclude ./missing.km\n`, { frames: ['read', 'text', 'NamedRead', 'source selection'] }],
+      ['inline', null, { tips: ['save this fragment as a .km or .kash file and run that file'] }],
     ]) {
       const file = `${directory}/${name}.km`;
       if (text) await writeFile(file, text);
-      const args = ['--json', 'do', 'run', ...(text ? [file] : ['-c', '(include ./missing.km)'])];
+      const args = ['--json', 'do', 'run', ...(text ? [file] : ['--lang', 'km', '-c', 'include ./missing.km'])];
       const diagnostics = [];
       for (const command of [[resolve(process.argv[3])], ['node', resolve('src/js/kame.js')]]) {
         const result = spawnSync(command[0], [...command.slice(1), ...args], {

@@ -62,6 +62,8 @@ var operatorKinds = []OperatorKind{
 	{Kind: "each", Code: 8, Argv: true, MinIn: 1, MaxIn: 1, MaxOut: 1, Frames: FramesUnframe, InputFrames: InputsRequireFrames},
 	{Kind: "out", Code: 9, MinIn: 1, MaxIn: 1, MinOut: 0, MaxOut: 0, Frames: FramesKeep, InputFrames: InputsAny},
 	{Kind: "err", Code: 10, MinIn: 1, MaxIn: 1, MinOut: 0, MaxOut: 0, Frames: FramesKeep, InputFrames: InputsAny},
+	{Kind: "emit", Code: 11, MaxIn: 1, MaxOut: 1, OutputFile: true, Frames: FramesUnframe, InputFrames: InputsUnframed},
+	{Kind: "callable", Code: 12, MaxIn: 1, MaxOut: 1, OutputFile: true, Frames: FramesUnframe, InputFrames: InputsUnframed},
 }
 
 // LookupOperatorKind returns the contract for a wire kind, or nil for an

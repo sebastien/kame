@@ -9,7 +9,7 @@ import (
 
 func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 	a := t.Allocator()
-	values := make([]core.Value, 14)
+	values := make([]core.Value, 16)
 	values[0] = core.Value{Kind: core.Nil}
 	values[1] = core.Value{Kind: core.Bool, Bool: true}
 	values[2] = core.Value{Kind: core.Int, Int: -42}
@@ -35,6 +35,8 @@ func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 	values[11] = core.Value{Kind: core.Float, Float: 0.0}
 	values[12] = core.Value{Kind: core.Float, Float: 1.0}
 	values[13] = core.Value{Kind: core.Float, Float: -42.0}
+	values[14] = core.NewSymbol(a, "finished")
+	values[15] = core.NewSymbol(a, "+entries")
 	for i := range values {
 		data := core.PluginValueJSON(a, values[i])
 		if data == nil {
@@ -50,6 +52,9 @@ func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 		encodedAgain := core.PluginValueJSON(a, decoded)
 		if encodedAgain == nil || string(data) != string(encodedAgain) {
 			t.Error("plugin value changed kind or content during round trip")
+		}
+		if !core.ValueSignature(values[i]).Equal(core.ValueSignature(decoded)) {
+			t.Error("decoded plugin value changed its signature")
 		}
 		mem.FreeSlice(a, encodedAgain)
 		decoded.Free(a)
@@ -115,12 +120,15 @@ func TestPluginValueJSONRejectsUnsupportedAndMalformedValues(t *testing.T) {
 		t.Error("callable was serialized")
 		mem.FreeSlice(a, data)
 	}
-	invalid := make([]string, 5)
+	invalid := make([]string, 8)
 	invalid[0] = `{"kind":"string","data":"x","extra":true}`
 	invalid[1] = `{"kind":"bool","kind":"bool","data":true}`
 	invalid[2] = `{"kind":"bytes","data":"%%%="}`
 	invalid[3] = `{"kind":"resource","resourceKind":"unknown","name":"x"}`
 	invalid[4] = `{"kind":"list","items":[{"kind":"callable"}]}`
+	invalid[5] = `{"kind":"symbol","data":":finished"}`
+	invalid[6] = `{"kind":"symbol","data":"two words"}`
+	invalid[7] = `{"kind":"symbol","data":"+"}`
 	for i := range invalid {
 		var decoded core.Value
 		if core.ParsePluginValueJSON(a, []byte(invalid[i]), &decoded) {

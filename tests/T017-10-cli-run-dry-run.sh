@@ -4,24 +4,25 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-10 mixed runner dry-run"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 cli_build
 work="$TMPDIR/dry-run"
 mkdir -p "$work"
-cat >"$work/rules.kmk" <<'KMK'
-build : ; [shell: kash]
+cat >"$work/rules.km" <<'KM'
+task build
 	(out! "rule-out")
 	(err! "rule-err")
 	(write! "protected" "rule-write")
 	touch recipe-ran
-KMK
+KM
 cat >"$work/values.km" <<'KM'
 capture = $(touch capture-ran)
-legacy = (sh! "touch shell-ran")
-(out! "value-out")
-(err! "value-err")
-(write! "protected" "value-write")
-(str capture legacy)
+shell-value = sh! "touch shell-ran"
+def dry-work ()
+	(out! "value-out")
+	(err! "value-err")
+	(write! "protected" "value-write")
+	(str capture shell-value)
 KM
 cat >"$work/process.kash" <<'KASH'
 printf changed > protected
@@ -29,14 +30,14 @@ touch statement-ran
 KASH
 printf '%s' sentinel >"$work/protected"
 
-cp "$work/rules.kmk" "$work/Makefile.kmk"
+cp "$work/rules.km" "$work/Makefile.km"
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "${KAME_TEST_WASM_WRAPPER:-$CLI_ROOT/dist/kame.js}"); fi
 	test-step "$backend primary dry-run supports explicit, discovered and inline builds"
 	for source in file discover command; do
 		arguments=(-n -C "$work")
-		if [ "$source" = file ]; then arguments+=(-f rules.kmk build); elif [ "$source" = command ]; then arguments+=(-l kmk -c $'build :\n\ttouch recipe-ran\n' build); else arguments+=(build); fi
+		if [ "$source" = file ]; then arguments+=(-f rules.km build); elif [ "$source" = command ]; then arguments+=(-l km -c $'task build\n\ttouch recipe-ran\n' build); else arguments+=(build); fi
 		status=0
 		"${command[@]}" "${arguments[@]}" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 0 ] && [ ! -s "$work/out" ] && [ ! -e "$work/recipe-ran" ] && [ "$(cat "$work/protected")" = sentinel ] && ! grep -q rule-err "$work/err"; then test-ok "$backend primary $source dry-run suppresses effects"; else test-fail "$backend primary $source dry-run"; cat "$work/err"; fi
@@ -46,44 +47,42 @@ for backend in native wasm; do
 
 	test-step "$backend suppresses effects in rule, value, lazy and Kash work"
 	status=0
-	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build "$work/values.km" "$work/process.kash" >"$work/$backend.out" 2>"$work/$backend.err" || status=$?
+	"${command[@]}" do run -n -C "$work" "$work/rules.km" build "$work/values.km" -c '(dry-work ())' "$work/process.kash" >"$work/$backend.out" 2>"$work/$backend.err" || status=$?
 	if [ "$status" = 0 ] && [ ! -s "$work/$backend.out" ] && ! grep -qE 'rule-err|value-err' "$work/$backend.err"; then test-ok "$backend dry-run emits no output effects or implicit values"; else test-fail "$backend dry-run failed: $status"; cat "$work/$backend.err"; fi
 	if [ "$(cat "$work/protected")" = sentinel ] && [ ! -e "$work/recipe-ran" ] && [ ! -e "$work/capture-ran" ] && [ ! -e "$work/shell-ran" ] && [ ! -e "$work/statement-ran" ]; then test-ok "$backend suppresses every process/write path"; else test-fail "$backend performed a dry-run effect"; fi
 
 	test-step "$backend still evaluates pure work and validates commands"
 	status=0
-	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build -c '(first 1)' >"$work/out" 2>"$work/err" || status=$?
+	"${command[@]}" do run -n -C "$work" "$work/rules.km" build -c '(first 1)' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend does not skip pure expression validation"; else test-fail "$backend skipped pure expression"; fi
 	status=0
-	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build -l kash -c 'printf (nop [bad: 1])' >"$work/out" 2>"$work/err" || status=$?
+	"${command[@]}" do run -n -C "$work" "$work/rules.km" build -l kash -c 'printf (nop {bad: 1})' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend validates typed argv without launching"; else test-fail "$backend skipped argv validation"; fi
 	status=0
-	"${command[@]}" do run -n -C "$work" -c '$(touch denied)' "$work/rules.kmk" build >"$work/out" 2>"$work/err" || status=$?
+	"${command[@]}" do run -n -C "$work" -c '$(touch denied)' "$work/rules.km" build >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err" && [ ! -e "$work/denied" ]; then test-ok "$backend retains invocation capability restrictions"; else test-fail "$backend changed dry-run grants"; fi
 
 	test-step "$backend single rule and mixed JSON dry-runs"
-	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build >"$work/out" 2>"$work/err"
+	"${command[@]}" do run -n -C "$work" "$work/rules.km" build >"$work/out" 2>"$work/err"
 	if [ ! -s "$work/out" ] && [ ! -e "$work/recipe-ran" ]; then test-ok "$backend single rule source dry-run"; else test-fail "$backend single source effects"; fi
-	"${command[@]}" do run --json -n -C "$work" "$work/rules.kmk" build "$work/values.km" "$work/process.kash" >"$work/$backend.jsonl" 2>"$work/$backend.json.err"
+	"${command[@]}" do run --json -n -C "$work" "$work/rules.km" build "$work/values.km" -c '(dry-work ())' "$work/process.kash" >"$work/$backend.jsonl" 2>"$work/$backend.json.err"
 	if [ ! -s "$work/$backend.json.err" ] && jq -e -s 'all(.schema == 1 and .type != "stdout" and .type != "stderr" and .type != "process-started")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend JSON reports planning without live effects"; else test-fail "$backend JSON dry-run"; fi
 
 	test-step "$backend missing generated bytes are deferred, not fabricated"
 	generated="$work/$backend-generated"
 	mkdir -p "$generated"
 	printf seed >"$generated/seed"
-	cat >"$generated/Makefile.kmk" <<'KMK'
-default : ./second
-./first : ./seed ; [shell: kame]
-	(read @<)
-./second : ./first ; [shell: kame]
-	(read @<)
-GENERATED = (read ./first)
-lazy : ./first
-	@(nop GENERATED "")
-bad : ./first
-	@(nop (read @<) "")
-	@(read ./unrelated-missing)
-KMK
+	cat >"$generated/Makefile.km" <<'KM'
+task default : ./second
+rule ./first : ./seed = read inputs.0
+rule ./second : ./first = read inputs.0
+GENERATED = read ./first
+task lazy : ./first ; {shell: "sh"}
+	@{nop GENERATED ""}
+task bad : ./first ; {shell: "sh"}
+	@{nop (read inputs.0) ""}
+	@{read ./unrelated-missing}
+KM
 	status=0
 	"${command[@]}" -n -C "$generated" >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 0 ] && [ ! -e "$generated/first" ] && [ ! -e "$generated/second" ]; then test-ok "$backend defers missing generated read without effects"; else test-fail "$backend generated read dry-run ($status)"; cat "$work/err"; fi

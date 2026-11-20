@@ -48,7 +48,6 @@ func TestGoSuite(t *testing.T) {
 	t.Run("ProgressLifecycleIdentityAndClock", func(t *testing.T) { TestProgressLifecycleIdentityAndClock(legacy.Wrap(t)) })
 	t.Run("ProgressWorkerNamespaces", func(t *testing.T) { TestProgressWorkerNamespaces(legacy.Wrap(t)) })
 	t.Run("ProgressWorkersRetriesAndServices", func(t *testing.T) { TestProgressWorkersRetriesAndServices(legacy.Wrap(t)) })
-	t.Run("RemovedExecutionCommandsGiveMigrationHelp", func(t *testing.T) { TestRemovedExecutionCommandsGiveMigrationHelp(legacy.Wrap(t)) })
 	t.Run("RenderGrammarKeepsPayloadSourceAndCapabilities", func(t *testing.T) { TestRenderGrammarKeepsPayloadSourceAndCapabilities(legacy.Wrap(t)) })
 	t.Run("ReportPreservesNestedEnvelopeNames", func(t *testing.T) { TestReportPreservesNestedEnvelopeNames(legacy.Wrap(t)) })
 	t.Run("ResultJSONPreservesCommandEnvelopes", func(t *testing.T) { TestResultJSONPreservesCommandEnvelopes(legacy.Wrap(t)) })
@@ -61,6 +60,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("TargetReportGroupsKindsAndKeepsStatusReadableWithoutColor", func(t *testing.T) { TestTargetReportGroupsKindsAndKeepsStatusReadableWithoutColor(legacy.Wrap(t)) })
 	t.Run("TypedDefinitionOverrideGrammar", func(t *testing.T) { TestTypedDefinitionOverrideGrammar(legacy.Wrap(t)) })
 	t.Run("TypedInspectionOptionsCannotBecomeBuildTargets", func(t *testing.T) { TestTypedInspectionOptionsCannotBecomeBuildTargets(legacy.Wrap(t)) })
+	t.Run("UnknownExpressionCommandShowsRunnerUsage", func(t *testing.T) { TestUnknownExpressionCommandShowsRunnerUsage(legacy.Wrap(t)) })
 	t.Run("WatchOptions", func(t *testing.T) { TestWatchOptions(legacy.Wrap(t)) })
 	t.Run("WorkerETAInDashboard", func(t *testing.T) { TestWorkerETAInDashboard(legacy.Wrap(t)) })
 }

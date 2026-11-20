@@ -17,7 +17,7 @@ import time
 # -----------------------------------------------------------------------------
 
 def quote(text: str) -> str:
-	# Verbatim strings keep braces and @() as text, not pattern/template syntax.
+	# Verbatim strings keep interpolation markers literal.
 	assert '"""' not in text
 	return '"""' + text + '"""' if '{' in text or '@(' in text else json.dumps(text, ensure_ascii=False)
 
@@ -44,11 +44,11 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 	"""Retain shared consumers while membership moves empty → populated → empty."""
 	(project / 'items').mkdir()
 	(project / 'other').mkdir()
-	(project / 'Makefile.kmk').write_text(
-		'SHELL = kash\nROOT = "./items"\nFILES = @{ROOT}/*.txt\n'
-		'one :\n\t(write! ./one (join "," FILES))\n'
-		'two :\n\t(write! ./two (join "," FILES))\n'
-		'isolated :\n\t(write! ./isolated (join "," ./other/*.txt))\n')
+	(project / 'Makefile.km').write_text(
+		'root = "./items"\nmembers = files ${root}/*.txt\n'
+		'task one :\n\t(write! ./one (join "," (map str members)))\n'
+		'task two :\n\t(write! ./two (join "," (map str members)))\n'
+		'task isolated :\n\t(write! ./isolated (join "," (map str (files ./other/*.txt))))\n')
 	with (project / 'watch-log').open('w') as log, (project / 'watch-err').open('w') as err:
 		process = subprocess.Popen(command + ['--json', '--watch', 'one', 'two', 'isolated'],
 			cwd=project, env=environment, stdout=log, stderr=err, start_new_session=True)
@@ -58,7 +58,8 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 				assert process.poll() is None, 'watch exited before settling'
 				# A separate reader must not move the child's stdout file offset.
 				events = [json.loads(line) for line in (project / 'watch-log').read_text().splitlines(keepends=True) if line.endswith('\n')]
-				if (sum(event.get('type') == 'watch-idle' for event in events) >= cycles
+				# Output writes can become visible while their watch cycle is still active.
+				if (events and events[-1].get('type') == 'watch-idle' and events[-1]['cycle'] >= cycles
 					and all((project / name).exists() and (project / name).read_text() == expected
 						for name in ('one', 'two'))):
 					assert not any(event.get('type') == 'diagnostic' for event in events), events
@@ -80,7 +81,8 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 			assert (project / 'isolated').stat().st_mtime_ns == isolatedStamp, 'unrelated root rebuilt'
 			before = (project / 'watch-log').read_text()
 			time.sleep(.3)
-			assert (project / 'watch-log').read_text() == before, 'settled watch spins while idle'
+			after = (project / 'watch-log').read_text()
+			assert after == before, ('settled watch spins while idle', after[len(before):])
 			assert not (project / 'watch-err').read_text(), 'watch emitted stderr'
 		finally:
 			if process.poll() is None:
@@ -100,8 +102,8 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 
 def main() -> None:
 	root, backend, binary, temporary = sys.argv[1:]
-	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
-	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
+	command = [binary] if backend == 'native' else ['node', os.environ.get('KAME_TEST_WASM_WRAPPER', str(Path(root) / 'dist/kame.js'))]
+	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_') or key == 'KAME_WASM'}
 	checks = 0
 	with tempfile.TemporaryDirectory(prefix=f'computed-{backend}-', dir=temporary) as directory:
 		project = Path(directory)
@@ -125,79 +127,83 @@ def main() -> None:
 				result = run(['do', 'run', '--lang', lang, '-c', source])
 			assert result.returncode == 1 and code in result.stdout + result.stderr, (source, result)
 			checks += 1
-		allFiles = '["./files/a.txt" "./files/b.txt" "./files/literal*.txt" "./files/literal?.txt"]'
-		value('(let [ROOT "./files"] @{ROOT}/*.txt)', allFiles)
-		value('ROOT = "./files"\nFILES = @{ROOT}/*.txt\n(out! (count FILES))', '4', lang='km')
-		value('(count (let [ROOT "./files"] @{ROOT}/*.txt))', '4')
-		value('(let [ROOT "./files"] @{ROOT}/absent*)', '[]')
-		value('(let [ROOT "./files"] @{ROOT}/a.*)', '["./files/a.txt"]')
-		value('(let [ROOT "./files"] [@{ROOT}/absent* @{ROOT}/a.*])', '[[] ["./files/a.txt"]]')
-		value('(let [ROOT "./files"] (concat @{ROOT}/a.* @{ROOT}/absent* @{ROOT}/b.*))', '["./files/a.txt" "./files/b.txt"]')
-		value('(let [ROOT "./files"] [files: @{ROOT}/a.* empty: @{ROOT}/absent*])', '[files: ["./files/a.txt"] empty: []]')
+		def with_root(body: str, root: str = '"./files"') -> str:
+			return f'((root => {body}) {root})'
+
+		all_files = '[./files/a.txt, ./files/b.txt, ./files/literal\\*.txt, ./files/literal\\?.txt]'
+		value(with_root('files ${root}/*.txt'), all_files)
+		value('root = "./files"\nmembers = files ${root}/*.txt\n(out! (str (count members)))', '4', lang='km')
+		value('(count ' + with_root('files ${root}/*.txt') + ')', '4')
+		value(with_root('files ${root}/absent*'), '[]')
+		value(with_root('files ${root}/a.*'), '[./files/a.txt]')
+		value(with_root('[files ${root}/absent*, files ${root}/a.*]'), '[[], [./files/a.txt]]')
+		value(with_root('concat (files ${root}/a.*) (files ${root}/absent*) (files ${root}/b.*)'), '[./files/a.txt, ./files/b.txt]')
+		value(with_root('{selected: files ${root}/a.*, empty: files ${root}/absent*}'), '{selected: [./files/a.txt], empty: []}')
 		for name in ('literal*', 'literal?'):
-			value(f'(let [ROOT "./files" NAME {quote(name)}] @{{ROOT}}/@{{NAME}}.*)', f'["./files/{name}.txt"]')
-			value(f'(let [ROOT "./files" NAME {quote(name)}] (concat @{{ROOT}}/@{{NAME}}.* []))', f'["./files/{name}.txt"]')
+			value(f'((name => map str (files ./files/${{name}}.*)) {quote(name)})', f'["./files/{name}.txt"]')
+			value(f'((name => map str (concat (files ./files/${{name}}.*) [])) {quote(name)})', f'["./files/{name}.txt"]')
 		for name in ('{evil:*}', '[]', 'back\\slash', '"quote"', '@()', 'café猫'):
 			(project / 'files' / (name + '.txt')).write_text('literal')
-			value(f'(let [ROOT "./files" NAME {quote(name)}] @{{ROOT}}/@{{NAME}}.*)', '[' + json.dumps('./files/' + name + '.txt', ensure_ascii=False) + ']')
+			value(f'((name => map read (files ./files/${{name}}.*)) {quote(name)})', '[literal]')
 		for char in ('-', ']', '!', '^', '[', '\\'):
 			classRoot = project / ('class-' + str(ord(char)))
 			classRoot.mkdir()
 			for name in ('a', 'z', 'b', 'c', char):
 				(classRoot / name).write_text('x')
 			prefix = './' + classRoot.name
-			wanted = '[' + ' '.join(json.dumps(prefix + '/' + name) for name in sorted({'a', 'z', char})) + ']'
-			value(f'(let [ROOT {quote(prefix)} CHAR {quote(char)}] @{{ROOT}}/[a@{{CHAR}}z])', wanted)
+			wanted = '[' + ', '.join(json.dumps(prefix + '/' + name) for name in sorted({'a', 'z', char})) + ']'
+			value(f'((root char => map str (files ${{root}}/[a${{char}}z])) {quote(prefix)} {quote(char)})', wanted)
 		# An authored range may use an escaped closing bracket as its endpoint.
 		(project / 'range').mkdir()
 		for name in ('[', '\\', ']', '^'):
 			(project / 'range' / name).write_text('x')
-		value(r'(let [ROOT "./range"] @{ROOT}/[\[-\]])', '["./range/[" "./range/\\\\" "./range/]"]')
+		value(with_root(r'map str (files ${root}/[\[-\]])', '"./range"'), '["./range/[", "./range/\\\\", "./range/]"]')
 		for pathRoot in ('./files', '../' + project.name + '/files', str(project / 'files')):
-			value(f'(let [ROOT {quote(pathRoot)} EXT "txt"] (match? @{{ROOT}}/{{name:*}}.@{{EXT}} {quote(pathRoot + "/a.txt")}))', ':true', grant=False)
-		value('(let [ROOT "./files" EXT "txt"] (sub @{ROOT}/{first:*}-{second:*}.@{EXT} ./out/{second}/{first} "./files/a-b.txt"))', '"./out/b/a"', grant=False)
-		value('(let [ROOT "./files" OUT "./out"] (sub @{ROOT}/{name:*}-{name:*} @{OUT}/{name} "./files/a-a"))', '"./out/a"', grant=False)
-		value('(let [ROOT "./files"] (match? @{ROOT}/{name:~[a-z]+} "./files/abc"))', ':true', grant=False)
+			value(f'((root ext => capture ${{root}}/{{name:*}}.${{ext}} ${{root}}/a.txt) {quote(pathRoot)} "txt")', '{name: "a"}', grant=False)
+		value('((root ext => ./files/a-b.txt |> capture ${root}/{first:*}-{second:*}.${ext} |> bind ./out/{second}/{first}) "./files" "txt")', './out/b/a', grant=False)
+		value('((root out => ./files/a-a |> capture ${root}/{name:*}-{name:*} |> bind ${out}/{name}) "./files" "./out")', './out/a', grant=False)
+		value(with_root('capture ${root}/{name:~[a-z]+} ./files/abc'), '{name: "abc"}', grant=False)
 		for payload in ('{evil:*}', '*?[]\\"@()猫', '[a-z]+'):
-			value(f'(let [ROOT {quote("./" + payload)} EXT {quote(payload)}] (match? @{{ROOT}}/{{name:*}}.@{{EXT}} {quote("./" + payload + "/demo." + payload)}))', ':true', grant=False)
-		value('(let [ROOT "./files"] "@{ROOT}/{name:*}")', '"./files/{name:*}"', grant=False)
+			value(f'((root ext => match? ${{root}}/{{name:*}}.${{ext}} {quote("./" + payload + "/demo." + payload)}) {quote("./" + payload)} {quote(payload)})', 'true', grant=False)
+		value(with_root('"${root}/{name:*}"'), '"./files/{name:*}"', grant=False)
 		value('"./files/literal*.txt"', '"./files/literal*.txt"', grant=False)
-		value('(if :false (let [ROOT "./files"] @{ROOT}/*) "inactive")', '"inactive"', grant=False)
-		value('ROOT = "./files"\nUNUSED = @{ROOT}/*\n(out! "lazy")', 'lazy', lang='km', grant=False)
-		reject('(let [ROOT "./files"] @{ROOT}/*)', 'CAP_DENIED')
-		for operand in ('42', ':true', '[]', '[x: "./files"]', '"files"', '"file://files"', '(parse-json ' + json.dumps(json.dumps('\x00')) + ')'):
-			reject(f'(let [ROOT {operand}] @{{ROOT}}/{{name:*}})', 'EXPR_INVALID')
+		value('(if false then (files ./files/*) else "inactive")', '"inactive"', grant=False)
+		value('root = "./files"\nunused = files ${root}/*\n(out! "lazy")', 'lazy', lang='km', grant=False)
+		reject(with_root('files ${root}/*'), 'CAP_DENIED')
+		for operand in ('42', 'true', '[]', '{x: "./files"}', '"files"', '"file://files"', '(parse-json ' + json.dumps(json.dumps('\x00')) + ')'):
+			reject(with_root('${root}/{name:*}', operand), 'EXPR_INVALID')
 		for operand in ('"files"', '[]'):
-			reject(f'(let [ROOT {operand}] @{{ROOT}}/*)', 'EXPR_INVALID')
-		reject('./@(nop 42)/{name:*}', 'EXPR_INVALID')
-		for source in ('./{@{NAME}:*}', './{name:@{GLOB}}', './{name:~@{REGEX}}', '@{ROOT}/{a:*}/{b}', '@{ROOT}/{name:~(a|)}'):
+			reject(with_root('${root}/*', operand), 'EXPR_INVALID')
+		reject('${nop 42}/{name:*}', 'EXPR_INVALID')
+		value(with_root('capture ${root}/{a:*}/{b} ./files/dir/item'), '{a: "dir", b: "item"}', grant=False)
+		for source in ('./{${NAME}:*}', './{name:${GLOB}}', './{name:~${REGEX}}', '${ROOT}/{name:~(a|)}'):
 			reject(source, 'PARSE_ERR', parse=True)
-		reject('ROOT = "./"\n(include @{ROOT}/included.km)', 'PARSE_ERR', lang='km', parse=True)
-		(project / 'included.km').write_text('(out! "literal-include")\n')
-		(project / 'parent.km').write_text('(include ./included.km)\n')
-		includedResult = run(['do', 'run', '--lang', 'km', 'parent.km'])
-		assert includedResult.returncode == 0 and not includedResult.stderr and includedResult.stdout == 'literal-include', includedResult
+		reject('root = "./"\ninclude ${root}/included.km', 'PARSE_ERR', lang='km', parse=True)
+		(project / 'included.km').write_text('message = "literal-include"\n')
+		(project / 'parent.km').write_text('include ./included.km\ndefault = message\n')
+		includedResult = run(['do', 'run', '--lang', 'km', 'parent.km', 'default'])
+		assert includedResult.returncode == 0 and not includedResult.stderr and includedResult.stdout == '"literal-include"', includedResult
 		checks += 1
 		for lang, boundarySource in (
 			('kash', 'printf ./{name:*}\n'),
-			('rule', './out/{name}.o : ./src/{name}.c\n\tprintf unchanged\n')):
+			('km', 'rule ./out/{name}.o : ./src/{name}.c\n\tprintf unchanged\n')):
 			(project / 'boundary').write_text(boundarySource)
 			boundary = run(['do', 'parse', '--json', '--lang', lang, 'boundary'])
 			assert boundary.returncode == 0 and not boundary.stderr, boundary
 			boundaryAst = json.loads(boundary.stdout)['ast']
 			assert not any(node.get('kind') == 'interpolation' for node in walk(boundaryAst)), boundaryAst
 			if lang == 'kash':
-				assert not any(node.get('kind') == 'pattern' for node in walk(boundaryAst)), boundaryAst
+				assert not any(node.get('kind') == 'path-pattern' for node in walk(boundaryAst)), boundaryAst
 			boundaryFormat = run(['do', 'fmt', '--lang', lang, 'boundary'])
 			assert boundaryFormat.returncode == 0 and not boundaryFormat.stderr and '{name' in boundaryFormat.stdout, boundaryFormat
 			checks += 1
 		# Inspect the public schema rather than assuming a private AST layout.
-		source = '@{ROOT}/{one:*}.@{EXT}/{two:~[a-z]+}'
+		source = '${ROOT}/{one:*}.${EXT}/{two:~[a-z]+}'
 		(project / 'source.expr').write_text(source)
 		parsed = run(['do', 'parse', '--json', '--lang', 'expr', 'source.expr'])
 		assert parsed.returncode == 0 and not parsed.stderr, parsed
 		ast = json.loads(parsed.stdout)['ast']
-		patterns = [node for node in walk(ast) if node.get('kind') == 'pattern']
+		patterns = [node for node in walk(ast) if node.get('kind') == 'path-pattern']
 		assert len(patterns) == 1, ast
 		parts = patterns[0]['parts']
 		interpolations = [part for part in parts if part['kind'] == 'interpolation']

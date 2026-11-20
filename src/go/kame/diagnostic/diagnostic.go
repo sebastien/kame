@@ -95,6 +95,8 @@ type Diagnostic struct {
 type Termination struct {
 	Requested bool
 	Status    int
+	// Restore the cleanup failure's own protection when a capture consumes Exit.
+	CleanupProtected bool
 }
 
 // ExitOnly identifies the internal control carrier, never a user-facing error.

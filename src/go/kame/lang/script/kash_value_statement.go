@@ -35,9 +35,9 @@ func (p *kashParser) valueStatement(word string, start, operand int) *expr.Expr 
 			s.error(pos, targetEnd, "invalid set target")
 			return e
 		}
-		pos = trimStart(text, equals+1, end)
+		pos = bindingValueStart(text, start, equals+1)
 	}
-	if pos == end || text[pos] == '#' || text[pos] == ';' {
+	if pos == len(text) || text[pos] == '\n' || text[pos] == '#' || text[pos] == ';' {
 		s.error(pos, pos, word+" requires an expression")
 		return e
 	}

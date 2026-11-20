@@ -202,21 +202,18 @@ func TestDiscoveredBuildAppendsCommandsWithoutReinterpretingTargets(t *testing.T
 	}
 }
 
-func TestRemovedExecutionCommandsGiveMigrationHelp(t *testing.T) {
-	commands := []string{"expr"}
-	for i := range commands {
-		inv := cli.Parse(commands[i], []string{"-c", "42"})
-		if inv.OK || inv.Error.Code != "CMD_UNKNOWN" || inv.Error.Message != cli.RemovedCommandMessage(commands[i]) {
-			t.Error("removed execution command did not report migration help")
-		}
-		inv.Free()
+func TestUnknownExpressionCommandShowsRunnerUsage(t *testing.T) {
+	inv := cli.Parse("expr", []string{"-c", "42"})
+	defer inv.Free()
+	if inv.OK || inv.Error.Code != "CMD_UNKNOWN" || !strings.Contains(inv.Error.Message, "kame do run --lang expr -c TEXT") {
+		t.Error("unknown expression command did not show runner usage")
 	}
 }
 
 func TestKashExecutionAliasUsesUnifiedRunner(t *testing.T) {
 	inv := cli.Parse("kash", []string{"-c", "printf hello", "--", "two words"})
 	defer inv.Free()
-	if !inv.OK || inv.Name != "run" || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "kash" || len(inv.Args) != 1 || inv.Args[0] != "two words" || cli.RemovedCommandMessage("kash") != "" {
+	if !inv.OK || inv.Name != "run" || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "kash" || len(inv.Args) != 1 || inv.Args[0] != "two words" {
 		t.Error("Kash alias lost runner language, arguments, or command identity")
 	}
 }
@@ -263,7 +260,7 @@ func TestTypedDefinitionOverrideGrammar(t *testing.T) {
 		t.Error("typed override was mistaken for a source")
 	}
 	inv.Free()
-	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1, (out! \"bad\")]", "flag=\"@{missing}\"", "flag=(x => x)", "flag=1 2", "flag={x: 1, x: 2}"}
+	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1, (out! \"bad\")]", "flag=\"${missing}\"", "flag=(x => x)", "flag=1 2", "flag={x: 1, x: 2}"}
 	for i := range invalid {
 		inv = cli.Parse("build", []string{"--set", invalid[i]})
 		if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" {
@@ -278,11 +275,11 @@ func TestTypedDefinitionOverrideGrammar(t *testing.T) {
 	inv.Free()
 	commands := []string{"build", "run", "plan", "inputs", "outputs", "span", "cat", "tools", "render"}
 	for i := range commands {
-		removed := []string{"--define-value", "--define-value=flag=false"}
-		for j := range removed {
-			inv = cli.Parse(commands[i], []string{removed[j]})
+		unknown := []string{"--define-value", "--define-value=flag=false"}
+		for j := range unknown {
+			inv = cli.Parse(commands[i], []string{unknown[j]})
 			if inv.OK || inv.Error.Code != "OPT_UNKNOWN" || !strings.Contains(inv.Error.Message, "--set NAME=LITERAL") {
-				t.Error("removed typed option lacks recovery guidance")
+				t.Error("unknown typed option lacks recovery guidance")
 			}
 			inv.Free()
 		}
@@ -290,17 +287,17 @@ func TestTypedDefinitionOverrideGrammar(t *testing.T) {
 }
 
 func TestAssignmentShorthand(t *testing.T) {
-	inv := cli.Parse("build", []string{"env.HOST=0.0.0.0", "port=8000", "env.EMPTY=", "env.TOKEN=a=b", "--", "env.LITERAL=value"})
-	if !inv.OK || len(inv.Environment) != 3 || inv.Environment[0] != "HOST=0.0.0.0" || inv.Environment[1] != "EMPTY=" || inv.Environment[2] != "TOKEN=a=b" || len(inv.Parameters) != 1 || inv.Parameters[0] != "port=8000" || len(inv.Targets) != 2 || inv.Targets[1] != "env.LITERAL=value" {
+	inv := cli.Parse("build", []string{"env/HOST=0.0.0.0", "port=8000", "env/EMPTY=", "env/TOKEN=a=b", "--", "env/LITERAL=value"})
+	if !inv.OK || len(inv.Environment) != 3 || inv.Environment[0] != "HOST=0.0.0.0" || inv.Environment[1] != "EMPTY=" || inv.Environment[2] != "TOKEN=a=b" || len(inv.Parameters) != 1 || inv.Parameters[0] != "port=8000" || len(inv.Targets) != 2 || inv.Targets[1] != "env/LITERAL=value" {
 		t.Error("assignment shorthand lost environment, literal values, or delimiter policy")
 	}
 	inv.Free()
-	inv = cli.Parse("build", []string{"env.=bad"})
+	inv = cli.Parse("build", []string{"env/=bad"})
 	if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" {
 		t.Error("empty environment name accepted")
 	}
 	inv.Free()
-	if !cli.SelectsRun([]string{"env.HOST=local", "port=8000", "source.kame"}) {
+	if !cli.SelectsRun([]string{"env/HOST=local", "port=8000", "source.kame"}) {
 		t.Error("leading assignments hid an explicit source")
 	}
 }

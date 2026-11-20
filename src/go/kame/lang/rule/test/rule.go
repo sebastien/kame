@@ -13,7 +13,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 
 func TestComputedSequenceGroups(t *testing.T) {
 	a := t.Allocator()
-	text := "task a : @{PREP}, @{BUILD} | @{TOOLS}, ./ready"
+	text := "task a : ${PREP}, ${BUILD} | ${TOOLS}, ./ready"
 	parsed := rule.ParseRule(a, "groups.km", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 4 {
@@ -32,7 +32,7 @@ func TestComputedSequenceGroups(t *testing.T) {
 
 func TestComputedPrerequisitePathsRoundTrip(t *testing.T) {
 	a := t.Allocator()
-	text := "rule ./build/{path:**}.js : @{ROOT}/js/{path}.js, ./meta/@{MODE}/{path}.json | @{str ROOT \"/ready\"}/{_0}"
+	text := "rule ./build/{path:**}.js : ${ROOT}/js/{path}.js, ./meta/${MODE}/{path}.json | ${str ROOT \"/ready\"}/{_0}"
 	parsed := rule.ParseRule(a, "paths.km", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 3 {
@@ -56,31 +56,42 @@ func TestComputedPrerequisitePathsRoundTrip(t *testing.T) {
 
 func TestComputedOutputsPreserveExpressionsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "rule @{ROOT}/{name}.o @{OUTPUTS} : ./seed\n\tcat @< > @>"
+	text := "rule ${ROOT}/{name}.o ${OUTPUTS} (output-path name) : ./seed\n\tcat $inputs.0 > $outputs.0"
 	parsed := rule.ParseRule(a, "computed.km", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 2 {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 3 {
 		t.Error("computed outputs did not parse")
 		return
 	}
 	if parsed.Rule.Outputs[0].Kind != rule.TargetString || parsed.Rule.Outputs[1].Kind != rule.TargetExpression || parsed.Rule.Outputs[0].Expansion == nil || parsed.Rule.Outputs[1].Expansion == nil {
 		t.Error("output interpolation and list-splicing expressions were not distinguished")
 	}
+	parenthesized := parsed.Rule.Outputs[2]
+	if parenthesized.Kind != rule.TargetExpression || parenthesized.Expansion == nil || parenthesized.Expansion.Parts[0].Expr == nil {
+		t.Error("parenthesized output did not retain its expression")
+	}
 	formatted := rule.FormatRule(a, parsed.Rule)
 	if formatted != text {
 		t.Error("formatting changed authored output expressions")
 	}
 	mem.FreeString(a, formatted)
+	for _, invalid := range []string{"rule ()", "rule (name).path", "rule (name)(other)", "task (name)", "service (name)"} {
+		parsed := rule.ParseRule(a, "invalid.km", invalid)
+		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Errorf("expected a parse error for %q", invalid)
+		}
+		parsed.Free()
+	}
 }
 
 func TestFileRuleParsesRecipeIndentation(t *testing.T) {
-	result := rule.ParseRule(t.Allocator(), "test.km", "rule ./out : ./in dep\n\tcommand @< @>\n\t  nested")
+	result := rule.ParseRule(t.Allocator(), "test.km", "rule ./out : ./in dep\n\techo ${inputs.0}\n\t  nested")
 	defer result.Free()
 	if len(result.Diagnostics) != 0 || result.Rule == nil || result.Rule.Kind != rule.FileRule || len(result.Rule.Outputs) != 1 || len(result.Rule.Inputs) != 2 || len(result.Rule.Body) != 2 {
 		t.Error("file rule did not parse header and recipe body")
 		return
 	}
-	if result.Rule.Body[0].Text != "command @< @>" || result.Rule.Body[1].Text != "  nested" || !sameSpan(result.Rule.Body[0].Span, 23, 36) {
+	if result.Rule.Body[0].Text != "echo ${inputs.0}" || result.Rule.Body[1].Text != "  nested" || !sameSpan(result.Rule.Body[0].Span, 23, 39) {
 		t.Error("recipe prefix removal or line span was incorrect")
 	}
 }
@@ -99,7 +110,7 @@ func TestNamedAndPrefixedRulesClassify(t *testing.T) {
 
 func TestNamedTaskArgumentsParseFormatAndValidate(t *testing.T) {
 	a := t.Allocator()
-	text := "task cached deploy {environment} {region=us-east} : configure\n\tship @{environment} @{region}"
+	text := "task cached deploy {environment} {region=us-east} : configure\n\tship ${environment} ${region}"
 	parsed := rule.ParseRule(a, "arguments.km", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || parsed.Rule.Kind != rule.CachedTaskRule || len(parsed.Rule.Outputs) != 1 || len(parsed.Rule.Arguments) != 2 {
@@ -180,7 +191,7 @@ func TestFormatRulePreservesRecipeBlankLines(t *testing.T) {
 }
 
 func TestRuleHeaderBalancesQuotedAndExpressionInputs(t *testing.T) {
-	result := rule.ParseRule(t.Allocator(), "test.km", "rule \"./build dir/out\" : \"literal input\" @(wildcard ./src/*.c)")
+	result := rule.ParseRule(t.Allocator(), "test.km", "rule \"./build dir/out\" : \"literal input\" ${files ./src/*.c}")
 	defer result.Free()
 	if len(result.Diagnostics) != 0 || result.Rule.Kind != rule.FileRule || len(result.Rule.Inputs) != 2 || result.Rule.Inputs[0].Kind != rule.InputString || result.Rule.Inputs[0].Template == nil || result.Rule.Inputs[1].Kind != rule.InputExpression || result.Rule.Inputs[1].Template == nil {
 		t.Error("rule header split quoted or expression input")
@@ -209,7 +220,7 @@ func TestQuotedOperandsDecodeWithoutChangingAuthoredText(t *testing.T) {
 	if formatted != text {
 		t.Error("formatting changed quoted spelling")
 	}
-	dynamic := rule.ParseRule(a, "dynamic.km", "rule ./out : \"@{ROOT}/input\"")
+	dynamic := rule.ParseRule(a, "dynamic.km", "rule ./out : \"${ROOT}/input\"")
 	defer dynamic.Free()
 	if _, literal := rule.LiteralInput(dynamic.Rule.Inputs[0]); literal {
 		t.Error("interpolated prerequisite was treated as static")
@@ -254,17 +265,17 @@ func TestQuotedCapturesKeepDecodedBackslashesAndAuthoredSpans(t *testing.T) {
 }
 
 func TestRecipeTemplateRecoversMalformedExpansion(t *testing.T) {
-	result := rule.ParseRule(t.Allocator(), "test.km", "task default : dep\n\techo @(name")
+	result := rule.ParseRule(t.Allocator(), "test.km", "task default : dep\n\techo @{name")
 	defer result.Free()
-	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Severity != source.Warning || result.Rule.Body[0].Template == nil {
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Severity != source.Error || result.Rule.Body[0].Template == nil {
 		t.Error("recipe template did not recover malformed interpolation")
 	}
 }
 
 func TestRuleRetainsTargetFormAndNormalizesCRLFRecipe(t *testing.T) {
-	result := rule.ParseRule(t.Allocator(), "test.km", "rule ./{name:*}.o : ./{name:*}.c\r\n\techo @<\r\n")
+	result := rule.ParseRule(t.Allocator(), "test.km", "rule ./{name:*}.o : ./{name:*}.c\r\n\techo $inputs.0\r\n")
 	defer result.Free()
-	if len(result.Diagnostics) != 0 || result.Rule.Outputs[0].TargetForm == nil || result.Rule.Inputs[0].TargetForm == nil || len(result.Rule.Body) != 1 || result.Rule.Body[0].Text != "echo @<" {
+	if len(result.Diagnostics) != 0 || result.Rule.Outputs[0].TargetForm == nil || result.Rule.Inputs[0].TargetForm == nil || len(result.Rule.Body) != 1 || result.Rule.Body[0].Text != "echo $inputs.0" {
 		t.Errorf("rule forms=%t/%t body=%d diagnostics=%d", result.Rule.Outputs[0].TargetForm != nil, result.Rule.Inputs[0].TargetForm != nil, len(result.Rule.Body), len(result.Diagnostics))
 	}
 }
@@ -279,14 +290,14 @@ func TestWildcardInputRetainsAuthoredToken(t *testing.T) {
 
 func TestAlwaysPreservesFileKindOutputsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	parsed := rule.ParseRule(a, "always.km", "rule always ./one ./two : ./input\n  cp @< @>\n")
+	parsed := rule.ParseRule(a, "always.km", "rule always ./one ./two : ./input\n  cp $inputs.0 $outputs.0\n")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || !parsed.Rule.Always || parsed.Rule.Kind != rule.FileRule || len(parsed.Rule.Outputs) != 2 {
 		t.Error("always did not preserve file-rule semantics")
 		return
 	}
 	formatted := rule.FormatRule(a, parsed.Rule)
-	if formatted != "rule always ./one ./two : ./input\n\tcp @< @>" {
+	if formatted != "rule always ./one ./two : ./input\n\tcp $inputs.0 $outputs.0" {
 		t.Error("always formatter lost the prefix or outputs")
 	}
 	mem.FreeString(a, formatted)
@@ -303,7 +314,7 @@ func TestAlwaysPreservesFileKindOutputsAndFormatting(t *testing.T) {
 }
 
 func TestRuleRejectsNonRecordEnvironmentSuffix(t *testing.T) {
-	texts := []string{"task x ; env", "task x ; other \"MODE=debug\"", "task x ; env MODE", "task x ; env \"1MODE=debug\"", "task x ; env \"MODE\"", "task x ; env \"MODE=@{value ()}\"", "task x ; env \"MODE=\\u0000\""}
+	texts := []string{"task x ; env", "task x ; other \"MODE=debug\"", "task x ; env MODE", "task x ; env \"1MODE=debug\"", "task x ; env \"MODE\"", "task x ; env \"MODE=${value ()}\"", "task x ; env \"MODE=\\u0000\""}
 	for i := range texts {
 		parsed := rule.ParseRule(t.Allocator(), "invalid.km", texts[i])
 		if len(parsed.Diagnostics) == 0 {

@@ -19,15 +19,15 @@ if grep -q 'result = (nop' "$CLI_ERR"; then
 else
 	test-ok "expression diagnostic uses only authored input"
 fi
-cli_run -- do run --lang expr -c '(nth :false [1])'
+cli_run -- do run --lang expr -c '(nth false [1])'
 cli_expect_status 1
 cli_expect_stderr_contains '`nth` argument 1 expects int; got bool'
-cli_run -- do run --lang expr -c '(first)'
+cli_run -- do run --lang expr -c 'first ()'
 cli_expect_status 1
 cli_expect_stderr_contains '`first` expects 1 argument; got 0'
 
 test-step "lambda arity failures underline the parameter list"
-for case in '(([a b] a) 1 2 3)|[a b]' '(reduce ([a] a) [1 2])|[a]'; do
+for case in '((a b => a) 1 2 3)|a b' '(reduce (a => a) [1, 2])|a'; do
 	expr="${case%|*}" params="${case#*|}"
 	cli_run -- --json do run --lang expr -c "$expr"
 	cli_expect_status 1
@@ -41,10 +41,10 @@ for case in '(([a b] a) 1 2 3)|[a b]' '(reduce ([a] a) [1 2])|[a]'; do
 done
 
 test-step "recipe failures retain the operand span and full dependency path"
-build=$'root : leaf\nleaf :\n\t@(first 1)\n'
-cli_run -- --json -l kmk -c "$build" root
+build=$'task root : leaf\ntask leaf\n\t(first 1)\n'
+cli_run -- --json -l km -c "$build" root
 cli_expect_status 1
-diagnostic="$(jq -c 'select(.type == "diagnostic") | .diagnostic' "$CLI_OUT")"
+diagnostic="$(jq -c 'select(.type == "target-failed" and .target == "leaf") | .diagnostic' "$CLI_OUT")"
 if jq -e '.code == "EXPR_INVALID" and .message == "`first` argument 1 expects list or string; got int" and .source == "<command:1>" and .target == "leaf" and .targetStack == ["root", "leaf"] and .frames[0].label == "first" and .frames[1].label == "leaf"' <<<"$diagnostic" >/dev/null; then
 	test-ok "JSON retains precise failure and context"
 else
@@ -59,10 +59,10 @@ else
 fi
 
 test-step "unused tools do not block planning or execution"
-tools=$'good :\n\ttrue\nbad :\n\t@{x/kame-definitely-missing-tool}\nroot : bad\n'
+tools=$'task good\n\ttrue\ntask bad\n\tx/kame-definitely-missing-tool\ntask root : bad\n'
 cli_run -- do plan -c "$tools" good
 cli_expect_status 0
-cli_run -- -l kmk -c "$tools" good
+cli_run -- -l km -c "$tools" good
 cli_expect_status 0
 cli_run -- do tools check -c "$tools" good
 cli_expect_status 0
@@ -78,28 +78,28 @@ if jq -e -s 'map(select(.type == "diagnostic"))[0] | .diagnostic.targetStack == 
 else
 	test-fail "tool check omitted context"
 fi
-cli_run -- -l kmk -c "$tools" bad
+cli_run -- -l km -c "$tools" bad
 cli_expect_status 1
-cli_expect_stderr_contains 'TOOL_MISSING' '@{x/kame-definitely-missing-tool}' 'rule bad'
+cli_expect_stderr_contains 'TOOL_MISSING' 'x/kame-definitely-missing-tool' 'rule bad'
 cli_run -- do tools check -c "$tools"
 cli_expect_status 2
 cli_expect_stderr_contains 'tools check requires at least one target'
 
 test-step "checks follow computed dependencies and reject cycles"
-cli_run -- do tools check -c $'root : @(nop "bad")\nbad :\n\t@{x/kame-definitely-missing-tool}\n' root
+cli_run -- do tools check -c $'task root : ${nop "bad"}\ntask bad\n\tx/kame-definitely-missing-tool\n' root
 cli_expect_status 1
 cli_expect_stderr_contains 'TOOL_MISSING' 'required by root -> bad'
-cli_run -- do tools check -c $'a : b\nb : a\n' a
+cli_run -- do tools check -c $'task a : b\ntask b : a\n' a
 cli_expect_status 1
 cli_expect_stderr_contains 'DEP_CYCLE' 'required by a -> b -> a'
 
 test-step "read-only input expansion does not execute a recipe"
 mkdir -p tool-project
-cat >tool-project/Makefile.kmk <<'EOF'
-root : @(wildcard ./*.txt)
+cat >tool-project/Makefile.km <<'EOF'
+task root : ./*.txt
 	touch should-not-run
-./source.txt :
-	@{x/kame-definitely-missing-tool}
+rule ./source.txt :
+	x/kame-definitely-missing-tool
 EOF
 touch tool-project/source.txt
 cli_run -- do tools check -C tool-project root
@@ -118,33 +118,39 @@ cat >tool-project/bin/kame-test-tool <<'EOF'
 printf tool-ok
 EOF
 chmod +x tool-project/bin/kame-test-tool
-PATH="bin:$PATH" cli_run -- do tools check -C tool-project -c $'using :\n\t@{x/kame-test-tool}\n' using
+PATH="bin:$PATH" cli_run -- do tools check -C tool-project -c $'task using\n\tx/kame-test-tool\n' using
 cli_expect_status 0
-PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -l kmk -c $'using :\n\t@{x/kame-test-tool}\n' using
+PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -l km -c $'task using\n\tx/kame-test-tool\n' using
 cli_expect_status 0
 cli_expect_stdout 'tool-ok'
 
 test-step "included recipes and post-include rules retain authored locations"
 mkdir -p include-project
-cat >include-project/Makefile.kmk <<'EOF'
-(include ./rules.kmk)
-root : leaf
-local :
-	@(first 1)
+cat >include-project/Makefile.km <<'EOF'
+include ./rules.km
+task root : leaf
+task local
+	(first 1)
 EOF
-cat >include-project/rules.kmk <<'EOF'
-leaf :
-	@(first 1)
+cat >include-project/rules.km <<'EOF'
+task leaf
+	(first 1)
 EOF
 cli_run -- -C include-project root
 cli_expect_status 1
-cli_expect_stderr_contains 'rules.kmk:2:17' 'error[EXPR_INVALID]:' 'required by root -> leaf'
+cli_expect_stderr_contains 'rules.km:2:16' 'error[EXPR_INVALID]:' 'required by root -> leaf'
 cli_run -- -C include-project local
 cli_expect_status 1
-cli_expect_stderr_contains 'Makefile.kmk:4:17' 'error[EXPR_INVALID]:' '@(first 1)'
+cli_expect_stderr_contains 'Makefile.km:4:16' 'error[EXPR_INVALID]:' '(first 1)'
 
 test-step "diagnostic causes omit captured output but retain outcome and capture metadata"
-cli_run -- --json --log-limit 4 -l kmk -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails
+cat >include-project/Makefile.km <<'EOF'
+task fails ; {shell: "sh"}
+	printf diagnostic-secret-output
+	printf diagnostic-secret-error >&2
+	exit 7
+EOF
+cli_run -- -C include-project --json --log-limit 4 fails
 cli_expect_status 1
 if jq -e -s 'map(select(.diagnostic.cause != null)) | length > 0 and all(.[]; .diagnostic.cause | .status == 7 and .stdoutLimit == 4 and .stderrLimit == 4 and .stdoutTruncated == true and .stderrTruncated == true and (has("stdout") | not) and (has("stderr") | not))' "$CLI_OUT" >/dev/null; then
 	test-ok "causes contain metadata only"

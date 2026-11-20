@@ -39,11 +39,42 @@ func kashLine(b *strings.Builder, indent string, level int) {
 }
 
 func writeKashStatement(b *strings.Builder, e *Expr, indent string, level int) {
+	if (e.Kind == KashLet || e.Kind == KashSet) && indent == "\t" {
+		if e.Kind == KashLet {
+			b.WriteString("let ")
+		} else {
+			b.WriteString("set ")
+		}
+		b.WriteString(e.Text)
+		writeKashBindingValue(b, e.Items[0], indent, level)
+		return
+	}
 	if e.Kind != CommandGraph || !kashNestedGraph(e) {
 		writeExpr(b, e)
 		return
 	}
 	writeKashGraph(b, e, indent, level)
+}
+
+func writeKashBindingValue(b *strings.Builder, value *Expr, indent string, level int) {
+	b.WriteString(" =")
+	if indent != "\t" {
+		b.WriteByte(' ')
+		writeExpr(b, value)
+		return
+	}
+	line := b.String()[strings.LastIndexByte(b.String(), '\n')+1:]
+	column := Columns(line, 0) + 1
+	if value.Kind != Match && !inlineFits(nil, value, column, 0) {
+		level++
+		kashLine(b, indent, level)
+		column = level * 8
+	} else {
+		b.WriteByte(' ')
+	}
+	formatted := FormatAtIndent(nil, value, column, level*8)
+	b.WriteString(formatted)
+	mem.FreeString(nil, formatted)
 }
 
 func writeKashGraph(b *strings.Builder, e *Expr, indent string, level int) {
@@ -54,15 +85,17 @@ func writeKashGraph(b *strings.Builder, e *Expr, indent string, level int) {
 		}
 		if item.Kind == CommandMux {
 			if i != 1 || e.Items[0].Kind != CommandInput {
-				kashLine(b, indent, level+1)
+				b.WriteByte(' ')
 			}
 			b.WriteString("|(")
 			writeMuxHead(b, item)
 			if item.Text == "filter" && len(item.Body) != 0 {
 				if len(item.Body[0].Items) == 0 || item.Body[0].Items[0].Kind != CommandInput {
-					b.WriteString(" | ")
+					b.WriteString(" |")
 				}
-				writeKashStatement(b, item.Body[0], indent, level+1)
+				kashLine(b, indent, level+1)
+				writeKashGraph(b, item.Body[0], indent, level+1)
+				kashLine(b, indent, level)
 			}
 			b.WriteByte(')')
 			continue
@@ -71,24 +104,19 @@ func writeKashGraph(b *strings.Builder, e *Expr, indent string, level int) {
 			if joinsWithSpace(e.Items, i) {
 				b.WriteByte(' ')
 			} else {
-				kashLine(b, indent, level+1)
-				b.WriteString("| ")
+				b.WriteString(" | ")
 			}
 		}
 		if item.Kind == CommandGroup {
-			groupLevel := level
-			if i != 0 {
-				groupLevel++
-			}
 			b.WriteByte('(')
 			for j := range item.Items {
 				if j != 0 {
 					b.WriteByte(',')
 				}
-				kashLine(b, indent, groupLevel+1)
-				writeKashStatement(b, item.Items[j], indent, groupLevel+1)
+				kashLine(b, indent, level+1)
+				writeKashStatement(b, item.Items[j], indent, level+1)
 			}
-			kashLine(b, indent, groupLevel)
+			kashLine(b, indent, level)
 			b.WriteByte(')')
 		} else {
 			writeExpr(b, item)
@@ -100,7 +128,7 @@ func writeKashGraph(b *strings.Builder, e *Expr, indent string, level int) {
 	}
 	if len(e.Body) != 0 {
 		b.WriteString(" ? ")
-		writeProcess(b, e.Body[0])
+		writeKashStatement(b, e.Body[0], indent, level)
 	}
 	if e.Async {
 		b.WriteString(" &")
@@ -249,8 +277,7 @@ func writeKashBody(b *strings.Builder, body []*Expr, indent string, level int) {
 					b.WriteString("...")
 				}
 			}
-			b.WriteString(" = ")
-			writeExpr(b, statement.Items[0])
+			writeKashBindingValue(b, statement.Items[0], indent, level)
 		} else {
 			writeKashStatement(b, statement, indent, level)
 		}

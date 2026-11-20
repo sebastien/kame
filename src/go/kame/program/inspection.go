@@ -8,7 +8,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"kame/lang/template"
+	"kame/lang/source"
 	"slices"
 )
 
@@ -185,7 +185,7 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 				}
 				parent := g.Producers[d.Producer-1]
 				child := g.Resources[d.Resource-1].Producer
-				if child != 0 && (parent.ContextUnknown || (parent.Plan.Rule != nil && (len(parent.Plan.Rule.Environment) != 0 || parent.Plan.Rule.Metadata != nil))) {
+				if child != 0 && (parent.ContextUnknown || (parent.Plan.Rule != nil && parent.Plan.Rule.Metadata != nil)) {
 					g.Producers[child-1].ContextUnknown = true
 				}
 			}
@@ -463,7 +463,7 @@ func (g *inspectionGraph) resource(key core.ResourceKey, request string, depth i
 	display := cloneText(p.Alloc, request)
 	if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob {
 		mem.FreeString(p.Alloc, display)
-		display = p.relativePath(key.Name)
+		display = p.relativePath(host.DiscoveryPattern(key.Name))
 	}
 	g.Resources = append(g.Resources, inspectionResource{Key: key.Clone(p.Alloc), Display: display, Request: cloneText(p.Alloc, request), Depth: depth})
 	return len(g.Resources)
@@ -597,22 +597,12 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 	}
 	g.configuration(producer, r.Depth+1)
 	if plan.Rule != nil {
-		for i := range plan.Rule.Body {
-			value := plan.Rule.Body[i].Template
-			if value == nil {
-				continue
-			}
-			for j := range value.Parts {
-				part := value.Parts[j]
-				if part.Kind != template.Tool {
-					continue
-				}
-				key := p.inspectionKey(core.ResourceTool, part.Text)
-				id := g.resource(key, part.Text, r.Depth+1)
-				key.Free(p.Alloc)
-				g.dependency(producer, id, "declared", false, 0)
-			}
-		}
+		visitRecipeToolReferences(plan.Rule, func(name string, _ source.Span) {
+			key := p.inspectionKey(core.ResourceTool, name)
+			id := g.resource(key, name, r.Depth+1)
+			key.Free(p.Alloc)
+			g.dependency(producer, id, "declared", false, 0)
+		})
 	}
 	for i := range plan.GeneratorDependencies {
 		key := p.inspectionKey(core.ResourceDefinition, plan.GeneratorDependencies[i])
@@ -621,11 +611,20 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 		g.Resources[id-1].Configuration = true
 		g.dependency(producer, id, "configuration", false, 0)
 	}
-	if plan.Rule != nil && len(plan.Rule.Body) != 0 {
+	g.deferRuleBody(producer, plan.Rule)
+	return diagnostic.Diagnostic{}
+}
+
+func (g *inspectionGraph) deferRuleBody(producer int, declaration *rule.Rule) {
+	if declaration == nil {
+		return
+	}
+	if declaration.BodyExpression != nil || len(declaration.Body) != 0 {
 		g.deferred(producer, 0, "runtime-discovery")
+	}
+	if len(declaration.Body) != 0 {
 		g.deferred(producer, 0, "opaque-process-io")
 	}
-	return diagnostic.Diagnostic{}
 }
 
 func (p *Program) unavailableGeneratedRead(d diagnostic.Diagnostic) bool {

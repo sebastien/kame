@@ -29,7 +29,7 @@ rule ./build/config.json : ./config.km = json config
 rule ./build/version.txt : ./VERSION
 	let version = strip (text (read inputs.0))
 	let revision = $(git rev-parse --short HEAD)
-	return "@{version}+@{revision}\n"
+	return "${version}+${revision}\n"
 ```
 
 `shell` resolves with the other rule settings, before prerequisite execution;
@@ -112,7 +112,8 @@ performs actions.
   indirect effects.
 - `program/test/kame_recipes.go`: result types, producer validation, multiline
   expression parsing, content reuse and failure preserving existing artifacts.
-- Kash `return` publication: string and bytes results, `return nil` and bare
+- `tests/T044-01-runtime-kame-rule-bodies.sh` also covers Kash `return`
+  publication: string and bytes results, `return nil` and bare
   `return`, non-nil returns from ineligible rules, `exit` and failure before
   publication, and replacement of body-written output.
 - Existing file-input and WASM publication tests exercise dynamic reads,

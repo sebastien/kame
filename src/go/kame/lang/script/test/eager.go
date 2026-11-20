@@ -33,8 +33,8 @@ func TestKashEagerBindingsPreserveDeclarationAndStatementIdentity(t *testing.T) 
 
 func TestKashEagerBindingsRejectMalformedAndConflictingDeclarations(t *testing.T) {
 	texts := []string{
-		"let", "let = 1", "let value", "let value =", "let value =\nprintf must-not-run", "let env = 1", "let (helper) = 1", "let value += 1", "let value ?= 1",
-		"let value = 1\ndef value = 2", "def value = 1\nlet value = 2", "let value = 1\nlet value = 2", "def value ()\n\treturn 0\nlet value = 1",
+		"let", "let = 1", "let value", "let value =", "let value =\nprintf must-not-run", "let (helper) = 1", "let value += 1", "let value ?= 1",
+		"let value = 1\ndef value = 2", "def value = 1\nlet value = 2", "def value ()\n\treturn 0\nlet value = 1",
 		"for item in [1]\n\tlet item = 2\n", "def unused item\n\tlet item = 1\n", "def unused rest...\n\tlet rest = 1\n",
 	}
 	for i := range texts {

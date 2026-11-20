@@ -20,9 +20,6 @@ const (
 	Expression
 	Include
 	Command
-	When
-	Otherwise
-	EndWhen
 	Generate
 	Composition
 	SessionCommand
@@ -36,6 +33,7 @@ const (
 type ScriptItem struct {
 	Kind            ScriptItemKind
 	Span            source.Span
+	SourceOrigin    int
 	Text            string
 	Definition      *definition.Definition
 	Rule            *rule.Rule
@@ -43,7 +41,6 @@ type ScriptItem struct {
 	Expression      *expr.Expr
 	Include         string
 	OptionalInclude bool
-	GenerateName    string
 	Branches        []DeclarationBranch
 	Loop            *DeclarationLoop
 	Module          *ModuleDeclaration
@@ -115,156 +112,6 @@ func freeItems(a mem.Allocator, items []ScriptItem) {
 	mem.FreeSlice(nil, items)
 }
 
-func Parse(a mem.Allocator, name string, text string) *Script {
-	s := mem.Alloc[Script](a)
-	s.Alloc, s.Source = a, source.New(a, name, text)
-	parseScript(s, 0)
-	return s
-}
-
-// ParseBorrowed parses without copying name or text. The caller must keep both
-// strings alive and immutable until the returned Script is freed.
-func ParseBorrowed(a mem.Allocator, name string, text string) *Script {
-	s := mem.Alloc[Script](a)
-	s.Alloc, s.Source, s.BorrowedSource = a, source.Borrow(a, name, text), true
-	parseScript(s, 0)
-	return s
-}
-
-func parseScript(s *Script, offset int) {
-	a, text := s.Alloc, s.Source.Text
-	for pos := offset; pos < len(text); {
-		lineEnd := source.LogicalLineEnd(text, pos)
-		start, end := trim(text, pos, lineEnd)
-		if start == end {
-			pos = nextLine(text, lineEnd)
-			continue
-		}
-		if text[start] == '#' {
-			lineEnd = pos
-			for lineEnd < len(text) && text[lineEnd] != '\n' {
-				lineEnd++
-			}
-			start, end = trim(text, pos, lineEnd)
-			s.Items = append(s.Items, ScriptItem{Kind: Comment, Text: text[start:end], Span: source.Span{Start: start, End: end}})
-			pos = nextLine(text, lineEnd)
-			continue
-		}
-		if start == pos {
-			if following := rejectLegacyDirective(s, start, end); following != 0 {
-				pos = following
-				continue
-			}
-		}
-		generated := generatedHeader(text, start, end)
-		if generated.OK {
-			part := expr.ParsePrefix(a, s.Source, generated.ExpressionStart)
-			s.takeDiagnostics(part.Diagnostics)
-			if part.Expr == nil {
-				s.error(start, end, "generated declaration requires an expression")
-				pos = nextLine(text, lineEnd)
-				continue
-			}
-			s.Items = append(s.Items, ScriptItem{Kind: Generate, GenerateName: generated.Name, Expression: part.Expr, Span: source.Span{Start: start, End: part.End}})
-			pos = nextLine(text, part.End)
-			continue
-		}
-		if text[pos] == ' ' || text[pos] == '\t' {
-			s.error(pos, lineEnd, "indented text has no preceding rule")
-			pos = nextLine(text, lineEnd)
-			continue
-		}
-		if item, next, ok := s.sourceDeclaration(pos, start, end, false); ok {
-			s.Items = append(s.Items, item)
-			pos = next
-			continue
-		}
-		if item, next, ok := s.blockFunction(start, end); ok {
-			s.Items = append(s.Items, item)
-			pos = next
-			continue
-		}
-		headerEnd := definition.ValueHeaderEnd(a, s.Source, start)
-		if item, next, ok := s.blockValue(start, headerEnd); ok {
-			s.Items = append(s.Items, item)
-			pos = next
-			continue
-		}
-		if source.TopLevelByte(text[start:end], '=') >= 0 {
-			definitionEnd := multilineDefinitionEnd(a, s.Source, start, end)
-			part := definition.ParseRange(a, s.Source, start, definitionEnd)
-			s.takeDiagnostics(part.Diagnostics)
-			s.Items = append(s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
-			pos = nextLine(text, definitionEnd)
-			continue
-		}
-		if rule.HasRuleSeparator(text[start:end]) {
-			part := rule.ParseRuleRangeDeferred(a, s.Source, start, len(text))
-			s.takeDiagnostics(part.Diagnostics)
-			if part.Rule == nil {
-				pos = nextLine(text, lineEnd)
-				continue
-			}
-			s.Items = append(s.Items, ScriptItem{Kind: Rule, Span: part.Rule.Span, Rule: part.Rule})
-			pos = part.Rule.Span.End
-			if pos <= lineEnd {
-				pos = lineEnd
-			}
-			pos = nextLine(text, pos)
-			continue
-		}
-		prefix := expr.ParsePrefix(a, s.Source, start)
-		s.takeDiagnostics(prefix.Diagnostics)
-		if prefix.End > end {
-			lineEnd = source.LogicalLineEnd(text, prefix.End)
-			_, end = trim(text, start, lineEnd)
-		}
-		if prefix.End != end {
-			s.error(prefix.End, end, "unexpected top-level input")
-		}
-		s.Items = append(s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
-		pos = nextLine(text, lineEnd)
-	}
-}
-
-type generatedHeaderResult struct {
-	Name            string
-	ExpressionStart int
-	OK              bool
-}
-
-func generatedHeader(text string, start int, end int) generatedHeaderResult {
-	if end-start < len("generate ") || text[start:start+len("generate")] != "generate" || !space(text[start+len("generate")]) {
-		return generatedHeaderResult{}
-	}
-	declarationStart := trimStart(text, start+len("generate"), end)
-	equal := source.TopLevelByte(text[declarationStart:end], '=')
-	if equal < 0 {
-		return generatedHeaderResult{}
-	}
-	nameStart, nameEnd := trim(text, declarationStart, declarationStart+equal)
-	name := text[nameStart:nameEnd]
-	if !validGeneratedName(name) {
-		return generatedHeaderResult{}
-	}
-	expressionStart, _ := trim(text, declarationStart+equal+1, end)
-	return generatedHeaderResult{Name: name, ExpressionStart: expressionStart, OK: true}
-}
-
-func validGeneratedName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i := range name {
-		b := name[i]
-		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' || (i != 0 && ((b >= '0' && b <= '9') || b == '-')) {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
 func trimStart(text string, start int, end int) int {
 	for start < end && space(text[start]) {
 		start++
@@ -307,8 +154,14 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 		return lineEnd
 	}
 	pos := start + equals + 1
-	for pos < len(text) && (space(text[pos]) || text[pos] == '\n') {
-		pos++
+	for pos < len(text) {
+		if next := source.ContinuationEnd(text, pos, len(text)); next != pos {
+			pos = next
+		} else if space(text[pos]) || text[pos] == '\n' {
+			pos++
+		} else {
+			break
+		}
 	}
 	if pos == len(text) {
 		return lineEnd
@@ -389,7 +242,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
-		if item.Kind == Include || item.Kind == Composition || item.Kind == DeclarationFor || item.Kind == Generate && item.GenerateName == "" {
+		if item.Kind == Include || item.Kind == Composition || item.Kind == DeclarationFor || item.Kind == Generate {
 			writeSourceDeclaration(a, &b, text, item, indent, 0)
 			previousEnd = item.Span.End
 			continue
@@ -415,16 +268,6 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
-		if item.Kind == Generate {
-			b.WriteString("generate ")
-			b.WriteString(item.GenerateName)
-			b.WriteString(" = ")
-			value := expr.FormatAt(a, item.Expression, len("generate ")+len(item.GenerateName)+3)
-			b.WriteString(value)
-			mem.FreeString(a, value)
-			previousEnd = item.Span.End
-			continue
-		}
 		if item.Kind == Definition {
 			value := ""
 			if item.Definition.Expression != nil && item.Definition.Expression.Kind == expr.ValueBlock {
@@ -436,7 +279,9 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 				value = expr.FormatKashControl(a, item.Definition.Expression, indent)
 			} else if item.Definition.Expression != nil && item.Definition.Expression.Kind == expr.KashFunction {
 				value = expr.FormatKashControl(a, item.Definition.Expression, indent)
-			} else if s.Kash {
+			} else if item.Definition.Eager {
+				value = expr.FormatKashStatement(a, item.Definition.Expression, indent)
+			} else if s.Kash && indent != "\t" {
 				value = definition.FormatCompact(a, item.Definition)
 			} else {
 				value = definition.Format(a, item.Definition)

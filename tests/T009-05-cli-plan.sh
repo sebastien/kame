@@ -60,7 +60,7 @@ test-step "plan reports unknown freshness when the body may discover dependencie
 	cli_run -- do plan --json ./dynamic.out
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
-	cli_expect_json_query "$CLI_OUT" '.deferred[0].reason' 'runtime-discovery'
+	cli_expect_json_query "$CLI_OUT" '.deferred | map(.reason) | join(",")' 'runtime-discovery'
 )
 
 test-step "plan does not infer body-less rule freshness from output timestamps"
@@ -110,11 +110,11 @@ test-step "plan selects the default target when none is given"
 test-step "misplaced typed plan options cannot select build mode"
 (
 	mkdir inspection-guard
-	cat >inspection-guard/Makefile.kmk <<'EOF'
+	cat >inspection-guard/Makefile.km <<'EOF'
 NAME = 0
-do :
+task do
 	touch ./misexecuted
-plan :
+task plan
 	touch ./misexecuted
 EOF
 	for option in '--set NAME=1' '--set=NAME=1' '--set NAME=1 --set=NAME=2'; do
@@ -147,12 +147,12 @@ EOF
 )
 
 test-step "plan without a default fails with the available targets"
-cli_run -- do plan -c 'task first :'
+cli_run -- do plan -c 'task first'
 cli_expect_status 1
 cli_expect_stdout_empty
 cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
 
-cli_run -- do plan --json -c 'task first :'
+cli_run -- do plan --json -c 'task first'
 cli_expect_status 1
 cli_expect_stderr_empty
 cli_expect_json_query "$CLI_OUT" '.type' 'diagnostic'

@@ -45,6 +45,7 @@ func (p *Program) FinishExit(primary *diagnostic.Diagnostic, deferred *DeferScop
 		if joined.Diagnostic.Code != "" {
 			exit := primary.Exit
 			exit.Status = 1
+			exit.CleanupProtected = joined.Diagnostic.Protected
 			primary.Free(p.Alloc)
 			*primary = joined.Diagnostic.Clone(p.Alloc)
 			primary.Exit, primary.Protected = exit, true
@@ -61,6 +62,7 @@ func (p *Program) FinishExit(primary *diagnostic.Diagnostic, deferred *DeferScop
 	}
 	if r.Diagnostic.Code != "" && primary.ExitOnly() {
 		r.Diagnostic.Exit = primary.Exit
+		r.Diagnostic.Exit.CleanupProtected = r.Diagnostic.Protected
 		if r.Diagnostic.Exit.Status == 0 {
 			r.Diagnostic.Exit.Status = 1
 		}
@@ -73,4 +75,13 @@ func (p *Program) FinishExit(primary *diagnostic.Diagnostic, deferred *DeferScop
 	}
 	r.Free(c.Run)
 	return Result{Diagnostic: out}
+}
+
+func captureExitFailure(d diagnostic.Diagnostic) diagnostic.Diagnostic {
+	d.Protected, d.Exit = d.Exit.CleanupProtected, diagnostic.Termination{}
+	return d
+}
+
+func inspectCaptureExit(d diagnostic.Diagnostic) bool {
+	return d.ExitOnly() || functionOutcomeAllowed(captureExitFailure(d))
 }

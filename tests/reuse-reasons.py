@@ -8,13 +8,13 @@ import tempfile
 
 root, backend, binary = sys.argv[1:]
 root = Path(root)
-command = [binary] if backend == 'native' else ['node', str(root / 'dist/kame.js')]
+command = [binary] if backend == 'native' else ['node', os.environ.get('KAME_TEST_WASM_WRAPPER', str(root / 'dist/kame.js'))]
 cases = 0
 with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
     def run(text, arguments, environment=None):
         global cases
-        (project / 'Makefile.kmk').write_text(text)
+        (project / 'Makefile.km').write_text(text)
         try:
             result = subprocess.run(command + arguments, cwd=project,
                 env=dict(os.environ, MODE='ambient', **(environment or {})),
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'input').write_text('unchanged')
     # Guarded reuse must skip derived-value evaluation, not merely publication.
     (project / 'extra.json').write_text('"A"')
-    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input ; [shell: kame]\n\tPAYLOAD\n'
+    guarded = 'PAYLOAD = parse-json (text (read ./extra.json))\nrule ./guarded : ./input = PAYLOAD\n'
     first = reasons(run(guarded, ['--json', './guarded']))
     # Native file-context reads expose an opaque failure; forwarding establishes absence.
     assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'guarded').read_text() == 'B'
 
     # Effective configuration changes invalidate the guard without leaking values.
-    configured = 'SHELL = kash\nPAYLOAD ?= "default"\n./configured : ./input\n\t(yield! PAYLOAD)\n'
+    configured = 'PAYLOAD ?= "default"\nrule ./configured : ./input\n\treturn PAYLOAD\n'
     config_args = ['--json', '--define', 'PAYLOAD=before-config', './configured']
     run(configured, config_args)
     assert not reasons(run(configured, config_args))
@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not reasons(run(configured, config_args))
 
     # A child snapshot is aggregate evidence, not evidence about particular names.
-    explain = 'SHELL = /bin/sh\n./explained : ./input\n\tcp input explained\n'
+    explain = 'SHELL = "/bin/sh"\nrule ./explained : ./input\n\tcp input explained\n'
     first = reasons(run(explain, ['--json', './explained']))
     assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
     stamp = (project / 'explained').stat().st_mtime_ns
@@ -108,11 +108,11 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any(e['reason'] == 'forced' and e['decision'] == 'execute' for e in forced), forced
     human = run(explain, ['--output', 'text', '--force', './explained'])
     assert human.stdout == '' and '[./explained] execute: forced execution' in human.stderr, human
-    always = 'SHELL = kash\nalways ./explained : ./input\n\t(yield! "always")\n'
+    always = 'rule always ./explained : ./input\n\treturn "always"\n'
     selected = reasons(run(always, ['--json', './explained']))
     assert any(e['reason'] == 'always' for e in selected), selected
-    named = 'SHELL = kash\n./named-env : ./input\n\t(yield! (env "REASON_NAMED"))\n'
-    named_args = ['do', 'run', '--json', '--allow-read', '--allow-write', '--allow-env=REASON_NAMED', 'Makefile.kmk', '--entry', './named-env']
+    named = 'rule ./named-env : ./input\n\treturn env/REASON_NAMED\n'
+    named_args = ['--json', '--allow-read', '--allow-write', '--allow-env=REASON_NAMED', './named-env']
     run(named, named_args, environment={'REASON_NAMED': 'before-secret'})
     changed = run(named, named_args, environment={'REASON_NAMED': 'after-secret'})
     selected = reasons(changed)
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(e['reason'] == 'input-changed' for e in selected), selected
     assert not reasons(run(explain, ['--json', './explained']))
     # Cached-task lookup must retain the same missing/invalid distinction.
-    cached_reason = 'task reason-cached : ; [shell: kash]\n\t(out! "cached reason")\n'
+    cached_reason = 'task cached reason-cached\n\t(out! "cached reason")\n'
     selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
     assert [e['reason'] for e in selected] == ['record-missing'], selected
     assert not reasons(run(cached_reason, ['--json', 'reason-cached']))
@@ -144,26 +144,25 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'variable').write_text('A1')
     (project / 'constant').write_text('B')
     (project / 'trigger').write_text('one')
-    grouped = '''SHELL = kash
-default : ./consumeA ./consumeB ./readB ./both ./ordered cache-b
-./A ./B : ./variable ./constant ./trigger
-	cp ./variable @>
+    grouped = '''task default : ./consumeA ./consumeB ./readB ./both ./ordered cache-b
+rule ./A ./B : ./variable ./constant ./trigger
+	cp ./variable $outputs.0
 	cp ./constant ./B
 	printf x >> producer.log
-./consumeA : ./A
-	cp @< @>
+rule ./consumeA : ./A
+	cp $inputs.0 $outputs.0
 	printf x >> consumeA.log
-./consumeB : ./B
-	cp @< @>
+rule ./consumeB : ./B
+	cp $inputs.0 $outputs.0
 	printf x >> consumeB.log
-./readB : ./constant
-	(yield! (text (read "./B")))
-./both : ./A ./B
-	cat @<* > @>
+rule ./readB : ./constant
+	return (text (read "./B"))
+rule ./both : ./A ./B
+	cat $...inputs > $outputs.0
 	printf x >> both.log
-./ordered : ./constant | ./A
-	cp ./constant @>
-task cache-b : ./B
+rule ./ordered : ./constant | ./A
+	cp ./constant $outputs.0
+task cached cache-b : ./B
 	printf x >> cacheB.log
 '''
     def executions():
@@ -215,7 +214,7 @@ task cache-b : ./B
     # Missing siblings prevent publication and all downstream recipe execution.
     (project / 'B').unlink()
     broken = grouped.replace('\tcp ./constant ./B\n', '')
-    (project / 'Makefile.kmk').write_text(broken)
+    (project / 'Makefile.km').write_text(broken)
     result = subprocess.run(command + ['--json', 'default'], cwd=project,
                             text=True, capture_output=True, timeout=15)
     assert result.returncode == 1 and 'OUTPUT_MISSING' in result.stdout, result

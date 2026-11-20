@@ -6,8 +6,8 @@
 #
 # See `release-manifest` in release.kash.
 
-(include ./release.kash)
+include ./release.kash
 
-options = (operand-record args)
+let options = (operand-record args)
 
 (release-manifest (required-operand "directory" options) (required-operand "version" options) (required-operand "revision" options) (required-operand "public-key" options) (required-operand "signing-key" options) (get "source-directory" "" options))

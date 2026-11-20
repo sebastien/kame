@@ -7,17 +7,18 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 project="$TMPDIR/project"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'KMK'
-default :
+cat >"$project/Makefile.km" <<'KAME'
+task default : ; {shell: "sh"}
 	printf ready-marker; printf error-marker >&2; while [ ! -f ./release ]; do sleep .01; done
-KMK
+KAME
 for backend in native wasm; do
  for mode in human json; do
   test-step "$backend $mode publishes chunks while the recipe waits"
-  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
   if [ "$mode" = json ]; then runner+=(--json); fi
   if python3 - "$project" "${runner[@]}" <<'PYLIVE'
 from pathlib import Path
@@ -70,7 +71,7 @@ from pathlib import Path
 import selectors, signal, subprocess, sys
 folder = Path(sys.argv[1]) / 'watch'
 folder.mkdir()
-(folder / 'Makefile.kmk').write_text('default : ; [shell: kash]\n\t(out! "watch-marker")\n')
+(folder / 'Makefile.km').write_text('task default :\n\t(out! "watch-marker")\n')
 process = subprocess.Popen([sys.argv[2], '-C', str(folder), '--watch', 'default'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 selector = selectors.DefaultSelector()
 selector.register(process.stdout, selectors.EVENT_READ)

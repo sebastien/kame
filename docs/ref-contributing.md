@@ -1,6 +1,6 @@
 # Contributing
 
-Kame's portable runtime is written in Solod (So), a Go subset translated to C.
+Kame's portable runtime is written in Go.
 Native and WASM hosts adapt filesystem/process services without moving graph
 policy into the host. Use this guide for setup and local checks; the
 [architecture](spec/001-architecture.md) and [test contract](spec/013-tests.md)
@@ -10,35 +10,25 @@ define the boundaries and acceptance requirements.
 
 From the repository root, provide:
 
-- Go 1.26.0 or newer and Solod 0.4.0 (`src/go/kame/go.mod`).
-- GNU Make, Clang with native development headers/linker, Bash, and Python 3.
+- Go 1.26.0 or newer (`src/go/kame/go.mod`), GNU Make, Bash, and Python 3.
 - For CLI tests: `jq`, `rg` (ripgrep), `timeout`, `flock`, `sha256sum`, `ps`,
   `touch`, `mktemp`, `diff`, `realpath`, and `readlink`; some platforms need GNU
   utilities on PATH.
-- Node.js 18+ for WASM execution/tests; WASI SDK 34 for building the module.
-  Mise's `mise.toml` provisions only that SDK, not Go, Solod, or all host tools.
+- Node.js 18+ for WASM execution and tests. Go builds the module for
+  `GOOS=wasip1 GOARCH=wasm`.
 - `gofmt` and `shfmt` when using `make fmt`.
 
-Install the pinned compiler, matching native CI:
+Build the native CLI from the checkout:
 
 ```sh
-go install solod.dev/cmd/so@v0.4.0
-export PATH="$(go env GOPATH)/bin:$PATH"
-CC=clang make dist
+make dist
 build/kame.debug --version
 dist/kame --version
 ```
 
-`dist` builds the checks-enabled debug binary and the host-native release CLI;
-it does not build APE or WASM. For WASM, run `mise install` to install the pinned
-SDK, then `CC=clang make dist-wasm`. Without Mise, use
-`CC=clang make dist-wasm WASM_SDK=/absolute/path/to/wasi-sdk`; the directory
-must contain `bin/clang` and `bin/wasm-ld`, and supplies compiler-rt as well.
-`WASM_CC`/`WASM_LD` can override the individual tools but do not replace the
-SDK directory requirement. APE uses pinned Cosmocc provisioning:
-`make dist-ape`, or `src/sh/build-ape.sh` without Make. First-time provisioning
-downloads tools and requires `curl`, `unzip`, and `sha256sum` or `shasum`.
-None of these commands publishes a release.
+`make dist` builds the debug binary, the host-native release CLI, and the
+`dist/kash` interpreter link. `make dist-wasm` builds the JS/WASM pair, and
+`make release-assets` stages the platform binaries and Windows archive.
 
 ## Repository map
 
@@ -48,7 +38,7 @@ None of these commands publishes a release.
 | `src/go/kame/lang`, `operations` | Parsers, evaluation, templates, Kash, standard operations. |
 | `src/go/kame/host`, `cmd`, `cli` | Host adapters, entry points, shared CLI support. |
 | `src/js`, `src/py` | WASM wrapper/Node CLI and async Python CLI client. |
-| `src/c/wasm` | Freestanding C ABI linked into `dist/kame.wasm`. |
+| `src/go/kame/cmd/kame-wasm`, `src/go/kame/host/wasm` | WASM reactor entry point and host request forwarding. |
 | `src/sh` | Build, provisioning, release and benchmark helpers. |
 | `tests` | Black-box CLI catalog plus native/wasm/windows/platform/python harnesses and fixtures. |
 | `examples` | Runnable consumer lessons. |
@@ -61,13 +51,13 @@ Start with a relevant test, then run the affected gates. CLI tests can rebuild
 binaries and create temporary fixtures; run them from the checkout root.
 
 ```sh
-CC=clang make build/kame.debug
+make build/kame.debug
 tests/harness.sh -q tests/T013-04-meta-layer-examples.sh
 # Four workers by default on Bash 5.1+; explicitly serialize when debugging.
 KAME_TEST_JOBS=1 make test-cli
 ```
 
-Published-channel compatibility needs network access and the Solod toolchain:
+Published-channel compatibility needs network access and the Go toolchain:
 
 ```sh
 tests/platform/test-release-build.sh --channel auto
@@ -101,21 +91,20 @@ evaluations to avoid a CLI/WASM startup for each value; rejection cases stay iso
 
 | Command | Coverage |
 | --- | --- |
-| `CC=clang make test-so` | Solod packages plus native host and CLI lifecycle checks. |
-| `CC=clang make test-go` | Go subprocess drivers using the compiled native CLI. |
-| `CC=clang make test` | Native package, example, Go-driver, and CLI suites. |
-| `CC=clang make test-sanitize` | Sanitized package/example checks. |
-| `CC=clang make test-leaks` | Sanitized drivers/packages/examples and CLI leak gate. |
-| `CC=clang make test-wasm` | WASM ABI/import checks and explicit cross-backend CLI tests. |
-| `make test-all` | `test` plus `test-leaks`; **not** the WASM gate. |
+| `make test-unit` | Go packages plus native host and CLI lifecycle checks. |
+| `make test-go` | Go subprocess drivers using the compiled native CLI. |
+| `make test` | Native package, example, Go-driver, and CLI suites. |
+| `make test-sanitize` | Go `checkptr` package and example checks. |
+| `make test-leaks` | Go `checkptr` drivers, packages, examples, and CLI suites. |
+| `make test-wasm` | WASM ABI/import checks and the curated cross-backend CLI suites. |
+| `make test-all` | Runs `test` and `test-leaks`. |
 
 Release validation calls for separate native, leak, and WASM runs at one stable
 revision; see [TODO.md](../TODO.md). A workflow that only builds an artifact or
 runs `--version` is not evidence that the whole suite passed. In particular,
 cross-compiling Windows does not establish real-host process cleanup acceptance.
 The [test catalog](../tests/CATALOG.tsv) is an inventory, not a pass report.
-The portable memory-cache backend is covered by `TestCachedTaskUsesPortableMemoryBackend`
-in `make test-so`; no separate shell wrapper recompiles that package.
+`make test-unit` covers `TestCachedTaskUsesPortableMemoryBackend`.
 Native and WASM artifacts rebuild only when declared inputs change. Use
 `kame --force TARGET` to force rebuilding after a compiler or build-flag change.
 
@@ -126,11 +115,11 @@ Native and WASM artifacts rebuild only when declared inputs change. Use
 - When a refining spec changes a contract, update the base spec, practical
   reference, glossary, and affected examples together; link to the refinement.
 - Keep one preferred vocabulary: definitions bind names, symbols use `:name`,
-  and targets may identify files, bare tasks, cached tasks, or services.
+  and targets may identify files, phony tasks, cached tasks, or services.
 - Smoke-test changed snippets with native and WASM backends where applicable,
   check relative links, and run the examples regression above for lesson changes.
-- `make fmt` rewrites tracked Go/shell sources and `Makefile.kmk`; it is not a
-  Markdown formatter. Review its diff before retaining unrelated changes.
+- `make fmt` formats tracked Go and shell sources and the root `Kamefile`.
+  Review the diff for unrelated changes.
 
 For installation/trust setup, see [installation](ref-installation.md); for
 embedding and ownership-safe disposal, see [embedding APIs](ref-embedding.md).

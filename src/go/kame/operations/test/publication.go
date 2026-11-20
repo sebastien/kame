@@ -41,7 +41,7 @@ func TestPublicationRetainsCommitAcrossSuspensionAndPartialFailure(t *testing.T)
 		if !operations.Register(registry) {
 			t.Error("library registration failed")
 		}
-		parsed := script.Parse(a, "publication", "")
+		parsed := script.ParseKameFile(a, "publication", "")
 		program := eval.Compile(a, engine, parsed, registry)
 		text := `((result => (list result (now ()))) (publish! "./staged" "./final"))`
 		if scenario == 1 {

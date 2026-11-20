@@ -12,9 +12,9 @@ func TestNewerSelectorUsesNearestFileFrameAndRejectsPlanning(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	expression := expr.Parse(a, "test", "@<?")
+	expression := expr.Parse(a, "test", "changed-inputs")
 	if len(expression.Diagnostics) != 0 {
 		t.Error("newer selector did not parse")
 	}
@@ -51,12 +51,12 @@ func TestNamedContextUsesSelectorFramesAndDiagnostics(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	outer, inner := core.NewString(a, "outer"), core.NewString(a, "inner")
 	frames := []eval.RuleFrame{{FileRule: true, Inputs: []core.Value{outer}, Outputs: []core.Value{outer}, NewerInputs: []core.Value{outer}}, {FileRule: true, Inputs: []core.Value{inner}, Outputs: []core.Value{inner}, NewerInputs: []core.Value{inner}}}
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Phase: eval.RenderingPhase, RuleFrames: frames, Args: []core.Value{inner}, HasArgs: true}
-	names := []string{"inputs", "outputs", "inputs/changed", "args"}
+	names := []string{"inputs", "outputs", "changed-inputs", "args"}
 	for i := range names {
 		expression := expr.Parse(a, "test", names[i])
 		if len(expression.Diagnostics) != 0 || expression.Expr.Kind != expr.Name {
@@ -76,10 +76,10 @@ func TestNamedContextUsesSelectorFramesAndDiagnostics(t *testing.T) {
 		context.RuleFrames, context.HasArgs = frames, true
 		expression.Free()
 	}
-	expression := expr.Parse(a, "test", "inputs/changed.0")
+	expression := expr.Parse(a, "test", "changed-inputs.0")
 	result := program.EvaluateWith(expression.Expr, &context)
 	if len(expression.Diagnostics) != 0 || result.Diagnostic.Code != "" || result.Value.Text != "inner" {
-		t.Error("namespaced context reference lost index")
+		t.Error("changed-inputs reference lost index")
 	}
 	result.Free(a)
 	context.Phase = eval.PlanningPhase

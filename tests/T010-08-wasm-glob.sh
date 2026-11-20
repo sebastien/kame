@@ -11,7 +11,11 @@ test-start "T010-08 wasm glob service"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-glob"
@@ -23,8 +27,8 @@ printf x >"$project/src/a/one.km"
 printf x >"$project/src/two.km"
 
 test-step "wildcard output matches native byte-for-byte"
-for expression in '(wildcard "*.md")' '(wildcard "src/**/*.km")' '(wildcard "src/*.km")' '(count (wildcard "*"))'; do
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr --allow-read -c "$expression") >"$project/wasm.out"
+for expression in '(wildcard ./*.md)' '(wildcard ./src/**/*.km)' '(wildcard ./src/*.km)' '(count (wildcard ./*))'; do
+	(cd "$project" && node "$wasm_runner" do run --lang expr --allow-read -c "$expression") >"$project/wasm.out"
 	(cd "$project" && "$CLI_BIN" do run --lang expr --allow-read -c "$expression") >"$project/native.out"
 	if cmp -s "$project/wasm.out" "$project/native.out"; then
 		test-ok "parity: $expression"
@@ -33,6 +37,19 @@ for expression in '(wildcard "*.md")' '(wildcard "src/**/*.km")' '(wildcard "src
 	fi
 done
 
+test-step "absolute discovery uses root-relative paths and UTF-8 order"
+mkdir -p "$project/unicode"
+touch "$project/unicode/"$'\U00010000' "$project/unicode/"$'\ue000'
+absolute_expression="wildcard $project/unicode/*"
+(cd "$project" && "$CLI_BIN" do run --lang expr --allow-read -c "$absolute_expression") >"$project/native.out"
+(cd "$project" && node "$wasm_runner" do run --lang expr --allow-read -c "$absolute_expression") >"$project/wasm.out"
+expected=$'[./unicode/\ue000, ./unicode/\U00010000]'
+if cmp -s "$project/native.out" "$project/wasm.out" && [ "$(cat "$project/wasm.out")" = "$expected" ]; then
+	test-ok "absolute discovery is relative to the root and sorted by UTF-8 bytes"
+else
+	test-fail "absolute discovery parity: native=$(cat "$project/native.out"), wasm=$(cat "$project/wasm.out")"
+fi
+
 test-step "recursive discovery does not follow encountered directory symlinks"
 mkdir -p "$project/real/deep" "$project/links"
 touch "$project/real/deep/file.js"
@@ -40,10 +57,10 @@ ln -s ../real "$project/links/alias"
 ln -s .. "$project/links/cycle"
 ln -s ../absent "$project/links/dangling"
 for backend in native wasm; do
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
 	for sample in \
-		'(wildcard ./links/alias/**/*.js)|["./links/alias/deep/file.js"]' \
-		'(wildcard ./links/alias/*/*.js)|["./links/alias/deep/file.js"]' \
+		'(wildcard ./links/alias/**/*.js)|[./links/alias/deep/file.js]' \
+		'(wildcard ./links/alias/*/*.js)|[./links/alias/deep/file.js]' \
 		'(wildcard ./links/**/*.js)|[]'; do
 		(cd "$project" && "${runner[@]}" do run --lang expr --allow-read -c "${sample%|*}") >"$project/value"
 		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend symlink glob result: $(cat "$project/value")"; fi
@@ -52,7 +69,7 @@ done
 
 test-step "wildcard needs a read grant"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr -c '(wildcard "*.md")') >"$project/out.txt" 2>"$project/err.txt"
+(cd "$project" && node "$wasm_runner" do run --lang expr -c '(wildcard ./*.md)') >"$project/out.txt" 2>"$project/err.txt"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'CAP_DENIED' "$project/err.txt" && grep -q -- '--allow-read=ROOT' "$project/err.txt"; then

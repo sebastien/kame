@@ -3,6 +3,7 @@ package script
 import (
 	"kame/lang/expr"
 	"kame/lang/source"
+	"path"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ type ModuleName struct {
 }
 
 type ModuleDeclaration struct {
+	SourceOrigin int
 	Path         string
 	PathSpelling string
 	PathSpan     source.Span
@@ -21,6 +23,26 @@ type ModuleDeclaration struct {
 	AliasSpan    source.Span
 	Names        []ModuleName
 	Comment      string
+}
+
+func (m *ModuleDeclaration) Namespace() string {
+	if m.Alias != "" {
+		return m.Alias
+	}
+	name := path.Base(m.Path)
+	switch suffix := path.Ext(name); suffix {
+	case ".km", ".kame", ".kash", ".ksh":
+		return strings.TrimSuffix(name, suffix)
+	}
+	return name
+}
+
+func validModuleNamespace(name string) bool {
+	switch name {
+	case "x", "env", "std", "module":
+		return false
+	}
+	return expr.ValidBindingName(name)
 }
 
 func moduleKeyword(word string) bool {
@@ -75,6 +97,10 @@ func (s *Script) moduleDeclaration(word string, start, operand, end int) ScriptI
 			return item
 		}
 		m.Path, m.PathSpan, m.PathSpelling = path, span, text[span.Start:span.End]
+		if strings.HasSuffix(path, ".kmt") {
+			s.Diagnostics = append(s.Diagnostics, source.Diagnostic{Code: "RES_INVALID", Severity: source.Error, Message: "a document template cannot be imported as a module", Span: span})
+			return item
+		}
 		pos = skipSpace(span.End)
 	}
 	if word == "import" {
@@ -89,6 +115,13 @@ func (s *Script) moduleDeclaration(word string, start, operand, end int) ScriptI
 			if !ok {
 				return item
 			}
+		}
+		if namespace := m.Namespace(); !validModuleNamespace(namespace) {
+			span, message := m.AliasSpan, "invalid or reserved namespace alias: "+namespace
+			if m.Alias == "" {
+				span, message = m.PathSpan, "module path requires an unreserved namespace alias: "+namespace
+			}
+			s.Diagnostics = append(s.Diagnostics, source.Diagnostic{Code: "DEF_INVALID", Severity: source.Error, Message: message, Span: span})
 		}
 	} else {
 		if word == "from" {

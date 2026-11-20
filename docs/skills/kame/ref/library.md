@@ -1,30 +1,15 @@
 # Kame standard-library reference
 
-Kame operations are ordinary expression calls: `(name argument...)`. Arguments
-are evaluated before the operation runs, except the replacement operand of
-pattern `sub`: it is evaluated only after matching, with local captures. The
-deprecated alias `replace` follows the same rule. Unless noted, invalid arity or
-value types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
+Use `name argument…` to call an operation. Arguments evaluate before the
+call, except for explicitly staged operands such as the replacement in
+pattern `subst`. That replacement evaluates with captures in scope after a
+match. Invalid arguments report `EXPR_INVALID` and missing capabilities
+report `CAP_DENIED`.
 
-Transformations take parameters first and their subject last: `(f PARAMS VALUE)`.
-Optional parameters also precede the subject, so `(VALUE | f PARAMS)` is the same
-call. Only this order is accepted; there is no legacy-order detection. Comparisons
-retain `(gt? LEFT RIGHT)` and conventional left/right semantics. Variadic operations
-such as `str`, `concat`, `merge`, and `joinpath` retain authored operand order;
-special forms and internal template-lowering primitives have their own contracts.
-
-### Operation-name migration
-
-| Removed spelling | Replacement |
-| --- | --- |
-| `write`, `yield`, `out`, `err`, `run`, `pipe`, `fail`, `shell-template` | Add `!`: `write!`, `yield!`, `out!`, `err!`, `run!`, `pipe!`, `fail!`, `shell-template!`. |
-| `shell`, `shellrun`, `shell!`, `shellrun!`, `sh` | `sh!` |
-| `set-field`, `regex-replace` | `set`, `resub` |
-| `cat` | `str` for scalars, `join` for collections, or `json` for serialization. |
-
-Removed standard-library spellings produce migration diagnostics, not aliases.
-External command names and user-defined bindings are unaffected. `replace` is
-different: it remains a deprecated alias for `sub` with identical behavior.
+Transformations typically take parameters first and data last.
+`value |> f params` calls `f params value`. Comparisons take conventional
+left and right operands. Variadic operations such as `str`, `concat`,
+`merge`, and `joinpath` retain authored operand order.
 
 ## Values and calls
 
@@ -39,12 +24,12 @@ different: it remains a deprecated alias for `sub` with identical behavior.
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
 | `get` | `(get KEY [DEFAULT] RECORD)` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |
 | `first` | `(first LIST-OR-TEXT)` | Equivalent to `(nth 0 VALUE)`, including Unicode strings and nil for empty input. |
-| `nth` | `(nth INDEX LIST-OR-TEXT)` | Indexed item/code point, or `:nil` when out of range; negative indexes count from the end. |
+| `nth` | `(nth INDEX LIST-OR-TEXT)` | Indexed item/code point, or `nil` when out of range; negative indexes count from the end. |
 | `list` | `(list VALUE...)` | A list containing the arguments. |
-| `nop` | `(nop VALUE...)` | Last argument, or `:nil` with no arguments. |
+| `nop` | `(nop VALUE...)` | Last argument, or `nil` with no arguments. |
 | `apply` | `(apply FUNCTION LIST)` | Spreads list elements as positional arguments, regardless of arity. Nest a list once to pass it as one argument. |
-| `items` | `(items RECORD)` | Ordered records `[key: STRING value: VALUE]`, preserving typed nested data. |
-| `set` | `(set KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
+| `items` | `(items RECORD)` | Ordered records `{key: STRING, value: VALUE}`, preserving typed nested data. |
+| `put` | `put KEY VALUE RECORD` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
 | `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
 | `nil?`, `bool?`, `int?`, `float?`, `string?`, `bytes?`, `list?`, `record?`, `callable?`, `resource?`, `pattern?`, `process?` | `(PREDICATE VALUE)` | Exact outer-kind boolean for every value, including opaque/callable data. |
 | `number?` | `(number? VALUE)` | Whether the value is int or float. |
@@ -54,21 +39,33 @@ different: it remains a deprecated alias for `sub` with identical behavior.
 | `blank?` | `(blank? VALUE)` | True only for nil or an empty string; false, zero, whitespace, and empty collections are not blank. |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
 
-Only `:false` and `:nil` are false. Other values are true.
+Only `false` and `nil` are false. Other values are true.
 Truth conversion is not an emptiness test: zero and empty strings, bytes, lists,
 and records are true. Use `(not (empty? VALUE))` for known collection/text data;
 nil, booleans, and numbers are not valid `count` inputs. A nil-valued list item or
 record field still contributes to the count. See [Expressions](./expressions.md).
 
-Use native `items`/`set`/`merge` instead of JSON/template round trips and
+Use native `items`/`put`/`merge` instead of JSON/template round trips and
 kind predicates instead of JSON-prefix tests. Remove same-named local wrappers
 to expose the native operations. `(digest "sha512" (read ./file))` hashes a tracked
 read, including every trailing newline and binary byte.
 
-## Equality
+## Arithmetic and comparisons
 
-`eq?`/`=`/`==` are identical value-equality operations; `ne?`/`!=` negates
-their result. Supported values are nil, booleans, numbers, strings, bytes, lists,
+| Operation | Infix form | Result |
+| --- | --- | --- |
+| `add LEFT RIGHT` | `+` | Sum. |
+| `sub LEFT RIGHT` | `-` | Difference. |
+| `mul LEFT RIGHT` | `*` | Product. |
+| `div LEFT RIGHT` | `/` | Floating-point quotient, including integer operands. |
+| `mod LEFT RIGHT` | `%` | Integer remainder, with the dividend's sign when nonzero. |
+| `neg VALUE` | | Arithmetic negation. |
+
+Addition, subtraction, and multiplication keep the integer kind for integer
+operands. Integer overflow, division by zero, remainder by zero, nonfinite
+numbers, and invalid operand kinds report `EXPR_INVALID`.
+
+`eq?` and `==` check value equality. `ne?` and `!=` check inequality. Supported values are nil, booleans, numbers, strings, bytes, lists,
 and records. Lists compare in order; records compare by key/value regardless of
 field order. Bytes compare byte-for-byte and never equal strings. Different
 supported kinds are unequal, except exact integer/float numeric equality.
@@ -81,12 +78,10 @@ uses this same contract. Ordering and `unique` remain scalar-only.
 Named ordering predicates are `lt?`, `gt?`, `lte?`, and `gte?`; symbolic operators
 remain available. Integers order exactly, including beyond 2^53; mixed int/float
 ordering does not round the integer to float. NaN is unordered and errors.
-`eq`, `is`, `ne`, `lt`, `gt`, `lte`, and `gte` remain compatibility aliases, not
-identity operations. New code should use predicates or symbols; there is no `is?`.
+Comparisons do not chain.
 
-`get` defaults are eager. For a lazy fallback, write
-`(if (has-key? key record) (get key record) (compute-default))`. This distinguishes
-absence from a present nil without introducing implicit lazy operation arguments.
+`get` defaults are eager. Use `if has-key? key record then get key record else compute-default ()`
+to defer the default and preserve a present nil.
 
 ## Collections
 
@@ -95,17 +90,18 @@ Callbacks run in input order. `map` and `flatmap` require `(FUNCTION SUBJECT)`;
 receives the item alone; a callback declaring two or more parameters receives
 the item followed by its key (list position or record field name), with any
 further parameters nil. `map`, `filter`, and `filter-out` accept a record and
-return a record with the same field order: `(map ([v k] (str k "=" v)) [a: 1])`
-is `[a: "a=1"]`. `flatmap` and `reduce` take lists only.
+return a record with the same field order: `map (v k => str k "=" v) {a: 1}`
+returns `{a: "a=1"}`. `flatmap` and `reduce` take lists only.
 
 | Operation | Signature | Result |
 | --- | --- | --- |
-| `map` | `(map FUNCTION LIST-OR-RECORD)` | One callback result per item or field; `([value key] ...)` receives the item then its key. |
+| `map` | `(map FUNCTION LIST-OR-RECORD)` | One callback result per item or field; `(value key => ...)` receives the item then its key. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
 | `filter` | `(filter PREDICATE-OR-VALUE LIST-OR-RECORD)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
 | `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST-OR-RECORD)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |
 | `in?` | `(in? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
-| `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks; a third parameter receives the item's position. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
+| `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item => ...)` callbacks; a third parameter receives the item's position. Without `INITIAL`, the first item is the accumulator; an empty list produces `nil`. |
+| `collect!` | `collect! [LIMIT] STREAM` | Pulls a generator's values into a list. A non-negative `LIMIT` closes the source after that many values and runs pending cleanup. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
 | `slice` | `(slice START [END] LIST-OR-TEXT)` | Half-open slice; negative bounds count from the end. |
 | `sorted` | `(sorted LIST)` | Ascending sort of one comparable scalar kind. |
@@ -114,9 +110,8 @@ is `[a: "a=1"]`. `flatmap` and `reduce` take lists only.
 `sorted` and `unique` support nil, booleans, integers, floats, and strings; a
 mixed or unsupported list is invalid (including integer/float mixtures).
 
-`has?` remains a compatibility alias for `in?`. Record presence uses `has-key?`;
-text substring membership uses `includes?`. `bool` is a truth conversion, `not`
-is a logical operation, and neither is renamed with a predicate suffix.
+Use `in?` for list membership, `has-key?` for record keys, and
+`includes?` for substring membership.
 
 ## Text and patterns
 
@@ -126,10 +121,9 @@ is a logical operation, and neither is renamed with a predicate suffix.
 | `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator, preserving empty fields; empty text produces `[""]`. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
 | `line` | `(line TEXT)` | Removes one terminal LF, if present; preserves all other whitespace, including a preceding CR. |
-| `sub` | `(sub FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
+| `subst` | `subst FROM TO TEXT` | Replaces all literal `FROM` occurrences. |
 | `sub-token` | `(sub-token FROM TO TEXT)` | Replaces literal occurrences outside Unicode letter/number/underscore/hyphen boundaries. Search must be nonempty; replacement is literal and not rescanned. |
-| `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
-| `replace` | Same signatures as `sub` | Deprecated alias with identical behavior; no runtime warning. |
+| `subst` | `subst MATCH-PATTERN EXPANSION [SUBJECT]` | Pattern substitution. A path pattern subject discovers matches like `wildcard`. Without a subject, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
 | `match?` | `(match? MATCH-PATTERN [TEXT])` | Anchored boolean match; without `TEXT`, returns a unary predicate suitable for `filter`/`filter-out`. Subjects must be strings. |
 | `includes?` | `(includes? PART TEXT)` | Literal substring test. |
 | `starts?` | `(starts? PREFIX TEXT)` | Literal prefix test. |
@@ -141,11 +135,13 @@ is a logical operation, and neither is renamed with a predicate suffix.
 | `render` | `(render [PAYLOAD] [STYLE] SOURCE)` | Render a document template; in a two-argument call a leading record is payload and a leading string is style. File sources require read capability; bytes need explicit style. |
 | `pattern` | `(pattern TEXT)` | Construct and validate a pattern from runtime text. |
 | `regex-match` | `(regex-match PATTERN SUBJECT)` | Regex-pattern match record (`text`, `captures`, `named`), or nil. |
-| `capture` | `(capture INDEX-OR-NAME MATCH)` | Select a match capture, or nil when absent. |
+| `capture` | `capture PATTERN SUBJECT` | Anchored typed match that returns a record of named captures or nil. |
+| `bind` | `bind TEMPLATE CAPTURES` | Expand a pattern template using named captures. |
+| `regex-group` | `regex-group INDEX-OR-NAME MATCH` | Select a regex capture or nil. |
 | `resub` | `(resub MATCH-PATTERN EXPANSION SUBJECT)` | Anchored regex-pattern replacement on a string or string list; non-matches yield nil. |
 
-Literal `sub`/`replace` requires three strings; wrong types or a missing subject
-report `EXPR_INVALID` rather than constructing a pattern-substitution callable.
+Literal text replacement takes three strings. The two-argument form applies to
+pattern substitution.
 
 `strip` is an explicit broad-whitespace conversion, not command-capture framing.
 To remove one known terminal LF while preserving other whitespace and earlier
@@ -154,8 +150,8 @@ Do not infer a CRLF terminator or remove all terminal newlines unless the produc
 requires it. Capture itself is lossless; see [Kash](./kash.md).
 
 See [Templates](./templates.md) for document directives, source resolution,
-comment styles, and payload scopes. Lazy `if`, `and`, `or`, `match`, and `with`
-are special forms, not eager library operations; see [Expressions](./expressions.md).
+comment styles, and payload scopes. See the
+[expression reference](./expressions.md) for conditional evaluation.
 
 Pattern replacement uses Kame pattern literals such as `./src/{name:*}.c` and
 expansion references such as `./build/{name}.o`. Invalid matcher/expansion
@@ -185,12 +181,12 @@ dependencies. Relative paths use the current evaluation directory where needed.
 | --- | --- | --- |
 | `basename` | `(basename PATH)` | Final component. |
 | `dirname` | `(dirname PATH)` | Parent path. |
-| `splitext` | `(splitext PATH)` | `[ROOT EXTENSION]`; a lone leading dot is not an extension. |
+| `splitext` | `(splitext PATH)` | `[root, extension]`; a lone leading dot is not an extension. |
 | `ext` | `(ext PATH)` | Final extension. |
 | `joinpath` | `(joinpath PART...)` | Joined, cleaned path; retains explicit relative anchoring when the first nonempty part is `.` or starts with `./`. Parent traversal still normalizes normally. |
 | `relpath` | `(relpath BASE TARGET)` | Target path relative to base. |
 | `abspath` | `(abspath PATH)` | Clean absolute path, resolving a relative path from the evaluation directory. |
-| `source-dir` | `(source-dir)` | Absolute lexical directory of the file containing the authored call; no filesystem probe or grant. Inline/stdin/constructed source without loading metadata reports `SEL_NO_CONTEXT`. |
+| Source identity | `module/dir`, `module/file` | Lexical directory or path of the authoring source. |
 
 ## Filesystem, environment, and process operations
 
@@ -209,8 +205,8 @@ environment values can invalidate a consumer.
 | `files` | `(files PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+files ...)`. Rejects kind flags. |
 | `dirs` | `(dirs PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+dir ...)`. Rejects kind flags. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write in direct Kash recipes. Invalid during planning or read-only rule computation/expansion. |
-| `publish!` | `(publish! STAGED DESTINATION)` | read + write | Immediately publishes a completed staged regular file without replacing any existing destination entry. Requires read/write on staging and write on destination. Returns `[published: :true stagedRemoved: :true]`. |
-| `env` | `(env NAME)` | env | Environment value. |
+| `publish!` | `(publish! STAGED DESTINATION)` | read + write | Immediately publishes a completed staged regular file without replacing any existing destination entry. Requires read/write on staging and write on destination. Returns `{published: true, stagedRemoved: true}`. |
+| Environment read | `env/NAME` | env | Current unit environment value or nil. |
 | `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record. Allowed in explicit evaluation and direct Kash. Invalid during planning, shell-template expansion, and value-producing Kame bodies, including through a reached lazy definition. |
 | `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as sh!. |
 
@@ -258,9 +254,9 @@ schema field contains `names`, `arity` (`:flag`, `:one`, `:many`), and `repeat`
 (`:append`, `:replace`, `:reject`; flags cannot append):
 
 ```kash
-schema = [fonts: [names: ["-f" "--fonts"] arity: :many repeat: :append]]
-parsed = (parse-args schema args)
-fonts = parsed.options.fonts
+let schema = {fonts: {names: ["-f", "--fonts"], arity: :many, repeat: :append}}
+let parsed = parse-args schema args
+let fonts = parsed.options.fonts
 ```
 
 The result has `options` and `operands`. All options are present; flags default to
@@ -277,11 +273,10 @@ See [Scripting and publication](../../../spec/046-kash-scripting-and-publication
 
 ### Wildcard selection
 
-Prefer direct glob expressions for ordinary discovery: `sources = ./src/**/*.c`
-already yields a sorted, duplicate-free tracked list, even for zero or one match.
-Use `wildcard` for computed string patterns, sorted/deduplicated unions, or
-entry-kind filters. It accepts expanded lists without reinterpreting their
-filenames as patterns.
+A glob atom produces a `PathPattern`. Use `files ./src/**/*.c` for discovery,
+`wildcard` for unions and kind flags, or `pattern TEXT` to compile a constructed
+pattern. All three return sorted, duplicate-free paths. Flat lists of paths
+contribute existing members without globbing their filenames again.
 
 | Flags | Entry kind |
 | --- | --- |
@@ -320,8 +315,7 @@ Unrenderable values (callables, resources) still report `EXPR_INVALID`.
 | --- | --- | --- |
 | `out!` | `(out! VALUE...)` | In direct Kash, emits bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
 | `err!` | `(err! VALUE...)` | In direct Kash, emits bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
-| `yield!` | `(yield! VALUE...)` | In direct Kash, supplies bytes for exactly one declared file output. Standalone evaluation writes to stdout and returns nil. |
 
-Shell-template expansion and value-producing Kame bodies reject effects. Return
-text or bytes from `[shell: kame]` instead of expanding `@(yield! ...)`.
-Choose one producer: a value-producing Kame body or a Bash/Kash action program.
+Shell-template expansion and rule expression bodies reject effects. A rule with
+one file output publishes text or bytes from its expression body or from
+`return VALUE` in its Kash body.

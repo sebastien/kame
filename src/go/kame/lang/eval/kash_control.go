@@ -10,6 +10,8 @@ import (
 type localDefinition struct {
 	Expression    *expr.Expr
 	Scope         *Scope
+	Aggregate     *localAggregate
+	Configured    *expr.Expr
 	Active        bool
 	Done          bool
 	Value         core.Value
@@ -21,15 +23,15 @@ type localDefinition struct {
 }
 
 func (p *Program) localValue(local *localDefinition, c *Context) Result {
-	if c.PurePredicate || (c.pureValueBlock && c.Engine == nil) {
+	if c.PurePredicate || (c.Engine == nil && (c.pureValueBlock || c.Phase == PlanningPhase)) {
 		if local.Done {
 			return Result{Value: local.Value.Clone(c.Run), Diagnostic: local.Diagnostic.Clone(c.Run)}
 		}
 		if local.Active {
-			return failure(c.Run, "DEP_CYCLE", local.Expression.Span, "cyclic predicate definition")
+			return failure(c.Run, "DEP_CYCLE", local.Expression.Span, "cyclic local definition")
 		}
 		local.Active = true
-		r := p.evaluate(nil, local.Scope, local.Expression, c)
+		r := p.evaluateLocal(nil, local, c)
 		local.Active = false
 		return r
 	}
@@ -43,7 +45,7 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 	local.Active = true
 	before, beforePaths := len(c.Effects), len(c.WritePaths)
 	callerScope := c.Scope
-	r := p.evaluate(c.Engine, local.Scope, local.Expression, c)
+	r := p.evaluateLocal(c.Engine, local, c)
 	c.Scope = callerScope
 	local.Active = false
 	if !r.Waiting {
@@ -57,11 +59,11 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 		}
 		for i := before; i < len(c.Effects); i++ {
 			effect := c.Effects[i]
-			if p.DefinitionEffectSink == nil || r.Diagnostic.Code != "" || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
+			if !c.streamsControlOutput(effect.Kind) || r.Diagnostic.Code != "" {
 				local.Effects = append(local.Effects, effect.clone())
 			}
 		}
-		if p.DefinitionEffectSink != nil && r.Diagnostic.Code == "" {
+		if c.hasControlOutputSink() && r.Diagnostic.Code == "" {
 			p.streamControlOutput(c, before)
 			local.EffectsHeld = true
 		}
@@ -115,11 +117,11 @@ func (p *Program) retainControlEffects(state *kashControlState, c *Context, scop
 	}
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		if p.DefinitionEffectSink == nil || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
+		if !c.streamsControlOutput(effect.Kind) {
 			state.Effects = append(state.Effects, effect.clone())
 		}
 	}
-	if p.DefinitionEffectSink != nil {
+	if c.hasControlOutputSink() {
 		p.streamControlOutput(c, before)
 		for current := scope; current != nil; current = current.Parent {
 			for i := range current.Bindings {
@@ -132,12 +134,31 @@ func (p *Program) retainControlEffects(state *kashControlState, c *Context, scop
 	}
 }
 
+func (c *Context) streamsControlOutput(kind EffectKind) bool {
+	return (kind == EffectOut && c.commandOutput != nil) ||
+		((kind == EffectOut || kind == EffectErr) &&
+			(c.functionStage != nil || c.Program.DefinitionEffectSink != nil || c.RecipeOutput != nil))
+}
+
+func (c *Context) hasControlOutputSink() bool {
+	return c.commandOutput != nil || c.functionStage != nil || c.Program.DefinitionEffectSink != nil || c.RecipeOutput != nil
+}
+
 // Streaming sinks consume public output, never recipe-owned writes or yields.
+// A recipe sink associates its output with the target and retains it for replay.
 func (p *Program) streamControlOutput(c *Context, before int) {
 	kept := before
 	for i := before; i < len(c.Effects); i++ {
-		if c.Effects[i].Kind == EffectOut || c.Effects[i].Kind == EffectErr {
-			p.DefinitionEffectSink(p.DefinitionEffectState, c.Effects[i])
+		if c.streamsControlOutput(c.Effects[i].Kind) {
+			if c.Effects[i].Kind == EffectOut && c.commandOutput != nil {
+				c.commandOutput.append(c.Effects[i].Data)
+			} else if c.functionStage != nil {
+				c.functionStage.enqueue(c.Effects[i])
+			} else if c.RecipeOutput != nil {
+				c.RecipeOutput(c.Effects[i])
+			} else {
+				p.DefinitionEffectSink(p.DefinitionEffectState, c.Effects[i])
+			}
 			c.Effects[i].Free(c.Run)
 		} else {
 			c.Effects[kept] = c.Effects[i]
@@ -185,7 +206,7 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 			return r
 		}
 		switch r.Value.Kind {
-		case core.String, core.Pattern, core.Bool, core.Int, core.Float, core.Nil:
+		case core.String, core.Symbol, core.Path, core.Pattern, core.Bool, core.Int, core.Float, core.Nil:
 			state.Subject = r.Value.Clone(p.Alloc)
 		default:
 			state.Subject.Kind = r.Value.Kind
@@ -200,25 +221,12 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		if len(branch.Items) != 0 {
 			pattern := branch.Items[0]
-			operand := pattern
-			glob := isMatch && pattern.Kind == expr.Path && pattern.Pattern == nil && expr.PathHasGlob(pattern.Text)
-			if glob {
-				literal := *pattern
-				literal.LiteralPath = true
-				operand = &literal
-			}
-			r := p.evaluate(c.Engine, scope, operand, c)
+			r := p.evaluate(c.Engine, scope, pattern, c)
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
 			}
 			if isMatch {
-				matched := matchArmValue(c.Run, &state.Subject, &r.Value, glob, pattern.Span)
-				for i := range matched.Names {
-					if (e.Kind == expr.KashMatch || e.Kash) && matched.Names[i] == "env" && matched.Diag.Code == "" {
-						denied := failure(c.Run, "DEF_INVALID", branch.Items[0].Span, "env is reserved in Kash")
-						matched.Diag = denied.Diagnostic
-					}
-				}
+				matched := matchArmValue(c.Run, &state.Subject, &r.Value, pattern.Span)
 				selected = matched.Matched
 				if selected && matched.Diag.Code == "" {
 					state.Scope = newScope(p.Alloc, scope)
@@ -279,13 +287,11 @@ func (p *Program) kashBodyDefinitions(scope *Scope, body []*expr.Expr, c *Contex
 		if d.Kind != expr.KashDefinition && d.Kind != expr.KashLet {
 			continue
 		}
-		for j := range scope.Bindings {
-			if scope.Bindings[j].Name == d.Text {
-				return failure(c.Run, "DEF_INVALID", d.Span, "body definition conflicts with a local binding")
-			}
+		if previous := scope.localBinding(d.Text); previous != nil && !(d.Kind == expr.KashLet && previous.Kind == bindingEager) {
+			return failure(c.Run, "DEF_INVALID", d.Span, "body definition conflicts with a local binding")
 		}
 		if d.Kind == expr.KashLet {
-			scope.reserveEager(d.Text)
+			scope.reserveEager(d, false)
 			continue
 		}
 		if d.Bool {
@@ -332,6 +338,15 @@ func (p *Program) kashBodyBudget(state *kashControlState, body []*expr.Expr, c *
 			if b.Kind == bindingLocalDefinition && b.Local.Done {
 				b.Local.EffectsHeld = true
 			}
+		}
+		if r.Yielded {
+			if statement.Kind == expr.KashYield {
+				state.Index++
+				if budget != nil {
+					budget.Index++
+				}
+			}
+			return r
 		}
 		if r.Returned || r.LoopTransfer != expr.Invalid {
 			return r

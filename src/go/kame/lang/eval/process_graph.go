@@ -26,6 +26,8 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 	flat := mem.Alloc[expr.Expr](c.Run)
 	defer expr.Free(c.Run, flat)
 	flat.Kind, flat.Span, flat.Topology, flat.Async, flat.AcceptExit = e.Kind, e.Span, true, e.Async, e.AcceptExit
+	flat.ActionPrefix = e.ActionPrefix
+	flat.SourceOrigin, flat.EntrySource = e.SourceOrigin, e.EntrySource
 	for i := range e.Body {
 		flat.Body = append(flat.Body, expr.Clone(c.Run, e.Body[i]))
 	}
@@ -37,7 +39,9 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 	if previous == e {
 		c.PrepareDeferred = flat
 	}
+	restoreOperand := c.redirectListOperand(e, flat)
 	r = p.capture(flat, c)
+	restoreOperand()
 	c.PrepareDeferred = previous
 	return r
 }

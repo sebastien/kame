@@ -22,7 +22,7 @@ function Invoke-NativeCliBounded([string[]] $Arguments, [string] $StdoutPath, [s
 		$null = $process.WaitForExit(5000)
 		throw "Native $Name command exceeded ${TimeoutMilliseconds}ms: stdout=$(Get-Content -Raw $StdoutPath) stderr=$(Get-Content -Raw $StderrPath)"
 	}
-	return @{ ExitCode = $process.ExitCode; Stdout = (Get-Content -Raw $StdoutPath); Stderr = (Get-Content -Raw $StderrPath) }
+	return ${ ExitCode = $process.ExitCode; Stdout = (Get-Content -Raw $StdoutPath); Stderr = (Get-Content -Raw $StderrPath) }
 }
 $version = & $exe --version
 if ($LASTEXITCODE -ne 0 -or $version -notmatch '^kame \S+') {
@@ -33,8 +33,9 @@ $project = Join-Path $env:TEMP ("kame-native-windows-" + [guid]::NewGuid().ToStr
 New-Item -ItemType Directory -Path $project | Out-Null
 $shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 try {
-	@'
-(include ./native-child.kmk)
+	$makefile = @'
+SHELL = ["__POWERSHELL__", "-NoProfile", "-NonInteractive", "-Command"]
+include ./native-child.km
 
 task native-windows :
 	Write-Output 'native-windows-recipe-ok'
@@ -42,21 +43,22 @@ task native-windows :
 
 task native-cwd :
 	(Get-Location).Path | Set-Content -NoNewline native-cwd.txt
-'@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+'@
+	$makefile.Replace('__POWERSHELL__', $shell) | Set-Content -Encoding ascii (Join-Path $project 'Makefile.km')
 	@'
 task native-included :
 	Write-Output 'native-include-ok'
 
-task native-path :
-	@(out! (run! "cmd.exe" "/c" "echo native-path-ok"))
-'@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
+task native-path ; {shell: kash}
+	(out! (run! "cmd.exe" "/c" "echo native-path-ok"))
+'@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.km')
 	@'
-task native-pipeline :
-	@(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 65536; $s=[Console]::OpenStandardOutput(); for ($i=1; $i -le 32; $i++) { $s.Write($b,0,$b.Length); if (($i % 4) -eq 0) { Set-Content pipeline-stage-one-bytes ($i * $b.Length) } }; Set-Content pipeline-stage-one-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r; if ($n -le 8192 -or ($n % 262144) -lt $r) { Set-Content pipeline-stage-two-bytes $n } }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
+task native-pipeline ; {shell: kash}
+	(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 65536; $s=[Console]::OpenStandardOutput(); for ($i=1; $i -le 32; $i++) { $s.Write($b,0,$b.Length); if (($i % 4) -eq 0) { Set-Content pipeline-stage-one-bytes ($i * $b.Length) } }; Set-Content pipeline-stage-one-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r; if ($n -le 8192 -or ($n % 262144) -lt $r) { Set-Content pipeline-stage-two-bytes $n } }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
 
-task native-pipeline-eof :
-	@(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-producer-started yes; Set-Content pipeline-eof-producer-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-consumer-started yes; $s=[Console]::OpenStandardInput(); $v=$s.ReadByte(); Set-Content pipeline-eof-consumer-read $v; [Console]::Write($v)")))
-'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+task native-pipeline-eof ; {shell: kash}
+	(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-producer-started yes; Set-Content pipeline-eof-producer-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-consumer-started yes; $s=[Console]::OpenStandardInput(); $v=$s.ReadByte(); Set-Content pipeline-eof-consumer-read $v; [Console]::Write($v)")))
+'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.km')
 	@'
 task native-timeout :
 	Set-Content recipe-pid $PID
@@ -67,56 +69,56 @@ task native-timeout :
 	Set-Content child-launched launched
 	Start-Sleep -Seconds 30
 	Set-Content parent-marker late
-'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.km')
 	@'
-task native-cache : ./cache-input.txt
+task cached native-cache : ./cache-input.txt
 	Add-Content -Path cache-runs.txt -Value ran
 	Write-Output 'native-cache-ok'
 
-task native-concurrent-cache : ./cache-input.txt
+task cached native-concurrent-cache : ./cache-input.txt
 	Add-Content -Path concurrent-runs.txt -Value ran
 	Set-Content concurrent-first-started yes
 	Start-Sleep -Seconds 5
 	Write-Output 'native-concurrent-cache-ok'
 
-./native-watch-output.txt : ./native-watch-input.txt
-	Copy-Item -LiteralPath @< -Destination @>
+rule ./native-watch-output.txt : ./native-watch-input.txt
+	Copy-Item -LiteralPath '${inputs.0}' -Destination '${outputs.0}'
 
-./native-watch-glob-output.txt : ./native-watch-inputs/*.txt
+rule ./native-watch-glob-output.txt : ./native-watch-inputs/*.txt
 	Add-Content -Path native-watch-glob-runs.txt -Value ran
-	Set-Content -Path @> -Value done
-'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+	Set-Content -Path '${outputs.0}' -Value done
+'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.km')
 	Push-Location $project
 	try {
 		$env:KAME_NATIVE_ENV = 'inherited'
 		Write-Host '[native-cli-probe] running recipe and environment checks'
-		$output = & $exe --timeout 15000 --directory $project --env kame_native_env=passed --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-windows 2>&1
+		$output = & $exe --timeout 15000 --directory $project --env kame_native_env=passed -f Makefile.km native-windows 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-windows-recipe-ok') {
 			throw "Native recipe check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not replace the inherited environment name case-insensitively or write its output file.'
 		}
-		$readOutput = & $exe do run --lang expr --allow-read -C $project -c '(read "native-env.txt")' 2>&1
+		$readOutput = & $exe do run --lang expr --allow-read -C $project -c 'read ./native-env.txt' 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($readOutput -join "`n") -notmatch 'passed') {
 			throw "Native file read operation failed: exit=$LASTEXITCODE output=$($readOutput -join ' | ')"
 		}
-		$existsOutput = & $exe do run --lang expr --allow-read -C $project -c '(exists? "native-env.txt")' 2>&1
-		if ($LASTEXITCODE -ne 0 -or ($existsOutput -join "`n") -notmatch ':true') {
+		$existsOutput = & $exe do run --lang expr --allow-read -C $project -c 'exists? ./native-env.txt' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($existsOutput -join "`n") -notmatch '\btrue\b') {
 			throw "Native file existence operation failed: exit=$LASTEXITCODE output=$($existsOutput -join ' | ')"
 		}
-		$statOutput = & $exe do run --lang expr --allow-read -C $project -c '(stat "native-env.txt")' 2>&1
+		$statOutput = & $exe do run --lang expr --allow-read -C $project -c 'stat ./native-env.txt' 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($statOutput -join "`n") -notmatch 'name: "native-env.txt"') {
 			throw "Native file stat operation failed: exit=$LASTEXITCODE output=$($statOutput -join ' | ')"
 		}
-		$wildcardOutput = & $exe do run --lang expr --allow-read -C $project -c '(wildcard "*.kmk")' 2>&1
-		if ($LASTEXITCODE -ne 0 -or ($wildcardOutput -join "`n") -notmatch 'native-child.kmk' -or ($wildcardOutput -join "`n") -notmatch 'Makefile.kmk') {
+		$wildcardOutput = & $exe do run --lang expr --allow-read -C $project -c 'files ./*.km' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($wildcardOutput -join "`n") -notmatch 'native-child.km' -or ($wildcardOutput -join "`n") -notmatch 'Makefile.km') {
 			throw "Native wildcard operation failed: exit=$LASTEXITCODE output=$($wildcardOutput -join ' | ')"
 		}
 		Push-Location $env:TEMP
 		try {
 			Write-Host '[native-cli-probe] checking working directory'
-			$output = & $exe --timeout 15000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-cwd 2>&1
+			$output = & $exe --timeout 15000 --directory $project -f Makefile.km native-cwd 2>&1
 			$cwdStatus = $LASTEXITCODE
 		} finally {
 			Pop-Location
@@ -127,12 +129,12 @@ task native-concurrent-cache : ./cache-input.txt
 			throw "Native CLI working-directory selection failed: exit=$cwdStatus actual=$actualCwd output=$($output -join ' | ')"
 		}
 		Write-Host '[native-cli-probe] checking include loading'
-		$output = & $exe --timeout 15000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-included 2>&1
+		$output = & $exe --timeout 15000 --directory $project -f Makefile.km native-included 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-include-ok') {
 			throw "Native source include check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
 		Write-Host '[native-cli-probe] checking PATH executable lookup'
-		$output = & $exe --timeout 15000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-path 2>&1
+		$output = & $exe --timeout 15000 --directory $project -f Makefile.km native-path 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-path-ok') {
 			throw "Native PATH executable lookup failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
@@ -141,7 +143,7 @@ task native-concurrent-cache : ./cache-input.txt
 		$eofOutputPath = Join-Path $project 'pipeline-eof.out'
 		$eofErrorPath = Join-Path $project 'pipeline-eof.err'
 		Write-Output '[native-eof-probe] starting'
-		$eofResult = Invoke-NativeCliBounded @('--env', 'KAME_WINDOWS_SPAWN_TRACE=1', '--timeout', '5000', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-pipeline-eof') $eofOutputPath $eofErrorPath 15000 'EOF pipeline probe'
+		$eofResult = Invoke-NativeCliBounded @('--env', 'KAME_WINDOWS_SPAWN_TRACE=1', '--timeout', '5000', '--directory', $project, '-f', 'Makefile.km', 'native-pipeline-eof') $eofOutputPath $eofErrorPath 15000 'EOF pipeline probe'
 		Write-Output '[native-eof-probe] finished'
 		$eofStatus = $eofResult.ExitCode
 		$eofOutput = $eofResult.Stdout
@@ -153,7 +155,7 @@ task native-concurrent-cache : ./cache-input.txt
 			$pipelineFailure = "Native EOF-only pipeline failed: exit=$eofStatus markers=$($eofMarkers -join ',') stdout=$eofOutput stderr=$eofError trace=$eofTrace"
 		}
 		Write-Output '[native-data-probe] starting'
-		$pipelineResult = Invoke-NativeCliBounded @('--timeout', '30000', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-pipeline') $pipelineOutputPath $pipelineErrorPath 45000 '2 MiB pipeline probe'
+		$pipelineResult = Invoke-NativeCliBounded @('--timeout', '30000', '--directory', $project, '-f', 'Makefile.km', 'native-pipeline') $pipelineOutputPath $pipelineErrorPath 45000 '2 MiB pipeline probe'
 		Write-Output '[native-data-probe] finished'
 		$pipelineStatus = $pipelineResult.ExitCode
 		$pipelineOutput = $pipelineResult.Stdout
@@ -166,7 +168,7 @@ task native-concurrent-cache : ./cache-input.txt
 		}
 	Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'initial'
 		Write-Host '[native-cli-probe] checking cache behavior'
-		$cacheArgs = @('--json', '--timeout', '15000', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
+		$cacheArgs = @('--json', '--timeout', '15000', '--directory', $project, '-f', 'Makefile.km', 'native-cache')
 		$null = & $exe @cacheArgs 2>&1
 		if ($LASTEXITCODE -ne 0 -or !(Test-Path (Join-Path $project 'cache-runs.txt'))) {
 			throw "Native cache miss failed: exit=$LASTEXITCODE"
@@ -182,7 +184,7 @@ task native-concurrent-cache : ./cache-input.txt
 		if ($LASTEXITCODE -ne 0 -or $cacheRuns.Count -ne 2 -or ($cacheOutput -join "`n") -match '"cached":true') {
 			throw "Native cache input invalidation failed: exit=$LASTEXITCODE runs=$($cacheRuns.Count) output=$($cacheOutput -join ' | ')"
 		}
-		$concurrentArgs = @('--json', '--timeout', '15000', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-concurrent-cache')
+		$concurrentArgs = @('--json', '--timeout', '15000', '--directory', $project, '-f', 'Makefile.km', 'native-concurrent-cache')
 		$firstOutput = Join-Path $project 'concurrent-1.out'
 		$firstError = Join-Path $project 'concurrent-1.err'
 		$secondOutput = Join-Path $project 'concurrent-2.out'
@@ -213,7 +215,7 @@ task native-concurrent-cache : ./cache-input.txt
 		New-Item -ItemType Directory -Path (Join-Path $project 'native-watch-inputs') | Out-Null
 		Set-Content -Path (Join-Path $project 'native-watch-inputs/a.txt') -Value a
 		Write-Host '[native-cli-probe] checking file and glob watch'
-		$watchArgs = @('--timeout', '15000', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '--watch', './native-watch-output.txt', './native-watch-glob-output.txt')
+		$watchArgs = @('--timeout', '15000', '--directory', $project, '--watch', './native-watch-output.txt', './native-watch-glob-output.txt')
 		$watchStdout = Join-Path $project 'watch.out'
 		$watchStderr = Join-Path $project 'watch.err'
 		$watch = Start-Process -FilePath $exe -ArgumentList $watchArgs -PassThru -NoNewWindow -RedirectStandardOutput $watchStdout -RedirectStandardError $watchStderr
@@ -258,7 +260,7 @@ task native-concurrent-cache : ./cache-input.txt
 			if (!$watch.HasExited) { Stop-Process -Id $watch.Id -Force }
 		}
 		Write-Host '[native-cli-probe] checking descendant cleanup'
-		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
+		$timeoutOutput = & $exe --timeout 15000 -f Makefile.km native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
 		Start-Sleep -Seconds 20
 		Write-Output ($timeoutOutput -join "`n")

@@ -16,7 +16,7 @@ func TestTargetShadowDiagnosticOwnsMessageAndSource(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
-	parsed := script.Parse(a, "arguments.kmk", "region = \"global\"\ndeploy {region=west} :\n")
+	parsed := script.ParseKameFile(a, "arguments.km", "region = \"global\"\ntask deploy {region=west} :\n")
 	compiled := program.Compile(a, parsed, registry, program.Options{})
 	parsed.Free()
 	defer compiled.Free(a)
@@ -30,7 +30,7 @@ func TestTargetShadowDiagnosticOwnsMessageAndSource(t *testing.T) {
 		return
 	}
 	d := compiled.Diagnostics[0]
-	if !d.Owned || d.Code != "TGT_ARGUMENT" || d.Source != "arguments.kmk" || d.Message != "target argument shadows definition: region" {
+	if !d.Owned || d.Code != "TGT_ARGUMENT" || d.Source != "arguments.km" || d.Message != "target argument shadows definition: region" {
 		t.Error("returned diagnostic did not retain its message and source")
 	}
 }
@@ -100,7 +100,7 @@ func TestForwardedProcessCompletionRetiresDisplay(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	for mode := 0; mode < 2; mode++ {
-		parsed := script.Parse(a, "pending.kmk", "value = (sh! \"printf ok\")\n")
+		parsed := script.ParseKameFile(a, "pending.km", "value = (sh! \"printf ok\")\n")
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ForwardRequests: true, Grants: []eval.Grant{{Capability: eval.Run}}})
 		if compiled.Program == nil {
 			compiled.Free(a)

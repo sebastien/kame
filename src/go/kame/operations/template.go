@@ -8,11 +8,25 @@ import (
 	"kame/lang/eval"
 	"kame/lang/template"
 
+	"path"
+	"strings"
 	"unicode/utf8"
 )
 
-func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
-	_ = s
+func opRender(c *eval.Context, _ any, v []core.Value) eval.Result {
+	return render(c, v, false)
+}
+
+// Template includes use the file loader independently of render's inline
+// String and Bytes sources. The payload, when present, precedes the path.
+func opTemplateInclude(c *eval.Context, _ any, v []core.Value) eval.Result {
+	if len(v) == 2 && v[0].Kind != core.Record {
+		return invalidArgument(c, v, 0, "record")
+	}
+	return render(c, v, true)
+}
+
+func render(c *eval.Context, v []core.Value, include bool) eval.Result {
 	previousFinalization := c.FinalizationForbidden
 	c.FinalizationForbidden = true
 	defer restoreRenderFinalization(c, previousFinalization)
@@ -20,15 +34,17 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		discardArgCallables(c, v)
 		return c.InvalidOperation("expects 1 to 3 arguments")
 	}
-	// Optional PAYLOAD and STYLE precede the template source.
-	var payload *core.Value
-	var styleArg *core.Value
+	var payload, styleArg *core.Value
+	sourceIndex := len(v) - 1
 	if len(v) == 2 {
-		if v[0].Kind == core.Record {
+		switch {
+		case v[0].Kind == core.Record:
 			payload = &v[0]
-		} else if v[0].Kind == core.String {
+		case !include && v[1].Kind == core.Record:
+			payload, sourceIndex = &v[1], 0
+		case v[0].Kind == core.String:
 			styleArg = &v[0]
-		} else {
+		default:
 			return invalidArgument(c, v, 0, "record or string")
 		}
 	}
@@ -39,203 +55,131 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		if v[1].Kind != core.String {
 			return invalidArgument(c, v, 1, "string")
 		}
-		payload = &v[0]
-		styleArg = &v[1]
+		payload, styleArg = &v[0], &v[1]
 	}
-	if payload != nil && payload.Kind != core.Record {
-		return invalidArgument(c, v, 0, "record")
-	}
-	src := &v[len(v)-1]
-	if src.Kind != core.String && src.Kind != core.Bytes {
-		return invalidArgument(c, v, len(v)-1, "string or bytes")
-	}
-	// Resolve source bytes, style, and file identity.
-	var content string
-	var contentOwned bool
-	var style string
-	var filePath string
-	var isFile bool
-	if src.Kind == core.Bytes {
-		if styleArg == nil {
-			discardArgCallables(c, v)
-			return styledFailure(c, "TPL_STYLE", "bytes template needs an explicit style")
+	src := &v[sourceIndex]
+	isFile := src.Kind == core.Path
+	filePath := src.Text
+	if include {
+		if !src.IsPathText() {
+			return invalidArgument(c, v, sourceIndex, "path or string")
 		}
-		norm, ok := template.NormalizeStyle(styleArg.Text)
-		if !ok {
+		if filePath == "" || strings.IndexByte(filePath, 0) >= 0 {
 			discardArgCallables(c, v)
+			return c.InvalidOperation("template include requires a nonempty path without NUL")
+		}
+		isFile = true
+		filePath = templateIncludePath(c, filePath)
+		defer mem.FreeString(c.Run, filePath)
+	} else if !isFile && src.Kind != core.String && src.Kind != core.Bytes {
+		return invalidArgument(c, v, sourceIndex, "path, string or bytes")
+	}
+	if isFile && strings.HasPrefix(filePath, "~/") {
+		home, _ := c.Unit.EnvironmentValue(c.Environment, "HOME")
+		if !path.IsAbs(home) {
+			discardArgCallables(c, v)
+			return styledFailure(c, "FS_ERR", "cannot resolve home directory for template")
+		}
+		filePath = path.Join(home, filePath[2:])
+	}
+
+	style := "plain"
+	validStyle := true
+	if styleArg != nil {
+		style, validStyle = template.NormalizeStyle(styleArg.Text)
+	} else if isFile {
+		style, validStyle = template.InferStyle(filePath)
+	}
+	if !validStyle {
+		discardArgCallables(c, v)
+		if styleArg != nil {
 			return styledFailure(c, "TPL_STYLE", "unknown comment style")
 		}
-		style = norm
+		return styledFailure(c, "TPL_STYLE", "unknown template extension")
+	}
+
+	sourceName := "<render>"
+	content := src.Text
+	if isFile {
+		sourceName = c.CanonicalPath(filePath)
+		defer mem.FreeString(c.Run, sourceName)
+		for _, parent := range c.RenderStack {
+			if parent == sourceName {
+				discardArgCallables(c, v)
+				return styledFailure(c, "TPL_CYCLE", "recursive template inclusion")
+			}
+		}
+		if !c.Allows(eval.Read, filePath) {
+			discardArgCallables(c, v)
+			return failure("CAP_DENIED", "read access denied")
+		}
+		if !c.DirectHostRequests {
+			key := core.NewResourceKey(c.Run, core.ResourceFile, filePath)
+			current := c.Dependency(key)
+			key.Free(c.Run)
+			if !current {
+				discardArgCallables(c, v)
+				return eval.Result{Waiting: true}
+			}
+		}
+		got := readFileBytes(c, filePath)
+		if got.Waiting || got.Diagnostic.Code != "" {
+			discardArgCallables(c, v)
+			return got
+		}
+		defer got.Value.Free(c.Run)
+		switch got.Value.Kind {
+		case core.Bytes:
+			if !utf8.Valid(got.Value.Bytes) {
+				discardArgCallables(c, v)
+				return c.InvalidOperation("template file contains bytes that are not valid UTF-8")
+			}
+			content = string(got.Value.Bytes)
+		case core.String:
+			content = got.Value.Text
+		default:
+			discardArgCallables(c, v)
+			return c.InvalidOperation("template file read must return bytes or string")
+		}
+
+		// Context copies borrow their caller's stack.
+		previousStack := c.RenderStack
+		c.RenderStack = make([]string, len(previousStack)+1)
+		copy(c.RenderStack, previousStack)
+		c.RenderStack[len(previousStack)] = sourceName
+		defer func() {
+			mem.FreeSlice(nil, c.RenderStack)
+			c.RenderStack = previousStack
+		}()
+	} else if src.Kind == core.Bytes {
 		if !utf8.Valid(src.Bytes) {
 			discardArgCallables(c, v)
 			return c.InvalidOperation("template source contains bytes that are not valid UTF-8")
 		}
-		if len(src.Bytes) != 0 {
-			b := mem.AllocSlice[byte](c.Run, len(src.Bytes), len(src.Bytes))
-			copy(b, src.Bytes)
-			content = string(b)
-			contentOwned = true
-		}
-	} else {
-		if isExplicitPath(src.Text) {
-			isFile = true
-			filePath = src.Text
-			// Cycle check before reading.
-			for i := range c.RenderStack {
-				if c.RenderStack[i] == filePath {
-					discardArgCallables(c, v)
-					return styledFailure(c, "TPL_CYCLE", "recursive template inclusion")
-				}
-			}
-			if !c.Allows(eval.Read, filePath) {
-				discardArgCallables(c, v)
-				return failure("CAP_DENIED", "read access denied")
-			}
-			if !c.DirectHostRequests {
-				key := core.NewResourceKey(c.Run, core.ResourceFile, filePath)
-				current := c.Dependency(key)
-				key.Free(c.Run)
-				if !current {
-					discardArgCallables(c, v)
-					return eval.Result{Waiting: true}
-				}
-			}
-			got := readFileBytes(c, filePath)
-			if got.Waiting || got.Diagnostic.Code != "" {
-				discardArgCallables(c, v)
-				if contentOwned {
-					mem.FreeString(c.Run, content)
-				}
-				return got
-			}
-			if got.Value.Kind == core.Bytes {
-				if !utf8.Valid(got.Value.Bytes) {
-					got.Value.Free(c.Run)
-					discardArgCallables(c, v)
-					return c.InvalidOperation("template file contains bytes that are not valid UTF-8")
-				}
-				if len(got.Value.Bytes) != 0 {
-					b := mem.AllocSlice[byte](c.Run, len(got.Value.Bytes), len(got.Value.Bytes))
-					copy(b, got.Value.Bytes)
-					content = string(b)
-					contentOwned = true
-				}
-				got.Value.Free(c.Run)
-			} else if got.Value.Kind == core.String {
-				content = got.Value.Text
-				// Transfer ownership: got.Value.Text is Run-owned; keep it.
-				// Prevent double free by clearing got before Free.
-				contentOwned = true
-				// got.Value.Free would free Text; instead take ownership.
-				// Mark got as empty so Free is safe.
-				got.Value = core.Value{}
-			} else {
-				got.Value.Free(c.Run)
-				discardArgCallables(c, v)
-				if contentOwned {
-					mem.FreeString(c.Run, content)
-				}
-				return c.InvalidOperation("template file read must return bytes or string")
-			}
-			if styleArg != nil {
-				norm, ok := template.NormalizeStyle(styleArg.Text)
-				if !ok {
-					discardArgCallables(c, v)
-					if contentOwned {
-						mem.FreeString(c.Run, content)
-					}
-					return styledFailure(c, "TPL_STYLE", "unknown comment style")
-				}
-				style = norm
-			} else {
-				inferred, ok := template.InferStyle(filePath)
-				if !ok {
-					discardArgCallables(c, v)
-					if contentOwned {
-						mem.FreeString(c.Run, content)
-					}
-					return styledFailure(c, "TPL_STYLE", "unknown template extension")
-				}
-				style = inferred
-			}
-		} else {
-			// String content.
-			content = src.Text
-			if styleArg != nil {
-				norm, ok := template.NormalizeStyle(styleArg.Text)
-				if !ok {
-					discardArgCallables(c, v)
-					return styledFailure(c, "TPL_STYLE", "unknown comment style")
-				}
-				style = norm
-			} else {
-				style = "plain"
-			}
-		}
+		content = string(src.Bytes)
 	}
-	// Push cycle entry for files.
-	pushed := false
-	previousStack := c.RenderStack
-	if isFile {
-		owned := ""
-		if len(filePath) != 0 {
-			b := mem.AllocSlice[byte](c.Run, len(filePath), len(filePath))
-			copy(b, []byte(filePath))
-			owned = string(b)
-		}
-		// Context copies borrow their caller's stack. Own only this frame's
-		// storage and final string; never reallocate a borrowed backing slice.
-		c.RenderStack = make([]string, len(previousStack)+1)
-		copy(c.RenderStack, previousStack)
-		c.RenderStack[len(previousStack)] = owned
-		pushed = true
-	}
-	// Parse.
-	sourceName := "<render>"
-	if isFile {
-		sourceName = filePath
-	}
+
 	doc := template.ParseDocument(c.Run, sourceName, content, style)
-	if contentOwned && src.Kind == core.Bytes {
-		mem.FreeString(c.Run, content)
-	}
-	if src.Kind == core.String && isFile && contentOwned {
-		mem.FreeString(c.Run, content)
-	}
+	defer doc.Free()
 	if len(doc.Diagnostics) != 0 {
 		diag := doc.Diagnostics[0]
-		code := diag.Code
-		msg := diag.Message
-		span := diag.Span
-		srcName := sourceName
-		doc.Free()
-		if pushed {
-			popRenderStack(c, previousStack)
-		}
 		discardArgCallables(c, v)
-		return renderFailure(c, code, srcName, span.Start, span.End, msg)
+		return renderFailure(c, diag.Code, sourceName, diag.Span.Start, diag.Span.End, diag.Message)
 	}
 	// Evaluate with payload scope and template source.
 	prevSource := c.Source
 	prevScope := c.Scope
 	c.Source = sourceName
 	var child *eval.Scope
-	evalScope := c.Scope
 	if payload != nil {
 		child = eval.RenderChildScope(c, prevScope, *payload)
 		if child == nil {
 			c.Source = prevSource
-			doc.Free()
-			if pushed {
-				popRenderStack(c, previousStack)
-			}
 			discardArgCallables(c, v)
 			return c.InvalidOperation("cannot create template payload scope")
 		}
-		evalScope = child
 		c.Scope = child
 	}
-	_ = evalScope
 	previousClone := c.CloneCallableAST
 	c.CloneCallableAST = true
 	res := c.Program.EvaluateWith(doc.Root, c)
@@ -244,10 +188,6 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	c.Scope = prevScope
 	if child != nil {
 		child.Free()
-	}
-	doc.Free()
-	if pushed {
-		popRenderStack(c, previousStack)
 	}
 	// Payload callables transferred into the child scope above; only the caller's
 	// shallow argument-storage free remains, even if evaluation failed or waited.
@@ -265,40 +205,11 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 
 func restoreRenderFinalization(c *eval.Context, previous bool) { c.FinalizationForbidden = previous }
 
-// opTemplateItems gives document loops stable positional and key metadata.
-// It is used by the template lowering rather than authored directly.
-func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Result {
-	_ = state
-	input := values[0]
-	count := 0
-	if input.Kind == core.List {
-		count = len(input.List)
-	} else if input.Kind == core.Record {
-		count = len(input.Record)
-	} else {
-		return invalidArgument(c, values, 0, "list or record")
+func opTemplateMap(c *eval.Context, state any, values []core.Value) eval.Result {
+	if values[1].Kind != core.List {
+		return invalidArgument(c, values, 1, "list")
 	}
-	items := make([]core.Value, count)
-	for i := 0; i < count; i++ {
-		index := core.Value{Kind: core.Int, Int: int64(i)}
-		key := core.Value{Kind: core.Nil}
-		value := core.Value{Kind: core.Nil}
-		if input.Kind == core.List {
-			value = input.List[i].Clone(c.Run)
-		} else {
-			key = core.NewString(c.Run, input.Record[i].Key)
-			value = input.Record[i].Value.Clone(c.Run)
-		}
-		var fields []core.RecordField
-		fields = append(fields, core.RecordField{Key: "index", Value: index})
-		fields = append(fields, core.RecordField{Key: "key", Value: key})
-		fields = append(fields, core.RecordField{Key: "value", Value: value})
-		items[i] = core.NewRecord(c.Run, fields)
-		key.Free(c.Run)
-		value.Free(c.Run)
-		mem.FreeSlice(nil, fields)
-	}
-	return eval.Result{Value: core.Value{Kind: core.List, List: items}}
+	return opMap(c, state, values)
 }
 
 // opTemplateApply splats the already-built positional argument list. It keeps
@@ -348,14 +259,28 @@ func isTemplateWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
-func popRenderStack(c *eval.Context, previous []string) {
-	if len(c.RenderStack) == 0 {
-		return
+func templateIncludePath(c *eval.Context, name string) string {
+	if path.IsAbs(name) || strings.HasPrefix(name, "~/") || core.IsResourceURIName(name) {
+		return cloneText(c.Run, name)
 	}
-	last := len(c.RenderStack) - 1
-	mem.FreeString(c.Run, c.RenderStack[last])
-	mem.FreeSlice(nil, c.RenderStack)
-	c.RenderStack = previous
+	if core.IsResourceURIName(c.Source) {
+		parsed := core.ParseResourceURI(c.Run, c.Source)
+		defer parsed.URI.Free()
+		if parsed.Error == "" {
+			base := parsed.URI
+			base.Path = path.Join(path.Dir(base.Path), name)
+			return base.Canonical(c.Run)
+		}
+	}
+	dir := c.SourceDirectory()
+	defer dir.Free(c.Run)
+	if dir.Diagnostic.Code == "" {
+		return cloneText(c.Run, path.Join(dir.Value.Text, name))
+	}
+	if c.Source != "" && c.Source[0] != '<' {
+		return c.CanonicalPath(path.Join(path.Dir(c.Source), name))
+	}
+	return c.CanonicalPath(name)
 }
 
 func styledFailure(c *eval.Context, code string, msg string) eval.Result {

@@ -1,7 +1,8 @@
 # Kame language fixtures
 
 Representative Kame source covering the syntax in
-`docs/spec/004-language.md`. The `lang/expr`, `lang/template`, `lang/rule`, and
+`docs/spec/004-language.md` and `docs/spec/055-unified-kame-kash-language.md`.
+The `lang/expr`, `lang/template`, `lang/rule`, and
 `lang/script` package tests consume shared fixtures, alongside the CLI parse
 matrix (T004-01), invalid-diagnostic checks (T004-02), canonicalization
 (T004-06), and format/AST stability checks (T004-08). Native and WASM consumers
@@ -32,12 +33,8 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 
 ## Conventions
 
-- Fixtures cover specified syntax as well as deliberately retained legacy and
-  historical inputs. Their presence is not a language compatibility contract or
-  a claim that every consumer supports every input; check the consuming runner
-  and diagnostic manifest. Current syntax uses `@{ref}` / `@(call)`, literal bare
-  `{(...)}`, and authored-pipe preservation; fixtures and goldens follow those
-  boundaries rather than providing automatic migration of historical sources.
+- Strings and document templates use `@{EXPR}` for both references and
+  expressions. Check the consuming runner for the fixture subset it uses.
 - `expr/`, `rule/`, and `script/` files end with a trailing newline because the
   parsers ignore surrounding whitespace. Invalid `expr-` and `rule-` fixtures
   follow the same rule.
@@ -47,27 +44,22 @@ the native, CLI, and wasm golden tests can consume the same bytes.
   its newlines deliberately.
 - Canonical goldens must match their expected formatted bytes. General parse
   fixtures need not already be canonical: T004-06 checks that formatting reaches
-  a fixed point, and T004-08 checks AST stability. Historical interpolation
-  fixtures test literal text or explicit rejection, not a deprecated-input parser
-  or automatic migration.
+  a fixed point, and T004-08 checks AST stability.
 - Recipe lines are indented with one tab. `rule/rules/indent.km` keeps extra
   indentation inside recipe text on purpose.
 - LF line endings only.
-- Malformed `@(` / `@{` expansions are warnings that keep the text literal, not
-  hard rejections; `MANIFEST.tsv` records `severity` and `recovery` for these.
-- `script/core-example.km` keeps the legacy example's lower-case `manifest` and
-  `bundle` definitions; the mixed case is intentional, not a naming error.
+- Malformed interpolation in `invalid/` produces `PARSE_ERR`. `MANIFEST.tsv`
+  records the severity and recovery mode.
 
 ## Coverage
 
 - `expr/`: literals, all number forms (`0`, integer, negative, underscore,
-  binary, octal, hex, float, signed exponent), string escapes and interpolation
-  (including samples of earlier `@(...)` and `{(...)}` forms, nested interpolation
-  and escaped braces), lists, records,
+  binary, octal, hex, float, signed exponent), string escapes, nested
+  interpolation, escaped braces, lists, records,
   names (`?`, `!`, leading `_`), references (index, negative index, slice, open
   slice, mixed components, selection), applications, lambdas (plain, no-arg,
-  rest), pipes (deferred and placeholder), and the `?` (`special-optional`),
-  `let`, `def`, `eval` special forms.
+  rest), value pipes and placeholder sections, optional lookup with `??`,
+  and `eval`.
 - `template/string/`: literal text, reference/call expansion samples, the full
   selector table including a negative input index, escapes, mixed expansions,
   nested expressions, multiline text.
@@ -78,8 +70,8 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 - `rule/rules/`: file rules (inputs, no inputs, multiple outputs), tasks, cached
   tasks, services, all output (`outputs.km`) and input (`inputs.km`) forms,
   selectors in recipes, indentation.
-- `script/`: comments in order, definitions plus rules plus top-level
-  expressions, and the adapted legacy core example.
+- `script/`: comments in order, default task selection, and composition of
+  definitions and rules.
 - `invalid/`: number forms (leading/trailing dot, single and consecutive
   underscores, base-prefix sign, int64 overflow, hexadecimal float), empty
   application, mixed record/rule outputs, single quotes, rest parameters

@@ -15,6 +15,7 @@ type Result struct {
 	Waiting      bool
 	Completed    bool
 	Returned     bool      // explicit return from the current function, value block or rule body
+	Yielded      bool      // suspend after advancing past the reached yield statement
 	LoopTransfer expr.Kind // KashBreak/KashContinue, consumed by the nearest loop.
 	Stream       *core.Source
 	Diagnostic   diagnostic.Diagnostic
@@ -40,9 +41,9 @@ func renderFailure(a mem.Allocator, expression *expr.Expr, span source.Span, act
 	result := failure(a, "EXPR_INVALID", span, "cannot render "+core.KindName(actual)+" as text; use an explicit conversion")
 	if actual == core.Callable {
 		tip := "Invoke the callable explicitly before rendering its result."
-		if expression != nil && expression.Expansion == "@{" && (expression.Kind == expr.Name || expression.Kind == expr.Reference) {
+		if expression != nil && expression.Expansion != "" && (expression.Kind == expr.Name || expression.Kind == expr.Reference) {
 			name := expr.Compact(a, expression)
-			tip = owned(a, "Use @{"+name+" ()} to invoke it without arguments.")
+			tip = owned(a, "Use "+expression.Expansion+name+" ()} to invoke it without arguments.")
 			mem.FreeString(a, name)
 			result.Diagnostic.Tips = append(result.Diagnostic.Tips, tip)
 		} else {
@@ -60,13 +61,6 @@ func (c *Context) InvalidRender(index int, actual core.Kind) Result {
 		span = expression.Span
 	}
 	return renderFailure(c.Run, expression, span, actual)
-}
-
-func literalSelectorTip(a mem.Allocator, result Result) Result {
-	if result.Diagnostic.Code == "SEL_NO_CONTEXT" || result.Diagnostic.Code == "SEL_INDEX_INVALID" {
-		result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, "Escape \\@ for a literal at-sign in template text (for example, --mtime=\\@0)."))
-	}
-	return result
 }
 
 func environmentDenied(a mem.Allocator, span source.Span, name string) Result {

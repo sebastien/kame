@@ -1,48 +1,44 @@
 # Idioms and gotchas
 
-Use `.km` for values, `.kmk` for build rules, and `.kash`/`.ksh` for processes.
+Use `.km` for Kame definitions and build declarations, and `.kash` for action blocks.
 Ordered file and `-c` operands can share definitions in one `do run` session;
 the first fragment establishes capability defaults. See the
 [CLI reference](skills/kame/ref/cli.md) for invocation details.
 
 ## Values and references
 
-A bare name references a binding. So `[a b]` is a list of two references, while
-`["a" "b"]` contains two strings. An empty definition such as `name =` is a
-parse error; use `name = :nil` or `name = ""` to state what you mean.
-
-Application arguments are Kame values, not shell words:
+A bare name references a binding. `[a, b]` contains the values of two bindings,
+while `["a", "b"]` contains two strings. Use `name = nil` for an absent value
+and `name = ""` for empty text. Function application passes each value as one
+argument.
 
 ```sh
-kame do run --lang expr -c '(join "-" ["a" "b"])'
+kame do run --lang expr -c 'join "-" ["a", "b"]'
 # "a-b"
-kame do run --lang expr -c '(count [1 2 3])'
+kame do run --lang expr -c 'count [1, 2, 3]'
 # 3
 ```
 
-Printed values use canonical syntax: `:nil`, `:true`, `:false`, and quoted
-strings. Bytes print directly. Do not infer string splitting from display.
+Printed values use canonical syntax, including `nil`, `true`, `false`, and
+quoted strings. Bytes print directly.
 
-`.km` scripts emit only explicit `out!`/`err!` output, not their final value.
-Use `--print-result` for canonical result display, or select a named entry.
-`expr` displays its result even when it also calls `out!`. For exact output
-without result framing, use a `.km` script with `(out! DATA)`.
-Program operands after `--` are literal strings in `args` (`@*`), with indexed
-access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
-when VALUE ends in a source suffix or contains expression-looking text.
+`do run --lang expr` displays the result. Use a definition name to request a
+value from a `.km` source or `--print-result` to display a program result.
+Program operands after `--` populate the `args` list. Use `args.0` for the
+first operand.
 
-`NAME=TEXT`, `--define NAME=TEXT` and `KAME_NAME` configure strings. Use
-`kame --set FLAG=:false` for false or `kame --set 'MODULES=["js" "py"]'` for a
-list. Bare `FLAG=:false` is the truthy string `:false`, not a boolean. Typed
-overrides accept only closed literal data, never calls or references.
+`NAME=TEXT`, `--define NAME=TEXT`, and environment overrides configure
+strings. Use `kame --set FLAG=false` to pass a boolean and
+`kame --set 'MODULES=["js", "py"]'` to pass a list. Typed overrides accept
+closed literal values.
 
 ## Truth, emptiness, and captured identifiers
 
 Only nil and false are false; zero and empty text, bytes, lists, and records are
 true. Use `(not (empty? FILES))` for known collection data, `(nil? VALUE)` for
-absence (including opaque values), and `(= NUMBER 0)` for zero. `empty?` returns
+absence (including opaque values), and `NUMBER == 0` for zero. `empty?` returns
 false for nil and non-container kinds. `count` is not valid on nil or numbers.
-`(or "" "fallback")` returns the empty string; it is not an emptiness default.
+`"" or "fallback"` returns the empty string because empty text is truthy.
 
 `blank?` tests nil or empty text, not whitespace, false, zero or empty collections.
 `split` preserves empty fields; tokenizing a space-delimited setting is an explicit
@@ -53,14 +49,14 @@ filter, not a change to splitting semantics:
 (split " " "")
 # []
 (filter-out "" (split " " ""))
-# ["py" "js"]
+# ["py", "js"]
 (filter-out "" (split " " " py  js "))
-# :false: exact membership
-(in? "py" ["pypy" "js"])
+# false
+in? "py" ["pypy", "js"]
 ```
 
 This tokenizer handles ASCII spaces, not tabs/newlines or shell quoting. Prefer
-typed lists (`--set 'MODULES=["py" "js"]'`) when the setting is structured data.
+typed lists (`--set 'MODULES=["py", "js"]'`) when the setting is structured data.
 
 Command capture preserves stdout, including every trailing newline.
 `(strip $(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
@@ -72,13 +68,12 @@ failure-cleanup examples.
 
 ## Paths, sources, and authority
 
-`./output.txt` names a file artifact; `output.txt` without an explicit path is
-not automatically a file rule. A bare task runs when requested; `task NAME` is
-a cached task. Use `--force` to bypass freshness/cache decisions for an invocation.
+`./output.txt` names a file artifact. Write an explicit path for file rules. Declare a phony task with
+`task NAME` or a cacheable task with `task cached NAME`. Use `--force` to bypass freshness/cache decisions for an invocation.
 File reuse compares recorded input/output content digests, not timestamps:
 touching unchanged bytes preserves reuse; changing bytes invalidates even with
 preserved metadata. A first successful run establishes the record.
-For a persistent file-rule override, write `always ./output : ./input`. It keeps
+For a persistent file-rule override, write `rule always ./output : ./input`. It keeps
 file artifacts and output checks, and reruns whenever a new root reaches it.
 Shared prerequisites still run once within a diamond or concurrent root batch.
 
@@ -88,18 +83,17 @@ siblings, or repairs that restore identical bytes, preserve its reuse. A missing
 or invalid cache record can require rebuilding to establish trustworthy facts;
 the following unchanged invocation should reuse them.
 
-`-C project -f Makefile.kmk` selects `project/Makefile.kmk`, independent of
+`-C project -f Makefile.km` selects `project/Makefile.km`, independent of
 option order. Absolute source paths stay absolute. Includes are relative to
 the containing source, while evaluation paths use the selected working directory.
-`joinpath` preserves a first nonempty `.` / `./` anchor while cleaning components:
-`(joinpath ./deps/sdk ./etc/file)` stays `"./deps/sdk/etc/file"`. Do not replace
-path joining with concatenation just to retain file-rule classification.
+`joinpath` preserves a leading `./` while cleaning components. The expression
+`joinpath ./deps/sdk ./etc/file` returns the path `./deps/sdk/etc/file`.
 
 Value/expression invocations deny host operations by default; grant only what is
 needed:
 
 ```sh
-kame do run --lang expr --allow-read=. -c './docs/*.md'
+kame do run --lang expr --allow-read=. -c 'files ./docs/*.md'
 ```
 
 Read, write, run, and environment authority are separate. Filesystem roots are lexical
@@ -107,20 +101,16 @@ checks, with the symlink boundary described in
 [the capability contract](spec/005-evaluation.md#capabilities). Grants do not
 contain a child process's filesystem, network or environment access.
 
-`env.NO_COLOR` reads the same tracked value as `(env "NO_COLOR")` in Kame and
-Kash expressions; interpolation can use `@{env.NO_COLOR}`. Even a normal build
-needs an environment-read grant. The `env.` namespace is not a lexical record;
-bare `env` remains the callable operation in Kame, not a whole-environment value.
-Shell `NO_COLOR=1` affects inherited processes and CLI presentation but does not
-configure a declared Kame `NO_COLOR` definition. Use `kame NO_COLOR=1`,
-`KAME_NO_COLOR=1 kame`, or a typed `--set` for definition configuration. None of
-those grants an environment read; use `--allow-env=NO_COLOR` when a read is
-intended. Explicit grant options replace defaults, so repeat other needed grants.
+`env/NO_COLOR` reads the current unit's environment and yields `nil` when
+the variable is unset. Use `${env/NO_COLOR}` in a string or `@{env/NO_COLOR}` in a template.
+Environment reads require the matching grant, such as `--allow-env=NO_COLOR`.
+An explicit grant list replaces the defaults, so include the other grants
+the invocation needs.
 
 For an authored opt-in color setting:
 
 ```kame
-COLOR_DISABLED ?= (not (blank? env.NO_COLOR))
+COLOR_DISABLED ?= (not (blank? env/NO_COLOR))
 ```
 
 ```sh
@@ -132,64 +122,37 @@ read. The definition treats unset/empty `NO_COLOR` as color enabled and nonempty
 text as color disabled. The read participates in freshness; a grant alone does
 not make a program adopt this setting.
 
-## Build expressions and shell recipes
+## Build expressions and recipes
 
-A default external-shell recipe is one shell script. Shell variables and `cd`
-persist between its lines. Port Make recipes that relied on one shell per line
-carefully. `SHELL = kash` selects direct Kash instead: use `$name` and
-`(EXPRESSION)`, not document-template expansion.
+Kash is the default recipe language. Use `$inputs.0` and `$outputs.0` for the
+first input and output, and `$...inputs` to pass all inputs as separate
+arguments. `changed-inputs` contains unique normal file inputs whose content
+has changed since the last successful run. It contains all normal file inputs
+when the output or reuse record is missing and excludes order-only inputs.
 
-Kame selectors use `@>` for the first output, `@<` for the first input, and `@<*` for
-all normal inputs. `@<?` selects unique normal file inputs whose content digest
-changed since the successful run, or all normal file inputs when any output or
-the record is missing. Forced execution does not invent changed inputs. It
-excludes order-only prerequisites and is available only inside file recipes.
-Use explicit `{stem}` pattern captures for stems, `@(dirname @>)` for the output
-directory and `@(dirname @<)` for the first input directory.
+Use `${EXPR}` in a rule header to expand a path or a list of paths. Each expansion
+is flattened in authored order. Use captures such as `{stem}` in output patterns
+and `(dirname outputs.0)` in a Kash recipe to compute an output directory.
 
-External-shell recipes use `@{name}` for lookup and `@(function args...)` for a
-call; `@(function)` invokes without arguments. Bare `{(...)}` does not interpolate,
-and ordinary formatting does not translate old syntax. Build headers accept
-whole reference/call expansions and paths such as `@{DIRECTORY}/suffix`,
-interleaved with literal or quoted paths. Each whole expansion is evaluated and
-flattened independently, in authored order.
+Select a foreign shell with rule metadata, for example
+`task show ; {shell: "/bin/sh"}`. The recipe is one shell script. Kame
+renders `@{EXPR}` before execution, and the shell interprets its own variables
+and command substitutions. A literal tar argument such as `--mtime=@0` needs no interpolation escape.
 
-Template `@0` is a selector even inside shell quotes. Write `--mtime=\@0` for a
-literal tar argument, or use `@raw` for a larger literal template section.
-Rule metadata follows the colon and inputs: `show : ; [shell: kash]`, not
-`show ; [shell: kash] :`.
+A backslash followed by a newline continues a declaration header or
+expression. Expressions also continue inside a delimiter or after an
+unfinished operator.
 
-Long definitions and rule headers may continue with backslash-newline; indented
-continuation lines belong to that declaration. Use multiline expressions or a
-verbatim quoted string for multiline values. Recipe continuations remain shell syntax.
+Use `files ./src/**/*.c` to discover files with a tracked pattern.
+`**` matches zero or more directory levels. A wildcard in a command
+argument stays literal. See the [library reference](skills/kame/ref/library.md)
+for directory and symlink selection.
 
-Quote shell text held in a Kame definition:
-
-```kame
-WASM_SDK = "$(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk"
-WASM_CC = "@{WASM_SDK}/bin/clang"
-```
-
-The plain quoted `$(...)` stays literal until the recipe shell sees the rendered
-text. This is a workaround, not a dependency-tracked resolver: it can run once
-per use and is not reflected as a resolved executable in the plan. Unquoted
-`$(...)` is an embedded Kash process expression and a trailing `/suffix`
-is not part of that atom. Do not use Make's `$$` habit blindly: raw recipe text
-is shell-owned, so `$HOME` is a shell expansion; `$$` means the shell process ID.
-
-A raw wildcard word in Kash argv stays literal. In Kame expressions, an
-unquoted explicit path such as `./src/**/*.c` discovers files and returns a
-tracked list; quoted paths remain literal. `wildcard` accepts patterns or
-expanded path lists and returns a sorted, duplicate-free union. Use `:+files`,
-`:+dir`, or `:+symlinks` for entry-kind selection; use collection operations
-for other predicates. `**` matches zero or more directory levels. See the
-[library reference](skills/kame/ref/library.md#wildcard-selection).
-
-Kash composes scalar words directly: `biome --config-path=(js-biome-config)`.
-The same fragments work in `:cwd ./build/(variant)` and redirections such as
-`> ./out/(name).txt`. Whitespace in a result stays inside one argument/path;
-mixed lists are errors, not implicit joins. Quoted parentheses remain literal.
-Definitions require a standalone `=`, so `echo name=(name)` is a command word.
+Kash can compose a scalar argument with `biome --config-path=(js-biome-config)`.
+The same fragments work in `cwd: ./build/(variant)` and redirections such as
+`> ./out/(name).txt`. Whitespace stays within the argument or path that
+contains it. Use `$...list` when a list supplies separate arguments. Quoted parentheses
+remain literal. `echo name=(name)` interpolates `name` into one command argument.
 
 ## Patterns and expansions
 
@@ -197,14 +160,14 @@ A replacement expansion may be a string, a number, a boolean, or an expansion
 pattern. Scalar expansions convert to text:
 
 ```sh
-kame do run --lang expr -c '(sub ./src/{name:*}.c "1" "./src/demo.c")'
+kame do run --lang expr -c 'subst ./src/{name:*}.c "1" "./src/demo.c"'
 # "1"
 ```
 
-A nonmatching subject remains unchanged under `sub` (or its deprecated alias
-`replace`). Use `(match? PATTERN TEXT)` for a boolean test, or `(match? PATTERN)`
-as a predicate for `filter`/`filter-out`. Keep match patterns and expansion
-patterns distinct; their capture/reference groups have different roles.
+`subst` leaves an unmatched subject unchanged. Use `match? PATTERN TEXT`
+to test for a match, or `(match? PATTERN)` as a predicate for `filter` or
+`filter-out`. Use captures in the matching pattern and reference those
+captures in the replacement pattern.
 Patterns can start with a capture, and bare targets can capture: `{name:*}`
 or `aws-shell-{role-account}`. Exact targets win over templates; structurally
 nested single-capture file templates follow [spec 045](spec/045-rule-precedence.md).
@@ -217,15 +180,13 @@ including a filtered wildcard result. `**` captures can backtrack across path
 segments. Anchor the source prefix to avoid copying it into the destination:
 
 ```kame
-SOURCES = (filter-out ([x] (includes? "draft" x)) ./src/**/*.txto)
-OUTPUTS = (sub ./src/{path:**}.txto ./build/{path}.json SOURCES)
+sources = files ./src/**/*.txt |> filter-out (source => includes? "draft" (str source))
+outputs = subst ./src/{path:**}.txt ./build/{path}.json sources
 ```
 
-With two arguments, `sub` returns an invocation-owned callable for `map`,
-not printable data for `do cat`. Nonmatching list members remain unchanged;
-filter with `match?` first if only matching sources should be retained.
-Substitution is not a matching predicate: unchanged strings are truthy.
-`resub` retains its separate nil-on-nonmatch behavior.
+With two arguments, `subst` returns a callable that accepts the subject.
+Filter with `match?` before substituting to retain only matching sources.
+`resub` returns `nil` when its subject has no match.
 
 ## Inspection and reproducibility
 

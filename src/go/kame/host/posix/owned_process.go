@@ -18,6 +18,7 @@ var errObserveExit = errors.New("cannot observe process exit")
 // when that numeric identity could have been reassigned to another process.
 type ownedProcess struct {
 	cmd     *exec.Cmd
+	outputs []commandOutput
 	mu      sync.Mutex
 	retired bool
 	timer   *pausableTimer
@@ -43,28 +44,58 @@ func (p *ownedProcess) wait(r *running) error {
 	}
 	p.mu.Unlock()
 	result := p.cmd.Wait()
+	for i := range p.outputs {
+		// Wake an idle read so the copier can switch to the post-exit drain.
+		p.outputs[i].reader.SetReadDeadline(time.Now())
+	}
+	for i := range p.outputs {
+		if err := <-p.outputs[i].done; result == nil {
+			result = err
+		}
+	}
 	if observed != nil {
 		return errors.Join(errObserveExit, observed, result)
 	}
 	return result
 }
 func (r *running) startCommand(cmd *exec.Cmd) error {
+	_, err := r.startOwnedCommand(cmd, true)
+	return err
+}
+
+func (r *running) startOwnedCommand(cmd *exec.Cmd, trackStage bool) (*ownedProcess, error) {
 	r.commandMu.Lock()
 	defer r.commandMu.Unlock()
 	select {
 	case <-r.stopped:
-		return io.ErrClosedPipe
+		return nil, io.ErrClosedPipe
 	default:
 	}
-	if e := cmd.Start(); e != nil {
-		return e
+	outputs, err := commandOutputs(cmd)
+	if err != nil {
+		return nil, err
+	}
+	err = cmd.Start()
+	for i := range outputs {
+		outputs[i].writer.Close()
+		if err != nil {
+			outputs[i].reader.Close()
+		} else {
+			go outputs[i].copy()
+		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	if r.owned == nil {
 		r.owned = map[*exec.Cmd]*ownedProcess{}
 	}
-	r.owned[cmd] = &ownedProcess{cmd: cmd}
-	r.cmds = append(r.cmds, cmd)
-	return nil
+	p := &ownedProcess{cmd: cmd, outputs: outputs}
+	r.owned[cmd] = p
+	if trackStage {
+		r.cmds = append(r.cmds, cmd)
+	}
+	return p, nil
 }
 func (r *running) waitCommand(cmd *exec.Cmd) error {
 	r.commandMu.Lock()

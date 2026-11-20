@@ -30,7 +30,7 @@ workspace with invocation-scoped `defer`; see the
 
 ## 1. Commands receive values
 
-Read `01-values.kash`. `printf` receives two arguments from `$names`, including
+Read `01-values.kash`. `printf` receives two arguments from `$...names`, including
 one argument containing a space:
 
 ```text
@@ -38,15 +38,20 @@ one argument containing a space:
 [second.txt]
 ```
 
-The next command applies the ordinary Kame `label` function and prints the
-uppercase names. There is no shell word splitting, implicit globbing, or
-reparsing of values as commands. `"$names"` would be an error: a quoted word
-cannot splice a list.
+The next command uses `"${names}"` to render the same list in one argument.
+The list items are separated by a space:
+
+```text
+Names: [hello world.txt second.txt]
+```
+
+The lesson also applies the Kame `label` function and spreads the resulting
+uppercase names into separate arguments.
 
 **Try now:** Capture commands inside a value expression:
 
 ```sh
-kame do run --lang expr --allow-run -c '(let [names ["hello world.txt" "second.txt"]] $(printf "[%s]\n" $names))'
+kame do run --lang expr --allow-run -c '(names => $(printf "[%s]\n" $...names)) ["hello world.txt", "second.txt"]'
 kame do run --lang expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
 ```
 
@@ -83,8 +88,8 @@ but a value pipe is not a Unix byte stream.
 ## 3. Recovery has a meaning
 
 Read `03-recovery.kash`. A grep non-match is accepted by `CMD ?`; a fallback
-command is selected by `CMD ? ELSE`; a fallback value is selected by `??`.
-Neither recovery form makes capability denial or cancellation successful.
+command is selected by `CMD || ELSE`. The lesson checks the outcome from `$?(CMD)` and uses `??`
+to replace the resulting `nil` with a fallback value.
 
 **Change:** Add `needle` to a temporary copy of `sample.txt`. The fallback
 message disappears. Change `mode` to exercise the failing branch deliberately.
@@ -99,7 +104,7 @@ different situations, not one generic shell exit-code trick.
 | `04-operations.kash` | Validate statuses and retry an idempotent probe | Only status 75 retries; private staging is removed by `defer`. |
 | `05-batch.kash` | Label a batch and drain a finite work queue | Change `--prefix`; `for` visits typed values, while `while` runs a fresh command probe. |
 | `06-environment.kash` | Run a configured tool in private staging | The final stage override wins; the next stage still sees the original record. No real secrets are used. |
-| `07-concurrency.kash` | Run independent checks and produce a background report | Explicitly demanding a lazy handle starts it; `await` is repeat-safe. Deferred checks see background work joined. |
+| `07-concurrency.kash` | Run independent checks and produce a background report | Each `let` starts a background check and stores its handle. Repeated `wait` calls return the same completion, and deferred checks run after the background writer joins. |
 | `08-streaming.kash` | Split an event log into errors and normal events | Add another ERROR line; the filter removes selected records from the main stream, and broadcast retains a full audit copy. |
 | `09-workers.kash` | Distribute complete records to two workers | Odd/even records go to different long-running branches; `each` starts one command per record. Strict merge ordering is explicit. |
 | `10-publication.kash` | Generate, validate, compare, and publish a report | JSON escaping is handled by `json`; live operands compare streams without capture. Existing destinations are never overwritten. |

@@ -8,9 +8,9 @@
 # `kame --force TARGET` rebuilds anyway.
 #
 # Recipes are Kash, not a shell. A nonzero command fails the recipe. Overrides
-# are Kame configuration: a build does not grant environment reads, so a raw
+# are Kame configuration. A raw
 # `CFLAGS=` export is not consulted. Assignment wins, then the KAME_ prefix,
-# then the default:
+# then the authored default:
 #   kame wasm
 #   kame dist-release KAME_RELEASE_PUBLIC_KEY=... KAME_RELEASE_SIGNING_KEY=...
 #   KAME_RELEASE_PUBLIC_KEY=... kame dist-release
@@ -22,11 +22,9 @@
 #   kame -n TARGET
 # =============================================================================
 
-SHELL = kash
-
 # Release staging/signing and Go test-suite generation are Kash libraries.
-(include ./src/kash/release.kash)
-(include ./src/kash/go-tests.kash)
+include ./src/kash/release.kash
+include ./src/kash/go-tests.kash
 
 # --- Paths ------------------------------------------------------------------
 
@@ -45,7 +43,7 @@ RELEASE_SIGNING_KEY ?= ""
 RELEASE_REVISION ?= ""
 
 # CLI assignment of the KAME_* name wins; otherwise the KAME_ environment alias.
-(configured primary alias) = (if (blank? primary) alias primary)
+def configured primary alias = if blank? primary then alias else primary
 
 # --- Source sets ------------------------------------------------------------
 #
@@ -53,255 +51,255 @@ RELEASE_REVISION ?= ""
 # The version file is named explicitly: it may not exist yet, and its own
 # rule is what refreshes it from VERSION.
 
-KAME_SOURCES =
-  (files ./src/go/kame/**/*.go)
-
-KAME_INPUTS =
-  (concat
-    [
-      ./src/go/kame/cmd/kame/version_generated.go
-      ./src/go/kame/go.mod
-      ./src/go/kame/go.sum
-      ./Kamefile]
-    (filter-out ./src/go/kame/cmd/kame/version_generated.go KAME_SOURCES))
+KAME_SOURCES = files ./src/go/kame/**/*.go
+KAME_INPUTS = concat [
+    ./src/go/kame/cmd/kame/version_generated.go,
+    ./src/go/kame/go.mod,
+    ./src/go/kame/go.sum,
+    ./Kamefile,
+] (filter-out ./src/go/kame/cmd/kame/version_generated.go KAME_SOURCES)
 
 # The WASI reactor and its runtime are built by the standard Go toolchain.
-WASM_SOURCES = (files ./src/go/kame/**/*.go)
-LAUNCHER_SOURCES = (files ./src/go/kame/cmd/kame-launcher/*.go)
+WASM_SOURCES = files ./src/go/kame/**/*.go
+LAUNCHER_SOURCES = files ./src/go/kame/cmd/kame-launcher/*.go
 
 # Cross-backend gate. Explicit, not a glob: test-wasm is a curated list.
-TEST_WASM =
-  [
-    ./tests/T042-01-kash-topology.sh
-    ./tests/T042-02-kash-framing.sh
-    ./tests/T042-03-kash-channels.sh
-    ./tests/T042-04-kash-operands.sh
-    ./tests/T042-05-kash-scheduling.sh
-    ./tests/T042-06-kash-lossy.sh
-    ./tests/T042-07-kash-metrics.sh
-    ./tests/T042-08-kash-live.sh
-    ./tests/T042-09-kash-ordering.sh
-    ./tests/T042-10-kash-failure-policy.sh
-    ./tests/T042-11-kash-each.sh
-    ./tests/T044-01-runtime-kame-rule-bodies.sh
-    ./tests/T046-01-kash-scripting.sh
-    ./tests/T047-01-kash-output-ports-and-command-lists.sh
-    ./tests/T048-01-kash-stderr.sh
-    ./tests/T043-01-lang-finalization.sh
-    ./tests/T010-01-wasm-loader.sh
-    ./tests/T010-02-wasm-abi.sh
-    ./tests/T010-03-wasm-target.sh
-    ./tests/T010-04-wasm-forwarding.sh
-    ./tests/T010-05-wasm-rule-target.sh
-    ./tests/T010-06-wasm-cli.sh
-    ./tests/T010-07-wasm-cat.sh
-    ./tests/T010-08-wasm-glob.sh
-    ./tests/T010-09-wasm-parse.sh
-    ./tests/T010-10-wasm-fmt.sh
-    ./tests/T018-01-lang-source-style.sh
-    ./tests/T010-11-wasm-plan.sh
-    ./tests/T010-12-wasm-graph.sh
-    ./tests/T010-13-wasm-tools.sh
-    ./tests/T010-14-wasm-json.sh
-    ./tests/T010-15-wasm-process-control.sh
-    ./tests/T010-16-wasm-cancellation.sh
-    ./tests/T010-17-wasm-human-output.sh
-    ./tests/T010-18-wasm-clock.sh
-    ./tests/T010-19-wasm-cache.sh
-    ./tests/T010-20-wasm-build-includes.sh
-    ./tests/T007-09-lib-wildcard-union.sh
-    ./tests/T007-10-lib-record-lookup.sh
-    ./tests/T007-11-lib-tools.sh
-    ./tests/T007-12-lib-operation-values.sh
-    ./tests/T007-13-lib-structural-equality.sh
-    ./tests/T007-14-lib-native-data.sh
-    ./tests/T007-16-lib-consistency.sh
-    ./tests/T007-15-runtime-symlink-watch.sh
-    ./tests/T005-06-eval-truth-capture.sh
-    ./tests/T009-13-cli-configuration.sh
-    ./tests/T009-16-cli-script-output.sh
-    ./tests/T009-18-cli-list.sh
-    ./tests/T009-14-cli-watch.sh
-    ./tests/T004-19-lang-rule-header-composition.sh
-    ./tests/T004-10-lang-line-continuations.sh
-    ./tests/T004-11-lang-wildcard-inputs.sh
-    ./tests/T004-12-lang-optional-includes.sh
-    ./tests/T004-13-lang-declaration-conditions.sh
-    ./tests/T004-14-lang-rule-positional-captures.sh
-    ./tests/T004-15-lang-rule-regex-captures.sh
-    ./tests/T004-16-lang-computed-outputs.sh
-    ./tests/T004-20-runtime-computed-outputs-watch.sh
-    ./tests/T004-17-lang-definition-expressions.sh
-    ./tests/T004-18-lang-contributions.sh
-    ./tests/T012-02-streams-live-cli.sh
-    ./tests/T012-03-streams-large-output.sh
-    ./tests/T012-04-streams-backpressure.sh
-    ./tests/T006-03-runtime-always.sh
-    ./tests/T006-04-runtime-order-only.sh
-    ./tests/T006-06-runtime-environment.sh
-    ./tests/T006-10-runtime-environment-watch.sh
-    ./tests/T006-11-runtime-symlink-outputs.sh
-    ./tests/T006-07-runtime-newer-inputs.sh
-    ./tests/T010-21-wasm-build-effects.sh
-    ./tests/T010-22-wasm-memory.sh
-    ./tests/T010-23-wasm-watch.sh
-    ./tests/T010-24-wasm-target-arguments.sh
-    ./tests/T010-25-wasm-watch-abi.sh
-    ./tests/T010-26-wasm-service-readiness.sh
-    ./tests/T010-27-wasm-generated-declarations.sh
-    ./tests/T010-28-cache-management.sh
-    ./tests/T010-29-cache-locking.sh
-    ./tests/T010-32-wasm-embedding-js.sh
-    ./tests/T010-33-wasm-embedding-python.sh
-    ./tests/T033-01-host-plugins.sh
-    ./tests/T014-02-patterns-ergonomics.sh
-    ./tests/T014-03-runtime-pattern-construction.sh
-    ./tests/T014-04-patterns-regex.sh
-    ./tests/T016-02-cli-template-extensions.sh
-    ./tests/T016-03-lang-template-boundaries.sh
-    ./tests/T016-01-cli-render.sh
-    ./tests/T017-02-wasm-capture.sh
-    ./tests/T017-03-eval-pipelines.sh
-    ./tests/T017-04-eval-redirections.sh
-    ./tests/T017-05-eval-setup.sh
-    ./tests/T017-06-kash-source.sh
-    ./tests/T017-07-cli-run-session.sh
-    ./tests/T017-08-cli-run-includes.sh
-    ./tests/T017-09-cli-run-json.sh
-    ./tests/T017-10-cli-run-dry-run.sh
-    ./tests/T017-11-kash-accept-exit.sh
-    ./tests/T017-12-kash-command-recovery.sh
-    ./tests/T017-13-kash-value-recovery.sh
-    ./tests/T017-14-kash-if.sh
-    ./tests/T017-15-kash-match.sh
-    ./tests/T017-16-kash-environment.sh
-    ./tests/T017-17-eval-process-expressions.sh
-    ./tests/T017-18-kash-async.sh
-    ./tests/T017-19-kash-recipes.sh
-    ./tests/T017-25-kash-recipe-deadlines.sh
-    ./tests/T017-20-kash-context-environment.sh
-    ./tests/T017-21-kash-words.sh
-    ./tests/T017-22-kash-defer.sh
-    ./tests/T017-24-kash-defer-lifecycle.sh
-    ./tests/T017-23-kash-operations.sh
-    ./tests/T017-26-kash-functions.sh
-    ./tests/T011-04-diag-language-boundaries.sh
-    ./tests/T038-01-kash-direct-recipes.sh
-    ./tests/T038-06-kash-recipe-lifecycle.sh
-    ./tests/T038-02-lib-wildcard-kinds.sh
-    ./tests/T038-03-lib-text-json.sh
-    ./tests/T038-04-lib-action-names.sh
-    ./tests/T040-01-cli-automatic-clean.sh
-    ./tests/T041-01-patterns-predicates-and-substitution.sh
-    ./tests/T036-01-cli-presentation.sh
-    ./tests/T036-03-cli-presentation-lifecycle.sh
-    ./tests/T036-04-cli-osc-progress.sh
-    ./tests/T036-02-cli-reuse-reasons.sh]
+TEST_WASM = [
+    ./tests/T042-01-kash-topology.sh,
+    ./tests/T042-02-kash-framing.sh,
+    ./tests/T042-03-kash-channels.sh,
+    ./tests/T042-04-kash-operands.sh,
+    ./tests/T042-05-kash-scheduling.sh,
+    ./tests/T042-06-kash-lossy.sh,
+    ./tests/T042-07-kash-metrics.sh,
+    ./tests/T042-08-kash-live.sh,
+    ./tests/T042-09-kash-ordering.sh,
+    ./tests/T042-10-kash-failure-policy.sh,
+    ./tests/T042-11-kash-each.sh,
+    ./tests/T044-01-runtime-kame-rule-bodies.sh,
+    ./tests/T046-01-kash-scripting.sh,
+    ./tests/T055-01-kash-generators.sh,
+    ./tests/T055-02-kash-callable-stages.sh,
+    ./tests/T047-01-kash-output-ports-and-command-lists.sh,
+    ./tests/T048-01-kash-stderr.sh,
+    ./tests/T043-01-lang-finalization.sh,
+    ./tests/T010-01-wasm-loader.sh,
+    ./tests/T010-02-wasm-abi.sh,
+    ./tests/T010-03-wasm-target.sh,
+    ./tests/T010-04-wasm-forwarding.sh,
+    ./tests/T010-05-wasm-rule-target.sh,
+    ./tests/T010-06-wasm-cli.sh,
+    ./tests/T010-07-wasm-cat.sh,
+    ./tests/T010-08-wasm-glob.sh,
+    ./tests/T010-09-wasm-parse.sh,
+    ./tests/T010-10-wasm-fmt.sh,
+    ./tests/T018-01-lang-source-style.sh,
+    ./tests/T010-11-wasm-plan.sh,
+    ./tests/T010-12-wasm-graph.sh,
+    ./tests/T010-13-wasm-tools.sh,
+    ./tests/T010-14-wasm-json.sh,
+    ./tests/T010-15-wasm-process-control.sh,
+    ./tests/T010-16-wasm-cancellation.sh,
+    ./tests/T010-17-wasm-human-output.sh,
+    ./tests/T010-18-wasm-clock.sh,
+    ./tests/T010-19-wasm-cache.sh,
+    ./tests/T010-20-wasm-build-includes.sh,
+    ./tests/T007-09-lib-wildcard-union.sh,
+    ./tests/T007-10-lib-record-lookup.sh,
+    ./tests/T007-11-lib-tools.sh,
+    ./tests/T007-12-lib-operation-values.sh,
+    ./tests/T007-13-lib-structural-equality.sh,
+    ./tests/T007-14-lib-native-data.sh,
+    ./tests/T007-16-lib-consistency.sh,
+    ./tests/T007-15-runtime-symlink-watch.sh,
+    ./tests/T005-06-eval-truth-capture.sh,
+    ./tests/T009-13-cli-configuration.sh,
+    ./tests/T009-16-cli-script-output.sh,
+    ./tests/T009-18-cli-list.sh,
+    ./tests/T009-14-cli-watch.sh,
+    ./tests/T004-19-lang-rule-header-composition.sh,
+    ./tests/T004-10-lang-line-continuations.sh,
+    ./tests/T004-11-lang-wildcard-inputs.sh,
+    ./tests/T004-12-lang-optional-includes.sh,
+    ./tests/T004-13-lang-declaration-conditions.sh,
+    ./tests/T004-14-lang-rule-positional-captures.sh,
+    ./tests/T004-15-lang-rule-regex-captures.sh,
+    ./tests/T004-16-lang-computed-outputs.sh,
+    ./tests/T004-20-runtime-computed-outputs-watch.sh,
+    ./tests/T004-17-lang-definition-expressions.sh,
+    ./tests/T004-18-lang-contributions.sh,
+    ./tests/T012-02-streams-live-cli.sh,
+    ./tests/T012-03-streams-large-output.sh,
+    ./tests/T012-04-streams-backpressure.sh,
+    ./tests/T006-03-runtime-always.sh,
+    ./tests/T006-04-runtime-order-only.sh,
+    ./tests/T006-06-runtime-environment.sh,
+    ./tests/T006-10-runtime-environment-watch.sh,
+    ./tests/T006-11-runtime-symlink-outputs.sh,
+    ./tests/T006-07-runtime-newer-inputs.sh,
+    ./tests/T010-21-wasm-build-effects.sh,
+    ./tests/T010-22-wasm-memory.sh,
+    ./tests/T010-23-wasm-watch.sh,
+    ./tests/T010-24-wasm-target-arguments.sh,
+    ./tests/T010-25-wasm-watch-abi.sh,
+    ./tests/T010-26-wasm-service-readiness.sh,
+    ./tests/T010-27-wasm-generated-declarations.sh,
+    ./tests/T010-28-cache-management.sh,
+    ./tests/T010-29-cache-locking.sh,
+    ./tests/T010-32-wasm-embedding-js.sh,
+    ./tests/T010-33-wasm-embedding-python.sh,
+    ./tests/T033-01-host-plugins.sh,
+    ./tests/T014-02-patterns-ergonomics.sh,
+    ./tests/T014-03-runtime-pattern-construction.sh,
+    ./tests/T014-04-patterns-regex.sh,
+    ./tests/T016-02-cli-template-extensions.sh,
+    ./tests/T016-03-lang-template-boundaries.sh,
+    ./tests/T016-01-cli-render.sh,
+    ./tests/T017-02-wasm-capture.sh,
+    ./tests/T017-03-eval-pipelines.sh,
+    ./tests/T017-04-eval-redirections.sh,
+    ./tests/T017-05-eval-setup.sh,
+    ./tests/T017-06-kash-source.sh,
+    ./tests/T017-07-cli-run-session.sh,
+    ./tests/T017-08-cli-run-includes.sh,
+    ./tests/T017-09-cli-run-json.sh,
+    ./tests/T017-10-cli-run-dry-run.sh,
+    ./tests/T017-11-kash-accept-exit.sh,
+    ./tests/T017-12-kash-command-recovery.sh,
+    ./tests/T017-13-kash-value-recovery.sh,
+    ./tests/T017-14-kash-if.sh,
+    ./tests/T017-15-kash-match.sh,
+    ./tests/T017-16-kash-environment.sh,
+    ./tests/T017-17-eval-process-expressions.sh,
+    ./tests/T017-18-kash-async.sh,
+    ./tests/T017-19-kash-recipes.sh,
+    ./tests/T017-25-kash-recipe-deadlines.sh,
+    ./tests/T017-20-kash-context-environment.sh,
+    ./tests/T017-21-kash-words.sh,
+    ./tests/T017-22-kash-defer.sh,
+    ./tests/T017-24-kash-defer-lifecycle.sh,
+    ./tests/T017-23-kash-operations.sh,
+    ./tests/T017-26-kash-functions.sh,
+    ./tests/T011-04-diag-language-boundaries.sh,
+    ./tests/T038-01-kash-direct-recipes.sh,
+    ./tests/T038-06-kash-recipe-lifecycle.sh,
+    ./tests/T038-02-lib-wildcard-kinds.sh,
+    ./tests/T038-03-lib-text-json.sh,
+    ./tests/T038-04-lib-action-names.sh,
+    ./tests/T040-01-cli-automatic-clean.sh,
+    ./tests/T041-01-patterns-predicates-and-substitution.sh,
+    ./tests/T036-01-cli-presentation.sh,
+    ./tests/T036-03-cli-presentation-lifecycle.sh,
+    ./tests/T036-04-cli-osc-progress.sh,
+    ./tests/T036-02-cli-reuse-reasons.sh,
+]
 
 # --- Aggregate targets ------------------------------------------------------
 #
 # With no target, Kame runs `default`. That is Make's first target, `build`.
 
-default : build
+task default : build
 
-build : dist
+task build : dist
 
-dist : ./build/kame.debug ./dist/kame ./dist/kash
+task dist : ./build/kame.debug ./dist/kame ./dist/kash
 
 # --- Version metadata -------------------------------------------------------
 #
 # The Makefile bootstrap generates the same file before Kame exists; keep the
 # two in sync. The build ID is the checkout's revision, or "unknown".
 
-./src/go/kame/cmd/kame/version_generated.go : ./VERSION
-	version = (strip (text (read ./VERSION)))
-	if (not (match? "{~[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?}" version))
-		(fail! "invalid version in VERSION: @{version}")
-	git = (capture! [stdout: :true stderr: :true] :accept-exit [1 128] "git" "rev-parse" "--short=12" "HEAD") ?? [status: 1]
-	build_id = (if (success? git) (strip (text git.stdout)) "unknown")
-	(yield! "// Code generated from repository/build metadata; DO NOT EDIT.\npackage main\n\nconst version = \"@{version}\"\nconst buildID = \"@{build_id}\"\nconst buildTime = \"development\"\n")
+rule ./src/go/kame/cmd/kame/version_generated.go : ./VERSION
+	let version = (strip (text (read ./VERSION)))
+	if (not (match? (pattern "{~[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z.-]+)?}") version))
+		(fail! "invalid version in VERSION: ${version}")
+	let vcs = capture! {stdout: true, stderr: true} :accept-exit [1, 128] "git" "rev-parse" "--short=12" "HEAD"
+	let build_id = if success? vcs then strip (text vcs.stdout) else "unknown"
+	return "// Code generated from repository/build metadata; DO NOT EDIT.\npackage main\n\nconst version = \"${version}\"\nconst buildID = \"${build_id}\"\nconst buildTime = \"development\"\n"
 
-version-source : ./src/go/kame/cmd/kame/version_generated.go
+task version-source : ./src/go/kame/cmd/kame/version_generated.go
 
 # --- Native binaries --------------------------------------------------------
 
-./build/kame.debug : @{KAME_INPUTS}
+rule ./build/kame.debug : ${KAME_INPUTS}
 	mkdir -p ./build
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -ldflags "-X main.artifactMode=debug" -o (abspath ./build/kame.debug) ./cmd/kame
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go build -ldflags "-X main.artifactMode=debug" -o (abspath ./build/kame.debug) ./cmd/kame
 
-./build/kame.sanitize : @{KAME_INPUTS}
+rule ./build/kame.sanitize : ${KAME_INPUTS}
 	mkdir -p ./build
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -gcflags "all=-d=checkptr=2" -ldflags "-X main.artifactMode=sanitize" -o (abspath ./build/kame.sanitize) ./cmd/kame
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go build -gcflags "all=-d=checkptr=2" -ldflags "-X main.artifactMode=sanitize" -o (abspath ./build/kame.sanitize) ./cmd/kame
 
-./dist/kame : @{KAME_INPUTS}
+rule ./dist/kame : ${KAME_INPUTS}
 	mkdir -p ./dist
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath ./dist/kame) ./cmd/kame
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath ./dist/kame) ./cmd/kame
 
 # The same binary under its interpreter name: `kash FILE` runs Kash, and bare
 # `kash` on a terminal starts the interactive REPL. A relative link keeps the
 # pair relocatable.
-./dist/kash : ./dist/kame
+rule ./dist/kash : ./dist/kame
 	ln -sf kame ./dist/kash
 
 # Cross-compiled release binaries: kame-{linux,darwin}-{x86_64,arm64}.
 
-RELEASE_SYSTEMS =
-  [
-    Linux: "linux"
-    Darwin: "darwin"
-    FreeBSD: "freebsd"
-    NetBSD: "netbsd"
-    OpenBSD: "openbsd"]
-RELEASE_ARCHES =
-  [x86_64: "x86_64" amd64: "x86_64" aarch64: "arm64" arm64: "arm64"]
-GO_ARCHES = [x86_64: "amd64" arm64: "arm64"]
+RELEASE_SYSTEMS = {
+    Linux: "linux",
+    Darwin: "darwin",
+    FreeBSD: "freebsd",
+    NetBSD: "netbsd",
+    OpenBSD: "openbsd",
+}
+RELEASE_ARCHES = {x86_64: "x86_64", amd64: "x86_64", aarch64: "arm64", arm64: "arm64"}
+GO_ARCHES = {x86_64: "amd64", arm64: "arm64"}
 
-RELEASE_BINARIES =
-  [
-    ./dist/kame-linux-x86_64
-    ./dist/kame-linux-arm64
-    ./dist/kame-darwin-x86_64
-    ./dist/kame-darwin-arm64]
+RELEASE_BINARIES = [
+    ./dist/kame-linux-x86_64,
+    ./dist/kame-linux-arm64,
+    ./dist/kame-darwin-x86_64,
+    ./dist/kame-darwin-arm64,
+]
 
-./dist/kame-{system:~linux|darwin}-{arch:~x86_64|arm64} : @{KAME_INPUTS}
+rule ./dist/kame-{system:~linux|darwin}-{arch:~x86_64|arm64} : ${KAME_INPUTS}
 	mkdir -p ./dist
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS $system :GOARCH (get arch GO_ARCHES) :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath (first outputs)) ./cmd/kame
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOOS: $system GOARCH: (get arch GO_ARCHES) GOCACHE: (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w -X main.artifactMode=release" -o (abspath (first outputs)) ./cmd/kame
 
 # Preserve a host-native CLI under a stable release platform identifier.
 # The pattern rule is incremental; `dist-native` picks the host platform.
 # Detect it only at runtime, then request the pattern producer via stat.
 
-./dist/native/{platform}/kame : ./dist/kame
+rule ./dist/native/{platform}/kame : ./dist/kame
 	mkdir -p (dirname (first outputs))
 	cp (first inputs) (first outputs)
 	chmod +x (first outputs)
 
-dist-native : ./dist/kame
-	system = (get (line $(uname -s)) RELEASE_SYSTEMS)
-	arch = (get (lowercase (line $(uname -m))) RELEASE_ARCHES)
-	detected = (if (and system arch) "@{system}-@{arch}" (fail! "unsupported native release platform: @(line $(uname -s)) @(line $(uname -m))"))
-	platform = (if (blank? (configured KAME_PLATFORM PLATFORM)) detected (configured KAME_PLATFORM PLATFORM))
-	dest = (joinpath "./dist/native" platform "kame")
+task dist-native : ./dist/kame
+	let platform = configured KAME_PLATFORM PLATFORM
+	if blank? platform
+		let host-system = line $(uname -s)
+		let host-arch = line $(uname -m)
+		let system = get host-system RELEASE_SYSTEMS
+		let arch = get (lowercase host-arch) RELEASE_ARCHES
+		set platform = if system and arch then "${system}-${arch}" else fail! "unsupported native release platform: ${host-system} ${host-arch}"
+	let dest = (joinpath "./dist/native" platform "kame")
 	(stat dest)
 
 # --- WebAssembly ------------------------------------------------------------
 
 # Build beside the output, then rename: other CLI processes may be loading it.
 
-./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./Kamefile
+rule ./build/wasm/kame.wasm : ${WASM_SOURCES} ./src/go/kame/go.mod ./Kamefile
 	mkdir -p ./build/wasm
 	let staged = (line $(mktemp ./build/wasm/.kame.wasm.XXXXXX))
 	defer rm -f $staged
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS wasip1 :GOARCH wasm :GOCACHE (abspath ./build/go-cache) go build -buildmode=c-shared -o (abspath staged) ./cmd/kame-wasm
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOOS: wasip1 GOARCH: wasm GOCACHE: (abspath ./build/go-cache) go build -buildmode=c-shared -o (abspath staged) ./cmd/kame-wasm
 	mv $staged ./build/wasm/kame.wasm
 
-wasm : ./build/wasm/kame.wasm
+task wasm : ./build/wasm/kame.wasm
 
-dist-wasm : ./dist/kame.wasm ./dist/kame.js
+task dist-wasm : ./dist/kame.wasm ./dist/kame.js
 
 # Publish the pair by atomic renames, as other CLI processes may be loading it.
 
-./dist/kame.wasm ./dist/kame.js : ./build/wasm/kame.wasm ./src/js/kame.js
+rule ./dist/kame.wasm ./dist/kame.js : ./build/wasm/kame.wasm ./src/js/kame.js
 	mkdir -p ./dist
 	let wasm = (line $(mktemp ./dist/.kame.wasm.XXXXXX))
 	let js = (line $(mktemp ./dist/.kame.js.XXXXXX))
@@ -318,14 +316,14 @@ dist-wasm : ./dist/kame.wasm ./dist/kame.js
 # Provenance includes a timestamp, so this stays a task rather than a file rule.
 # It does not collect native platform artifacts or rewrite package definitions.
 
-release-assets : dist-wasm @{RELEASE_BINARIES} ./dist/kame-windows-x64.zip
+task release-assets : dist-wasm ${RELEASE_BINARIES} ./dist/kame-windows-x64.zip
 
-dist-release : release-assets ./VERSION ./src/kash/release.kash
-	public_key = (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)
-	signing_key = (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)
-	git_revision = $(git rev-parse HEAD) ?? "unknown"
-	revision = (if (blank? (configured KAME_RELEASE_REVISION RELEASE_REVISION)) (strip git_revision) (configured KAME_RELEASE_REVISION RELEASE_REVISION))
-	version = (strip (text (read ./VERSION)))
+task dist-release : release-assets ./VERSION ./src/kash/release.kash
+	let public_key = (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)
+	let signing_key = (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)
+	let git_revision = $(git rev-parse HEAD) ?? "unknown"
+	let revision = (if (blank? (configured KAME_RELEASE_REVISION RELEASE_REVISION)) then (strip git_revision) else (configured KAME_RELEASE_REVISION RELEASE_REVISION))
+	let version = (strip (text (read ./VERSION)))
 	if (blank? public_key)
 		(fail! "set KAME_RELEASE_PUBLIC_KEY to the release verification key")
 	if (blank? signing_key)
@@ -337,7 +335,7 @@ dist-release : release-assets ./VERSION ./src/kash/release.kash
 # Not a file rule: the outputs are tracked source, and release staging must not
 # claim them.
 
-package-manifests : release-assets ./VERSION ./src/kash/release.kash ./src/kash/templates/kame.rb ./src/kash/templates/kame.json
+task package-manifests : release-assets ./VERSION ./src/kash/release.kash ./src/kash/templates/kame.rb ./src/kash/templates/kame.json
 	(package-manifests "./dist" "./etc" (strip (text (read ./VERSION))))
 
 # --- Release publication ----------------------------------------------------
@@ -350,7 +348,7 @@ package-manifests : release-assets ./VERSION ./src/kash/release.kash ./src/kash/
 # and KAME_RELEASE_SIGNING_KEY or littlesecrets. The metadata lends foreground
 # commands the terminal, so npm can prompt for authentication.
 
-release {repo=} {notes=} : release-assets ./VERSION ./package.json ./src/kash/release.kash ; [tty: :true foreground: :true]
+task release {repo=} {notes=} : release-assets ./VERSION ./package.json ./src/kash/release.kash ; {tty: true, foreground: true}
 	(release-publish (abspath ".") repo (release-path notes) (release-path (configured KAME_RELEASE_PUBLIC_KEY RELEASE_PUBLIC_KEY)) (release-path (configured KAME_RELEASE_SIGNING_KEY RELEASE_SIGNING_KEY)))
 
 # --- Windows launcher -------------------------------------------------------
@@ -359,109 +357,110 @@ release {repo=} {notes=} : release-assets ./VERSION ./package.json ./src/kash/re
 # .exe; declaring the siblings keeps a deleted kame.js or kame.wasm from looking
 # fresh. The Windows release bundles the launcher with the WASM pair.
 
-./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION : @{LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./VERSION ./src/go/kame/go.mod ./src/go/kame/go.sum
+rule ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION : ${LAUNCHER_SOURCES} ./dist/kame.js ./dist/kame.wasm ./VERSION ./src/go/kame/go.mod ./src/go/kame/go.sum
 	mkdir -p ./dist/windows
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOOS windows :GOARCH amd64 :GOCACHE (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w" -o (abspath ./dist/windows/kame.exe) ./cmd/kame-launcher
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOOS: windows GOARCH: amd64 GOCACHE: (abspath ./build/go-cache) go build -trimpath -ldflags "-s -w" -o (abspath ./dist/windows/kame.exe) ./cmd/kame-launcher
 	cp ./dist/kame.js ./dist/windows/kame.js
 	cp ./dist/kame.wasm ./dist/windows/kame.wasm
 	cp ./VERSION ./dist/windows/VERSION
 	printf '{"type":"module"}\n' > ./dist/windows/package.json
 
-./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION
+rule ./dist/kame-windows-x64.zip : ./dist/windows/kame.exe ./dist/windows/kame.js ./dist/windows/kame.wasm ./dist/windows/package.json ./dist/windows/VERSION
 	rm -f (first outputs)
-	:cwd ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm package.json VERSION
+	cwd: ./dist/windows zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm package.json VERSION
 
-dist-windows : ./dist/kame-windows-x64.zip
+task dist-windows : ./dist/kame-windows-x64.zip
 
 # --- Tests ------------------------------------------------------------------
 #
 # Bare tasks always run. Do not cache them: a green record is not a reason to
 # skip a test, and an input list would not cover the compiler or the host.
 
-test : test-toolchain test-unit test-examples test-go test-cli
+task test : test-toolchain test-unit test-examples test-go test-cli
 
-check : test-unit
+task check : test-unit
 
-test-toolchain : ./build/kame.debug ./tests/native/test-toolchain.sh
-	:KAME_TOOLCHAIN_TEST_BINARY (abspath ./build/kame.debug) bash ./tests/native/test-toolchain.sh
+task test-toolchain : ./build/kame.debug ./tests/native/test-toolchain.sh
+	KAME_TOOLCHAIN_TEST_BINARY: (abspath ./build/kame.debug) bash ./tests/native/test-toolchain.sh
 
-test-unit : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test ./...
+task test-unit : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test ./...
 
-test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh
+task test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh
 	bash ./tests/native/test-cli-lifecycle.sh
 
-test-native-host : ./tests/native/test-host.sh
+task test-native-host : ./tests/native/test-host.sh
 	bash ./tests/native/test-host.sh
 
-test-examples :
-	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test ./...
+task test-examples
+	cwd: ./examples/engine CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test ./...
 
-test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
-	:cwd $KAME_DIR :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.debug) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.debug) go test ./cmd/kame
+task test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
+	cwd: $KAME_DIR KAME_NATIVE_FORMAT_TEST_BINARY: (abspath ./build/kame.debug) KAME_NATIVE_CLI_TEST_BINARY: (abspath ./build/kame.debug) go test ./cmd/kame
 
-test-cli : ./build/kame.debug dist-wasm ./dist/kame ./dist/kame-windows-x64.zip ./tests/harness.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/harness.sh
+task test-cli : ./build/kame.debug dist-wasm ./dist/kame ${RELEASE_BINARIES} ./dist/kame-windows-x64.zip ./tests/harness.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/harness.sh
 
-test-cli-options : ./build/kame.debug dist-wasm ./tests/T009-17-cli-options.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T009-17-cli-options.sh
+task test-cli-options : ./build/kame.debug dist-wasm ./tests/T009-17-cli-options.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T009-17-cli-options.sh
 
-test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-03-cli-presentation-lifecycle.sh ./tests/T036-04-cli-osc-progress.sh ./tests/T036-02-cli-reuse-reasons.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-01-cli-presentation.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-03-cli-presentation-lifecycle.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-04-cli-osc-progress.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
+task test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-03-cli-presentation-lifecycle.sh ./tests/T036-04-cli-osc-progress.sh ./tests/T036-02-cli-reuse-reasons.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T036-01-cli-presentation.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T036-03-cli-presentation-lifecycle.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T036-04-cli-osc-progress.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
 
-test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspection.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T037-01-cli-build-inspection.sh
+task test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspection.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T037-01-cli-build-inspection.sh
 
-test-reuse-reasons : ./build/kame.debug dist-wasm ./tests/T036-02-cli-reuse-reasons.sh
-	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
+task test-reuse-reasons : ./build/kame.debug dist-wasm ./tests/T036-02-cli-reuse-reasons.sh
+	KAME_TEST_PREBUILT: (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
 
 # Published-channel compatibility check: network access and the
 # Go toolchain are required, so this stays opt-in and outside the hermetic suite.
-test-release-build :
+task test-release-build
 	./tests/platform/test-release-build.sh
 
-test-all : test test-leaks
+task test-all : test test-leaks
 
-test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
-	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+task test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	cwd: ./examples/engine CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
 
-test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host
-	leak_scripts = (filter-out ./tests/T013-03-meta-binary.sh (files ./tests/T*.sh))
-	:cwd $KAME_DIR :CGO_ENABLED "0" :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.sanitize) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.sanitize) go test -gcflags "all=-d=checkptr=2" ./cmd/kame
-	:cwd $KAME_DIR :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
-	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
-	:KAME_TEST_PREBUILT (abspath ".") :CLI_BIN (abspath ./build/kame.sanitize) ./tests/harness.sh $leak_scripts
+task test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ${RELEASE_BINARIES} ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host
+	let leak_scripts = (filter-out ./tests/T013-03-meta-binary.sh (files ./tests/T*.sh))
+	cwd: $KAME_DIR CGO_ENABLED: "0" KAME_NATIVE_FORMAT_TEST_BINARY: (abspath ./build/kame.sanitize) KAME_NATIVE_CLI_TEST_BINARY: (abspath ./build/kame.sanitize) go test -gcflags "all=-d=checkptr=2" ./cmd/kame
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	cwd: ./examples/engine CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -gcflags "all=-d=checkptr=2" ./...
+	KAME_TEST_PREBUILT: (abspath ".") CLI_BIN: (abspath ./build/kame.sanitize) ./tests/harness.sh $...leak_scripts
 
-wasm-portable : wasm
+task wasm-portable : wasm
 
-wasm-check : wasm ./tests/wasm/go-reactor.mjs ./tests/wasm/check-imports.mjs
+task wasm-check : wasm ./tests/wasm/go-reactor.mjs ./tests/wasm/check-imports.mjs
 	node ./tests/wasm/check-imports.mjs ./build/wasm/kame.wasm
 	node ./tests/wasm/go-reactor.mjs ./build/wasm/kame.wasm
 
-# map/run! streams each script and fails the recipe on the first nonzero status.
-test-wasm : wasm-check ./build/kame.debug dist-wasm @{TEST_WASM}
-	(map ([script] (run! :env [KAME_TEST_PREBUILT: (abspath ".")] script)) TEST_WASM)
+# Run each script in order and stop at the first failure.
+task test-wasm : wasm-check ./build/kame.debug dist-wasm ${TEST_WASM}
+	for script in TEST_WASM
+		KAME_TEST_PREBUILT: (abspath ".") $script
 
 # --- Generated sources ------------------------------------------------------
 #
 # Regenerate the committed go_tests_*_test.go wrappers after adding tests.
 
-go-tests : ./src/kash/go-tests.kash
+task go-tests : ./src/kash/go-tests.kash
 	(go-tests ./src/go/kame)
 
 # --- Formatting and cleanup -------------------------------------------------
 
-fmt : ./build/kame.debug
+task fmt : ./build/kame.debug
 	git ls-files -z -- "*.go" | xargs -0r gofmt -w
 	git ls-files -z -- "*.sh" | xargs -0r shfmt -w
 	./build/kame.debug do fmt -i Kamefile
 
-clean :
+task clean
 	rm -rf ./build ./dist
 
-demo :
-	:cwd ./examples/engine :CGO_ENABLED "0" :GOCACHE (abspath ./build/go-cache) go run ./demo
+task demo
+	cwd: ./examples/engine CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go run ./demo

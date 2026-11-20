@@ -7,18 +7,19 @@ test-start "T014-03 runtime pattern construction"
 test-step "build native and WASM runners"
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 
 for host in native wasm; do
-	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	"${runner[@]}" do run --lang expr -c '(pattern (str "./" "{" "name:*" "}.c"))' >"$TMPDIR/$host.out" 2>"$TMPDIR/$host.err"
-	if [ "$(cat "$TMPDIR/$host.out")" = '"./{name:*}.c"' ]; then
+	if [ "$(cat "$TMPDIR/$host.out")" = './{name:*}.c' ]; then
 		test-ok "$host explicitly constructs a pattern value"
 	else
 		test-fail "$host runtime pattern result: $(cat "$TMPDIR/$host.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(replace (pattern (str "./src/" "{" "name:*" "}.c")) (pattern (str "./build/" "{" "name" "}.o")) "./src/demo.c")' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
-	if [ "$(cat "$TMPDIR/$host.replace.out")" = '"./build/demo.o"' ]; then
+	"${runner[@]}" do run --lang expr -c '((output => ./src/demo.c |> capture (pattern (str "./src/" "{" "name:*" "}.c")) |> bind ${output}/{name}.o) "./build")' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
+	if [ "$(cat "$TMPDIR/$host.replace.out")" = './build/demo.o' ]; then
 		test-ok "$host applies runtime match and expansion patterns"
 	else
 		test-fail "$host runtime pattern replacement: $(cat "$TMPDIR/$host.replace.err")"

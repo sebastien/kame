@@ -4,31 +4,30 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T006-11 symlink outputs"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work/src/py" "$work/deps/hjson/hjson" "$work/deps/toon/src/toon_format"
 	printf seed >"$work/seed"
 	printf first >"$work/payload"
-	cat >"$work/Makefile.kmk" <<'KMK'
-prep : ./src/py/hjson ./src/py/toon_format
-./src/py/hjson : ./deps/hjson
-	ln -sfrTn @</hjson @>
-./src/py/toon_format : ./deps/toon
-	ln -sfrTn @</src/toon_format @>
-./link : ./seed
+	cat >"$work/Makefile.km" <<'KMK'
+task prep : ./src/py/hjson ./src/py/toon_format
+rule ./src/py/hjson : ./deps/hjson
+	ln -sfrTn $inputs.0/hjson $outputs.0
+rule ./src/py/toon_format : ./deps/toon
+	ln -sfrTn $inputs.0/src/toon_format $outputs.0
+rule ./link : ./seed
 	printf x >> runs
-	ln -sfn deps/hjson/hjson @>
-./dangling : ./seed
-	ln -sfn absent @>
-./loop : ./seed
-	ln -sfn loop @>
-./file-link : ./seed
-	ln -sfn payload @>
-./copy : ./file-link ; [shell: kame]
-	(read @<)
+	ln -sfn deps/hjson/hjson $outputs.0
+rule ./dangling : ./seed
+	ln -sfn absent $outputs.0
+rule ./loop : ./seed
+	ln -sfn loop $outputs.0
+rule ./file-link : ./seed
+	ln -sfn payload $outputs.0
+rule ./copy : ./file-link = (read inputs.0)
 KMK
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
 	test-step "$backend prep publishes links to directories"
 	"${runner[@]}" -C "$work" prep
 	[ "$(readlink "$work/src/py/hjson")" = ../../deps/hjson/hjson ]

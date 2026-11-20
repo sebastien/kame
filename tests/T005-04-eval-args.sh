@@ -13,35 +13,35 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-test-step "arguments after -- are available as @*"
-cli_run -- do run --lang expr -c '(join "-" @*)' -- a b c
+test-step "arguments after -- are available as args"
+cli_run -- do run --lang expr -c 'join "-" args' -- a b c
 cli_expect_status 0
 cli_expect_stdout '"a-b-c"'
 
-cli_run -- do run --lang expr -c '(json @#)' -- a b c
+cli_run -- do run --lang expr -c 'json (count args)' -- a b c
 cli_expect_status 0
 cli_expect_stdout '"3"'
 
-cli_run -- do run --lang expr -c '@_' -- first second
+cli_run -- do run --lang expr -c 'first args' -- first second
 cli_expect_status 0
 cli_expect_stdout '"first"'
 
-cli_run -- do run --lang expr -c '@1' -- first second
+cli_run -- do run --lang expr -c 'args.1' -- first second
 cli_expect_status 0
 cli_expect_stdout '"second"'
 
 test-step "no arguments yields an empty argument list"
-cli_run -- do run --lang expr -c '(join "-" @*)'
+cli_run -- do run --lang expr -c 'join "-" args'
 cli_expect_status 0
 cli_expect_stdout '""'
 cli_expect_stderr_empty
 
-cli_run -- do run --lang expr -c '@#'
+cli_run -- do run --lang expr -c 'count args'
 cli_expect_status 0
 cli_expect_stdout '0'
 
 test-step "expression read from stdin"
-printf '(join "" ["x" "y"])' >expression.km
+printf 'join "" ["x", "y"]' >expression.km
 cli_run --stdin expression.km -- do run --lang expr -
 cli_expect_status 0
 cli_expect_stdout '"xy"'

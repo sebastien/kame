@@ -6,9 +6,10 @@ test-start "T038-03 scalar text and JSON"
 test-step "build artifacts"
 cd "$CLI_ROOT"
 cli_build
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 for backend in native wasm; do
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	check() {
 		local want="$1" expression="$2"
 		if "${runner[@]}" do run --lang expr -c "$expression" >"$TMPDIR/out" 2>"$TMPDIR/err" && [ "$(cat "$TMPDIR/out")" = "$want" ]; then test-ok "$backend $expression"; else test-fail "$backend $expression"; cat "$TMPDIR/out" "$TMPDIR/err"; fi
@@ -19,25 +20,26 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$TMPDIR/err" && [ ! -s "$TMPDIR/out" ]; then test-ok "$backend rejects $expression"; else test-fail "$backend $expression ($status)"; cat "$TMPDIR/out" "$TMPDIR/err"; fi
 	}
 	test-step "$backend scalar concatenation and explicit JSON round trips"
-	check '""' '(str)'
-	check '"x=42/1.5/true/false/nil/./file"' '(str "x=" 42 "/" 1.5 "/" :true "/" :false "/" :nil "/" ./file)'
+	check '""' 'str ()'
+	check '"x=42/1.5/true/false/nil/./file"' '(str "x=" 42 "/" 1.5 "/" true "/" false "/" nil "/" ./file)'
 	check '"\"text\""' '(json "text")'
-	check '"null"' '(json :nil)'
-	check '"{\"a\":[true,null],\"z\":2}"' '(json [z: 2 a: [:true :nil]])'
-	check ':true' '(eq (parse-json (json [z: 2 a: [:true :nil]])) [a: [:true :nil] z: 2])'
-	check ':true' '(eq (parse-json (json "a\n\t\\\"")) "a\n\t\\\"")'
+	check '"null"' '(json nil)'
+	check '"{\"a\":[true,null],\"z\":2}"' '(json {z: 2, a: [true, nil]})'
+	check 'true' '(parse-json (json {z: 2, a: [true, nil]})) == {a: [true, nil], z: 2}'
+	check 'true' '(parse-json (json "a\n\t\\\"")) == "a\n\t\\\""'
 	# Optimized float formatting uses the SDK's wide-integer arithmetic builtins.
 	check '"[5e-324,2.2250738585072014e-308,1.7976931348623157e+308]"' '(json (parse-json "[5e-324,2.2250738585072014e-308,1.7976931348623157e308]"))'
 	check '"[9223372036854775807,-9223372036854775808,1.8446744073709552e+19]"' '(json (parse-json "[9223372036854775807,-9223372036854775808,18446744073709551615]"))'
 	check '"[0.1,1.2345678901234567,1e-300,1e+300,0]"' '(json (parse-json "[0.1,1.2345678901234567,1e-300,1e300,-0.0]"))'
-	check '"a1 2b"' '(render "plain" """a@(nop :nil)@(nop [1 2])b""")'
+	check '"a1 2b"' '(render "plain" """a@{nil}@{join " " (map str [1, 2])}b""")'
+	reject '(render "plain" """@{[1, 2]}""")' EXPR_INVALID
 	reject '(cat "a" "b")' OP_UNKNOWN
 	for operation in str json; do
-		for value in '([x] x)' './path/{*}' '(resource "mem://x/file")' '[bad: ([x] x)]'; do reject "($operation $value)" EXPR_INVALID; done
+		for value in '(x => x)' './path/{*}' '(resource "mem://x/file")' '{bad: (x => x)}'; do reject "($operation $value)" EXPR_INVALID; done
 	done
 	reject '(str [])' EXPR_INVALID
-	reject '(str [a: 1])' EXPR_INVALID
-	reject '(json)' EXPR_INVALID
+	reject '(str {a: 1})' EXPR_INVALID
+	reject 'json ()' EXPR_INVALID
 	reject '(json 1 2)' EXPR_INVALID
 done
 test-end

@@ -6,7 +6,8 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-02 embedded Kash backend parity"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/kash-parity"
 mkdir -p "$work"
@@ -17,7 +18,7 @@ parity() {
 	set +e
 	"$CLI_BIN" do run --lang expr "$@" -c "$expression" >"$work/native.out" 2>"$work/native.err"
 	local native_status=$?
-	node "$CLI_ROOT/dist/kame.js" do run --lang expr "$@" -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
+	node "$wasm_wrapper" do run --lang expr "$@" -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
 	local wasm_status=$?
 	set -e
 	if [ "$native_status" = "$expected_status" ] && [ "$wasm_status" = "$expected_status" ] && cmp -s "$work/native.out" "$work/wasm.out"; then
@@ -31,12 +32,12 @@ test-step "captured values and distinct function/callback execution"
 parity '(str $(printf a) $(printf b))' 0 --allow-run
 parity '(str (eval "$(printf a)") (eval "$(printf b)"))' 0 --allow-run
 parity '$(printf "one\ntwo\n")' 0 --allow-run
-parity '(let [files ["a b" "c"]] $(printf "[%s]" $files))' 0 --allow-run
-parity '(map ([x] $(printf "%s" $x)) ["a" "b"])' 0 --allow-run
-parity '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' 0 --allow-run
+parity '((files => $(printf "[%s]" $...files)) ["a b", "c"])' 0 --allow-run
+parity '(map (x => $(printf "%s" $x)) ["a", "b"])' 0 --allow-run
+parity '((f => str (f "a") (f "b")) (x => $(printf "%s" $x)))' 0 --allow-run
 parity '$(printf "%s" $(printf nested))' 0 --allow-run
-parity '$(printf "[%s]" (nop ["a b" "c"]))' 0 --allow-run
-parity '$(printf "%s" ("a" | uppercase))' 0 --allow-run
+parity '((files => $(printf "[%s]" $...files)) (concat ["a b"] ["c"]))' 0 --allow-run
+parity '$(printf "%s" ("a" |> uppercase))' 0 --allow-run
 parity '"$(printf literal)"' 0
 
 test-step "capabilities, exit failures, invalid encoding, capture overflow"
@@ -54,12 +55,12 @@ for invalid in 0 -1 nope 999999999999999999999999 ''; do
 done
 
 test-step "lazy definitions inherit the invocation capture limit"
-printf '%s\n' 'value = $(printf abcd)' >"$work/definition.kmk"
+printf '%s\n' 'value = $(printf abcd)' >"$work/definition.km"
 for limit in 3 4; do
 	set +e
-	"$CLI_BIN" --capture-limit="$limit" -f "$work/definition.kmk" value >"$work/native.out" 2>"$work/native.err"
+	"$CLI_BIN" --allow-run --capture-limit="$limit" -f "$work/definition.km" value >"$work/native.out" 2>"$work/native.err"
 	native_status=$?
-	node "$CLI_ROOT/dist/kame.js" --capture-limit="$limit" -f "$work/definition.kmk" value >"$work/wasm.out" 2>"$work/wasm.err"
+	node "$wasm_wrapper" --allow-run --capture-limit="$limit" -f "$work/definition.km" value >"$work/wasm.out" 2>"$work/wasm.err"
 	wasm_status=$?
 	set -e
 	if [ "$limit" = 3 ]; then expected=1; else expected=0; fi
@@ -81,7 +82,10 @@ parity '$(printf "\\377")' 1 --allow-run
 parity '$(head -c 1048577 /dev/zero)' 1 --allow-run
 parity '$(no-such-executable-kash)' 1 --allow-run
 parity '$(printf denied)' 1 --allow-run="$work"
-parity '$(printf granted)' 0 --allow-run=/usr/bin --tool printf=/usr/bin/printf
+parity '$(kame-test-printf granted)' 0 --allow-run --tool kame-test-printf=/usr/bin/printf
+parity '$(kame-test-printf denied)' 1 --allow-run=/usr/bin --tool kame-test-printf=/usr/bin/printf
+grep -q CAP_DENIED "$work/native.err"
+grep -q CAP_DENIED "$work/wasm.err"
 parity '$(/usr/bin/printf granted)' 0 --allow-run=/usr/bin
 
 test-step "neither backend implicitly treats executable text as shell code"
@@ -93,7 +97,7 @@ test-step "AST and formatter parity with nested substitutions"
 printf '%s\n' '(str $(printf "%s" ${project.name}) [$(printf (str "a" "b"))])' >"$work/expression.km"
 for command in parse fmt; do
 	"$CLI_BIN" do "$command" --lang expr "$work/expression.km" >"$work/native.out"
-	node "$CLI_ROOT/dist/kame.js" do "$command" --lang expr "$work/expression.km" >"$work/wasm.out"
+	node "$wasm_wrapper" do "$command" --lang expr "$work/expression.km" >"$work/wasm.out"
 	if cmp -s "$work/native.out" "$work/wasm.out"; then test-ok "$command parity"; else test-fail "$command parity"; fi
 done
 

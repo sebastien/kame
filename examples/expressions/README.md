@@ -10,19 +10,27 @@ the CLI on your PATH (or the absolute path to `build/kame.debug`).
 ## 1. From an expression to a program
 
 ```sh
-kame do run --lang expr -c '(sub ./notes/{name:*}.txt ./public/{name}.txt [./notes/hello.txt ./notes/world.txt])'
+kame do run --lang expr -c 'subst ./notes/{name:*}.txt ./public/{name}.txt [./notes/hello.txt, ./notes/world.txt]'
 kame -f ./01-values.km pages
 kame -f ./01-values.km publication
+kame -f ./01-values.km page-summary
 ```
 
 The first two commands produce the same list:
 
 ```text
-["./public/hello.txt" "./public/world.txt"]
+[./public/hello.txt, ./public/world.txt]
 ```
 
 The third produces a record with a title, that list, and a count of `2`. Paths,
 lists, and records are values, not shell text. No `public/` directory is created.
+
+The last command evaluates `"Pages: ${pages}"`, which displays the list as one
+string with spaces between the paths:
+
+```text
+"Pages: ./public/hello.txt ./public/world.txt"
+```
 
 **Change:** Edit `title`, then request `title`, `first-page`, and `publication`
 separately. Request `unused`: it fails because `uppercase` requires text, not
@@ -40,7 +48,7 @@ kame -f ./02-functions.km labels
 ```
 
 `pages` preserves the source order and duplicate. `ordered` removes the
-duplicate and sorts the paths. `labels` is `["HELLO.TXT" "WORLD.TXT"]`.
+duplicate and sorts the path strings. `labels` is `["HELLO.TXT", "WORLD.TXT"]`.
 
 Read the named `page` function, the value pipe, and the anonymous function side
 by side. None introduces a new kind of value.
@@ -62,11 +70,11 @@ kame --allow-read=. -f ./03-resources.km publication
 The count changes from `2` to `3`. Remove only the `third.txt` you just created
 when finished. There are still no generated pages.
 
-Unlike the literal list, a glob expression records a filesystem dependency. In standalone
-expression execution and standalone `.km` programs it requires an explicit read grant:
+`files` records a filesystem dependency for the glob. Give standalone
+expressions and standalone `.km` programs an explicit read grant:
 
 ```sh
-kame do run --lang expr --allow-read -c './notes/*.txt'
+kame do run --lang expr --allow-read -c 'files ./notes/*.txt'
 ```
 
 **Understand:** Resource discovery feeds the same value language; it is not a

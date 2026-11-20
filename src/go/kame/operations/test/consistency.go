@@ -15,11 +15,11 @@ func TestPredicateAndSequenceConsistency(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "consistency.km", "")
+	parsed := script.ParseKameFile(a, "consistency.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	checks := []string{
 		`(eq? 1 1.0)`, `(ne? 1 2)`, `(lt? 1 2)`, `(gt? 2 1)`, `(lte? 1 1)`, `(gte? 1 1)`,
-		`(in? {x: nil} [{x: nil}])`, `(not (in? "x" ["xy"]))`, `(eq? (has? 1 [1.0]) (in? 1 [1.0]))`,
+		`(in? {x: nil} [{x: nil}])`, `(not (in? "x" ["xy"]))`, `(in? 1 [1.0])`,
 		`(nil? nil)`, `(not (nil? uppercase))`, `(bool? false)`, `(int? 1)`, `(float? 1.5)`,
 		`(number? 1)`, `(number? 1.5)`, `(not (number? "1"))`, `(callable? uppercase)`,
 		`(resource? (resource "mem://fixture/file"))`, `(pattern? ./{name:*})`, `(not (process? {status: 0}))`,
@@ -88,7 +88,7 @@ func TestExactNumericOrdering(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "ordering.km", "")
+	parsed := script.ParseKameFile(a, "ordering.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	checks := []string{
 		`(lt? 9007199254740992 9007199254740993)`, `(gt? 9007199254740993 9007199254740992)`,
@@ -102,7 +102,7 @@ func TestExactNumericOrdering(t *testing.T) {
 		`(lt? 9007199254740992.0 9007199254740993)`,
 		`(lt? 0 0.5)`, `(gt? 0 -0.5)`, `(lt? -1 -0.5)`, `(gt? 1 0.5)`,
 		`(lte? 0 -0.0)`, `(gte? -0.0 0)`,
-		`(eq? (lt 1 2) (lt? 1 2))`, `(eq? (is 1 1) (eq? 1 1))`,
+		`(eq? (1 < 2) (lt? 1 2))`, `(eq? (1 == 1) (eq? 1 1))`,
 	}
 	for i := range checks {
 		r := evaluate(t, p, checks[i])
@@ -154,8 +154,8 @@ func TestPredicateNamingContract(t *testing.T) {
 	}
 	aliases := []string{"eq", "is", "ne", "lt", "gt", "lte", "gte", "has?"}
 	for i := range aliases {
-		if !r.HasOperation(aliases[i]) {
-			t.Error("compatibility alias was removed: " + aliases[i])
+		if r.HasOperation(aliases[i]) {
+			t.Error("removed predicate is still registered: " + aliases[i])
 		}
 	}
 	if r.HasOperation("is?") || !r.HasOperation("not") || !r.HasOperation("bool") {

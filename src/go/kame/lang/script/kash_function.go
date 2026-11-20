@@ -24,13 +24,7 @@ func (p *kashParser) functionBlock(level, start int) *definition.Definition {
 	d := part.Definition
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Span, e.Text, d.Expression = expr.KashFunction, d.Span, d.Name, e
-	if d.Name == "env" {
-		s.error(d.NameSpan.Start, d.NameSpan.End, "expected non-reserved function name")
-	}
 	for _, parameter := range d.Parameters {
-		if parameter.Name == "env" {
-			s.error(parameter.Span.Start, parameter.Span.End, "invalid or reserved function parameter")
-		}
 		e.Parameters = append(e.Parameters, expr.Parameter{Name: parameter.Name, Span: parameter.Span, Rest: parameter.Rest})
 	}
 	p.Pos = nextLine(text, end)

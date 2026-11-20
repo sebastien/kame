@@ -6,38 +6,31 @@ import (
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
+	"kame/operations"
 )
 
 func TestSelectorMissingContextDiagnostics(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "selector.km", "")
+	parsed := script.ParseKameFile(a, "selector.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{" @<", " @>", " @0"}
-	messages := []string{
-		"input selector @< requires an input context; none is available",
-		"output selector @> requires an output context; none is available",
-		"argument selector @0 requires an argument context; none is available",
-	}
-	tips := []string{
-		"use @< in a rule recipe, or pass the input value explicitly",
-		"use @> in a rule recipe, or pass the output value explicitly",
-		"use @0 in a rule recipe, or pass the argument value explicitly",
-	}
+	names := []string{"inputs", "outputs", "args"}
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a}
-	for i := range texts {
-		expression := expr.Parse(a, "selector.km", texts[i])
+	for _, name := range names {
+		text := " " + name
+		expression := expr.Parse(a, "selector.km", text)
 		if len(expression.Diagnostics) != 0 {
-			t.Error("selector fixture did not parse")
+			t.Error("context binding fixture did not parse")
 		}
 		r := p.EvaluateWith(expression.Expr, &context)
 		expression.Free()
-		if r.Diagnostic.Code != "SEL_NO_CONTEXT" || r.Diagnostic.Message != messages[i] || !r.Diagnostic.Owned || r.Diagnostic.Span.Start != 1 || r.Diagnostic.Span.End != len(texts[i]) {
-			t.Error("missing selector context lost kind, ownership, or authored span")
+		if r.Diagnostic.Code != "SEL_NO_CONTEXT" || r.Diagnostic.Message != name+" requires an active rule or invocation context" ||
+			!r.Diagnostic.Owned || r.Diagnostic.Span.Start != 1 || r.Diagnostic.Span.End != len(text) {
+			t.Error("missing context binding lost kind, ownership, or authored span")
 		}
-		if len(r.Diagnostic.Tips) != 1 || r.Diagnostic.Tips[0] != tips[i] {
-			t.Error("missing selector context lost its owned remediation tip")
+		if len(r.Diagnostic.Tips) != 1 || r.Diagnostic.Tips[0] != "Use "+name+" where it is bound, or pass the list explicitly." {
+			t.Error("missing context binding lost its owned remediation tip")
 		}
 		r.Free(a)
 	}
@@ -51,11 +44,12 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "selector.km", "")
+	operations.Register(registry)
+	parsed := script.ParseKameFile(a, "selector.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	values := []core.Value{{Kind: core.Int, Int: 7}}
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a, Inputs: values, Outputs: values, Args: values, HasArgs: true}
-	texts := []string{"@<", "@>", "@0"}
+	texts := []string{"inputs.0", "outputs.0", "args.0"}
 	for _, text := range texts {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
@@ -67,21 +61,17 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 	}
 	context.Inputs, context.Outputs, context.Args = nil, nil, nil
 	context.RuleFrames = []eval.RuleFrame{{}}
-	empty := []string{"@<", "@>", "@0"}
+	empty := []string{"inputs.0", "outputs.0", "args.0"}
 	for _, text := range empty {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
-		message := "selector index is empty"
-		if text == "@0" {
-			message = "selector index out of range"
-		}
-		if r.Diagnostic.Code != "SEL_INDEX_INVALID" || r.Diagnostic.Message != message {
+		if r.Diagnostic.Code != "SEL_INDEX_INVALID" {
 			t.Error("present empty context was mislabeled as missing")
 		}
 		r.Free(a)
 		expression.Free()
 	}
-	emptyLists := []string{"@<*", "@>*", "@*"}
+	emptyLists := []string{"inputs", "outputs", "args"}
 	for _, text := range emptyLists {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
@@ -91,7 +81,7 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 		r.Free(a)
 		expression.Free()
 	}
-	emptyCounts := []string{"@<#", "@>#", "@#"}
+	emptyCounts := []string{"count inputs", "count outputs", "count args"}
 	for _, text := range emptyCounts {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)

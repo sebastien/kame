@@ -45,7 +45,8 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 	dashboardLive = false
 	emitTaskbar(run.Err, 0, 0)
 	taskbarEnabled = false
-	repl := &replSession{run: run, shell: replShell{Program: session.Program, FollowGrants: len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants}, contextRequests: make(chan chan completionContext)}
+	session.FollowDirectoryGrants = len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants
+	repl := &replSession{run: run, shell: replShell{Session: session}, contextRequests: make(chan chan completionContext)}
 	session.Program.Eval.CommandAlias, session.Program.Eval.CommandAliasState = replCommandAlias, &repl.shell
 	session.Program.Eval.SessionTool, session.Program.Eval.SessionToolState = replSessionTool, &repl.shell
 	session.Program.BackgroundNode = repl.backgroundNode
@@ -202,28 +203,12 @@ func replExitEntry(text string) bool {
 // session. parsed is the text given to the parser; it equals text, except for
 // startup entries, which keep their file offsets through blank padding.
 func (s *replSession) runEntry(name, text, parsed string, background bool) (int, bool) {
-	run, session := s.run, s.run.Session
-	if s.options != nil {
-		if handled, status := s.options.command(text, run.Out, run.Err); handled {
-			if status == 0 && s.history != nil {
-				s.history.applyOptions()
-			}
-			return status, false
+	session := s.run.Session
+	fields := strings.Fields(text)
+	if len(fields) != 0 && !session.Program.Eval.HasLexicalBinding(fields[0]) {
+		if handled, status, stop := s.sessionCommand(text, fields); handled {
+			return status, stop
 		}
-	}
-	if s.history != nil {
-		if handled, status := s.history.command(text, run.Out, run.Err); handled {
-			return status, false
-		}
-	}
-	if handled, status, stop := s.jobCommand(text); handled {
-		return status, stop
-	}
-	if fields := strings.Fields(text); len(fields) != 0 && fields[0] == "explain" && !strings.ContainsRune(text, '\n') {
-		return s.explain(len(fields)), false
-	}
-	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
-		return status, false
 	}
 	first, diagnostics := session.AppendKash(name, parsed)
 	if s.reportDiagnostics(diagnostics) {
@@ -234,6 +219,33 @@ func (s *replSession) runEntry(name, text, parsed string, background bool) (int,
 		return 0, false
 	}
 	return s.foreground(job, false)
+}
+
+func (s *replSession) sessionCommand(text string, fields []string) (bool, int, bool) {
+	run := s.run
+	if s.options != nil {
+		if handled, status := s.options.command(text, run.Out, run.Err); handled {
+			if status == 0 && s.history != nil {
+				s.history.applyOptions()
+			}
+			return true, status, false
+		}
+	}
+	if s.history != nil {
+		if handled, status := s.history.command(text, run.Out, run.Err); handled {
+			return true, status, false
+		}
+	}
+	if handled, status, stop := s.jobCommand(text); handled {
+		return true, status, stop
+	}
+	if fields[0] == "explain" && !strings.ContainsRune(text, '\n') {
+		return true, s.explain(len(fields)), false
+	}
+	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
+		return true, status, false
+	}
+	return false, 0, false
 }
 
 // explain renders the latest failure in full, including one a terminal
@@ -362,7 +374,7 @@ func (s *replSession) callPrompt(function string, status int, fallback string) (
 			jobs++
 		}
 	}
-	text := "(" + function + " {status: " + strconv.Itoa(status) + ", dir: " + kameString(session.Program.Options.Directory) + ", name: " + kameString(s.shell.directoryName()) + ", jobs: " + strconv.Itoa(jobs) + "})"
+	text := "(" + function + " {status: " + strconv.Itoa(status) + ", dir: " + kameString(session.Directory()) + ", name: " + kameString(s.shell.directoryName()) + ", jobs: " + strconv.Itoa(jobs) + "})"
 	first, diagnostics := session.AppendKash(name, text)
 	if s.reportDiagnostics(diagnostics) {
 		return fallback, false
@@ -418,7 +430,7 @@ func (s *replSession) completion() completionContext {
 	for name, prefix := range s.shell.aliases {
 		aliases[name] = prefix
 	}
-	return completionContext{Directory: p.Options.Directory, Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases}
+	return completionContext{Directory: s.run.Session.Directory(), Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases}
 }
 
 // replEntry is one entry read from the input: Kash text, the byte offset of

@@ -8,7 +8,7 @@ alphabetically.
 
 ### Source and span
 
-A **source** is named UTF-8 text being parsed, such as a `Makefile.kmk` or an
+A **source** is named UTF-8 text being parsed, such as a `Makefile.km` or an
 inline `-c` command. A **span** is a zero-based, half-open byte range within one
 source, retained by AST nodes and diagnostics. Display lines and columns are
 derived from spans when rendering diagnostics.
@@ -31,11 +31,10 @@ immutable and belong to the compiled program.
 ### Name, symbol, and path
 
 A **name** is an identifier such as `build` or `sources`; it can refer to a
-definition, operation, or named target depending on context. A **symbol** starts
-with `:` and evaluates to its literal name (with `:true`, `:false`, and `:nil`
-being special values). A **path** is a filesystem spelling that explicitly starts
-with `/`, `./`, or `../`. In particular, `out/file` is not a path in source until
-written as `./out/file`.
+definition, operation, or named target depending on context. A **symbol** such
+as `:ready` evaluates to its literal name. The boolean and nil literals are
+`true`, `false`, and `nil`. An authored **path** starts with `/`, `./`, or
+`../`, as in `./out/file`.
 
 ### Expression and value
 
@@ -64,27 +63,24 @@ Function definitions, lambdas, and placeholder sections share this callable mode
 A **reference** starts with a name and follows components such as record keys,
 list indexes, slices, or selections: `project.name`, `files.0`, or
 `config.{host,port}`. These references select values; they do not themselves
-declare target dependencies. The special **environment reference** `env.NAME`
-performs a tracked, capability-checked read in both Kame and Kash. It is not a
-field lookup on a lexical record; bare `env` remains a callable in Kame.
+declare target dependencies. An **environment reference** such as `env/HOME`
+performs a tracked, capability-checked read in both Kame and Kash.
 
 ### Control form
 
 A **control form** is a special form whose operands are evaluated only when
-selected. The language provides `?` (missing-reference/tool fallback), `if` (ordered
-test/then branches with an optional else), `and`/`or` (lazy conjunction and
-disjunction), `match` (pattern dispatch with capture binding), `let`, `def`, and
-`with`. A control form is not an eager operation: an unselected branch's
-dependencies and effects never run.
+selected. The language provides `??` for fallback, `if` for conditional values
+or blocks, `and` and `or` for lazy boolean operations, and `match` for pattern
+dispatch with capture bindings. Unselected branches leave dependencies and
+effects untouched.
 
-### Template and selector
+### Template and rule bindings
 
 A **string template** is text containing literal segments and Kame expansions.
-`@{reference}` reads a binding; `@` followed by a parenthesized Kame expression
-evaluates it, so `@(function)` is a zero-argument call. Bare `{(...)}` does not
-interpolate. A **selector** reads the nearest rule or function context:
-`@<` is the first rule input, `@>` the first output, and `@_` the first
-function argument. Templates are rendered; they are not shell syntax.
+Kame strings use `${EXPR}`. Document templates and foreign-shell recipes use
+`@{EXPR}`. Rule bodies bind
+`inputs`, `outputs`, `changed-inputs`, and `captures`. For example,
+`inputs.0` reads the first input and `outputs.0` reads the first output.
 
 ### Target template and capture
 
@@ -98,15 +94,16 @@ reference.
 ### Placeholder section
 
 A **placeholder section** is a short lexical function written around one
-expression with placeholders, such as `((sub ".c" ".o" _))`. `_`, `__`,
+expression with placeholders, such as `(sub ".c" ".o" _)`. `_`, `__`,
 and `_2` denote positional arguments. A placeholder only has this special meaning
 inside a section; elsewhere it remains an ordinary name.
 
 ### Pattern
 
-A **pattern** is a first-class expression value parsed from a path or plain
-string with brace groups. Match groups, such as `{name:*}` and `{**}`, capture
-text; expansion groups, such as `{name}` and `{_0}`, insert a prior capture.
+A **pattern** is a first-class expression value written in a path pattern or
+parsed from text with `pattern`. Match groups, such as `{name:*}` and
+`{**}`, capture text. Template groups such as `{name}` and `{_0}` insert
+a prior capture.
 Patterns power `match?` predicates and the match-and-expand form of `sub`
 (`replace` is a deprecated alias). Substitution preserves nonmatches; matching
 returns a boolean. Patterns do not reclassify runtime strings containing braces;
@@ -116,24 +113,21 @@ explicit regex groups use the bounded regex grammar.
 
 ### Script and include
 
-A **script** is a Kame source program: a `.km` value script contains definitions
-and expression statements; a `.kmk` rule program adds build rules; a `.kash`
-process script describes typed commands and control flow. They share expressions,
-not one outer grammar. `(include PATH)` composes file-backed value/rule sources
-at the inclusion point; included declarations share scope/source order and inherit
-the caller's language. Composition-only `if` selects literal includes before
-runtime; `(include? PATH)` skips only missing files. These directives do not
-provide Kash source inclusion.
+A `.km` **program** contains definitions and may declare rules, tasks, and
+services. A `.kash` **script** contains typed commands and control flow. Both
+use the expression grammar in value context. `include PATH` composes source
+in the caller's scope at the inclusion point. `include? PATH` skips a missing
+file. `import` exposes a module's exports.
 
 ### Rule
 
 A **rule** declares outputs, inputs, and an optional indented recipe. Kame
-classifies rules by their output syntax:
+classifies declarations by their leading keyword.
 
-- A **file rule** has explicit path outputs and produces filesystem artifacts.
-- A **bare task** (also called a phony task) has one bare-name output and runs
+- A **file rule** uses `rule` and produces one or more filesystem artifacts.
+- A **phony task** uses `task`, has a named target, and runs
   whenever it is reached.
-- A **cached task** is prefixed with `task` and may reuse a successful cached
+- A **cached task** uses `task cached` and may reuse a successful cached
   execution.
 - A **service** is prefixed with `service` and represents a long-running action.
 
@@ -150,11 +144,10 @@ input without a producing rule must already exist.
 
 ### Recipe
 
-A **recipe** is the ordered set of indented body lines belonging to a rule.
-External-shell recipes are document templates: Kame renders them and sends the
-resulting shell script to the host without parsing its shell language. With
-`SHELL = kash` or rule metadata `[shell: kash]`, Kame instead parses the body as
-direct Kash statements and process graphs, without document-template expansion.
+A **recipe** is the ordered body of a rule. A default recipe contains Kash
+statements and process graphs. When metadata or the build-wide `SHELL`
+setting selects an external shell, Kame renders the body as a document
+template and sends the result to that shell.
 
 ### Rule selection and rule instance
 
@@ -282,9 +275,9 @@ streams are distinct from the engine's value-stream protocol below.
 ### Process handle
 
 A **process handle** is an opaque value for asynchronous process work owned by
-the current invocation. `(run! :async :true ...)` returns one; `(await handle)`
-observes its result. Handles cannot be serialized or cached, and asynchronous
-work is joined or cancelled before its invocation ends, not detached.
+the current invocation. `$&(COMMAND)` returns a handle and
+`$?(wait $handle)` reads its outcome. The owning invocation joins or cancels
+its asynchronous work before it ends.
 
 ### Source and materializer
 
@@ -308,18 +301,17 @@ execute**. An operation may be valid only in particular phases: planning cannot
 perform effects, rule-body computation and shell-template expansion are read-only,
 and execution runs the selected producer and publishes its accepted output.
 
-### Effect and yield
+### Effects and file publication
 
-An **effect** is an explicit runtime action: `out!` and `err!` write to the
-corresponding runtime streams, and `write!` can write a file.
-**Yield** is the declarative effect that appends content for exactly one file-rule
-output in direct Kash. A **value-producing rule body**, selected with
-`[shell: kame]`, instead returns text or bytes and lets the rule publish them.
-Neither it nor shell-template expansion can perform effects.
+An **effect** is an explicit runtime action. `out!` and `err!` write to the
+corresponding streams, and `write!` writes a file. A **value-producing rule
+body** supplies text or bytes for exactly one file output. An expression body
+supplies its result, and a Kash body can supply it with `return VALUE`. Rule
+expression bodies and shell-template expansion reject effects.
 
-In standalone evaluation, the context flushes successful `out!`, `err!`, and
-`yield!` effects to its output streams instead. This happens only after the
-evaluation completes, so a host-request retry does not duplicate output.
+Standalone evaluation flushes successful `out!` and `err!` effects to the
+corresponding streams after evaluation completes. A host-request retry does
+not duplicate that output.
 
 ### Host request
 

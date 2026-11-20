@@ -245,9 +245,9 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		}
 		return core.ProducerCompleted
 	}
-	if hasYield(effects) && commands != "" {
+	if hasPublication(effects) && commands != "" {
 		mem.FreeString(p.Alloc, commands)
-		p.failRule(c, index, failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
+		p.failRule(c, index, failureAt(p.Alloc, "OUTPUT_CONFLICT", publicationSpan(effects), "body publication cannot be combined with shell commands"))
 		return core.ProducerFailed
 	}
 	if effectDiagnostic := validateEffects(p.Alloc, entry, effects); effectDiagnostic.Code != "" {
@@ -295,7 +295,6 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		pending := mem.Alloc[forwardEffectsState](p.Alloc)
 		pending.Commands = commands
 		pending.WritePaths = cloneStrings(p.Alloc, writePaths)
-		pending.HasYield = hasYield(effects)
 		for i := range effects {
 			pending.Effects = append(pending.Effects, eval.Effect{Kind: effects[i].Kind, Span: effects[i].Span, Data: slices.Clone(effects[i].Data)})
 		}
@@ -312,11 +311,10 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		p.failRule(c, index, effectDiagnostic)
 		return core.ProducerFailed
 	}
-	return p.finishRecipe(c, index, commands, hasYield(effects))
+	return p.finishRecipe(c, index, commands)
 }
 
-func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string, yielded bool) core.ProducerResult {
-	_ = yielded
+func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string) core.ProducerResult {
 	entry := &p.Instances[index]
 	if commands == "" {
 		if entry.Rule.Kind == rule.FileRule {

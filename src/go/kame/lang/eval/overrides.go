@@ -5,6 +5,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
+	"kame/lang/source"
 
 	"strings"
 )
@@ -13,7 +14,7 @@ import (
 // requested. The evaluator owns its replacement AST; the authored AST remains
 // untouched, retaining its name and diagnostic position.
 func (p *Program) OverrideDefinition(name, text string) bool {
-	literal := expr.Expr{Kind: expr.Symbol, Text: text}
+	literal := expr.LiteralString(text, source.Span{})
 	return p.overrideDefinition(name, &literal)
 }
 
@@ -49,7 +50,7 @@ func (p *Program) overrideDefinition(name string, expression *expr.Expr) bool {
 }
 
 func (p *Program) literalDefinition(original *definition.Definition, text string) *definition.Definition {
-	literal := expr.Expr{Kind: expr.Symbol, Text: text, Span: original.Span}
+	literal := expr.LiteralString(text, original.Span)
 	return p.expressionDefinition(original, &literal)
 }
 
@@ -104,6 +105,12 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 			identity.Write(inputs.Digest[:])
 			identity.Write(outputs.Digest[:])
 			identity.Write(newer.Digest[:])
+			if len(frame.Captures) != 0 {
+				captures := core.ValueSignature(core.Value{Kind: core.List, List: frame.Captures})
+				invalidFrames = invalidFrames || captures.Mode == core.SignatureUnavailable
+				identity.Text("captures")
+				identity.Write(captures.Digest[:])
+			}
 		}
 		identity.Sum(namespace[:])
 	}
@@ -152,6 +159,9 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 		}
 		for j := range context.RuleFrames[i].NewerInputs {
 			frame.NewerInputs = append(frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
+		}
+		for _, capture := range context.RuleFrames[i].Captures {
+			frame.Captures = append(frame.Captures, capture.Clone(p.Alloc))
 		}
 		state.RuleFrames = append(state.RuleFrames, frame)
 	}

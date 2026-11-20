@@ -32,14 +32,14 @@ cli_expect_status 1
 cli_expect_stderr_contains 'definitely-not-an-operation'
 
 test-step "arity failures carry messages"
-diag '(count)' 'EXPR_INVALID'
+diag 'count ()' 'EXPR_INVALID'
 diag '(count 1 2)' 'EXPR_INVALID'
-diag '(not)' 'EXPR_INVALID'
-diag '(nth (list 1))' 'EXPR_INVALID'
+diag 'not ()' 'EXPR_INVALID'
+diag 'nth [1]' 'EXPR_INVALID'
 
 test-step "kind failures carry messages"
 diag '(first 1)' 'EXPR_INVALID'
-diag '(join "-" (list 1))' 'EXPR_INVALID'
+diag 'join "-" [1]' 'EXPR_INVALID'
 diag '(slice 0 2 1)' 'EXPR_INVALID'
 diag '(sorted "abc")' 'EXPR_INVALID'
 

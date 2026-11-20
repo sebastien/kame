@@ -8,17 +8,8 @@ import (
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
+	"strings"
 )
-
-type loopOutputState struct{ Count int }
-
-func loopOutputSink(value any, effect eval.Effect) {
-	state := value.(*loopOutputState)
-	if effect.Kind != eval.EffectOut {
-		state.Count += 100
-	}
-	state.Count++
-}
 
 func TestMixedKashLibraryFragments(t *testing.T) {
 	a := t.Allocator()
@@ -52,7 +43,7 @@ func TestMixedKashLibraryFragments(t *testing.T) {
 func TestKashLoopsRetainDeferredWritesWithOutputSink(t *testing.T) {
 	a := t.Allocator()
 	h := wasm.NewMemoryHost(a)
-	s := script.Parse(a, "loops.kmk", "SHELL = kash\ndefault :\n\tfor item in [\"first\", \"second\"]\n\t\tif (nop true)\n\t\t\t(write! (joinpath \".\" (str \"direct-\" item)) item)\n\t\t\tdef written = (write! (joinpath \".\" item) item)\n\t\t\t(nop written)\n\t\t(out! item)\n")
+	s := script.ParseKameFile(a, "loops.km", "task default\n\tfor item in [\"first\", \"second\"]\n\t\tif true\n\t\t\t(write! (joinpath \".\" (str \"direct-\" item)) item)\n\t\t\tdef written = (write! (joinpath \".\" item) item)\n\t\t\t(nop written)\n\t\t(out! item)\n")
 	r := eval.NewRegistry(a)
 	if !operations.Register(r) {
 		t.Error("library registration failed")
@@ -66,8 +57,8 @@ func TestKashLoopsRetainDeferredWritesWithOutputSink(t *testing.T) {
 		return
 	}
 	p := compiled.Program
-	state := loopOutputState{}
-	p.Eval.SetDefinitionEffectSink(loopOutputSink, &state)
+	definitionOutput := false
+	p.Eval.SetDefinitionEffectSink(func(any, eval.Effect) { definitionOutput = true }, nil)
 	result := p.Materialize("default")
 	if result.Diagnostic.Code != "" {
 		t.Error("loop recipe failed: " + result.Diagnostic.Code)
@@ -83,8 +74,15 @@ func TestKashLoopsRetainDeferredWritesWithOutputSink(t *testing.T) {
 		}
 		mem.FreeSlice(a, data)
 	}
-	if state.Count != 2 {
-		t.Error("stream sink received deferred writes or replayed output")
+	var output strings.Builder
+	for next := p.NextEvent(); next.OK; next = p.NextEvent() {
+		if next.Event.Kind == program.Stdout && next.Event.Target == "default" {
+			output.Write(next.Event.Data)
+		}
+		next.Event.Free(a)
+	}
+	if definitionOutput || output.String() != "firstsecond" {
+		t.Error("loop stdout was lost, replayed, or sent to the standalone definition sink")
 	}
 	p.Free()
 	compiled.Free(a)

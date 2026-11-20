@@ -6,10 +6,10 @@ test-start "T012-04 WASM publication backpressure"
 test-step "build WASM host"
 cli_require_tools
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for scenario in stdout stderr json argv cache cancel timeout watch; do
  test-step "public pipe pressure: $scenario"
- if python3 "$CLI_ROOT/tests/backpressure.py" "$CLI_ROOT" "$scenario"; then
+ if python3 "$CLI_ROOT/tests/backpressure.py" "$wasm_cli" "$scenario"; then
   test-ok "$scenario pauses producers and resumes or terminates correctly"
  else
   test-fail "$scenario publication backpressure"

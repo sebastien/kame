@@ -105,9 +105,18 @@ func TestNativeCatSignalsCancelAndReap(t *testing.T) {
 		for _, repeated := range []bool{false, true} {
 			t.Run(fmt.Sprintf("signal-%d/repeated-%t", signal, repeated), func(t *testing.T) {
 				directory := t.TempDir()
-				// Ignore TERM so the repeated signal arrives during graceful shutdown.
-				// Both the shell and its background child belong to the recipe group.
-				nativeCLIWrite(t, filepath.Join(directory, "Makefile.km"), "SHELL = \"/bin/sh\"\nrule ./artifact\n\ttrap '' TERM; echo $$ > leader; sleep 30 & echo $! > child; touch ready; wait; printf leaked > @>\n")
+				// The TERM trap acknowledges graceful shutdown while the recipe
+				// remains active. Send the second signal only after this handshake.
+				nativeCLIWrite(t, filepath.Join(directory, "Makefile.km"), `SHELL = "/bin/sh"
+rule ./artifact
+	trap 'touch cancelling; while :; do sleep .01; done' TERM
+	echo $$ > leader
+	sleep 30 &
+	echo $! > child
+	touch ready
+	wait
+	printf leaked > "${outputs.0}"
+`)
 				args := []string{"do", "cat", "./artifact"}
 				if repeated {
 					args = append(args, "--json")
@@ -129,7 +138,13 @@ func TestNativeCatSignalsCancelAndReap(t *testing.T) {
 				}
 				want := 1
 				if repeated {
-					time.Sleep(30 * time.Millisecond)
+					deadline := time.Now().Add(5 * time.Second)
+					for !fileExists(filepath.Join(directory, "cancelling")) {
+						if time.Now().After(deadline) {
+							t.Fatalf("cat did not begin cancellation: %s", nativeCLIRead(stderr))
+						}
+						time.Sleep(time.Millisecond)
+					}
 					if err := command.Process.Signal(signal); err != nil {
 						t.Fatal(err)
 					}
@@ -471,7 +486,7 @@ func TestNativeInteractiveKashExplicitGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	status := runNativeCLIIn(t, sub, []string{"do", "run", "-i", "--allow-write=" + sub, "--allow-run"}, strings.NewReader("cd ..\necho no > ./denied.txt\necho continued\n"), &out, &errOut)
+	status := runNativeCLIIn(t, sub, []string{"do", "run", "-i", "--allow-write=.", "--allow-run"}, strings.NewReader("cd ..\necho no > ./denied.txt\necho continued\n"), &out, &errOut)
 	if status != 0 || out.String() != "continued\n" || !strings.Contains(errOut.String(), "CAP_DENIED") {
 		t.Fatalf("explicit grants: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
@@ -487,7 +502,11 @@ func TestNativeInteractiveKashExplicitGrants(t *testing.T) {
 func TestNativeInteractiveKashStartupFile(t *testing.T) {
 	directory := t.TempDir()
 	init := filepath.Join(directory, "init.kash")
-	nativeCLIWrite(t, init, "# startup\nlet who = \"init\"\n\nexport FROM_INIT=yes\n\ndef hello name\n\techo hello $name\n\nls ./missing-startup\necho after-failure\n")
+	startupDir := filepath.Join(directory, "startup")
+	if err := os.Mkdir(startupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, init, "# startup\nlet who = \"init\"\n\nset env/FROM_INIT = \"yes\"\n\ndef hello name\n\techo hello $name\n\nls ./missing-startup\necho after-failure\nalias greet = [\"echo\", \"alias-from-init\"]\ncd startup\n")
 	run := func(value, entries string) (int, string, string) {
 		t.Helper()
 		t.Setenv("KASH_INIT", value)
@@ -495,8 +514,12 @@ func TestNativeInteractiveKashStartupFile(t *testing.T) {
 		status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
 		return status, out.String(), errOut.String()
 	}
-	status, out, errOut := run(init, "echo $who\n(hello \"x\")\nprintenv FROM_INIT\nls ./missing-entry\n")
-	if status != 2 || out != "after-failure\ninit\nhello x\nyes\n" {
+	status, out, errOut := run(init, "echo $who\n(hello \"x\")\nprintenv FROM_INIT\nls ./missing-entry\ngreet\npwd\n")
+	resolved, err := filepath.EvalSymlinks(startupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 0 || out != "after-failure\ninit\nhello x\nyes\nalias-from-init\n"+resolved+"\n" {
 		t.Fatalf("startup session: status=%d out=%q err=%q", status, out, errOut)
 	}
 	if !strings.Contains(errOut, init+":9:1") || !strings.Contains(errOut, "<kash:4>:1:1") {
@@ -643,7 +666,7 @@ func TestNativeInteractiveKashAsyncFailureReporting(t *testing.T) {
 	}
 }
 
-// Interactive cd and export change the session directory and child
+// Interactive cd and set change the session directory and child
 // environment for later entries; default grants follow the directory.
 func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
 	directory := t.TempDir()
@@ -651,21 +674,34 @@ func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := strings.Join([]string{
-		"cd sub",
+		"def enter ()\n  cd sub\n",
+		"enter",
 		"echo written > ./note.txt",
 		"pwd",
 		"cd -",
-		"export GREETING=\"hi $KASH_TEST_NAME\" RAW='$KASH_TEST_NAME'",
+		"set env/GREETING = \"hi kash\"",
+		"set env/RAW = \"$KASH_TEST_NAME\"",
 		"printenv GREETING RAW",
-		"unset GREETING",
+		"set env/GREETING = nil",
 		"printenv GREETING ?",
 		"cd ./missing",
-		"export KEPT=no 1bad=x",
-		"printenv KEPT ?",
+		"set env/KEPT = \"entry-value\"",
+		"set env/KEPT = true",
+		"printenv KEPT",
+		"def captured ()\n  set env/KEPT = \"capture-only\"\n  sh -c 'printf %s \"$KEPT\"'\n",
+		"echo $(captured)",
+		"printenv KEPT",
+		"cd",
+		"pwd",
+		"cd -",
+		"cd ~",
+		"pwd",
+		"cd ~/..",
+		"pwd",
 	}, "\n") + "\n"
 	var out, errOut bytes.Buffer
 	command := exec.Command(nativeCLIBinary(t), "do", "run", "-i")
-	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash", "KASH_INIT=")
+	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash", "KASH_INIT=", "HOME="+filepath.Join(directory, "sub"))
 	command.Stdin, command.Stdout, command.Stderr = strings.NewReader(entries), &out, &errOut
 	err := command.Run()
 	status := 0
@@ -673,14 +709,14 @@ func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
 		status = exit.ExitCode()
 	}
 	resolved, _ := filepath.EvalSymlinks(filepath.Join(directory, "sub"))
-	want := resolved + "\nhi kash\n$KASH_TEST_NAME\n"
+	want := resolved + "\nhi kash\n$KASH_TEST_NAME\nhi kash\nentry-value\ncapture-only\nentry-value\n" + resolved + "\n" + resolved + "\n" + filepath.Dir(resolved) + "\n"
 	if status != 0 || out.String() != want {
 		t.Fatalf("session state: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 	if data, err := os.ReadFile(filepath.Join(directory, "sub", "note.txt")); err != nil || string(data) != "written\n" {
 		t.Fatalf("redirection did not follow cd: %q %v", data, err)
 	}
-	if !strings.Contains(errOut.String(), "cd: not a directory") || !strings.Contains(errOut.String(), "export: expected NAME=VALUE: 1bad=x") {
+	if !strings.Contains(errOut.String(), "cd: not a directory") || !strings.Contains(errOut.String(), "[EXPR_INVALID]") || !strings.Contains(errOut.String(), "[CAP_DENIED]") {
 		t.Fatalf("builtin errors: %q", errOut.String())
 	}
 }
@@ -733,14 +769,931 @@ func TestNativeKashCommandWordsComposeTypedArguments(t *testing.T) {
 	directory := t.TempDir()
 	t.Setenv("KAME_TEST_WORD_SCOPE", "scope with space")
 	text := "def folder = \"./two words\"\ndef flags = [\"x y\", \"z\"]\n" +
-		"printf '[%s]' @build --mtime=@0 deploy@host: @(str 42) '@{quoted}' " +
+		"printf '[%s]' @build --mtime=@0 deploy@host: @(str 42) '${quoted}' " +
 		"$folder/file ${env/KAME_TEST_WORD_SCOPE}/file $...flags prefix-$(printf captured)-suffix\n"
-	want := "[@build][--mtime=@0][deploy@host:][@42][@{quoted}]" +
+	want := "[@build][--mtime=@0][deploy@host:][@42][${quoted}]" +
 		"[./two words/file][scope with space/file][x y][z][prefix-captured-suffix]"
 	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
 		"--allow-run", "--allow-env=KAME_TEST_WORD_SCOPE", "-c", text)
 	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
 		t.Fatalf("command words returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeExpressionNamesResolveLexicalStandardAndEnvironment(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("KAME055_ENV_VALUE", "from environment")
+	t.Setenv("kame055_env_lowercase", "unreachable")
+	t.Setenv("KAME055_ENV_MISSING", "")
+	if err := os.Unsetenv("KAME055_ENV_MISSING"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		source, want, code string
+	}{
+		{source: `KAME055_ENV_VALUE`, want: `"from environment"`},
+		{source: `(KAME055_ENV_VALUE => KAME055_ENV_VALUE) "lexical"`, want: `"lexical"`},
+		{source: `(str => [str, std/str 42]) "lexical"`, want: `["lexical", "42"]`},
+		{source: `kame055_env_lowercase`, code: "REF_MISSING"},
+		{source: `KAME055_ENV_MISSING`, code: "ENV_VAR_MISSING"},
+		{source: `KAME055_ENV_MISSING ?? "fallback"`, want: `"fallback"`},
+		{source: `env/KAME055_ENV_MISSING`, want: `nil`},
+		{source: `KAME055_ENV_DENIED ?? "fallback"`, code: "CAP_DENIED"},
+	} {
+		command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "expr",
+			"--allow-env=KAME055_ENV_VALUE", "--allow-env=KAME055_ENV_MISSING", "--allow-env=kame055_env_lowercase", "-c", tc.source)
+		status := nativeCLIWait(t, command, stderr)
+		if tc.code != "" {
+			if status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "["+tc.code+"]") {
+				t.Errorf("%s: status %d, output %q, diagnostic %s", tc.source, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+			}
+		} else if status != 0 || strings.TrimSpace(nativeCLIRead(stdout)) != tc.want {
+			t.Errorf("%s: status %d, output %q, want %q, diagnostic %s", tc.source, status, nativeCLIRead(stdout), tc.want, nativeCLIRead(stderr))
+		}
+	}
+}
+
+func TestNativeKashSetUpdatesTheOwningBlock(t *testing.T) {
+	directory := t.TempDir()
+	text := `let total = 0
+for increment in [1, 2, 3]
+  set total = total + increment
+if true
+  let total = 10
+  set total = total + 1
+  (out! total)
+with
+  set total = total + 1
+(out! total)
+def count ()
+  let count = 40
+  set count = count + 2
+  return count
+(out! (count ()))
+`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "11742" {
+		t.Fatalf("set returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
+		"-c", "let values = []", "-c", `set values = [(out! "once "), $?(printf ready).value]
+(out! values.1)`)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "once ready" {
+		t.Fatalf("suspended assignment returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
+		"-c", "(out! \"forbidden\")\nlet target = 1\nset target = 2", "-c", "let closure = (ignored => target)")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
+		!strings.Contains(nativeCLIRead(stderr), "[PARSE_ERR]") {
+		t.Fatalf("invalid assignment returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashLetShadowsFromItsDeclaration(t *testing.T) {
+	directory := t.TempDir()
+	first := `let value = 1
+let saved = (() => value)
+def read-original ()
+  return value
+let earlier = value
+let value = value + 1
+set value = value + 1
+(out! [(saved ()), (read-original ()), earlier, value])
+def local ()
+  let n = 10
+  let previous = (() => n)
+  let n = n + 10
+  set n = n + 1
+  return [(previous ()), n]
+(out! (local ()))`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", first)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "[1,1,1,3][10,21]" {
+		t.Fatalf("shadowing returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
+		"-c", "let value = 1\nlet earlier = value", "-c", "let value = value + 1\n(out! [earlier, value])")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "[1,2]" {
+		t.Fatalf("cross-fragment shadowing returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashCommandLookupPrefersLexicalBindings(t *testing.T) {
+	directory := t.TempDir()
+	text := `def printf value rest...
+  (out! [value.count, rest])
+  return "discarded"
+let value = {count: 42}
+let extra = [1, true]
+printf $value $...extra
+let callback = (x => out! x)
+$callback typed
+out! marker
+err! warning
+std/out! (str 7)
+x/printf %s external`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "[42,[1,true]]typedmarker7external" || nativeCLIRead(stderr) != "warning" {
+		t.Fatalf("command lookup returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, tc := range []struct{ source, code string }{
+		{`let printf = 42; printf (out! "forbidden")`, "EXPR_INVALID"},
+		{`let printf = 42; printf (out! "forbidden") | cat`, "EXPR_INVALID"},
+		{`str (out! "argument")`, "TOOL_MISSING"},
+	} {
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", tc.source)
+		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
+			!strings.Contains(nativeCLIRead(stderr), "["+tc.code+"]") {
+			t.Fatalf("%s: status %d, output %q, diagnostic %s", tc.source, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+}
+
+func TestNativeKashEnvironmentWritesStayInTheirExecutionUnit(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("KAME055_UNIT_VALUE", "parent")
+	setup := `def update value
+  set env/KAME055_UNIT_VALUE = value
+  return value
+update 42`
+	uses := `(out! env/KAME055_UNIT_VALUE)
+printf %s $(printf %s (update "capture") && sh -c 'printf %s "$KAME055_UNIT_VALUE"')
+(out! KAME055_UNIT_VALUE)
+with env: {KAME055_UNIT_VALUE: "stage"}
+  set env/KAME055_UNIT_VALUE = "after"
+  sh -c 'printf %s "$KAME055_UNIT_VALUE"'
+  (out! KAME055_UNIT_VALUE)
+sh -c 'printf %s "$KAME055_UNIT_VALUE"'`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash",
+		"--allow-env=KAME055_UNIT_VALUE", "--allow-run", "-c", setup, "-c", uses)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "42capturecapture42stageafterafter" {
+		t.Fatalf("environment unit returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", `def change ()
+  defer sh -c 'printf %s "$KAME055_UNIT_VALUE"'
+  set env/KAME055_UNIT_VALUE = "cleanup"
+change`)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "cleanup" {
+		t.Fatalf("cleanup environment returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, tc := range []struct{ source, code string }{
+		{`set env/KAME055_UNIT_VALUE = nil`, "CAP_DENIED"},
+		{`set env/KAME055_UNIT_VALUE = true`, "EXPR_INVALID"},
+		{`set env/KAME055_UNIT_VALUE = {key: "value"}`, "EXPR_INVALID"},
+		{`set env/KAME055_UNIT_VALUE = "unreadable"; (out! (KAME055_UNIT_VALUE ?? "fallback"))`, "CAP_DENIED"},
+	} {
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", tc.source)
+		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
+			!strings.Contains(nativeCLIRead(stderr), "["+tc.code+"]") {
+			t.Fatalf("%s: status %d, output %q, diagnostic %s", tc.source, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-n", "-c", `set env/KAME055_UNIT_VALUE = (out! "forbidden")`)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "" {
+		t.Fatalf("dry-run environment assignment returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashRecipeEnvironmentRemovalRequiresScopedAuthority(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("KAME055_AUTH_VALUE", "original")
+	file := filepath.Join(directory, "authority.km")
+	nativeCLIWrite(t, file, `task default ; {authority: {read: ["KAME055_AUTH_VALUE"], unset: ["KAME055_AUTH_VALUE"]}}
+  set env/KAME055_AUTH_VALUE = ""
+  (out! (env/KAME055_AUTH_VALUE == ""))
+  set env/KAME055_AUTH_VALUE = nil
+  (out! (env/KAME055_AUTH_VALUE == nil))
+  sh -c 'printf %s "${KAME055_AUTH_VALUE-unset}"'
+task without-authority
+  set env/KAME055_AUTH_VALUE = nil
+`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-run", file)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), "truetrue") || !strings.Contains(nativeCLIRead(stdout), "unset") {
+		t.Fatalf("authorized removal returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-run", file, "without-authority")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || !strings.Contains(nativeCLIRead(stderr)+nativeCLIRead(stdout), "[CAP_DENIED]") {
+		t.Fatalf("unauthorized removal returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, policy := range []string{`true`, `{read: [true]}`, `{unset: ["DUP", "DUP"]}`, `{other: []}`} {
+		nativeCLIWrite(t, file, "task prepare\n  out! forbidden\ntask default : prepare ; {authority: "+policy+"}\n  out! forbidden\n")
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-run", file)
+		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[EXPR_INVALID]") {
+			t.Fatalf("authority %s returned status %d: %q %s", policy, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+}
+
+func TestNativeInteractiveKashEnvironmentPersistsAcrossEntries(t *testing.T) {
+	t.Setenv("KASH_INIT", "")
+	input := "def change ()\n  set env/KAME055_SESSION_VALUE = \"session\"\n\nchange\n" +
+		"out! (env/KAME055_SESSION_VALUE)\nsh -c 'printf %s \"$KAME055_SESSION_VALUE\"'\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, t.TempDir(), []string{"do", "run", "-i", "--allow-run", "--allow-env=KAME055_SESSION_VALUE"}, strings.NewReader(input), &out, &errOut)
+	if status != 0 || out.String() != "sessionsession" || errOut.Len() != 0 {
+		t.Fatalf("interactive environment returned status %d: %q %s", status, out.String(), errOut.String())
+	}
+}
+
+func TestNativeKashFreshnessValidatesConsumedChildEnvironment(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "input"), "material")
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `rule ./out : ./input ; {authority: {read: ["OBS_REMOVED"], unset: ["OBS_REMOVED"]}}
+  set env/OBS_REPLACED = "local"
+  set env/OBS_REMOVED = nil
+  if env/OBS_REMOVED != nil
+    (fail! "removed variable")
+  with env: {OBS_STAGE: "with"}
+    sh -c 'printf "ran\n" >> runs; printf "%s/%s/%s/%s\n" "$OBS_PASS" "$OBS_REPLACED" "${OBS_REMOVED-unset}" "$OBS_STAGE"' > $outputs.0
+    OBS_STAGE: "child" sh -c 'printf "%s/%s\n" "$OBS_PASS" "$OBS_STAGE"' >> $outputs.0
+`)
+	for i, inherited := range []string{"first", "first", "changed"} {
+		for _, name := range []string{"OBS_REPLACED", "OBS_REMOVED", "OBS_STAGE"} {
+			t.Setenv(name, fmt.Sprintf("unused-%d", i))
+		}
+		t.Setenv("OBS_PASS", inherited)
+		command, _, stderr := nativeCLIStart(t, directory, "--allow-read", "--allow-write", "--allow-run", "./out")
+		if status := nativeCLIWait(t, command, stderr); status != 0 {
+			t.Fatalf("environment build %d returned status %d: %s", i, status, nativeCLIRead(stderr))
+		}
+		want := inherited + "/local/unset/with\n" + inherited + "/child\n"
+		if got := nativeCLIRead(filepath.Join(directory, "out")); got != want {
+			t.Fatalf("build %d output %q, want %q", i, got, want)
+		}
+		wantRuns := 1
+		if i == 2 {
+			wantRuns = 2
+		}
+		if runs := strings.Count(nativeCLIRead(filepath.Join(directory, "runs")), "ran\n"); runs != wantRuns {
+			t.Fatalf("build %d executed %d times, want %d", i, runs, wantRuns)
+		}
+	}
+}
+
+func TestNativeKashWrittenPathSelectsExecutable(t *testing.T) {
+	directory := t.TempDir()
+	tool := filepath.Join(directory, "kame055-path-tool")
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\nprintf unit-path"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	text := "set env/PATH = " + kameString(directory) + "\nPATH: /nonexistent kame055-path-tool"
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{want: "unit-path"},
+		{args: []string{"--tool=kame055-path-tool=/bin/true"}},
+	} {
+		args := append([]string{"do", "run", "--lang", "kash"}, tc.args...)
+		command, stdout, stderr := nativeCLIStart(t, directory, append(args, "-c", text)...)
+		if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != tc.want {
+			t.Fatalf("%v: PATH lookup returned status %d: %q %s", tc.args, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "--allow-run="+directory, "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[CAP_DENIED]") {
+		t.Fatalf("scoped PATH lookup returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `task default ; {authority: {unset: ["PATH"]}}
+  set env/PATH = nil
+  kame055-path-tool
+`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "--allow-run", "default")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || strings.Contains(nativeCLIRead(stdout), "unit-path") || !strings.Contains(nativeCLIRead(stderr), "[TOOL_MISSING]") {
+		t.Fatalf("unset PATH lookup returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "--allow-run", "--tool=kame055-path-tool="+tool, "default")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), "unit-path") {
+		t.Fatalf("tool override with unset PATH returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashDirectoryChangesStayInTheirExecutionUnit(t *testing.T) {
+	directory := t.TempDir()
+	for _, name := range []string{"first", "second", "home"} {
+		if err := os.Mkdir(filepath.Join(directory, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", filepath.Join(directory, "home"))
+	setup := `def move destination
+  cd $destination
+  return ""
+move ./first
+pwd
+(out! (sh! "pwd").stdout)`
+	uses := `printf %s $(printf %s (move ../second) && pwd)
+pwd
+cd -
+pwd
+with cwd: ./first
+  cd ./second
+  pwd
+pwd
+cd
+pwd
+cd ./missing || /bin/printf 'recovered\n'`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", setup, "-c", uses)
+	want := strings.Join([]string{filepath.Join(directory, "first"), filepath.Join(directory, "first"), filepath.Join(directory, "second"), filepath.Join(directory, "first"), directory,
+		filepath.Join(directory, "first"), filepath.Join(directory, "second"), filepath.Join(directory, "home"), "recovered", ""}, "\n")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("directory unit returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeAuthoredImportsBindOnlyExports(t *testing.T) {
+	directory := t.TempDir()
+	library := filepath.Join(directory, "lib")
+	if err := os.Mkdir(library, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(library, "util.km"), `export answer, say
+private = 40
+answer = private + 2
+def say () = out! "ok"
+unused = fail! "an import must not evaluate definitions"
+task ignored
+  out! forbidden`)
+	nativeCLIWrite(t, filepath.Join(library, "other.kash"), `export greet
+def greet word
+  out! $word`)
+	kash := filepath.Join(directory, "main.kash")
+	nativeCLIWrite(t, kash, `import ./lib/util
+from ./lib/util.km import answer as copied
+let util = "local"
+out! $util ${util/answer} $copied
+util/say`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-write", kash)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "local4242ok" {
+		t.Fatalf("Kash import returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	kame := filepath.Join(directory, "main.km")
+	nativeCLIWrite(t, kame, `from ./lib/other import greet as say
+task default
+  say cross-language`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-write", kame)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), "cross-language") {
+		t.Fatalf("Kame import returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, tc := range []struct{ declaration, code string }{
+		{"from ./lib/util.km import private", "REF_MISSING"},
+		{"import ./lib/absent", "FS_ERR"},
+		{"import ./lib/ambiguous", "RES_INVALID"},
+	} {
+		nativeCLIWrite(t, filepath.Join(library, "ambiguous.km"), "unused = 1\n")
+		nativeCLIWrite(t, filepath.Join(library, "ambiguous.kash"), "def unused = 1\n")
+		nativeCLIWrite(t, kash, "out! forbidden\n"+tc.declaration+"\n")
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-write", kash)
+		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "["+tc.code+"]") {
+			t.Fatalf("%s returned status %d: %q %s", tc.declaration, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+	}
+}
+
+func TestNativeAuthoredImportsResolveNestedModules(t *testing.T) {
+	directory := t.TempDir()
+	for _, folder := range []string{"lib", "lib/helpers"} {
+		if err := os.Mkdir(filepath.Join(directory, folder), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	main := filepath.Join(directory, "main.kash")
+	facade := filepath.Join(directory, "lib", "facade.km")
+	included := filepath.Join(directory, "lib", "helpers", "included.km")
+	leaf := filepath.Join(directory, "lib", "leaf.kash")
+	nativeCLIWrite(t, main, `import ./lib/facade
+from ./lib/./facade.km import greet
+facade/greet first
+greet second`)
+	nativeCLIWrite(t, facade, `include ./helpers/included.km
+export greet`)
+	nativeCLIWrite(t, included, `from ../leaf import speak
+def greet = speak`)
+	nativeCLIWrite(t, leaf, `export speak
+def speak word
+  out! $word
+def unused = fail! "an import must not evaluate definitions"`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-write", main)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "firstsecond" {
+		t.Fatalf("nested imports returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+
+	nativeCLIWrite(t, facade, `from ./leaf import speak
+export speak`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-write", main)
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[DEF_INVALID]") {
+		t.Fatalf("re-export returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+
+	nativeCLIWrite(t, facade, `import ./leaf.kash`)
+	nativeCLIWrite(t, leaf, `import ./facade.km`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-write", main)
+	status := nativeCLIWait(t, command, stderr)
+	message := nativeCLIRead(stderr)
+	chain := strings.Join([]string{facade, leaf, facade}, " -> ")
+	if status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(message, "[DEP_CYCLE]") || !strings.Contains(message, chain) {
+		t.Fatalf("import cycle returned status %d: %q %s", status, nativeCLIRead(stdout), message)
+	}
+}
+
+func TestNativeAuthoredModuleSelectsConditionalIncludes(t *testing.T) {
+	directory := t.TempDir()
+	main := filepath.Join(directory, "main.kash")
+	module := filepath.Join(directory, "library.km")
+	nativeCLIWrite(t, main, `import ./library.km
+out! ${library/message}`)
+	nativeCLIWrite(t, filepath.Join(directory, "configuration.km"), `mode = "release"`)
+	nativeCLIWrite(t, filepath.Join(directory, "selected.km"), `message = "selected"`)
+	nativeCLIWrite(t, module, `include ./configuration.km
+def release () = mode == "release"
+if read ./unused.km
+  task ignored
+    out! forbidden
+if false
+  include ./library.km
+elif release ()
+  if nil
+    include ./absent.km
+  else
+    include? ./optional.km
+    include ./selected.km
+else
+  include ./absent.km
+export message`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-write", main)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "selected" {
+		t.Fatalf("conditional includes returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+
+	nativeCLIWrite(t, module, `if true
+  include ./library.km`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-write", main)
+	status := nativeCLIWait(t, command, stderr)
+	message := nativeCLIRead(stderr)
+	if status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(message, "[DEP_CYCLE]") ||
+		!strings.Contains(message, module+" -> "+module) {
+		t.Fatalf("conditional include cycle returned status %d: %q %s", status, nativeCLIRead(stdout), message)
+	}
+}
+
+func TestNativeDeclarationBlocksCloseOverIterationBindings(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "input"), "input")
+	nativeCLIWrite(t, filepath.Join(directory, "Makefile.km"), `variants = ["debug", "release"]
+for variant in variants
+  let label = "${variant}/${env/KAME055_VARIANT_LABEL}"
+  if variant == "debug"
+    rule ./${variant}.txt : ./input = label
+  else
+    rule ./${variant}.txt : ./input
+      return label
+if true
+  let label = "local to conditional"
+  task message
+    out! $label`)
+	for _, label := range []string{"first", "updated"} {
+		t.Setenv("KAME055_VARIANT_LABEL", label)
+		command, stdout, stderr := nativeCLIStart(t, directory, "--allow-env=KAME055_VARIANT_LABEL", "--allow-read=./input", "--allow-write", "./debug.txt", "./release.txt", "message")
+		if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), "local to conditional") {
+			t.Fatalf("declaration build returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+		for _, variant := range []string{"debug", "release"} {
+			if content := nativeCLIRead(filepath.Join(directory, variant+".txt")); content != variant+"/"+label {
+				t.Fatalf("%s rule captured %q with label %s", variant, content, label)
+			}
+		}
+	}
+}
+
+func TestNativeGenerateRegistersRuleValues(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "Makefile.km")
+	nativeCLIWrite(t, source, `def create name =
+  rule ./${name}.txt
+    return name
+generate (["first", "second"] |> map create)
+for name in ["nested"]
+  let body = "${name}/generated"
+  generate (rule ./${name}.txt = body)
+generate (task default
+  out! generated
+)`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-write", source, "./first.txt", "./second.txt", "./nested.txt", "default")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), "generated") {
+		t.Fatalf("generate returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	for _, entry := range []struct{ name, content string }{{"first", "first"}, {"second", "second"}, {"nested", "nested/generated"}} {
+		if got := nativeCLIRead(filepath.Join(directory, entry.name+".txt")); got != entry.content {
+			t.Errorf("generated %s wrote %q, want %q", entry.name, got, entry.content)
+		}
+	}
+
+	nativeCLIWrite(t, source, `def create name =
+  task conflict
+    out! forbidden
+generate ([1, 2] |> map create)`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "--allow-write", "conflict")
+	status := nativeCLIWait(t, command, stderr)
+	message := nativeCLIRead(stderr)
+	if status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(message, "[TGT_AMBIG]") ||
+		!strings.Contains(message, "call create") || !strings.Contains(message, "generate registration") {
+		t.Fatalf("generate collision returned status %d: %q %s", status, nativeCLIRead(stdout), message)
+	}
+}
+
+func TestNativeGenerateImportsConstructorAndPrivateBindings(t *testing.T) {
+	directory := t.TempDir()
+	library := filepath.Join(directory, "lib")
+	if err := os.Mkdir(library, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(library, "factory.km"), `from ./labels.km import label
+export create
+stem = "result-"
+def create name =
+  rule ./${stem}${name}.txt = str label ":" name ":" (basename module/file)
+`)
+	nativeCLIWrite(t, filepath.Join(library, "labels.km"), "export label\nlabel = \"private\"\n")
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `import ./unused
+from ./lib/factory.km import create
+generate (create "item")
+`)
+	command, _, stderr := nativeCLIStart(t, directory, "./result-item.txt")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(filepath.Join(directory, "result-item.txt")) != "private:item:factory.km" {
+		t.Fatalf("imported constructor returned status %d: %s", status, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeDeclarationIncludesSpliceIntoEachIteration(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directory, "rules"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `for variant in ["debug", "release"]
+  if variant == "unused"
+    include ./Kamefile
+  include ./rules/variant.km
+  rule ./${variant}-after.txt = final
+`)
+	nativeCLIWrite(t, filepath.Join(directory, "rules", "variant.km"), `label = str prefix ":" (basename module/file)
+prefix = str variant "-selected"
+include ./nested.km
+final = str label nested-label
+`)
+	nativeCLIWrite(t, filepath.Join(directory, "rules", "nested.km"), `nested-label = str ":" (basename module/file)
+rule ./${variant}.txt = str label nested-label
+`)
+	command, _, stderr := nativeCLIStart(t, directory, "./debug.txt", "./debug-after.txt", "./release.txt", "./release-after.txt")
+	if status := nativeCLIWait(t, command, stderr); status != 0 {
+		t.Fatalf("declaration includes returned status %d: %s", status, nativeCLIRead(stderr))
+	}
+	for _, variant := range []string{"debug", "release"} {
+		for name, want := range map[string]string{
+			variant + ".txt":       variant + "-selected:variant.km:nested.km",
+			variant + "-after.txt": variant + "-selected:variant.km:nested.km",
+		} {
+			if got := nativeCLIRead(filepath.Join(directory, name)); got != want {
+				t.Errorf("%s contains %q, want %q", name, got, want)
+			}
+		}
+	}
+}
+
+func TestNativeRuleBodyBindsCapturesAndChangedInputs(t *testing.T) {
+	directory := t.TempDir()
+	target := "./out/release/common/example.txt"
+	if err := os.MkdirAll(filepath.Join(directory, "out", "release", "common"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "order"} {
+		nativeCLIWrite(t, filepath.Join(directory, name), name)
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "bindings.kash"), `export snapshot
+def snapshot () = [captures, changed-inputs]`)
+	nativeCLIWrite(t, filepath.Join(directory, "Makefile.km"), `import ./bindings.kash
+rule ./out/{kind}/{*}/{name}.txt : ./a ./b ./a | ./order
+  let job = $&(out! "$kind/$name" (json (bindings/snapshot ())))
+  let done = $?(wait $job)
+  return done.value`)
+	for i, want := range []string{`release/example[["release","common","example"],["./a","./b"]]`, `release/example[["release","common","example"],["./b"]]`, `release/example[["release","common","example"],[]]`} {
+		args := []string{"--allow-read", "--allow-write", target}
+		if i == 1 {
+			nativeCLIWrite(t, filepath.Join(directory, "b"), "new bytes")
+			nativeCLIWrite(t, filepath.Join(directory, "order"), "changed order-only input")
+		} else if i == 2 {
+			args = append([]string{"--force"}, args...)
+		}
+		command, stdout, stderr := nativeCLIStart(t, directory, args...)
+		if status := nativeCLIWait(t, command, stderr); status != 0 {
+			t.Fatalf("build %d returned status %d: %q %s", i, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+		}
+		if got := nativeCLIRead(filepath.Join(directory, target)); got != want {
+			t.Fatalf("build %d wrote %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestNativePlainPathsKeepTheirKindAtRuntime(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "input.txt"), "payload")
+	source := filepath.Join(directory, "main.kash")
+	nativeCLIWrite(t, source, `let file = ./input.txt
+let joined = joinpath (dirname file) "input.txt"
+out! (json [(file == joined), (file == "./input.txt"), (string? file), (string? module/file)])
+out! "|" (str file) "|" (read file) "|"
+printf "%s" $file`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-run", "--allow-read", source)
+	want := "[true,false,false,false]|./input.txt|payload|./input.txt"
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("typed paths returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativePathPatternsCaptureBindAndDiscover(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directory, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"z.c", "a.c", "other.h", "left-right.c", "yes-yes.c"} {
+		nativeCLIWrite(t, filepath.Join(directory, "src", name), "")
+	}
+	if err := os.Mkdir(filepath.Join(directory, "src", "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "src", "sub", "nested.c"), "")
+	source := filepath.Join(directory, "main.kash")
+	nativeCLIWrite(t, source, `let matcher = ./src/{path:**}/{name}.c
+let target = ./build/{path}/{name}.o
+let fields = ./src/lib/math/vector.c |> capture matcher
+let output = fields |> bind target
+let regex = regex-match (pattern "{word:~[a-z]+}") "ok"
+let found = files ./src/*.c
+let grouped = files ./src/{name:~[a-z]+}-{name}.c
+let absolute = files ${module/dir}/src/{name:~[a-z]+}-{name}.c
+let nested = files ./src/{path:**}/{name}.c
+let repeated = capture (pattern "{name:*}-{name:*}") "x-y"
+out! (json fields) "|" (str output) "|" (regex-group "word" regex)
+out! "|" (json [(output == ./build/lib/math/vector.o), (found == [./src/a.c, ./src/left-right.c, ./src/yes-yes.c, ./src/z.c]), (grouped == [./src/yes-yes.c]), (absolute == grouped), (nested == [./src/sub/nested.c]), (nil? repeated)])`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-read", source)
+	want := `{"name":"vector","path":"lib/math"}|./build/lib/math/vector.o|ok|[true,true,true,true,true,true]`
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("path operations returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeDeclarationDiscoveryWatchRecoversFromOverlap(t *testing.T) {
+	directory := t.TempDir()
+	items := filepath.Join(directory, "items")
+	if err := os.Mkdir(items, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(items, "yes-yes.txt"), "")
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `if true
+  let discovered = files ./items/{name:~[a-z]+}-{name}.txt
+  if (count discovered) > 1
+    rule ./items/absent-absent.txt = "collision"
+  rule ./out = str (count discovered)
+`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "--json", "--watch", "./out")
+	idleCount := func() int { return strings.Count(nativeCLIRead(stdout), `"type":"watch-idle"`) }
+	nativeCLIAwait(t, stderr, func() bool { return idleCount() >= 1 })
+	if got := nativeCLIRead(filepath.Join(directory, "out")); got != "1" {
+		t.Fatalf("initial registration gave %q", got)
+	}
+	nativeCLIWrite(t, filepath.Join(items, "left-right.txt"), "")
+	if err := os.Mkdir(filepath.Join(items, "dir-dir.txt"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	matching := filepath.Join(items, "also-also.txt")
+	nativeCLIWrite(t, matching, "")
+	nativeCLIAwait(t, stderr, func() bool { return idleCount() >= 2 })
+	log := nativeCLIRead(stdout)
+	if !strings.Contains(log, `"code":"DISCOVERY_OVERLAP"`) || !strings.Contains(log, `output declared here: ./items/absent-absent.txt`) {
+		t.Fatalf("failed registration missed the pattern's absent output:\n%s", log)
+	}
+	if err := os.Remove(matching); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIAwait(t, stderr, func() bool { return idleCount() >= 3 })
+	log = nativeCLIRead(stdout)
+	if strings.Count(log, `"code":"DISCOVERY_OVERLAP"`) != 1 || nativeCLIRead(filepath.Join(directory, "out")) != "1" {
+		t.Fatalf("watch did not recover from discovery overlap after the matching file was removed:\n%s", log)
+	}
+	if err := command.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	if status := nativeCLIWait(t, command, stderr); status != 130 {
+		t.Fatalf("watch returned status %d: %s", status, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeDeclarationDiscoveryRejectsContentReads(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "secret.txt"), "private contents")
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `payload = read ./secret.txt
+if payload
+  rule ./out = "unexpected"
+`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "--json", "./out")
+	status := nativeCLIWait(t, command, stderr)
+	log := nativeCLIRead(stdout)
+	if status != 1 || !strings.Contains(log, `"code":"PHASE_INVALID"`) || strings.Contains(log, "private contents") {
+		t.Fatalf("registration returned status %d: %s%s", status, log, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeDeclarationDiscoveryRejectsGeneratedOutput(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `inputs = files ./items/*.txt
+if (count inputs) == 0
+  generate (rule ./items/absent.txt = "collision")
+`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "--json", "./items/absent.txt")
+	status := nativeCLIWait(t, command, stderr)
+	log := nativeCLIRead(stdout)
+	if status != 1 || !strings.Contains(log, `"code":"DISCOVERY_OVERLAP"`) || !strings.Contains(log, `output declared here: ./items/absent.txt`) {
+		t.Fatalf("generated output registration returned status %d: %s%s", status, log, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeModulePathsUseTheAuthoringFile(t *testing.T) {
+	directory := t.TempDir()
+	library := filepath.Join(directory, "lib")
+	for _, name := range []string{library, filepath.Join(directory, "other")} {
+		if err := os.Mkdir(name, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	helper := filepath.Join(library, "assets.kash")
+	nativeCLIWrite(t, helper, `def assets () = module/dir
+def assets-file () = module/file
+def asset-path () = ${module/dir}/templates/page.kmt
+export assets, assets-file`)
+	t.Setenv("KAME055_MODULE_VALUE", "initial")
+	kash := filepath.Join(directory, "main.kash")
+	nativeCLIWrite(t, kash, `include ./lib/assets.kash
+let env = "lexical"
+set env/KAME055_MODULE_VALUE = "store"
+cd ./other
+printf '%s\n' $env ${env/KAME055_MODULE_VALUE} ${module/dir} ${module/file} (assets ()) (assets-file ()) (asset-path ())`)
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--allow-env=KAME055_MODULE_VALUE", "--allow-run", kash)
+	want := strings.Join([]string{"lexical", "store", directory, kash, library, helper, filepath.Join(library, "templates", "page.kmt"), ""}, "\n")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("Kash module paths returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+	kame := filepath.Join(directory, "main.km")
+	nativeCLIWrite(t, kame, `import ./lib/assets.kash as library
+task default
+  printf '%s\n' ${module/dir} ${module/file} (library/assets ()) (library/assets-file ())`)
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--allow-run", kame)
+	want = strings.Join([]string{directory, kame, library, helper, ""}, "\n")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || !strings.Contains(nativeCLIRead(stdout), want) {
+		t.Fatalf("Kame module paths returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashOutputBuiltinsUseStageRouting(t *testing.T) {
+	directory := t.TempDir()
+	raw := []byte{0, 0xff, '\r', '\n'}
+	if err := os.WriteFile(filepath.Join(directory, "bytes"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text := `let raw = read ./bytes
+out! $raw > ./out
+err! $raw 2> ./err
+let captured = $(out! "captured")
+let diverted = $(err! "joined" 2>&1)
+out! $captured $diverted
+let job = $&(out! async)
+let done = $?(wait $job)
+out! $done.value
+def cleanup ()
+  defer out! later >> ./out
+cleanup`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "-l", "kash", "--allow-read", "--allow-write", "-c", text)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "capturedjoinedasync" || nativeCLIRead(stderr) != "" {
+		t.Fatalf("routed output returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	if got := nativeCLIRead(filepath.Join(directory, "out")); got != string(raw)+"later" {
+		t.Fatalf("redirected stdout = %q", got)
+	}
+	if got := nativeCLIRead(filepath.Join(directory, "err")); got != string(raw) {
+		t.Fatalf("redirected stderr = %q", got)
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", "out! piped | cat")
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "piped" || nativeCLIRead(stderr) != "" {
+		t.Fatalf("pipeline output returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashFunctionCapturesAndOutcomes(t *testing.T) {
+	directory := t.TempDir()
+	text := `def produce value
+  defer out! ":cleanup"
+  out! "prefix:"
+  printf %s $value
+  err! "notice;"
+  return 42
+let captured = $(produce input)
+let outcome = $?(produce input)
+let job = $&(produce input)
+let done = $?(wait $job)
+printf '[%s][%s][%s]' $captured $outcome.value $done.value
+def rejected ()
+  out! private
+  (fail! "intentional")
+let failed = $?(rejected)
+printf '[%s:%s:%s]' $failed.state $failed.status $failed.error.code
+def process-failure ()
+  sh -c 'exit 7'
+let process-outcome = $?(process-failure)
+let accepted = $?(process-failure ?)
+printf '[%s:%s][%s:%s:%s]' $process-outcome.state $process-outcome.status $accepted.state $accepted.status $accepted.ok`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", text)
+	want := "[prefix:input:cleanup][42][42][failed:1:USER_ERROR][failed:7][completed:7:false]"
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want || nativeCLIRead(stderr) != "notice;notice;notice;" {
+		t.Fatalf("function captures returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "--capture-limit=32", "-c", "def flood ()\n  yes\nlet result = $(flood)\nout! $result")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[CAPTURE_LIMIT]") {
+		t.Fatalf("capture bound returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashCommandListOutcomesPreserveSelection(t *testing.T) {
+	directory := t.TempDir()
+	text := `let recovered = $?(sh -c 'printf one; exit 7' || printf two)
+let stopped = $?(sh -c 'printf bad; exit 7' && printf skipped)
+let accepted = $?(sh -c 'printf accepted; exit 8' ? || printf skipped)
+let missing = $?(printf one && kame055-no-such-command || printf skipped)
+let single = $?(kame055-no-such-command)
+def produce ()
+  out! internal
+  return 42
+let typed = $?(true && produce)
+let job = $&(true && kame055-no-such-command)
+let async = $?(wait $job)
+printf '[%s:%s][%s:%s][%s:%s:%s][%s:%s][%s][%s][%s]' $recovered.status $recovered.value $stopped.status $stopped.value $accepted.state $accepted.status $accepted.value $missing.error.code $missing.value $single.error.code $typed.value $async.error.code`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", text)
+	want := "[0:onetwo][7:bad][completed:8:accepted][TOOL_MISSING:one][TOOL_MISSING][42][TOOL_MISSING]"
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("command-list outcomes returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "--allow-write", "-c",
+		"let result = $?(out! hidden && true || out! skipped)\nout! unexpected")
+	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[CAP_DENIED]") {
+		t.Fatalf("command-list denial returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashWaitObservesOwnedAsyncOutcomes(t *testing.T) {
+	directory := t.TempDir()
+	setup := `let failed = $&(sh -c 'printf output; exit 7')
+let accepted = $&(sh -c 'exit 9' ?)
+let recovered = $&(printf before && false || printf after)
+let missing = $&(kame-test-nonexistent-command)`
+	inspect := `let failure = $?(wait $failed)
+let again = $?(wait $failed)
+let acceptedResult = $?(wait $accepted)
+let recoveredResult = $?(wait $recovered)
+let launchResult = $?(wait $missing)
+printf '%s\n' $failure.state $failure.value $failure.status $again.status
+printf '%s\n' $acceptedResult.state $acceptedResult.ok $acceptedResult.status $acceptedResult.effectiveStatus
+printf '%s\n' $recoveredResult.value $launchResult.state $launchResult.error.code`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", setup, "-c", inspect)
+	want := "failed\noutput\n7\n7\ncompleted\nfalse\n9\n0\nbeforeafter\nfailed\nTOOL_MISSING\n"
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("async waits returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+	command, _, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", "let job = $&(sh -c 'exit 7')")
+	if status := nativeCLIWait(t, command, stderr); status == 0 || !strings.Contains(nativeCLIRead(stderr), "RECIPE_FAIL") {
+		t.Fatalf("unobserved async failure returned status %d: %s", status, nativeCLIRead(stderr))
+	}
+}
+
+func TestNativeKashKillSignalsAndCancelsOwnedWork(t *testing.T) {
+	directory := t.TempDir()
+	text := `let signalled = $&(sleep 20)
+let unaffected = $&(printf intact)
+kill -TERM $signalled
+let terminated = $?(wait $signalled)
+let cancelled = $&(sh -c 'echo $$ > child; exec sleep 20')
+sh -c 'while [ ! -s child ]; do sleep 0.01; done'
+kill $cancelled
+let stopped = $?(wait $cancelled)
+let kept = $?(wait $unaffected)
+printf '%s\n' $terminated.signal $terminated.state $stopped.status $stopped.state $kept.value`
+	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", text)
+	want := fmt.Sprintf("%d\nfailed\n130\ncancelled\nintact\n", syscall.SIGTERM)
+	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
+		t.Fatalf("kill returned status %d: %q, want %q: %s", status, nativeCLIRead(stdout), want, nativeCLIRead(stderr))
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(nativeCLIRead(filepath.Join(directory, "child"))))
+	if err != nil || pid <= 0 || syscall.Kill(pid, 0) != syscall.ESRCH {
+		t.Fatalf("cancelled process was not reaped: PID %d, %v", pid, err)
+	}
+	command, _, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "-c", "kill 2147483646")
+	if status := nativeCLIWait(t, command, stderr); status == 0 || !strings.Contains(nativeCLIRead(stderr), "EXPR_INVALID") {
+		t.Fatalf("kill with a PID returned status %d: %s", status, nativeCLIRead(stderr))
 	}
 }
 
@@ -772,19 +1725,19 @@ func TestNativeKashStageSettingsUseReservedTypes(t *testing.T) {
 	}
 	nativeCLIWrite(t, filepath.Join(stageDirectory, "stage-proof"), "present")
 	text := "def seconds = 10\ndef detached = false\ndef variant = \"release\"\n" +
-		":timeout 10 :tty false :foreground $detached :env {MODE: \"two words\"} sh -c 'printf \"[%s]\" \"$MODE\"'\n" +
-		":timeout $seconds printf '[done]'\n" +
-		":cwd ./build/(variant) :timeout 0x10 sh -c 'test -f ./stage-proof && printf \"[cwd]\"'\n"
+		"timeout: 10 tty: false foreground: $detached env: {MODE: \"two words\"} sh -c 'printf \"[%s]\" \"$MODE\"'\n" +
+		"timeout: $seconds printf '[done]'\n" +
+		"cwd: ./build/(variant) timeout: 0x10 sh -c 'test -f ./stage-proof && printf \"[cwd]\"'\n"
 	command, stdout, stderr := nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
 	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != "[two words][done][cwd]" {
 		t.Fatalf("typed stage settings returned status %d: %q %s", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
 	}
 	for _, text := range []string{
-		":timeout (str 10) printf forbidden",
-		"def timeout = \"10\"\n:timeout $timeout printf forbidden",
-		":tty (str false) printf forbidden",
-		":foreground (str false) printf forbidden",
-		":env (str 10) printf forbidden",
+		"timeout: (str 10) printf forbidden",
+		"def timeout = \"10\"\ntimeout: $timeout printf forbidden",
+		"tty: (str false) printf forbidden",
+		"foreground: (str false) printf forbidden",
+		"env: (str 10) printf forbidden",
 	} {
 		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", text)
 		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||

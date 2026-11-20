@@ -179,11 +179,7 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 			}
 			return runDoCommand(args[1], args[2:], in, out, errOut)
 		}
-		message := cli.RemovedCommandMessage(args[1])
-		if message == "" {
-			message = "unknown command: " + args[1]
-		}
-		cliError(errOut, "CMD_UNKNOWN", message)
+		cliError(errOut, "CMD_UNKNOWN", cli.UnknownCommandMessage(args[1]))
 		if !cliDiagnosticJSON {
 			io.WriteString(errOut, "help: run 'kame do --help' to list commands\n")
 		}

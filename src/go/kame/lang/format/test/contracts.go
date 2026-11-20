@@ -6,7 +6,6 @@ import (
 	"kame/lang/format"
 	"kame/lang/script"
 	"kame/lang/source"
-	"strings"
 )
 
 func TestKashGraphFormattingCanonicalizesOperatorStages(t *testing.T) {
@@ -37,7 +36,7 @@ func TestKashGraphFormattingCanonicalizesOperatorStages(t *testing.T) {
 	if !inline.OK || !expanded.OK || expanded.Text != inline.Text {
 		t.Error("expanded Kash graph formatting is not idempotent")
 	}
-	if !strings.Contains(inline.Text, "\n\t|(broadcast) (\n\t\tcat > ./l,\n") {
+	if inline.Text != "printf a |(broadcast) (\n\tcat > ./l,\n\tcat > ./r\n)\n" {
 		t.Error("nested Kash group did not expand structurally")
 	}
 }
@@ -63,7 +62,7 @@ func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	defer mem.FreeString(a, definition.Text)
 	defer mem.FreeString(a, definition.Code)
 	defer mem.FreeString(a, definition.Message)
-	if !definition.OK || definition.Text != "value =\n  [\n\t1, # item\n\t2,\n]\n" {
+	if !definition.OK || definition.Text != "value =\n\t[\n\t\t1 # item\n\t\t2\n\t]\n" {
 		t.Errorf("definition lost its internal comment: %q", definition.Text)
 	}
 	text := "# before\ndef f () = 1\n# between\n  (f ())\n# after\n"
@@ -82,11 +81,16 @@ func TestValueFormatterSharesFragmentGrammarAndComments(t *testing.T) {
 	if !formatted.OK || formatted.Text != "# before\ndef f () = 1\n# between\n(f ())\n# after\n" {
 		t.Error("value formatter differs from fragment grammar or drops comments")
 	}
-	languages := []string{"km", "kmk", "kash"}
-	for _, lang := range languages {
-		result := format.Source(a, lang, "independent", "build : dep\n\techo ok\n", "tabs", 4)
-		if (lang == "km" && result.OK) || (lang == "kmk" && !result.OK) {
-			t.Error("value/rule parser boundary changed")
+	for _, test := range []struct {
+		text string
+		ok   bool
+	}{
+		{"task build : dep\n\techo ok\n", true},
+		{"build : dep\n\techo ok\n", false},
+	} {
+		result := format.Source(a, script.KameFileLanguage, "independent.km", test.text, "tabs", 4)
+		if result.OK != test.ok {
+			t.Error("Kame rule declaration keyword requirement changed")
 		}
 		mem.FreeString(a, result.Text)
 		mem.FreeString(a, result.Code)

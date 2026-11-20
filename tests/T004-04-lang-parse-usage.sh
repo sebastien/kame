@@ -22,7 +22,7 @@ cli_expect_status 2
 cli_expect_stderr_contains "OPT_NO_VALUE"
 
 test-step "only known languages are accepted"
-for lang in expr template rule script; do
+for lang in expr template km kash; do
 	cli_run --stdin /dev/null -- do parse "--lang=$lang"
 	# Empty stdin may be a parse error, but the language itself is accepted.
 	if [ "$CLI_STATUS" = 2 ]; then
@@ -32,9 +32,11 @@ for lang in expr template rule script; do
 	fi
 done
 
-cli_run -- do parse --lang bogus
-cli_expect_status 2
-cli_expect_stderr_contains "OPT_VALUE_INVALID" "invalid language"
+for lang in bogus rule script kmk; do
+	cli_run -- do parse "--lang=$lang"
+	cli_expect_status 2
+	cli_expect_stderr_contains "OPT_VALUE_INVALID" "invalid language"
+done
 
 test-step "unknown options are rejected"
 cli_run -- do parse --bogus

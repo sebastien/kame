@@ -21,15 +21,12 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	entry := &p.Instances[index]
 	// The common inherited snapshot is already canonical and owned. Keep it
 	// instead of reconstructing it on every dependency-validation attempt.
-	if entry.EnvironmentClaimed && len(entry.Rule.Environment) == 0 && len(entry.MetadataEnvironment) == 0 && sameEnvironment(entry.Environment, inherited) {
+	if entry.EnvironmentClaimed && len(entry.MetadataEnvironment) == 0 && sameEnvironment(entry.Environment, inherited) {
 		return true
 	}
 	var environment []string
 	for i := range inherited {
 		environment = p.setEnvironment(environment, inherited[i])
-	}
-	for i := range p.Instances[index].Rule.Environment {
-		environment = p.setEnvironment(environment, p.Instances[index].Rule.Environment[i].Value)
 	}
 	for i := range p.Instances[index].MetadataEnvironment {
 		environment = p.setEnvironment(environment, p.Instances[index].MetadataEnvironment[i])

@@ -32,6 +32,10 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 	for i := range value.Record {
 		field := value.Record[i]
 		switch field.Key {
+		case "compositionDiscoveries":
+			if field.Value.Kind != core.List {
+				return false
+			}
 		case "sources":
 			if !session && field.Value.Kind != core.List {
 				return false

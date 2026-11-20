@@ -1,200 +1,126 @@
 # Expressions
 
-`expr` parses exactly one Kame expression. It is the shared value language of
-scripts, templates, rule expansions, and Kash boundaries.
-
-Evaluation is bounded to 32 simultaneously active expressions, including
-function bodies and their operands. Deeper recursion reports `EVAL_DEPTH`
-instead of exhausting the native/WASM stack. Iterative `map`/`reduce` callbacks
-do not accumulate depth across items.
-
-## Values and references
+Kame programs, Kash actions, and templates share the expression grammar.
+Use `--lang expr` to inspect or evaluate one expression.
 
 ```kame
-[name: "app" sources: [./src/main.c ./src/util.c] release: :false]
+{name: "app", sources: [./src/main.c, ./src/util.c], release: false}
 ```
 
-- Lists and records use whitespace, not commas. Do not mix keyed and unkeyed
-  entries. Numbers, strings, explicit paths, booleans, and nil are values.
-- `[...prefix "printf" "%s\n"]` spreads a list expression one level into a list
-  literal. Empty lists insert nothing; non-lists error. Ordinary entries retain
-  nesting. Spread is not available in records, call arguments, or parameter lists.
-- Bare names are references; use `"app"` or `:app` for literal text. Symbols
-  other than `:true`, `:false`, and `:nil` evaluate to their name without `:`.
-- Paths start with `./`, `../`, or `/`; nonglob paths are values, not file reads.
-  `(resource "file:///absolute/path")` or `(resource "mem://workspace/path")`
-  constructs an explicit protocol resource; a quoted URI alone is ordinary text.
-- References support fields (`project.name`), indexes (`files.0`, `files.-1`),
-  half-open slices (`files.1..4`), and selections (`config.{host,port}`).
-- `env.NAME` reads one environment variable, like `(env "NAME")`, under a named
-  environment-read grant. Missing variables yield nil; empty values stay strings.
-  The `env.` namespace does not look up a lexical record or expose all variables.
-- Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
+Lists use brackets and records use braces. Separate items and fields with a
+comma or newline. Use `[...items, value]` to spread a list into a list and
+`{...defaults, name}` to spread a record and add the current `name` value.
+Symbols such as `:app` carry a name. Only `nil` and `false` are false.
+Use `empty? value` to check whether a container has any contents.
 
-Postfix fields start from a named reference, not a call result. Use
-`(get "stdout" (sh! COMMAND))`, or bind the record and read `result.stdout`,
-rather than `(expression).stdout`. This does not change process authority.
+Bare names read their bindings. `project.name`, `project."display name"`,
+`files.0`, and `files.-1` select fields or indexes. A grouped expression
+can select a field, as in `(parse-json "{\"title\":\"News\"}").title`.
+`env/NAME` reads one permitted environment variable. `lib/name` selects
+an export from a module, and `std/name` selects a standard operation.
+Rule frames bind `inputs`, `outputs`, `changed-inputs`, and `captures`.
+`args` supplies the active argument list.
+[Rules](./rules.md) · [Program composition](./scripts.md)
 
-An unquoted explicit path with authored `*`, `?`, or a bracket class is a
-glob expression: `SOURCES = ./src/**/*.c` lazily requests a tracked filesystem
-scan under read authority. Results are always lists: no matches give `[]`, and
-one match remains a one-item list. Quoted/escaped wildcard bytes and wildcard
-bytes inserted by interpolation remain literal. Capture-pattern groups take
-precedence over globs. Raw Kash command words do not glob; embedded Kame
-expressions do. See [wildcard selection](./library.md#wildcard-selection).
-
-Empty byte sequences and records are also true. For strings, bytes, lists, or
-records, use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for
-nonemptiness; `count` does not accept nil, booleans, or numbers. Test absence with
-`(= VALUE :nil)` and numeric zero with `(= VALUE 0)` instead. Whitespace is data.
-`and`/`or` retain the deciding operand, so `(or "" "fallback")` returns `""`.
-Source-composition `if` shares this truthiness; test collection emptiness explicitly.
-
-Expression strings use double quotes with `\"`, `\\`, `\n`, `\r`, and `\t`.
-Use `"Name: @{name}"` for lookup and `"Count: @(count files)"` for a call.
-`"Version: @(version)"` calls without arguments; parentheses are part of the
-expression, not an extra wrapper. Bare `{(...)}` does not interpolate and there
-is no compatibility parser or automatic formatter migration.
-Use `\@`/`\{` for literal openers; verbatim literals remain untouched.
-Single quotes are not string delimiters. Verbatim strings with matching runs
-of three or more double quotes preserve raw multiline content.
-
-Unquoted value paths also resolve authored `{name}` and `{_N}` groups as
-lexical string bindings: `(let [root "./src" path "widgets/button"]
-@{root}/js/{path}.js)` yields `./src/js/widgets/button.js`. This works with
-static roots too. Missing names report `REF_MISSING`; inserted values remain
-literal data. Matcher groups such as `{path:**}` still construct patterns.
-Rootless expansion patterns such as `{path}.js` retain pattern semantics;
-use `(pattern TEXT)` to explicitly construct a rooted expansion pattern.
-
-## Calls, functions, and pipes
+## Application, arithmetic, and pipes
 
 ```kame
-(join "," ["a" "b"])
-([name] (str "Hello, " name))
-(let [names ["Ada" "Lin"]]
-  (names | map ([name] (uppercase name)) | join ", "))
+join "," ["a", "b"]
+map (name => uppercase name) ["Ada", "Lin"]
+["Ada", "Lin"] |> map uppercase |> join ", "
+["./main.c", "./site.html"] |> filter (ends? ".c" _)
+7 |> gt? _ 3
+1 + 2 * 3
 ```
 
-Applications are `(FUNCTION ARG...)`; `()` is invalid. Lambdas begin with a
-parameter list; a single final `rest...` parameter collects remaining arguments.
-A declared parameter with no supplied argument is nil; extra arguments are an
-error.
-`((str "prefix-" _))` is a placeholder section equivalent to a one-argument
-lambda. Outside sections, underscore names remain ordinary names.
+Use `f a b` to call a function. Parentheses group an inner expression,
+as in `f (g a) b`. `f ()` calls with zero arguments. A lambda declares
+its parameters before `=>`. Its last parameter can be `rest...`.
+`f ...args` and `apply f args` supply the contents of a list as arguments.
 
-`(value | transform a)` evaluates like `(transform a value)`; `_` on the right
-chooses where to insert the value. Formatting preserves authored pipes and
-nested calls as distinct structures, including placeholder positions; only
-spacing/layout changes. This is value transformation, not a process pipe.
+Applications bind more tightly than arithmetic. Multiplication, division,
+and remainder bind more tightly than addition and subtraction. `/` returns a
+float. `%` requires integer operands. Use infix comparisons such as `a >= b`
+or a named predicate such as `gte?` when a callback is needed. Comparisons
+take left and right operands in that order.
 
-An initial application may omit its inner parentheses: `(tool "git" | ?)`
-means `(? (tool "git"))`. A single subject remains a value, not a call; special
-forms such as `?` retain control of subject evaluation.
-Standard transformations put parameters (including optional ones) before their
-subject: `(nth 1 files)` or `(files | nth 1)`. Comparisons keep left/right order:
-`(gt? LEFT RIGHT)`, so use `(VALUE | gt? _ 3)` to test whether `VALUE > 3`.
-See [Library](./library.md) for operation signatures; do not infer operand
-order from another language.
+A `|>` stage evaluates the receiving operation with the prior value appended
+as its last argument. Top-level `_` placeholders set the placement and reuse
+the same value. A parenthesized group such as `(ends? ".c" _)` is a callable
+section. Collection operations generally put parameters first and data last.
+`map` and `filter` callbacks can receive a list position or a record key as
+their second parameter. `reduce` can pass the position third.
+[Library](./library.md)
 
-Named execution context is available where a matching frame exists: `args` is
-the nearest argument list, while `inputs`, `outputs`, and `inputs/changed` expose
-the rule lists corresponding to `@<*`, `@>*`, and `@<?`. Lexical bindings take
-precedence. Unavailable access reports `SEL_NO_CONTEXT`; changed inputs are
-runtime-only for file rules. `args.0` and `inputs/changed.0` use normal references.
-Names containing slash-separated segments are not implicit filesystem paths.
-
-## Operation values
-
-Ordinary registered operations are first-class callables:
+Ordinary operations can be passed, bound, and invoked as callables:
 
 ```kame
-predicate = exists?
-(filter predicate FILES)
-(map uppercase ["a" "b"])
-(let [size count] (size [1 2 3]))
+map uppercase ["a", "b"]
+(size => size [1, 2, 3]) count
 ```
 
-Names resolve lexically before the operation registry. Operation values may be
-aliased, passed to functions, or stored in lists/records. Lookup alone performs
-no effects; invocation retains ordinary arity, capability, phase, dependency,
-version-tracking and suspension behavior. This also applies to plugin operations
-and comparison aliases. Callables are invocation-owned, not serialized code.
+Each call retains its arity, capability, phase, and dependency rules.
+Evaluation limits simultaneously active expression depth. Iterative callbacks
+release their call depth between items.
+[Evaluation](../../../spec/005-evaluation.md)
 
-## Special forms
-
-Special forms are syntax-only, not callable values or plugin operation names.
-Use a lambda when adapting one to a callback. In addition to the forms below,
-`run!`, `pipe!`, and `await` are process special forms; see [Kash](./kash.md).
+## Control expressions
 
 | Form | Behavior |
 | --- | --- |
-| `(let [name VALUE ...] BODY...)` | Sequential bindings in a child scope; returns the last body value. |
-| `(def NAME VALUE)` | Bind a value in the current scope. |
-| `(def NAME [PARAM...] BODY...)` | Bind a function. |
-| `(if TEST THEN [TEST THEN]... [ELSE])` | Evaluate only the selected branch; without a match/else, return nil. |
-| `(and VALUE...)` / `(or VALUE...)` | Short-circuit and return the deciding operand. |
-| `(with RECORD BODY...)` | Bind record fields in a child scope. |
-| `(match SUBJECT [PATTERN BODY...]... [:else BODY...])` | First matching clause; captures are local to its body. |
-| `(? VALUE...)` | First operand without unprotected `REF_MISSING` or `TOOL_MISSING`, or nil if all are missing; does not skip successful nil/false or catch other errors. `(tool "git" \| ?)` makes tool lookup optional. |
-| `(eval SOURCE)` | Evaluate expression text; not a script loader or replacement for native source composition. |
+| `if test then a elif next then b else c` | Evaluate the selected arm. |
+| `left and right`, `left or right` | Short-circuit and return the deciding value. |
+| `left ?? right` | Evaluate `right` for nil or a missing lookup. |
+| `match value` with one `PATTERN => EXPR` per line | Evaluate the first matching arm. Captures are local to that arm. |
+| `eval SOURCE` | Evaluate expression source text. |
 
-Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq?` (both equality
-symbols), `ne?`, `lt?`, `gt?`, `lte?`, `gte?`. Equality is kind-aware and recursive
-for bytes, lists, and records (record field order is ignored). Unsuffixed named
-comparisons remain compatibility aliases; `is` is equality, not identity.
-Opaque values are not comparable. These are prefix
-calls, not infix operators.
+`tool "git" ?? nil` allows an unavailable executable. Capability denial and
+other failures propagate. Kame programs use lazy definitions and Kash blocks
+can use eager `let` and mutable `set` bindings under lexical scoping rules.
+[Programs](./scripts.md) · [Kash actions](./kash.md)
 
-## Patterns and processes
+## Strings, paths, and patterns
 
-```kame
-(sub ./src/{name:*}.c ./build/{name}.o
-  [./src/main.c ./src/util.c])
-```
+Use `${EXPR}` in ordinary strings and paths. For example,
+`"Count: ${count files}"` evaluates a call, and `"Version: ${version ()}"`
+calls with zero arguments. In strings, lists render with spaces between
+items and records use the standard display format. Use `join` for a
+custom separator. Triple-quoted strings preserve raw multiline contents.
+[Templates](./templates.md)
 
-Expression match patterns use `{*}`, `{**}`, `{name:*}`, or `{name:**}`;
-expansion patterns use `{name}` or `{_N}`. In rooted replacement paths these
-resolve capture-local bindings; `sub` and `resub` defer replacement evaluation
-until a match exists. Pass a string or list of strings
-directly as the third operand of pattern `sub`; no `map` is needed for a list.
-With two arguments it produces a callable; nonmatches remain unchanged.
-`replace` is a deprecated alias. `(match? PATTERN [TEXT])` tests a full-string
-match, returning a unary predicate when `TEXT` is omitted. Use it for filtering. Rule captures
-have a related but distinct grammar; see [Rules](./rules.md).
-`(pattern TEXT)` constructs and validates a pattern from runtime text. Regex
-matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and
-`resub` expose bounded matching and capture processing. Regex syntax is
-portable and byte-oriented, not PCRE; see
-[Pattern extensions](../../../spec/029-pattern-extensions.md).
-
-Computed path patterns keep their groups authored while inserting literal data:
+An explicit path is a value. A wildcard path such as `./src/**/*.c`
+is a path pattern. Use `files ./src/**/*.c` to discover matching files or
+`dirs ./*/.jj` to discover matching directories. Discovery requires read
+authority and tracks the matches as dependencies. Pattern
+groups such as `{name:*}` match one path segment, and `{path:**}` can span
+directories. Expansion patterns use `{name}` or `{_N}`. Interpolated path
+data stays literal.
 
 ```kame
-(let [root "./src" output "./build" extension "c"]
-  (sub @{root}/{name:*}.@{extension} @{output}/{name}.o "./src/main.c"))
+subst ./src/{name:*}.c ./build/{name}.o [./src/main.c, ./src/util.c]
+capture ./src/{name:*}.c ./src/main.c
 ```
 
-Interpolation inside a group is invalid. Inserted braces, backslashes and glob
-or regex punctuation stay literal; they cannot create matching syntax. Use
-`(pattern TEXT)` when that compilation is intentional. These patterns do not
-enumerate files; interpolated strings and raw Kash words remain separate data.
+`subst` preserves nonmatching subjects and accepts a string or a list of
+strings or paths. Use a two-argument `subst` as a callable.
+`pattern TEXT` constructs a pattern explicitly. Regex groups
+`{name:~REGEX}` use bounded matching.
+[Pattern extensions](../../../spec/029-pattern-extensions.md)
 
-`$(printf "hello\n")` is an expression atom whose contents parse as Kash.
-It captures UTF-8 stdout exactly, including trailing newlines; it does not
-parse its contents as a Kame expression. Use Kash's `(EXPRESSION)` boundaries
-to compute typed command arguments. Execution needs a run grant and a phase
-allowing processes. Plain `"$(command)"` is literal text. Use explicit string
-interpolation to demand capture. See [Kash](./kash.md) for process semantics.
+## Capture and verification
 
-## Verify
+`$(COMMAND)` captures Kash stdout exactly, including trailing newlines.
+`$?(COMMAND)` returns an outcome record, and `$&(COMMAND)` starts owned async
+work. These forms need appropriate execution authority and phase.
+[Process inspection](../../../spec/049-process-inspection.md)
 
 ```sh
-kame do run --lang expr -c '(join "," ["a" "b"])'
+kame do run --lang expr -c 'join "," ["a", "b"]'
 kame do run --lang expr --allow-read=./src -c './src/*.c'
-printf '%s\n' '(join "," ["a" "b"])' | kame do parse --lang expr
+printf '%s\n' 'join "," ["a", "b"]' | kame do parse --lang expr
 ```
 
-Pure value sessions deny host capabilities by default. Grant only required
-read/write/run/env access. Reads and globs track dependencies in builds;
-unused values and unselected branches must not introduce effects.
+Pure value sessions require explicit host grants. Reads and globs track
+dependencies in builds. Unused lazy definitions and unselected branches run
+without effects.
+[Kame expression reference](../../../ref-kame-expr.md)

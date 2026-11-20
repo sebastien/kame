@@ -16,7 +16,7 @@ import (
 // The tracked allocator also checks repeated-query and failure-path ownership.
 func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "default : left, right\nleft : shared\nright : shared later\nshared :\nlater :\n")
+	parsed := script.ParseKameFile(a, "<test>", "task default : left, right\ntask left : shared\ntask right : shared later\ntask shared :\ntask later :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -58,7 +58,7 @@ func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 
 func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "task build {flavor=debug} : @(str \"./\" flavor)\ndefault : \"build flavor=one\" \"build flavor=two\"\ncycle : loop\nloop : cycle\nservice dev {port=8080} :\n")
+	parsed := script.ParseKameFile(a, "<test>", "task build {flavor=debug} : ${str \"./\" flavor}\ntask default : \"build flavor=one\" \"build flavor=two\"\ntask cycle : loop\ntask loop : cycle\nservice dev {port=8080} :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -101,7 +101,7 @@ func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 
 func TestInspectionCoincidentOrigins(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "default : left ./source @(nop \"./source\") right\nleft :\nright :\n")
+	parsed := script.ParseKameFile(a, "<test>", "task default : left ./source ${nop \"./source\"} right\ntask left :\ntask right :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -128,7 +128,7 @@ func TestInspectionCoincidentOrigins(t *testing.T) {
 
 func TestInspectionArtifactWithoutHostStaysUnknownAndRepeatStable(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./result : ./seed\n\ttouch forbidden\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./result : ./seed\n\ttouch forbidden\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -162,7 +162,7 @@ func TestInspectionArtifactWithoutHostStaysUnknownAndRepeatStable(t *testing.T) 
 
 func TestInspectionDownstreamPatternsDepthAndRepeatedQueries(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./build/{name}.o ./build/{name}.map : ./src/{name}.c\n./app : ./build/one.o ./unrelated\n./unused : ./elsewhere\n./ordered : | ./src/one.c\ndefault : ./app\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./build/{name}.o ./build/{name}.map : ./src/{name}.c\nrule ./app : ./build/one.o ./unrelated\nrule ./unused : ./elsewhere\nrule ./ordered : | ./src/one.c\ntask default : ./app\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -219,7 +219,7 @@ func TestInspectionDownstreamPatternsDepthAndRepeatedQueries(t *testing.T) {
 
 func TestCLIFileOperandsPreserveLogicalNamesAndArguments(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "seed :\n./release.zip : ./seed\ntask deploy {mode=debug} :\n./out : ./input\n")
+	parsed := script.ParseKameFile(a, "<test>", "task seed :\nrule ./release.zip : ./seed\ntask deploy {mode=debug} :\nrule ./out : ./input\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -257,7 +257,7 @@ func TestCLIFileOperandsPreserveLogicalNamesAndArguments(t *testing.T) {
 
 func TestInspectionReversePositionalReferencesAndLogicalPatterns(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out/{name} : ./src/{_0}\n./pair/{left}-{right} : ./pair-src/{_1}-{_0}\nbuild-{name} : seed-{name}\nseed-one :\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./out/{name} : ./src/{_0}\nrule ./pair/{left}-{right} : ./pair-src/{_1}-{_0}\ntask build-{name} : seed-{name}\ntask seed-one :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -287,7 +287,7 @@ func TestInspectionReversePositionalReferencesAndLogicalPatterns(t *testing.T) {
 
 func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : @(nop true) ./elsewhere\n./computed-bad : @(nop \"./computed-seed\") @(nop true)\n./late-computed-bad : @(nop true) @(nop \"./late-computed-seed\")\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./out : ./seed\nrule ./bad : ${nop true} ./elsewhere\nrule ./computed-bad : ${nop \"./computed-seed\"} ${nop true}\nrule ./late-computed-bad : ${nop true} ${nop \"./late-computed-seed\"}\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -338,7 +338,7 @@ func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing
 
 func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./seed : @(read ./secret)\n./out : ./seed\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./seed : ${read ./secret}\nrule ./out : ./seed\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", ForwardRequests: true, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -381,7 +381,7 @@ func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 
 func TestInspectionConsumerReadErrorsRemainAuthorizedAndScoped(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : ./elsewhere @(read ./missing)\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./out : ./seed\nrule ./bad : ./elsewhere ${read ./missing}\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: wasm.NewMemoryHost(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -413,7 +413,7 @@ func TestInspectionConsumerReadErrorsRemainAuthorizedAndScoped(t *testing.T) {
 
 func TestInspectionAffectedConsumerReadStillRequiresGrant(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed @(read ./secret)\n")
+	parsed := script.ParseKameFile(a, "<test>", "rule ./out : ./seed ${read ./secret}\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", ForwardRequests: true})

@@ -118,34 +118,34 @@ func TestPickRejectsControlBytesWithoutChangingANSIIdentity(t *testing.T) {
 }
 
 func TestPickGrammarForwardsExecutionFlagsAndRejectsTargets(t *testing.T) {
-	inv := cli.Parse("pick", []string{"-C", "work", "-f", "Build.kmk", "-j", "3", "-n", "--force", "--picker", "fzy", "--define", "MODE=release", "--set", "FLAG=false", "name=value"})
-	if !inv.OK || inv.Directory != "work" || inv.File != "Build.kmk" || inv.Jobs != 3 || !inv.DryRun || !inv.Force || inv.Picker != "fzy" || len(inv.Defines) != 2 || len(inv.Parameters) != 1 {
+	inv := cli.Parse("pick", []string{"-C", "work", "-f", "Build.km", "-j", "3", "-n", "--force", "--picker", "fzy", "--define", "MODE=release", "--set", "FLAG=false", "name=value"})
+	if !inv.OK || inv.Directory != "work" || inv.File != "Build.km" || inv.Jobs != 3 || !inv.DryRun || !inv.Force || inv.Picker != "fzy" || len(inv.Defines) != 2 || len(inv.Parameters) != 1 {
 		t.Error("pick did not keep source, execution, or picker options: " + inv.Error.Code + " " + inv.Error.Message)
 	}
 	build := cli.PickArgs(&inv, "build", "./build/app")
 	text := joined(build)
-	if text != "-C work -f Build.kmk --define MODE=release --set FLAG=false -n --force -j 3 name=value -- ./build/app" {
+	if text != "-C work -f Build.km --define MODE=release --set FLAG=false -n --force -j 3 name=value -- ./build/app" {
 		t.Error("build forwarding changed: " + text)
 	}
 	mem.FreeString(mem.System, text)
 	cli.FreeArgs(build)
 	cat := cli.PickArgs(&inv, "cat", "app")
 	text = joined(cat)
-	if text != "-C work -f Build.kmk --define MODE=release --set FLAG=false --force -j 3 name=value -- app" {
+	if text != "-C work -f Build.km --define MODE=release --set FLAG=false --force -j 3 name=value -- app" {
 		t.Error("cat forwarding kept dry-run or dropped execution flags: " + text)
 	}
 	mem.FreeString(mem.System, text)
 	cli.FreeArgs(cat)
 	inspect := cli.PickArgs(&inv, "inspect", "app")
 	text = joined(inspect)
-	if text != "-C work -f Build.kmk --define MODE=release --set FLAG=false name=value -- app" {
+	if text != "-C work -f Build.km --define MODE=release --set FLAG=false name=value -- app" {
 		t.Error("inspection forwarding included execution flags: " + text)
 	}
 	mem.FreeString(mem.System, text)
 	cli.FreeArgs(inspect)
 	list := cli.PickArgs(&inv, "list", "")
 	text = joined(list)
-	if text != "-C work -f Build.kmk --define MODE=release --set FLAG=false" {
+	if text != "-C work -f Build.km --define MODE=release --set FLAG=false" {
 		t.Error("list forwarding included a parameter or target: " + text)
 	}
 	mem.FreeString(mem.System, text)

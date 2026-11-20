@@ -30,6 +30,7 @@ func retainFinalizerContext(a mem.Allocator, c *Context) Context {
 	for i := range c.RuleFrames {
 		f := c.RuleFrames[i]
 		f.Inputs, f.Outputs, f.NewerInputs = cloneFinalizerValues(a, f.Inputs), cloneFinalizerValues(a, f.Outputs), cloneFinalizerValues(a, f.NewerInputs)
+		f.Captures = cloneFinalizerValues(a, f.Captures)
 		r.RuleFrames = append(r.RuleFrames, f)
 	}
 	for i := range c.Frames {
@@ -71,6 +72,7 @@ func freeFinalizerContext(a mem.Allocator, c *Context) {
 		freeValuesWithCallables(a, c.RuleFrames[i].Inputs)
 		freeValuesWithCallables(a, c.RuleFrames[i].Outputs)
 		freeValuesWithCallables(a, c.RuleFrames[i].NewerInputs)
+		freeValuesWithCallables(a, c.RuleFrames[i].Captures)
 	}
 	mem.FreeSlice(nil, c.RuleFrames)
 	for i := range c.Frames {

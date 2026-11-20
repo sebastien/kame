@@ -12,7 +12,7 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "bounds.km", "")
+	parsed := script.ParseKameFile(a, "bounds.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"((xs => xs.18446744073709551616) [7])",
@@ -26,7 +26,7 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 		}
 		r.Free(a)
 	}
-	selectors := []string{"@>18446744073709551616", "@>-18446744073709551616", "@>0..18446744073709551616", "@>0..-2147483648"}
+	selectors := []string{"outputs.18446744073709551616", "outputs.-18446744073709551616", "outputs.9223372036854775807", "outputs.-2147483648"}
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a, Outputs: []core.Value{{Kind: core.Int, Int: 7}}}
 	for i := range selectors {
 		expression := expr.Parse(a, "selector.km", selectors[i])

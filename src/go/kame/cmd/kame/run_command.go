@@ -50,7 +50,7 @@ func writeExprEffect(value any, effect eval.Effect) {
 		output.Err.Write(effect.Data)
 		return
 	}
-	if effect.Kind == eval.EffectOut || effect.Kind == eval.EffectYield {
+	if effect.Kind == eval.EffectOut {
 		dashboardRaw(output.Err, effect.Data, posix.StdoutIsTerminal())
 		output.Out.Write(effect.Data)
 	}
@@ -80,6 +80,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				freeRunInputs(fragments, storage, names)
 				return 1
 			}
+			if i == 0 && input.Lang == "km" && file.RuleWork {
+				inv.NoDefaultGrants = false
+			}
 			for j := range file.Parts {
 				entries := input.Entries
 				if j+1 != len(file.Parts) {
@@ -108,6 +111,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			if file.Status != 0 {
 				freeRunInputs(fragments, storage, names)
 				return 1
+			}
+			if i == 0 && input.Lang == "km" && file.RuleWork {
+				inv.NoDefaultGrants = false
 			}
 			for j := range file.Parts {
 				entries := input.Entries
@@ -150,6 +156,10 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	}
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult}
 	programOptions.RequireRuleWork, programOptions.RequireProcessWork = inv.RequireRuleWork, inv.RequireProcessWork
+	for i := range loaded {
+		programOptions.CompositionDiscoveries = append(programOptions.CompositionDiscoveries, loaded[i].Discoveries...)
+	}
+	defer mem.FreeSlice(nil, programOptions.CompositionDiscoveries)
 	programOptions.TrackTimings = true
 	programOptions.HasInput = inv.Name == "run"
 	for i := range inv.Inputs {

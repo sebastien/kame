@@ -53,7 +53,7 @@ func inlineFits(a mem.Allocator, e *Expr, column int, tail int) bool {
 	return fit
 }
 
-func writeDelimitedValue(a mem.Allocator, b *strings.Builder, e *Expr, column, indent, tail int) {
+func writeDelimitedValue(a mem.Allocator, b *strings.Builder, e *Expr, column, indent, tail int, layout valueLayout) {
 	if e == nil || e.Kind != Application || !e.Juxtaposed || len(e.Items) <= 1 || inlineFits(a, e, column, tail) {
 		writeLayout(a, b, e, column, indent, tail)
 		return
@@ -61,6 +61,9 @@ func writeDelimitedValue(a mem.Allocator, b *strings.Builder, e *Expr, column, i
 	writeLayout(a, b, e.Items[0], column, indent, 0)
 	next := indent/8 + 1
 	for i, arg := range e.Items[1:] {
+		if layout == valueCollection {
+			b.WriteString(" \\")
+		}
 		b.WriteByte('\n')
 		b.WriteString(strings.Repeat("\t", next))
 		argTail := 0
@@ -97,7 +100,7 @@ func writeJuxtaposition(a mem.Allocator, b *strings.Builder, e *Expr, column, in
 			delimiter = item.Items[0].Kind
 		}
 		switch delimiter {
-		case Group, Section, List, Record:
+		case Group, Section, List, Record, CommandCapture:
 		default:
 			continue
 		}
@@ -145,12 +148,40 @@ func applicationLinesFit(parts []string, column, tail int) bool {
 	return column+tail <= 80
 }
 
+func multilineRuleValue(e *Expr) bool {
+	return e != nil && e.Kind == RuleValue && strings.ContainsRune(e.Text, '\n')
+}
+
 func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, indent int, tail int) {
 	if e == nil {
 		return
 	}
+	if e.Kind == RuleValue {
+		formatted := e.RuleSyntax.Format(a, e.RuleSyntax.Declaration)
+		prefix := strings.Repeat("\t", indent/8) + strings.Repeat(" ", indent%8)
+		for i, line := range strings.Split(formatted, "\n") {
+			if i != 0 {
+				b.WriteByte('\n')
+				if line != "" {
+					b.WriteString(prefix)
+				}
+			}
+			b.WriteString(line)
+		}
+		mem.FreeString(a, formatted)
+		return
+	}
 	if e.Kind == Match && len(e.Body) != 0 {
 		writeMatch(a, b, e, column, indent)
+		return
+	}
+	if e.Kind == CommandCapture && (kashNestedGraph(e) || !inlineFits(a, e, column, tail)) {
+		level := indent / 8
+		writeActionPrefix(b, e)
+		kashLine(b, "\t", level+1)
+		writeKashGraph(b, e, "\t", level+1)
+		kashLine(b, "\t", level)
+		b.WriteByte(')')
 		return
 	}
 	if inlineFits(a, e, column, tail) {
@@ -204,25 +235,8 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		}
 		b.WriteByte('(')
 		if child != nil && child.Kind == Conditional && len(child.Items) >= 3 {
-			next := strings.Repeat("\t", indent/8+1)
-			b.WriteString("if ")
-			writeExpr(b, child.Items[0])
-			b.WriteString(" then ")
-			writeExpr(b, child.Items[1])
-			for i := 2; i+1 < len(child.Items); i += 2 {
-				b.WriteByte('\n')
-				b.WriteString(next)
-				b.WriteString("elif ")
-				writeExpr(b, child.Items[i])
-				b.WriteString(" then ")
-				writeExpr(b, child.Items[i+1])
-			}
-			b.WriteByte('\n')
-			b.WriteString(next)
-			b.WriteString("else ")
-			writeExpr(b, child.Items[len(child.Items)-1])
-			b.WriteByte('\n')
-			b.WriteString(strings.Repeat("\t", indent/8))
+			writeConditionalBranches(a, b, child, column+1, indent)
+			kashLine(b, "\t", indent/8)
 			b.WriteByte(')')
 			return
 		}
@@ -234,7 +248,7 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		next := indent/8 + 1
 		b.WriteByte('\n')
 		b.WriteString(strings.Repeat("\t", next))
-		writeDelimitedValue(a, b, child, next*8, next*8, 0)
+		writeDelimitedValue(a, b, child, next*8, next*8, 0, valueDelimited)
 		b.WriteByte('\n')
 		b.WriteString(strings.Repeat("\t", indent/8))
 		b.WriteByte(')')
@@ -246,8 +260,7 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		for _, item := range e.Items {
 			b.WriteByte('\n')
 			b.WriteString(strings.Repeat("\t", next/8))
-			writeDelimitedValue(a, b, item, next, next, 1)
-			b.WriteByte(',')
+			writeDelimitedValue(a, b, item, next, next, 0, valueCollection)
 		}
 		b.WriteByte('\n')
 		b.WriteString(strings.Repeat("\t", indent/8))
@@ -268,7 +281,7 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 			switch {
 			case field.Spread:
 				b.WriteString("...")
-				writeDelimitedValue(a, b, field.Value, next*8+3, next*8, 1)
+				writeDelimitedValue(a, b, field.Value, next*8+3, next*8, 1, valueCollection)
 			case field.Shorthand:
 				writeBraceKey(b, field)
 			default:
@@ -282,7 +295,7 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 				} else {
 					b.WriteByte('\n')
 					b.WriteString(strings.Repeat("\t", next+1))
-					writeDelimitedValue(a, b, field.Value, (next+1)*8, (next+1)*8, 1)
+					writeDelimitedValue(a, b, field.Value, (next+1)*8, (next+1)*8, 1, valueCollection)
 				}
 			}
 			b.WriteByte(',')
@@ -363,4 +376,27 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 	}
 	// Literal content and Kash process syntax are indivisible here.
 	writeExpr(b, e)
+}
+
+func writeConditionalBranches(a mem.Allocator, b *strings.Builder, e *Expr, column, indent int) {
+	level := indent/8 + 1
+	branchIndent := indent
+	for i := 0; i+1 < len(e.Items); i += 2 {
+		if i == 0 {
+			b.WriteString("if ")
+			column += len("if ")
+		} else {
+			kashLine(b, "\t", level)
+			b.WriteString("elif ")
+			branchIndent, column = level*8, level*8+len("elif ")
+		}
+		start := b.Len()
+		writeDelimitedValue(a, b, e.Items[i], column, branchIndent, len(" then"), valueDelimited)
+		b.WriteString(" then ")
+		column = Columns(b.String()[start:], column)
+		writeDelimitedValue(a, b, e.Items[i+1], column, branchIndent, 0, valueDelimited)
+	}
+	kashLine(b, "\t", level)
+	b.WriteString("else ")
+	writeDelimitedValue(a, b, e.Items[len(e.Items)-1], level*8+len("else "), level*8, 0, valueDelimited)
 }

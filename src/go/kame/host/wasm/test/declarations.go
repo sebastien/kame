@@ -9,7 +9,7 @@ import (
 
 func TestDeclarationPredicateDescriptorIsTypedAndHostFree(t *testing.T) {
 	a := t.Allocator()
-	result := wasm.DeclarationPredicate(a, []byte(`{"prefix":"mode ?= \"debug\"\n","predicate":"(eq mode \"release\")","defines":["mode=release"],"environment":["KAME_mode=debug"]}`))
+	result := wasm.DeclarationPredicate(a, []byte(`{"prefix":"mode ?= \"debug\"\n","predicate":"(eq? mode \"release\")","defines":["mode=release"],"environment":["KAME_mode=debug"]}`))
 	if result.Code != "" || result.Text != "true" {
 		t.Error("declaration predicate descriptor lost literal configuration")
 	}
@@ -37,9 +37,9 @@ func TestDeclarationPredicateDescriptorIsTypedAndHostFree(t *testing.T) {
 func TestConfigurationConditionDirectoryDescriptor(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
-		`{"directory":"/project","predicate":"(eq (abspath ./) \"/project\")"}`,
-		`{"directory":"/project","prefix":"root = (abspath ./)\n","predicate":"(eq root \"/project\")"}`,
-		`{"directory":"/project","sources":[{"name":"/sdk/defs.km","text":"root = (abspath ./)"}],"condition":{"name":"/sdk/main.km","text":"(eq root \"/project\")"}}`,
+		`{"directory":"/project","predicate":"(eq? (abspath ./) /project)"}`,
+		`{"directory":"/project","prefix":"root = (abspath ./)\n","predicate":"(eq? root /project)"}`,
+		`{"directory":"/project","sources":[{"name":"/sdk/defs.km","text":"root = (abspath ./)"}],"condition":{"name":"/sdk/main.km","text":"(eq? root /project)"}}`,
 	}
 	for i := range inputs {
 		result := wasm.RunCompositionCondition(a, []byte(inputs[i]))
@@ -87,7 +87,7 @@ func TestCompositionConditionAuthoredDescriptor(t *testing.T) {
 
 func TestCompositionConditionDescriptorSharesValidationAndDiagnosticJSON(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{`{"predicate":"0"}`, `{"predicate":"[]"}`, `{"predicate":"nil"}`, `{"predicate":"false"}`, `{"prefix":"mode ?= \"debug\"\nunused = (read \"never read\")\n","predicate":"(eq mode \"release\")","defines":["future=later","mode=release"],"environment":["KAME_mode=debug"]}`}
+	inputs := []string{`{"predicate":"0"}`, `{"predicate":"[]"}`, `{"predicate":"nil"}`, `{"predicate":"false"}`, `{"prefix":"mode ?= \"debug\"\nunused = (read \"never read\")\n","predicate":"(eq? mode \"release\")","defines":["future=later","mode=release"],"environment":["KAME_mode=debug"]}`}
 	for i := range inputs {
 		result := wasm.RunCompositionCondition(a, []byte(inputs[i]))
 		expected := "true"

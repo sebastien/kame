@@ -39,7 +39,7 @@ Each loaded file is parsed with the grammar selected by its own suffix (`055`
 ## Module paths and identity
 
 `import`, `from`, `include` and `include?` operands are literal path atoms
-beginning with `./`, `../`, `/` or `~/`. Globs, capture groups, `@{…}`
+beginning with `./`, `../`, `/` or `~/`. Globs, capture groups, `${…}`
 interpolation, quoted strings and computed values are `PARSE_ERR`; a string is
 never a module path, and values are never turned into paths or reparsed as
 source. A relative operand resolves against the directory of the file

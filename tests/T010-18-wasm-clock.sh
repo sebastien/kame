@@ -11,7 +11,11 @@ test-start "T010-18 wasm clock host requests"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-clock"
@@ -19,7 +23,7 @@ mkdir -p "$project"
 
 wasm() {
 	set +e
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" "$@") >"$project/out.txt" 2>"$project/err.txt"
+	(cd "$project" && node "$wasm_runner" "$@") >"$project/out.txt" 2>"$project/err.txt"
 	status=$?
 	set -e
 }
@@ -32,8 +36,8 @@ native() {
 }
 
 test-step "now returns epoch nanoseconds on both backends"
-wasm do run --lang expr -c '(now)'
-native do run --lang expr -c '(now)'
+wasm do run --lang expr -c 'now ()'
+native do run --lang expr -c 'now ()'
 if [ "$status" = 0 ] && [ "$nstatus" = 0 ] && [[ "$(cat "$project/out.txt")" =~ ^1[0-9]{18}$ ]] && [[ "$(cat "$project/nout.txt")" =~ ^1[0-9]{18}$ ]]; then
 	# Both readings are within a minute of each other.
 	drift=$(( $(cat "$project/nout.txt") - $(cat "$project/out.txt") ))
@@ -48,9 +52,9 @@ else
 fi
 
 test-step "monotonic is a non-negative, non-decreasing nanosecond clock"
-wasm do run --lang expr -c '(monotonic)'
+wasm do run --lang expr -c 'monotonic ()'
 first="$(cat "$project/out.txt")"
-wasm do run --lang expr -c '(monotonic)'
+wasm do run --lang expr -c 'monotonic ()'
 second="$(cat "$project/out.txt")"
 if [ "$status" = 0 ] && [ "$first" -ge 0 ] && [ "$second" -ge "$first" ]; then
 	test-ok "monotonic readings are non-negative and non-decreasing"
@@ -59,7 +63,7 @@ else
 fi
 
 test-step "clocks need no capability grant"
-wasm do run --lang expr -c '(now)'
+wasm do run --lang expr -c 'now ()'
 if [ "$status" = 0 ] && [ ! -s "$project/err.txt" ]; then
 	test-ok "now runs under the default deny-all grants"
 else
@@ -67,13 +71,13 @@ else
 fi
 
 test-step "a clock definition materializes on both backends"
-cat >"$project/Makefile.kmk" <<'EOF'
-STAMP = (now)
+cat >"$project/Makefile.km" <<'EOF'
+STAMP = now ()
 EOF
 wasm do cat STAMP
 native do cat STAMP
 if [ "$status" = 0 ] && [ "$nstatus" = 0 ] && [[ "$(cat "$project/out.txt")" =~ ^1[0-9]{18}$ ]] && [[ "$(cat "$project/nout.txt")" =~ ^1[0-9]{18}$ ]]; then
-	test-ok "a (now) definition materializes to epoch nanoseconds"
+	test-ok "a now () definition materializes to epoch nanoseconds"
 else
 	test-fail "clock definition: status=$status native=$nstatus out=$(cat "$project/out.txt")"
 fi

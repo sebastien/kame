@@ -32,7 +32,7 @@ func TestOptionalToolAbsenceAndResolutionAreRevalidated(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "optional.km", "available = (tool \"chosen\" ?? nil)\n")
+	parsed := script.ParseKameFile(a, "optional.km", "available = (tool \"chosen\" ?? nil)\n")
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: optionalToolResolver})
 	if compiled.Program == nil {
 		t.Fatal("compile optional lookup")

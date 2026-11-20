@@ -11,6 +11,9 @@ import (
 )
 
 func closeKashReader(state *kashLoopState) {
+	if stage := state.RecordStage; stage != nil {
+		stage.borrowedReader, state.RecordStage = nil, nil
+	}
 	if state.ReaderID != 0 && state.Program.RecordReaderCloser != nil {
 		state.Program.RecordReaderCloser.CloseRecordReader(state.ReaderID)
 		state.ReaderID = 0
@@ -19,10 +22,14 @@ func closeKashReader(state *kashLoopState) {
 
 func (p *Program) kashRecordSource(scope *Scope, e *expr.Expr, state *kashLoopState, c *Context) Result {
 	source := e.Items[0].Items[0]
+	stage := c.functionStage
 	if source.Kind == expr.Symbol && source.Text == "stdin" {
-		if !p.InputSupplied || c.InputClosed {
+		if c.InputClosed || (stage == nil && !p.InputSupplied) || (stage != nil && stage.cancelled) {
 			state.Ready, state.Done = true, true
 			return Result{}
+		}
+		if stage != nil && c.RecordBody {
+			return failure(c.Run, "KASH_DOUBLE_CONSUME", source.Span, "callable stage stdin already has an active record loop")
 		}
 		state.Stdin = true
 	} else {
@@ -31,7 +38,8 @@ func (p *Program) kashRecordSource(scope *Scope, e *expr.Expr, state *kashLoopSt
 			return r
 		}
 	}
-	if p.RecordReaderCloser == nil {
+	stagePort := state.Stdin && stage != nil && !stage.borrowedInput
+	if p.RecordReaderCloser == nil && !stagePort {
 		return failure(c.Run, "FEATURE_UNSUP", source.Span, "host does not support incremental record readers")
 	}
 	state.Delimiter = 10
@@ -39,8 +47,14 @@ func (p *Program) kashRecordSource(scope *Scope, e *expr.Expr, state *kashLoopSt
 		state.Delimiter = 0
 	}
 	state.Ready = true
+	if stagePort {
+		return Result{}
+	}
 	p.NextRecordReader++
 	state.ReaderID = p.NextRecordReader
+	if state.Stdin && stage != nil {
+		stage.borrowedReader, state.RecordStage = state, stage
+	}
 	return Result{}
 }
 
@@ -55,7 +69,7 @@ func (p *Program) kashRecordFileSource(scope *Scope, e *expr.Expr, state *kashLo
 		return r
 	}
 	name := ""
-	if r.Value.Kind == core.String {
+	if r.Value.IsPathText() {
 		name = r.Value.Text
 	} else if r.Value.Kind == core.Resource && r.Value.Resource.Kind == core.ResourceFile {
 		name = r.Value.Resource.Name
@@ -85,6 +99,17 @@ func (p *Program) kashRecordFileSource(scope *Scope, e *expr.Expr, state *kashLo
 }
 
 func (p *Program) kashRecordNext(e *expr.Expr, state *kashLoopState, c *Context) Result {
+	if state.Stdin && c.functionStage != nil && !c.functionStage.borrowedInput {
+		result := c.functionStage.readRecord(c, byte(state.Delimiter), e.Span)
+		if result.Waiting || result.Diagnostic.Code != "" {
+			return result
+		}
+		return p.kashRecordValue(e, state, c, result.Value)
+	}
+	if state.Stdin && c.functionStage != nil && c.functionStage.cancelled && state.RequestID == 0 {
+		state.Done = true
+		return Result{}
+	}
 	if !state.Stdin && !demandProcessInput(c, state.Path) {
 		return Result{Waiting: true}
 	}
@@ -111,18 +136,20 @@ func (p *Program) kashRecordNext(e *expr.Expr, state *kashLoopState, c *Context)
 		}
 		return Result{Diagnostic: diagnostic}
 	}
-	if completion.Value.Kind == core.Nil {
-		completion.Value.Free(c.Run)
+	return p.kashRecordValue(e, state, c, completion.Value)
+}
+
+func (p *Program) kashRecordValue(e *expr.Expr, state *kashLoopState, c *Context, value core.Value) Result {
+	defer value.Free(c.Run)
+	if value.Kind == core.Nil {
 		state.Done = true
 		return Result{}
 	}
-	if completion.Value.Kind != core.String || len(completion.Value.Text) == 0 || len(completion.Value.Text) > host.RecordLimit {
-		completion.Value.Free(c.Run)
+	if value.Kind != core.String || len(value.Text) == 0 || len(value.Text) > host.RecordLimit {
 		return failure(c.Run, "KASH_RECORD_LIMIT", e.Span, "record exceeds 64 KiB or host returned an invalid record")
 	}
-	text := completion.Value.Text
+	text := value.Text
 	if at := strings.IndexByte(text, byte(state.Delimiter)); at >= 0 && at != len(text)-1 {
-		completion.Value.Free(c.Run)
 		return failure(c.Run, "HOST_FAIL", e.Span, "host returned more than one framed record")
 	}
 	if text[len(text)-1] == byte(state.Delimiter) {
@@ -132,11 +159,9 @@ func (p *Program) kashRecordNext(e *expr.Expr, state *kashLoopState, c *Context)
 		}
 	}
 	if !utf8.Valid([]byte(text)) {
-		completion.Value.Free(c.Run)
 		return failure(c.Run, "KASH_FRAME_ENCODING", e.Span, "record is not valid UTF-8")
 	}
 	state.Iterable = core.NewString(p.Alloc, text)
-	completion.Value.Free(c.Run)
 	return Result{}
 }
 

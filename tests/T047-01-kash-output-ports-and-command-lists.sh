@@ -5,11 +5,12 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T047-01 Kash output ports, command lists, and exit fidelity"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	invoke() { "${runner[@]}" do run -C "$work" --allow-run --allow-read --allow-write "$@"; }
 	check() {
 		local expected_out="$1" expected_err="$2" source="$3" status=0
@@ -37,20 +38,20 @@ for backend in native wasm; do
 	}
 	test-step "$backend reserved presentation ports and capture"
 	check output warning $'printf output >&out\nprintf warning >&err'
-	check capture '' $'value = $(printf capture >&out)\nprintf "%s" $value'
-	check inherited '' $'helper = (kash """value = $(printf inherited >&out)\nprintf "%s" $value""")\n(helper)'
-	check '<>' warning $'value = $(printf warning >&err)\nprintf "<%s>" $value'
+	check capture '' $'let value = $(printf capture >&out)\nprintf "%s" $value'
+	check inherited '' $'def helper ()\n\tlet value = $(printf inherited >&out)\n\tprintf "%s" $value\nhelper'
+	check '<>' warning $'let value = $(printf warning >&err)\nprintf "<%s>" $value'
 	check presentation executable-stderr 'sh -c "printf executable-stderr >&2; printf presentation" >&out'
 	check x x 'printf x |(broadcast) (>&out, >&err)'
 	status=0
 	invoke -l kash -c 'head -c 262144 /dev/zero >&err' >"$work/large.out" 2>"$work/large.err" || status=$?
 	if [ "$status" = 0 ] && [ ! -s "$work/large.out" ] && [ "$(wc -c <"$work/large.err")" -eq 262144 ]; then test-ok "$backend large error-port output drains"; else test-fail "$backend large error-port output ($status)"; fi
 	status=0
-	invoke -l kash -c $'value = $((printf left >&err, printf right >&err))\nprintf "<%s>" $value' >"$work/out" 2>"$work/err" || status=$?
+	invoke -l kash -c $'let value = $((printf left >&err, printf right >&err))\nprintf "<%s>" $value' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '<>' ] && grep -q left "$work/err" && grep -q right "$work/err"; then test-ok "$backend zero-output capture keeps error ports live"; else test-fail "$backend error-only capture"; cat "$work/out" "$work/err"; fi
 	check OK WARN $'printf "WARN\\nOK\\n" |(frame :lines) |(filter (includes? "WARN" item) | cat >&err) | cat'
-	check ab '' $'value = $(printf a >&out && printf b >&out)\nprintf "%s" $value'
-	reject KASH_AMBIGUOUS_CAPTURE $'value = $((printf a, printf b))\nprintf "%s" $value'
+	check ab '' $'let value = $(printf a >&out && printf b >&out)\nprintf "%s" $value'
+	reject KASH_AMBIGUOUS_CAPTURE $'let value = $((printf a, printf b))\nprintf "%s" $value'
 	printf preserve >"$work/preserve"
 	reject PARSE_ERR 'printf changed > ./preserve >&err'
 	if [ "$(cat "$work/preserve")" = preserve ]; then test-ok "$backend conflict preflight preserves files"; else test-fail "$backend truncated a conflicting destination"; fi
@@ -64,15 +65,15 @@ for backend in native wasm; do
 	if [ "$status" = 0 ] && [ ! -e "$marker" ]; then test-ok "$backend skipped operand does not require write grant"; else test-fail "$backend checked skipped operand grant ($status)"; cat "$work/err"; fi
 	check '' '' 'true || ./not-installed-kame-test-command'
 	check C '' 'true || printf B && printf C'
-	check localaa '' $'value = (let [ignored (out! "local")] "a")\nprintf "%s" $value && printf "%s" $value $(printf "")'
+	check localaa '' $'def value = ((ignored => "a") (out! "local"))\nprintf "%s" $value && printf "%s" $value $(printf "")'
 	check fallback '' 'sh -c "exit 7" || printf fallback'
 	expect_status 7 RECIPE_FAIL $'sh -c "exit 7" && touch list-skipped\nprintf after-failure'
 	if [ ! -e "$work/list-skipped" ]; then test-ok "$backend failed list stops later statements"; else test-fail "$backend ran after failed list"; fi
 	check accepted '' 'sh -c "exit 7"? && printf accepted'
-	check yes '' $'if sh -c "exit 7" ||\n\tsh -c "exit 0"\n\tprintf yes\nelse\n\tprintf no'
-	check yes '' $'if test "$(printf x)" = x\n\tprintf yes'
-	check yes '' $'if false || test "$(printf x)" = x\n\tprintf yes'
-	check '' '' $'while test "$(printf x)" = y\n\tprintf no'
+	check yes '' $'if $?(sh -c "exit 7" ||\n\tsh -c "exit 0").ok\n\tprintf yes\nelse\n\tprintf no'
+	check yes '' $'if $?(test "$(printf x)" = x).ok\n\tprintf yes'
+	check yes '' $'if $?(false || test "$(printf x)" = x).ok\n\tprintf yes'
+	check '' '' $'while $?(test "$(printf x)" = y).ok\n\tprintf no'
 	reject PARSE_ERR $'printf a\n|| printf b'
 	reject PARSE_ERR $'printf a\n&& printf b'
 	malformed="touch $marker &&"
@@ -87,9 +88,9 @@ for backend in native wasm; do
 	invoke --timeout 100 -l kash -c 'sleep 2 || touch skipped-timeout' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q RECIPE_TIMEOUT "$work/err" && [ ! -e "$work/skipped-timeout" ]; then test-ok "$backend timeout is not recoverable by ||"; else test-fail "$backend timeout recovery"; cat "$work/err"; fi
 	test-step "$backend cumulative capture, signals, and cleanup status"
-	check beforeafter '' $'value = $(sh -c "printf before; exit 7" || printf after)\nprintf "%s" $value'
+	check beforeafter '' $'let value = $(sh -c "printf before; exit 7" || printf after)\nprintf "%s" $value'
 	status=0
-	invoke --capture-limit 5 -l kash -c $'value = $(printf 123 && printf 456 || touch capture-fallback)\nprintf "%s" $value' >"$work/out" 2>"$work/err" || status=$?
+	invoke --capture-limit 5 -l kash -c $'let value = $(printf 123 && printf 456 || touch capture-fallback)\nprintf "%s" $value' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAPTURE_LIMIT "$work/err" && [ ! -e "$work/capture-fallback" ]; then test-ok "$backend cumulative capture is fatal"; else test-fail "$backend capture overflow recovery ($status)"; cat "$work/err"; fi
 	check signal-recovered '' 'sh -c "kill -TERM \$\$" || printf signal-recovered'
 	expect_status 143 RECIPE_FAIL 'sh -c "kill -TERM \$\$"'
@@ -97,7 +98,7 @@ for backend in native wasm; do
 	expect_status 42 RECIPE_FAIL $'sh -c "exit 42"\ndefer sh -c "exit 9"'
 	expect_status 9 RECIPE_FAIL $'defer sh -c "exit 42"\ndefer sh -c "exit 9"'
 	printf 'sh -c "exit 42"\n' >"$work/nested.kash"
-	if [ "$backend" = native ]; then nested="$CLI_BIN"; else nested="node $CLI_ROOT/dist/kame.js"; fi
+	if [ "$backend" = native ]; then nested="$CLI_BIN"; else nested="node $wasm_wrapper"; fi
 	expect_status 42 RECIPE_FAIL "$nested do run --allow-run ./nested.kash"
 	test-step "$backend JSON summary preserves explicit process status"
 	status=0

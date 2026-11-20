@@ -4,46 +4,47 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-08 runner file includes"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/includes"
 mkdir -p "$work/nested" "$work/cwd"
 cat >"$work/main.km" <<'KM'
-(out! "界")
-(include ./nested/child.km)
-(out! "after")
-(str name "!")
+parts = ["界"]
+include ./nested/child.km
+parts += ["after"]
+default = nop (out! (join "" parts)) (str name "!")
 KM
 cat >"$work/nested/child.km" <<'KM'
-(include ./values.km)
-(out! "child")
+include ./values.km
+parts += ["child"]
 KM
 printf 'name = "Ada"\n' >"$work/nested/values.km"
-cat >"$work/rules.kmk" <<'KMK'
-(include ./nested/rules.kmk)
-build : child
+cat >"$work/rules.km" <<'KM'
+include ./nested/rules.km
+task build : child
 	printf main
-KMK
-cat >"$work/nested/rules.kmk" <<'KMK'
-child :
-	printf child
-KMK
-cat >"$work/cycle.km" <<'KM'
-(out! "must-not-run")
-(include ./nested/cycle.km)
 KM
-printf '(include ../cycle.km)\n' >"$work/nested/cycle.km"
-printf '(include ./absent.km)\n' >"$work/missing.km"
-printf '(include ./nested/invalid.km)\n' >"$work/invalid.km"
+cat >"$work/nested/rules.km" <<'KM'
+task child
+	printf child
+KM
+cat >"$work/cycle.km" <<'KM'
+default = out! "must-not-run"
+include ./nested/cycle.km
+KM
+printf 'include ../cycle.km\n' >"$work/nested/cycle.km"
+printf 'include ./absent.km\n' >"$work/missing.km"
+printf 'include ./nested/invalid.km\n' >"$work/invalid.km"
 printf 'name = [\n' >"$work/nested/invalid.km"
-printf '(include ./empty.km)\n(include ./empty.km)\n42\n' >"$work/repeated.km"
+printf 'include ./empty.km\ninclude ./empty.km\ndefault = 42\n' >"$work/repeated.km"
 : >"$work/empty.km"
-printf '(include "%s")\nname\n' "$work/nested/values.km" >"$work/absolute.km"
-printf '(include ./values.km)\n(out! name)\n' >"$work/nested/<command-file>.km"
-printf '(include ./values.km)\n(out! name)\n' >"$work/nested/<stdin>"
+printf 'include %s\ndefault = name\n' "$work/nested/values.km" >"$work/absolute.km"
+printf 'include ./values.km\ndefault = out! name\n' >"$work/nested/<command-file>.km"
+printf 'include ./values.km\ndefault = out! name\n' >"$work/nested/<stdin>"
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_wrapper"); fi
 	check() {
 		local expected="$1"; shift
 		local status=0
@@ -62,8 +63,8 @@ for backend in native wasm; do
 	check '界childafter"Ada!"' do run --print-result -C "$work/cwd" "$work/main.km"
 	check '42' do run --print-result "$work/repeated.km"
 	check '"Ada"' do run --print-result "$work/absolute.km"
-	check 'childmain' do run -C "$work" "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
-	check 'childmain' do run -C "$work" "$work/rules.kmk" build
+	check 'childmain' do run -C "$work" "$work/rules.km" build -c 'name = "Ada"' -c 'name'
+	check 'childmain' do run -C "$work" "$work/rules.km" build
 	# A physical file's spelling must not classify it as an inline/stdin source.
 	original_command=("${command[@]}")
 	command=(env -C "$work/nested" "${command[@]}")

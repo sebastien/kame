@@ -10,7 +10,7 @@ import (
 
 func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "computed.kmk", "ROOT = \"./build\"\n@{ROOT}/{name}.o : ./src/{name}.c\n\tcat @< > @>\n")
+	parsed := script.ParseKameFile(a, "computed.km", "ROOT = \"./build\"\nrule ${ROOT}/{name}.o : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
@@ -21,7 +21,7 @@ func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 		if planned.Diagnostic.Code != "" || len(planned.Plan.Outputs) != 1 || planned.Plan.Outputs[0] != "./build/demo.o" || len(planned.Plan.Inputs) != 1 || planned.Plan.Inputs[0] != "./src/demo.c" {
 			t.Error("computed capture was not propagated to inputs and outputs")
 		}
-		if parsed.Items[1].Rule.Outputs[0].Text != "@{ROOT}/{name}.o" {
+		if parsed.Items[1].Rule.Outputs[0].Text != "${ROOT}/{name}.o" {
 			t.Error("resolution overwrote authored syntax")
 		}
 		planned.Plan.Free(a)
@@ -35,7 +35,7 @@ func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 
 func TestComputedPrerequisitePathsResolveCaptures(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "computed.kmk", "ROOT = \"./src\"\n./build/{path:**}.js : @{ROOT}/js/{path}.js, @(nop @{ROOT}/meta/{path}.json) | @{ROOT}/ready/{_0}\n")
+	parsed := script.ParseKameFile(a, "computed.km", "ROOT = \"./src\"\nrule ./build/{path:**}.js : ${ROOT}/js/{path}.js, ${nop ${ROOT}/meta/${path}.json} | ${ROOT}/ready/{_0}\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
@@ -60,14 +60,14 @@ func TestComputedPrerequisitePathsResolveCaptures(t *testing.T) {
 func TestComputedOutputFailureCleanup(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(nop [./one, ./one]) :\n",
-		"@(nop []) :\n",
-		"ROOT = (out! \"forbidden\")\n@{ROOT}/out :\n",
-		"@(str \"./one\") :\n./one :\n",
-		"@(str \"./\" \"{\" \"name\") :\n",
+		"rule ${nop [./one, ./one]}\n",
+		"rule ${nop []}\n",
+		"ROOT = (out! \"forbidden\")\nrule ${ROOT}/out\n",
+		"rule ${str \"./one\"}\nrule ./one\n",
+		"rule ${nop true}\n",
 	}
 	for i := range fixtures {
-		parsed := script.Parse(a, "invalid.kmk", fixtures[i])
+		parsed := script.ParseKameFile(a, "invalid.km", fixtures[i])
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		compiled := program.Compile(a, parsed, registry, program.Options{})

@@ -40,7 +40,7 @@ func TestFinallyOutputCancellationCannotBeRecovered(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.Parse(a, "output-cancel.km", `result = finally! (() => missing) (() => (out! "cleanup")) ?? "fallback"`)
+	parsed := script.ParseKameFile(a, "output-cancel.km", `result = finally! (() => missing) (() => (out! "cleanup")) ?? "fallback"`)
 	p := eval.Compile(a, e, parsed, r)
 	h := finalizationHost{Alloc: a, Program: p, Quiet: true, CancelOutput: true}
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -85,7 +85,7 @@ func TestFinallyResultsAndFailures(t *testing.T) {
 		e := core.NewEngine(a)
 		r := eval.NewRegistry(a)
 		operations.Register(r)
-		parsed := script.Parse(a, "finalization.km", "result = "+sources[i])
+		parsed := script.ParseKameFile(a, "finalization.km", "result = "+sources[i])
 		p := eval.Compile(a, e, parsed, r)
 		h := finalizationHost{Alloc: a, Quiet: true}
 		p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -132,7 +132,7 @@ func TestFinallyValidationBeforeCallbacks(t *testing.T) {
 		e := core.NewEngine(a)
 		r := eval.NewRegistry(a)
 		operations.Register(r)
-		parsed := script.Parse(a, "finalization.km", "result = "+sources[i])
+		parsed := script.ParseKameFile(a, "finalization.km", "result = "+sources[i])
 		p := eval.Compile(a, e, parsed, r)
 		h := finalizationHost{Alloc: a, Quiet: true}
 		p.SetDefinitionEffectSink(finalizationOutput, &h)
@@ -164,7 +164,7 @@ func TestFinallySuspensionCancellationAndDeadline(t *testing.T) {
 		if mode == 5 {
 			source = `result = (finally! (() => (async ())) (() => (out! "cleanup")))`
 		}
-		parsed := script.Parse(a, "finalization.km", source)
+		parsed := script.ParseKameFile(a, "finalization.km", source)
 		p := eval.Compile(a, e, parsed, r)
 		h := finalizationHost{Alloc: a, Quiet: true}
 		p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -262,7 +262,7 @@ func TestFinallyNestedSharedDeadline(t *testing.T) {
 		if mode == 1 {
 			source = `result = (finally! {timeout-ms: 1} (() => 42) (() => (finally! (() => (async ())) (() => (out! "inner")))))`
 		}
-		parsed := script.Parse(a, "nested.km", source)
+		parsed := script.ParseKameFile(a, "nested.km", source)
 		p := eval.Compile(a, e, parsed, r)
 		h := finalizationHost{Alloc: a, Quiet: true}
 		p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
@@ -301,7 +301,7 @@ func TestFinallyUnavailableDriverDoesNotArm(t *testing.T) {
 	e := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	parsed := script.Parse(a, "finalization.km", `result = (finally! (() => (out! "body")) (() => (out! "cleanup")))`)
+	parsed := script.ParseKameFile(a, "finalization.km", `result = (finally! (() => (out! "body")) (() => (out! "cleanup")))`)
 	p := eval.Compile(a, e, parsed, r)
 	n := p.Definition("result")
 	e.Request(n)
@@ -371,7 +371,7 @@ func TestFinallyHandledFailureDoesNotStartOuterUnwind(t *testing.T) {
 	operations.Register(r)
 	h := finalizationHost{Alloc: a, Quiet: true}
 	r.Add(eval.Operation{Name: "advance-clock", Call: finalizationAdvanceClock, Context: &h, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "handled.km", `result = (finally! {timeout-ms: 1} (() => nop (finally! (() => missing) (() => nil) ?? 0) (advance-clock ()) (fail! "later")) (() => (out! "outer")))`)
+	parsed := script.ParseKameFile(a, "handled.km", `result = (finally! {timeout-ms: 1} (() => nop (finally! (() => missing) (() => nil) ?? 0) (advance-clock ()) (fail! "later")) (() => (out! "outer")))`)
 	p := eval.Compile(a, e, parsed, r)
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = finalizationClock, finalizationQuiescent, &h
 	p.SetDefinitionEffectSink(finalizationOutput, &h)

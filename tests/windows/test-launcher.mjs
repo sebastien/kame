@@ -65,8 +65,8 @@ try {
   const workspace = path.join(temporary, 'workspace');
   await mkdir(workspace);
   await writeFile(
-    path.join(workspace, 'Windows.kmk'),
-    'task windows-launcher : ; [shell: ["cmd.exe" "/d" "/c"]]\r\n\tnode write-env.js\r\n',
+    path.join(workspace, 'Windows.km'),
+    'task windows-launcher : ; {shell: ["cmd.exe", "/d", "/c"]}\r\n\tnode write-env.js\r\n',
   );
   await writeFile(
     path.join(workspace, 'write-env.js'),
@@ -76,7 +76,7 @@ try {
     launcher,
     [
       '--env', 'KAME_WINDOWS_TEST=from-host',
-      '-f', 'Windows.kmk', 'windows-launcher',
+      '-f', 'Windows.km', 'windows-launcher',
     ],
     { cwd: workspace },
   );
@@ -87,8 +87,8 @@ try {
   const timeoutWorkspace = path.join(temporary, 'timeout-workspace');
   await mkdir(timeoutWorkspace);
   await writeFile(
-    path.join(timeoutWorkspace, 'Timeout.kmk'),
-    'task timeout-tree : ; [shell: ["cmd.exe" "/d" "/c"]]\r\n\tnode child.js\r\n',
+    path.join(timeoutWorkspace, 'Timeout.km'),
+    'task timeout-tree : ; {shell: ["cmd.exe", "/d", "/c"]}\r\n\tnode child.js\r\n',
   );
   await writeFile(
     path.join(timeoutWorkspace, 'child.js'),
@@ -103,7 +103,7 @@ setInterval(() => {}, 1000);
   const timeoutBuild = await run(
     launcher,
     [
-      '--timeout', '5000', '-f', 'Timeout.kmk', 'timeout-tree',
+      '--timeout', '5000', '-f', 'Timeout.km', 'timeout-tree',
     ],
     { cwd: timeoutWorkspace, timeout: 15000 },
   );

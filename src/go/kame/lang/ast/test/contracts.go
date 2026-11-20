@@ -6,12 +6,13 @@ import (
 	"kame/internal/testing"
 	"kame/lang/ast"
 	"kame/lang/format"
+	"kame/lang/script"
 	"strings"
 )
 
 func TestSchemaTwoSemanticFields(t *testing.T) {
 	a := t.Allocator()
-	definitionLanguages := []string{"km", "kmk", "kash"}
+	definitionLanguages := []string{"km", script.KameFileLanguage, "kash"}
 	for _, lang := range definitionLanguages {
 		buffer := bytes.Buffer{}
 		if ast.WriteAST(&buffer, lang, "functions", "def f () = 1\ndef v = 1\n") != 0 || !strings.Contains(buffer.String(), "\"function\":true") || !strings.Contains(buffer.String(), "\"function\":false") {
@@ -19,27 +20,23 @@ func TestSchemaTwoSemanticFields(t *testing.T) {
 		}
 		buffer.Reset()
 	}
-	patternLanguages := []string{"expr", "km", "kmk", "kash", "rule", "template"}
-	for _, lang := range patternLanguages {
-		text := "[./{name:~[a-z]+}, ./{name:*}]"
-		if lang == "kash" {
-			text = "def p = " + text
-		}
-		if lang == "rule" {
-			text = "rule ./{name:~[a-z]+} ./{name:*} : @{PREP}, @{BUILD} ./in/{name:~[a-z]+}"
-		}
-		if lang == "template" {
-			text = "@(nop " + text + ")"
-		}
-		formatted := format.Source(a, lang, "regex", text, "tabs", 4)
+	patterns := "[./{name:~[a-z]+}, ./{name:*}]"
+	for _, test := range []struct{ lang, text string }{
+		{"expr", patterns},
+		{"km", patterns},
+		{"kash", "def p = " + patterns},
+		{script.KameFileLanguage, "rule ./{name:~[a-z]+} ./{name:*} : ${PREP}, ${BUILD} ./in/{name:~[a-z]+}"},
+		{"template", "@{nop " + patterns + "}"},
+	} {
+		formatted := format.Source(a, test.lang, "regex", test.text, "tabs", 4)
 		if !formatted.OK {
 			t.Error("regex source failed formatting")
 		} else {
 			buffer := bytes.Buffer{}
-			if ast.WriteAST(&buffer, lang, "regex", formatted.Text) != 0 || !strings.Contains(buffer.String(), "\"regex\":true") || !strings.Contains(buffer.String(), "\"regex\":false") || !strings.Contains(buffer.String(), "\"schema\":2") {
+			if ast.WriteAST(&buffer, test.lang, "regex", formatted.Text) != 0 || !strings.Contains(buffer.String(), "\"regex\":true") || !strings.Contains(buffer.String(), "\"regex\":false") || !strings.Contains(buffer.String(), "\"schema\":2") {
 				t.Error("formatted regex mode missing from schema-2 AST")
 			}
-			if lang == "rule" && (!strings.Contains(buffer.String(), "\"sequenceEnd\":true") || !strings.Contains(buffer.String(), "\"sequenceEnd\":false")) {
+			if test.lang == script.KameFileLanguage && (!strings.Contains(buffer.String(), "\"sequenceEnd\":true") || !strings.Contains(buffer.String(), "\"sequenceEnd\":false")) {
 				t.Error("input sequence boundary missing from AST")
 			}
 			buffer.Reset()
@@ -63,7 +60,7 @@ func TestRuleCapturePatternFieldAndAuthoredCoordinates(t *testing.T) {
 	texts := []string{`rule "./out\t{name}.o"`, `rule ./out/{name}.o : ./in/{name}.c`, `rule "./out\"/{name:~[a-z]+}.o"`}
 	for i := range texts {
 		buffer := bytes.Buffer{}
-		if ast.WriteAST(&buffer, "rule", "captures", texts[i]) != 0 {
+		if ast.WriteAST(&buffer, script.KameFileLanguage, "captures", texts[i]) != 0 {
 			t.Error("capture AST failed")
 		}
 		text := buffer.String()

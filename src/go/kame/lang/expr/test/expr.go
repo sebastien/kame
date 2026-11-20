@@ -23,7 +23,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 
 func TestQuotedTemplatePrefixKeepsBraceTextLiteral(t *testing.T) {
 	a := t.Allocator()
-	s := source.New(a, "header", `"./out\\dir/{name}.@{nop "{inner:*}"}" :`)
+	s := source.New(a, "header", `"./out\\dir/{name}.${nop "{inner:*}"}" :`)
 	defer s.Free(a)
 	parsed := expr.ParseQuotedTemplatePrefix(a, s, 0)
 	defer expr.Free(a, parsed.Expr)
@@ -181,7 +181,7 @@ func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
 }
 
 func TestNamespacedReferencesRemainDistinctFromPaths(t *testing.T) {
-	inputs := []string{"inputs/changed", "inputs/changed.0", "module/value", "./inputs/changed", "../inputs/changed", "/inputs/changed", "x/tool.name", `x/"tool.name"`, "$(printf ${inputs/changed})"}
+	inputs := []string{"build/changed", "build/changed.0", "module/value", "./build/changed", "../build/changed", "/build/changed", "x/tool.name", `x/"tool.name"`, "$(printf ${build/changed})"}
 	kinds := []expr.Kind{expr.Name, expr.Reference, expr.Name, expr.Path, expr.Path, expr.Path, expr.Reference, expr.Reference, expr.CommandCapture}
 	for i := range inputs {
 		r := parse(t, inputs[i])
@@ -200,7 +200,7 @@ func TestNamespacedReferencesRemainDistinctFromPaths(t *testing.T) {
 		mem.FreeString(t.Allocator(), formatted)
 		r.Free()
 	}
-	invalid := []string{"inputs/", "inputs//changed", "inputs/42", "x/42", "x/tool/extra"}
+	invalid := []string{"build/", "build//changed", "build/42", "x/42", "x/tool/extra"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
 		if len(r.Diagnostics) == 0 {
@@ -217,7 +217,7 @@ func TestCommandWordFormattingPreservesAuthoredSpelling(t *testing.T) {
 		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
 		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
 		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
-		"$(:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?)",
+		"$(cwd: ./build timeout: (nop 1) MODE: production cat < ./input | cat >> ./output ?)",
 		"$(printf   'hello' a\\ b a(b+c)d join\\\ned)",
 		"$(printf 'raw\\\nword')",
 	}
@@ -227,9 +227,9 @@ func TestCommandWordFormattingPreservesAuthoredSpelling(t *testing.T) {
 		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
 		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
 		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
-		"$(:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?)",
+		"$(\n\tcwd: ./build timeout: (nop 1) MODE: production cat < ./input | cat >> ./output ?\n)",
 		"$(printf 'hello' a\\ b a(b + c)d joined)",
-		"$(printf 'raw\\\nword')",
+		"$(\n\tprintf 'raw\\\nword'\n)",
 	}
 	for i := range inputs {
 		r := parse(t, inputs[i])
@@ -251,7 +251,7 @@ func TestCommandWordFormattingPreservesAuthoredSpelling(t *testing.T) {
 
 func TestCommandWordFormattingPreservesLiteralSlashSuffix(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{"$(echo \"$name\"/suffix)", "$(echo \"$name\"/)", "$(echo \"$inputs/changed\"/suffix)", "$(echo \"$name\"\"/suffix file\")"}
+	inputs := []string{"$(echo \"$name\"/suffix)", "$(echo \"$name\"/)", "$(echo \"$build/changed\"/suffix)", "$(echo \"$name\"\"/suffix file\")"}
 	for i := range inputs {
 		parsed := parse(t, inputs[i])
 		formatted := expr.Format(a, parsed.Expr)
@@ -343,7 +343,7 @@ func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
 }
 
 func TestCommandSetupParserAndFormatter(t *testing.T) {
-	r := parse(t, "$(:cwd ${directory} :timeout (nop 0.1) :MODE production :env {TOKEN: \"two words\"} cat | :MODE test cat :ordinary)")
+	r := parse(t, "$(cwd: ${directory} timeout: (nop 0.1) MODE: production env: {TOKEN: \"two words\"} cat | MODE: test cat ordinary:)")
 	if expr.Ungroup(r.Expr).Items[0].Items[0].Kind != expr.CommandSetup || expr.Ungroup(r.Expr).Items[0].Items[0].Text != "cwd" || expr.Ungroup(r.Expr).Items[1].Items[2].Kind != expr.CommandWord {
 		t.Error("stage setup lost its syntax boundary")
 	}
@@ -360,7 +360,7 @@ func TestCommandSetupParserAndFormatter(t *testing.T) {
 	mem.FreeString(t.Allocator(), again)
 	copy.Free()
 	r.Free()
-	invalid := []string{"$(:cwd)", "$(:cwd x)", "$(:cwd x :cwd y cat)", "$(:X a :X b cat)", "$(:async true cat)", "$(:9BAD x cat)", "$(:bad-key x cat)", "$(:timeout | cat)", "$(:env [TOKEN: )", "$(:env {TOKEN: \"value\"} :env [OTHER: \"value\"] cat)"}
+	invalid := []string{"$(:cwd x cat)", "$(cwd:)", "$(cwd: x)", "$(cwd: x cwd: y cat)", "$(X: a X: b cat)", "$(async: true cat)", "$(9BAD: x cat)", "$(bad-key: x cat)", "$(timeout: | cat)", "$(env: [TOKEN: )", "$(env: {TOKEN: \"value\"} env: [OTHER: \"value\"] cat)"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
 		if len(r.Diagnostics) == 0 {
@@ -403,7 +403,7 @@ func TestPipeRetainsAuthoredAndEvaluationSpans(t *testing.T) {
 }
 
 func TestStringInterpolationAndRoundTrip(t *testing.T) {
-	r := parse(t, "\"hello @{name}\\n\"")
+	r := parse(t, "\"hello ${name}\\n\"")
 	defer r.Free()
 	if r.Expr == nil || r.Expr.Kind != expr.String || len(r.Expr.Parts) != 3 || r.Expr.Parts[1].Expr == nil || !sameSpan(r.Expr.Parts[1].Span, 7, 14) {
 		t.Error("string interpolation parts did not retain spans")
@@ -421,7 +421,7 @@ func TestStringInterpolationAndRoundTrip(t *testing.T) {
 func TestStringInterpolationQuoteBoundaries(t *testing.T) {
 	a := t.Allocator()
 	// Quotes inside interpolation start nested expressions, not the outer close.
-	r := parse(t, `(cat "@{nop " (str [VALUE]) "}")`)
+	r := parse(t, `(cat "${nop " (str [VALUE]) "}")`)
 	defer r.Free()
 	if r.Expr == nil || len(expr.Ungroup(r.Expr).Items) != 2 {
 		t.Fatal("nested quote boundary changed")
@@ -439,7 +439,7 @@ func TestStringInterpolationQuoteBoundaries(t *testing.T) {
 	if inner.Kind != expr.String || len(inner.Parts) != 1 || inner.Parts[0].Text != " (str [VALUE]) " {
 		t.Error("nested expression string parsed incorrectly")
 	}
-	invalid := []string{`"@{"`, `"@{name"`, `"@{cat "x" "y"}`}
+	invalid := []string{`"${"`, `"${name"`, `"${cat "x" "y"}`}
 	for i := range invalid {
 		bad := expr.Parse(a, "boundary.km", invalid[i])
 		if len(bad.Diagnostics) == 0 {
@@ -457,15 +457,10 @@ func TestInvalidNumberReportsParseSpan(t *testing.T) {
 	}
 }
 
-func TestSelectorsAndInertBraceTextRetainSpans(t *testing.T) {
-	selector := parse(t, "@<1..-1")
-	defer selector.Free()
-	if selector.Expr == nil || selector.Expr.Kind != expr.Selector || selector.Expr.Text != "@<1..-1" || !sameSpan(selector.Expr.Span, 0, 7) {
-		t.Error("selector was not parsed with its source span")
-	}
+func TestInertBraceTextRetainsSpans(t *testing.T) {
 	string := parse(t, "\"Bundle {(count files)}\"")
 	defer string.Free()
-	if string.Expr == nil || len(string.Expr.Parts) != 1 || string.Expr.Parts[0].Expr != nil || string.Expr.Parts[0].Text != "Bundle {(count files)}" {
+	if string.Expr == nil || !sameSpan(string.Expr.Span, 0, len("\"Bundle {(count files)}\"")) || len(string.Expr.Parts) != 1 || string.Expr.Parts[0].Expr != nil || string.Expr.Parts[0].Text != "Bundle {(count files)}" {
 		t.Error("bare brace text was interpreted as interpolation")
 	}
 	formatted := expr.Format(t.Allocator(), string.Expr)
@@ -477,7 +472,7 @@ func TestSelectorsAndInertBraceTextRetainSpans(t *testing.T) {
 
 func TestFormattingNeverMigratesLiteralInterpolationText(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{`"outer {(count files)} end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @{str "x@{count files}y"} end"`, `"\@(missing){name:*}"`, "\"first line\n@second line\""}
+	inputs := []string{`"outer {(count files)} end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested ${str "x${count files}y"} end"`, `"\@(missing){name:*}"`, "\"first line\n@second line\""}
 	for i := range inputs {
 		parsed := expr.Parse(a, "migration.km", inputs[i])
 		if len(parsed.Diagnostics) != 0 {
@@ -499,9 +494,13 @@ func TestFormattingNeverMigratesLiteralInterpolationText(t *testing.T) {
 	}
 }
 
-func TestValidSelectorRequiresCompleteSelector(t *testing.T) {
-	if !expr.ValidSelector("@<1..-1") || expr.ValidSelector("@1...") {
-		t.Error("ValidSelector accepted an incomplete selector")
+func TestPositionalSelectorsAreRejected(t *testing.T) {
+	for _, text := range []string{"@<", "@<1..-1", "@<?", "@>0", "@*", "@0", "@#", "@_"} {
+		result := expr.Parse(t.Allocator(), "selector.km", text)
+		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Errorf("accepted positional selector %q", text)
+		}
+		result.Free()
 	}
 }
 
@@ -596,13 +595,13 @@ func TestPatternPathsClassify(t *testing.T) {
 	}
 	expand := parse(t, "./build/{_0}/{_1}.c")
 	defer expand.Free()
-	if expand.Expr == nil || expand.Expr.Pattern != nil || len(expand.Expr.Parts) != 5 || expand.Expr.Parts[1].Form != "{" || expand.Expr.Parts[3].Form != "{" {
-		t.Error("positional value path did not lower to interpolation")
+	if expand.Expr == nil || expand.Expr.Pattern == nil || expand.Expr.Pattern.References != 2 {
+		t.Error("positional path template lost its references")
 	}
 	named := parse(t, "./build/{name}.o")
 	defer named.Free()
-	if named.Expr == nil || named.Expr.Pattern != nil || len(named.Expr.Parts) != 3 || named.Expr.Parts[1].Form != "{" {
-		t.Error("named value path did not lower to interpolation")
+	if named.Expr == nil || named.Expr.Pattern == nil || named.Expr.Pattern.References != 1 {
+		t.Error("named path template lost its reference")
 	}
 	plain := parse(t, "./src/main.c")
 	defer plain.Free()

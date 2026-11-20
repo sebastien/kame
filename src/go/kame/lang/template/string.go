@@ -14,7 +14,6 @@ const (
 	Literal PartKind = iota
 	Expression
 	Reference
-	Selector
 	Tool
 )
 
@@ -33,6 +32,7 @@ type String struct {
 	Span        source.Span
 	Parts       []Part
 	Diagnostics []source.Diagnostic
+	marker      byte
 }
 
 func (t *String) Free() {
@@ -56,16 +56,17 @@ func (t *String) Free() {
 }
 
 type parser struct {
-	a     mem.Allocator
-	s     *source.Source
-	pos   int
-	end   int
-	parts []Part
-	diags []source.Diagnostic
+	a      mem.Allocator
+	s      *source.Source
+	pos    int
+	end    int
+	parts  []Part
+	diags  []source.Diagnostic
+	marker byte
 }
 
 func ParseString(a mem.Allocator, name string, text string) *String {
-	p := parser{a: a, s: source.New(a, name, text), end: len(text)}
+	p := parser{a: a, s: source.New(a, name, text), end: len(text), marker: '@'}
 	p.stringParts()
 	t := mem.Alloc[String](a)
 	t.Alloc, t.Source, t.OwnSource, t.Span, t.Parts, t.Diagnostics = a, p.s, true, source.Span{Start: 0, End: len(text)}, p.parts, p.diags
@@ -74,14 +75,24 @@ func ParseString(a mem.Allocator, name string, text string) *String {
 
 // ParseStringRange parses a template within a caller-owned Source.
 func ParseStringRange(a mem.Allocator, s *source.Source, start int, end int) *String {
+	return parseStringRange(a, s, start, end, '@')
+}
+
+// ParseSubstitutionRange parses a Kame rule header operand with ${…}.
+func ParseSubstitutionRange(a mem.Allocator, s *source.Source, start int, end int) *String {
+	return parseStringRange(a, s, start, end, '$')
+}
+
+func parseStringRange(a mem.Allocator, s *source.Source, start int, end int, marker byte) *String {
 	view := mem.Alloc[source.Source](a)
 	*view = *s
 	view.Text = s.Text[:end]
-	p := parser{a: a, s: view, pos: start, end: end}
+	p := parser{a: a, s: view, pos: start, end: end, marker: marker}
 	p.stringParts()
 	mem.Free(a, view)
 	t := mem.Alloc[String](a)
 	t.Alloc, t.Span, t.Parts, t.Diagnostics = a, source.Span{Start: start, End: end}, p.parts, p.diags
+	t.marker = marker
 	return t
 }
 
@@ -105,7 +116,12 @@ func (p *parser) stringParts() {
 	literal = strings.Builder{}
 	literalStart := p.pos
 	for p.pos < p.end {
-		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@{x/" {
+		if p.marker == '$' && p.s.Text[p.pos] == '\\' && p.pos+1 < p.end {
+			literal.WriteString(p.s.Text[p.pos : p.pos+2])
+			p.pos += 2
+			continue
+		}
+		if p.pos+4 < p.end && p.s.Text[p.pos] == p.marker && p.s.Text[p.pos+1:p.pos+4] == "{x/" {
 			end := p.pos + 4
 			for end < p.end && (isToolNameByte(p.s.Text[end])) {
 				end++
@@ -117,22 +133,18 @@ func (p *parser) stringParts() {
 				continue
 			}
 		}
-		if p.s.Text[p.pos] == '\\' && p.pos+1 < p.end && (p.s.Text[p.pos+1] == '@' || p.s.Text[p.pos+1] == '\\') {
-			literal.WriteByte(p.s.Text[p.pos+1])
-			p.pos += 2
-			continue
-		}
-		if p.s.Text[p.pos] != '@' {
+		if p.s.Text[p.pos] != p.marker {
 			literal.WriteByte(p.s.Text[p.pos])
 			p.pos++
 			continue
 		}
-		if p.pos+1 < p.end && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
-			start, close := p.pos, byte(')')
-			kind := Expression
-			if p.s.Text[p.pos+1] == '{' {
-				close, kind = '}', Reference
-			}
+		if p.marker == '@' && p.pos+1 < p.end && p.s.Text[p.pos+1] == '@' {
+			literal.WriteByte('@')
+			p.pos += 2
+			continue
+		}
+		if p.pos+1 < p.end && p.s.Text[p.pos+1] == '{' {
+			start := p.pos
 			prefix := expr.ParseExpansionPrefix(p.a, p.s, p.pos)
 			closed := prefix.Closed
 			if prefix.Expr == nil && closed {
@@ -149,12 +161,8 @@ func (p *parser) stringParts() {
 			if prefix.Expr == nil || !closed {
 				expr.Free(p.a, prefix.Expr)
 				mem.FreeSlice(nil, prefix.Diagnostics)
-				message := "unclosed template expression; expected ')'"
-				if close == '}' {
-					message = "unclosed reference expansion; expected '}'"
-				}
-				p.diagnostic(source.Warning, start, start+2, message)
-				literal.WriteByte('@')
+				p.diagnostic(source.Error, start, start+2, "unclosed template interpolation; expected '}'")
+				literal.WriteByte(p.marker)
 				p.pos++
 				continue
 			}
@@ -164,18 +172,11 @@ func (p *parser) stringParts() {
 			}
 			mem.FreeSlice(nil, prefix.Diagnostics)
 			p.pos = prefix.End
-			p.parts = append(p.parts, Part{Kind: kind, Expr: prefix.Expr, Span: source.Span{Start: start, End: p.pos}})
+			p.parts = append(p.parts, Part{Kind: Reference, Expr: prefix.Expr, Span: source.Span{Start: start, End: p.pos}})
 			literalStart = p.pos
 			continue
 		}
-		end := selectorEnd(p.s.Text, p.pos)
-		if end > p.pos && expr.ValidSelector(p.s.Text[p.pos:end]) {
-			p.literal(&literal, literalStart, p.pos)
-			p.parts = append(p.parts, Part{Kind: Selector, Text: p.s.Text[p.pos:end], Span: source.Span{Start: p.pos, End: end}})
-			p.pos, literalStart = end, end
-			continue
-		}
-		literal.WriteByte('@')
+		literal.WriteByte(p.marker)
 		p.pos++
 	}
 	p.literal(&literal, literalStart, p.pos)
@@ -187,31 +188,6 @@ func isToolNameByte(b byte) bool {
 }
 
 func templateSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
-
-func selectorEnd(text string, start int) int {
-	if start+1 >= len(text) {
-		return start
-	}
-	b := text[start+1]
-	if b == '*' || b == '#' || b == '_' {
-		return start + 2
-	}
-	if b != '<' && b != '>' && !isDigit(b) && b != '-' {
-		return start
-	}
-	i := start + 2
-	if b == '<' || b == '>' {
-		if i < len(text) && (text[i] == '*' || text[i] == '#' || (b == '<' && text[i] == '?')) {
-			return i + 1
-		}
-	}
-	for i < len(text) && (isDigit(text[i]) || text[i] == '-' || text[i] == '.') {
-		i++
-	}
-	return i
-}
-
-func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 func owned(a mem.Allocator, text string) string {
 	if len(text) == 0 {
@@ -225,38 +201,33 @@ func owned(a mem.Allocator, text string) string {
 // FormatString returns allocator-owned canonical standalone template text.
 func FormatString(a mem.Allocator, t *String) string {
 	b := strings.Builder{}
+	marker := t.marker
+	if marker == 0 {
+		marker = '@'
+	}
 	for i := range t.Parts {
 		part := t.Parts[i]
 		if part.Kind == Literal {
 			for j := 0; j < len(part.Text); j++ {
-				if part.Text[j] == '@' || part.Text[j] == '\\' {
-					b.WriteByte('\\')
+				if marker == '@' && part.Text[j] == '@' {
+					b.WriteByte('@')
 				}
 				b.WriteByte(part.Text[j])
 			}
 			continue
 		}
-		if part.Kind == Selector {
-			b.WriteString(part.Text)
-			continue
-		}
+		b.WriteByte(marker)
+		b.WriteByte('{')
 		if part.Kind == Tool {
-			b.WriteString("@{x/")
+			b.WriteString("x/")
 			b.WriteString(part.Text)
 			b.WriteByte('}')
 			continue
-		}
-		if part.Kind == Expression {
-			b.WriteByte('@')
-		} else {
-			b.WriteString("@{")
 		}
 		value := expr.Compact(a, part.Expr)
 		b.WriteString(value)
 		mem.FreeString(a, value)
-		if part.Kind != Expression {
-			b.WriteByte('}')
-		}
+		b.WriteByte('}')
 	}
 	value := owned(a, b.String())
 	b.Reset()

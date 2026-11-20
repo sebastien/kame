@@ -13,23 +13,31 @@ func TestDocumentBareTrimMarkerRender(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "trim.km", "")
+	parsed := script.ParseKameFile(a, "trim.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(render """@if(false)@if(fail! "unselected")bad@end(if)@else-safe@end(if)""")`,
-		`(render """@if(true)body@end-tail""")`,
-		`(render """@raw-body@end-tail""")`,
-		`(render """@raw
-body@end-tail""")`,
+		`(render """@if false
+@if fail! "unselected"
+bad
+@end if
+@else -
+ safe
+@-end if""")`,
+		`(render "html" """<!-- @if true -->body <!-- @-end if - --> tail""")`,
+		`(render "html" """<!-- @raw - --> body <!-- @-end raw - --> tail""")`,
+		`(render """@raw -
+ body
+@-end raw -
+ tail""")`,
 		`(render """@end2 @else_foo @raw/path @endif""")`,
-		`(render """@if(true)body@end!""")`,
-		`(render """@raw-body@end!""")`,
+		`(render """outside @end!""")`,
+		`(render "html" """<!-- @raw -->body<!-- @end raw -->!""")`,
 	}
-	wants := []string{"safe", "bodytail", "bodytail", "bodytail", "@end2 @else_foo @raw/path @endif", "body!", "body!"}
+	wants := []string{"safe", "bodytail", "bodytail", "bodytail", "@end2 @else_foo @raw/path @endif", "outside @end!", "body!"}
 	for i := range texts {
 		result := evaluate(t, p, texts[i])
 		if result.Waiting || result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != wants[i] {
-			t.Error("bare trim render failed: " + texts[i])
+			t.Errorf("rendered %q (diagnostic %s), want %q for %s", result.Value.Text, result.Diagnostic.Code, wants[i], texts[i])
 		}
 		result.Free(a)
 	}

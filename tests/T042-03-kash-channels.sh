@@ -49,7 +49,7 @@ stream right
 
 	test-step "$backend: filters, framed channels, and async ownership"
 	run_case "stream selected
-(printf \"a\nb\n\" |(frame :lines) |(filter (eq item \"a\") | cat >&selected) | cat > $right, &selected | cat > $left)" 0
+(printf \"a\nb\n\" |(frame :lines) |(filter (eq? item \"a\") | cat >&selected) | cat > $right, &selected | cat > $left)" 0
 	expect "selected branch owns its channel writer" test "$(cat "$left")" = a
 	expect "named side output never rejoins implicitly" test "$(cat "$right")" = b
 	run_case "stream records
@@ -60,10 +60,10 @@ stream right
 (printf abc >&terminal, &terminal)' 0
 	expect "terminal channel reader presents bytes" grep -qx abc "$work/$backend.out"
 	run_case "stream reports
-if (eq 1 1)
+if (eq? 1 1)
     (printf inherited >&reports, &reports | cat > $left)" 0
 	expect "control bodies inherit lexical declarations" test "$(cat "$left")" = inherited
-	run_case "if (eq 1 1)
+	run_case "if (eq? 1 1)
     stream local
     (printf local >&local, &local | cat > $left)
 (printf escaped >&local, &local | cat > $right)" 1 KASH_CHANNEL_UNBOUND
@@ -89,6 +89,6 @@ stream second
 	run_case 'stream reports
 (printf a >&reports, &reports |(filter true | cat) | cat)' 1 KASH_FRAME_REQUIRED
 	run_case 'stream reports
-(:cwd . &reports | cat, printf a >&reports)' 1 PARSE_ERR
+(cwd: . &reports | cat, printf a >&reports)' 1 PARSE_ERR
 done
 test-end

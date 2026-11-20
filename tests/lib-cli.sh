@@ -148,6 +148,24 @@ function _cli_new_capture {
 	mktemp -p "$TEST_PATH" "$prefix.XXXXXX"
 }
 
+# Run a cache fixture without supplying opaque data on stdin. Only stdin uses
+# a terminal, so stdout, stderr and status remain independently observable.
+function cli_with_terminal_stdin {
+	python3 -c '
+import os
+import pty
+import subprocess
+import sys
+
+master, terminal = pty.openpty()
+try:
+    sys.exit(subprocess.run(sys.argv[1:], stdin=terminal).returncode)
+finally:
+    os.close(terminal)
+    os.close(master)
+' "$@"
+}
+
 # Function: cli_run [OPTIONS] [--] ARG…
 #
 # Runs the CLI under test and captures status, stdout and stderr.

@@ -4,20 +4,21 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-09 runner JSON parity"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/json"
 mkdir -p "$work"
 printf 'name = "Ada"\n' >"$work/values.km"
-printf '(include ./values.km)\nname\n' >"$work/includes.km"
-printf 'build :\n\tprintf rule\n' >"$work/rules.kmk"
+printf 'include ./values.km\ndefault = name\n' >"$work/includes.km"
+printf 'task build\n\tprintf rule\n' >"$work/rules.km"
 printf 'name = [\n' >"$work/invalid.km"
 
 parity() {
 	local expected="$1"; shift
 	local native=0 wasm=0
 	"$CLI_BIN" do run --json "$@" >"$work/native" 2>"$work/native.err" || native=$?
-	node "$CLI_ROOT/dist/kame.js" do run --json "$@" >"$work/wasm" 2>"$work/wasm.err" || wasm=$?
+	node "$wasm_wrapper" do run --json "$@" >"$work/wasm" 2>"$work/wasm.err" || wasm=$?
 	jq -cS 'del(.node,.request,.generation,.attempt,.runtimeMS,.elapsedMS)' "$work/native" >"$work/native.norm"
 	jq -cS 'del(.node,.request,.generation,.attempt,.runtimeMS,.elapsedMS)' "$work/wasm" >"$work/wasm.norm"
 	if [ "$native" = "$expected" ] && [ "$wasm" = "$expected" ] && [ ! -s "$work/native.err" ] && [ ! -s "$work/wasm.err" ] && cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "$*"; else test-fail "JSON parity: native=$native wasm=$wasm"; diff -u "$work/native.norm" "$work/wasm.norm" || true; cat "$work/native.err" "$work/wasm.err"; fi
@@ -28,9 +29,9 @@ test-step "values, selected definitions, output effects and process streams"
 parity 0 -c 'name = "Ada"' -c '(out! "notice")' -c '(err! "warning")' -c 'name'
 parity 0 "$work/values.km" name name
 parity 0 -l kash -c 'printf bytes' -l km -c '42'
-parity 0 -l kash -c 'printf "\\377"' -l expr -c ':nil'
+parity 0 -l kash -c 'printf "\\377"' -l expr -c 'nil'
 if jq -e -s 'any(.type == "stdout" and .encoding == "base64" and .data == "/w==") and any(.type == "target-value" and .value.kind == "nil")' "$work/native" >/dev/null; then test-ok "binary streams and nil values are represented structurally"; else test-fail "binary/nil JSON encoding"; fi
-parity 0 -C "$work" "$work/rules.kmk" build -c '42'
+parity 0 -C "$work" "$work/rules.km" build -c '42'
 parity 0 "$work/includes.km"
 
 test-step "runtime failures preserve metadata without fabricated values"

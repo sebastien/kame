@@ -23,11 +23,8 @@ import (
 //     through Context.FreeCallable, then the caller shallow-frees the argument
 //     slice. The pre-Call error path discards deeply because no callee ran.
 //   - Result.Free always frees deeply; it owns its value.
-//   - Ancestor stores are rejected: storing a value that would strand its
-//     capture (wouldStrandCapture) fails with DEF_ESCAPE via
-//     rejectStrandedCapture. Enforcement lives in the checked
-//     Scope.trySetValue wrapper used by let/def value forms; raw setValue
-//     stays for fresh-child stores in callValues that cannot strand.
+//   - Eager let and set register ancestor stores for cycle collection.
+//     Other value forms reject those stores through trySetValue.
 //
 // FunctionKind records closure lifetimes and distinguishes the two kinds of
 // immutable, invocation-owned callable: Kash scripts/constructors and operations.
@@ -62,6 +59,7 @@ type Function struct {
 	// PayloadAlloc owns native state and cloned ASTs, not borrowed wrappers.
 	PayloadAlloc mem.Allocator
 	Owner        *Program
+	Signature    core.Signature
 	// OperationName is the registry key for FunctionOperation, not a discriminator.
 	OperationName       string
 	Kind                FunctionKind
@@ -237,12 +235,12 @@ func freeCallables(a mem.Allocator, value *core.Value) {
 			return
 		}
 		function := value.Callable.(*Function)
+		value.Callable = nil
 		if function.Kind == FunctionTemporary {
 			freeTemporaryFunction(a, function)
 		} else if function.Kind == FunctionBorrowed {
 			freeBorrowedWrapper(a, function)
 		}
-		value.Callable = nil
 		return
 	}
 	if value.Kind == core.List {
@@ -336,11 +334,8 @@ func freeFunctionParameters(a mem.Allocator, parameters []expr.Parameter, namesO
 // wouldStrandCapture reports whether storing value in scope would strand a
 // capture: true when value holds a callable whose capture scope is strictly
 // enclosed by scope (scope is an ancestor of the capture). Such a store
-// deadlocks teardown: scope waits on the capture's parent retain while the
-// capture waits on the stored wrapper, and the cycle breaker only handles
-// self-cycles. Same-scope, descendant, and cousin stores stay safe through
-// transfer discipline and late-release re-driving, so only ancestor stores
-// are rejected. Nil and nil-scope captures cannot strand and are allowed.
+// needs cycle collection: scope waits on the capture's parent retain while
+// the capture waits on the stored wrapper.
 //
 // The name distinguishes this forbidden ancestor store from the allowed
 // "escaped" closures in tests (e.g. a let-bound lambda returned as its own
@@ -395,6 +390,11 @@ func freeValuesWithCallables(a mem.Allocator, values []core.Value) {
 		freeCallables(a, &values[i])
 	}
 	freeValues(a, values)
+}
+
+func freeValueWithCallables(a mem.Allocator, value *core.Value) {
+	freeCallables(a, value)
+	value.Free(a)
 }
 
 func freeRecord(a mem.Allocator, values []core.RecordField) {

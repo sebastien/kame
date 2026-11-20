@@ -15,7 +15,7 @@ func (p *Program) beginOwnership(entry *instance, commands string, effects []eva
 	if p.Options.Ownership == nil {
 		return diagnostic.Diagnostic{}
 	}
-	if entry.Rule.Kind == rule.FileRule && (commands != "" || hasYield(effects)) {
+	if entry.Rule.Kind == rule.FileRule && (commands != "" || hasPublication(effects)) {
 		for i := range entry.Plan.Outputs {
 			name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 			if !slices.Contains(entry.OwnershipPaths, name) {
@@ -186,8 +186,8 @@ func (p *Program) CleanupContextBlocker() CleanupBlocker {
 			return p.cleanupBlocker(reason, input.Span)
 		}
 	}
-	if len(p.GeneratedRules) != 0 {
-		return p.cleanupBlocker("generated-declarations", p.GeneratedRules[0].Header)
+	if p.firstGenerateSpan.End != 0 {
+		return p.cleanupBlocker("generated-declarations", p.firstGenerateSpan)
 	}
 	for i := range p.Eval.DefinitionArgs {
 		if core.ValueSignature(p.Eval.DefinitionArgs[i]).Mode != core.SignatureContent {

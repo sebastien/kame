@@ -17,7 +17,7 @@ cp -a "$CLI_ROOT/src/go/kame/cmd/kame/testdata/parse" parse
 test-step "CLI AST goldens are byte-stable apart from the source path"
 (
 	cd parse
-	for entry in expr:expr template:template rule:rule script:script invalid-expr:expr; do
+	for entry in expr:expr template:template rule:km action:kash invalid-expr:expr; do
 		name="${entry%%:*}"
 		lang="${entry##*:}"
 		cli_run -- do parse --json --lang "$lang" "$name.km"

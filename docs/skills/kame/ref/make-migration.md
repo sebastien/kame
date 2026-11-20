@@ -1,57 +1,47 @@
-# Migrating from Make to Kame
+# Migrating from GNU Make to Kame
 
-This guide is for a staged migration from GNU Make to Kame. Kame borrows the
-idea of named targets and shell recipes, but it is not a Makefile parser or a
-drop-in replacement for GNU Make.
+Move one target and its prerequisites at a time. Keep the GNU Make
+`Makefile` while adding a Kame program in `Makefile.km`. Kame searches for
+`Kamefile`, `Makefile.km`, `make.km`, and `src/km/main.km` in that order.
 
-Keep the existing `Makefile` while adding `Makefile.kmk`. Kame discovers only
-Kame sources: `Kamefile`, `Makefile.kmk`, `make.kmk`, and `src/kmk/main.kmk`, in that order.
+## Map the build graph
 
-## Translate the build model first
-
-Before editing, classify every Make target:
-
-| Make construct | Kame model |
+| GNU Make | Kame |
 | --- | --- |
-| A target that produces a file | A rule with explicit `./`, `../`, or absolute output paths |
-| `.PHONY` target | Bare Kame task; it is always stale |
-| Expensive task whose result can be reused | `task NAME : ...`; Kame caches a successful result using rule, inputs, dynamic dependencies, and execution configuration |
-| First Make target / `.DEFAULT_GOAL` | A literal Kame target named `default` |
-| Prerequisite | Rule input after `:` |
-| Order-only prerequisite | Input after `|`; schedules normally but does not establish content freshness |
-| Pattern rule | Rule header with named captures such as `{name}` |
-| Recipe | Indented Kame rule body, rendered as one shell script |
+| File target | `rule ./out : ./in` with explicit filesystem paths |
+| `.PHONY` target | `task NAME`, which runs whenever reached |
+| Reusable successful work | `task cached NAME`, keyed by inputs, dynamic dependencies, and execution configuration |
+| First target or `.DEFAULT_GOAL` | `task default` for targetless invocations |
+| Normal prerequisite | Input after `:` |
+| Order-only prerequisite | Input after `\|`, which is scheduled without contributing to content freshness |
+| Pattern rule | Named captures in the output, such as `./build/{name}.o` |
+| Recipe | Indented Kash action block by default |
+| Included makefile | `include ./rules/common.km` |
+| Optional included makefile | `include? ./local.km` |
 
-Use `task` deliberately. A bare task is the Kame equivalent of a conventional
-phony target and runs each time it is reached. A `task` is a cached task, not a
-synonym for `.PHONY`.
+Prepend `./` or `../` to relative filesystem paths in rule headers. Keep
+logical task names bare after the `task` keyword. Use a comma between
+prerequisite groups when the first group must finish before the next starts.
 
-Kame does **not** select the first rule as the default. With no requested
-target, it runs a target literally named `default`; if none exists, it fails
-with `TGT_NO_DEFAULT` and lists the available named targets.
+## Translate variables and recipes
 
-## Syntax mapping
+| GNU Make | Kash recipe or Kame expression |
+| --- | --- |
+| `VAR = value` or `VAR := value` | `VAR = "value"` for text. Definitions are lazy expressions and can also hold typed values. |
+| `$(VAR)` in a recipe | `$VAR` for a typed argument, or `$...VAR` to spread a list |
+| `$@` | `$outputs.0` |
+| `$<` | `$inputs.0` |
+| `$^` | `$...inputs` |
+| `$?` | `$...changed-inputs`, computed from file content |
+| `$*` | `$stem`, given an output capture named `{stem}` |
+| `$(@D)` or `$(<D)` | `(dirname outputs.0)` or `(dirname inputs.0)` |
 
-| GNU Make | Kame | Notes |
-| --- | --- | --- |
-| `VAR = value` / `VAR := value` | `VAR = "value"` | Kame RHSs are expressions and definitions are lazy: bare names reference values, numbers are typed, text requires quotes, and lists require brackets. Do not assume Make's recursive versus immediate expansion distinction. |
-| `$(VAR)` in a recipe | `@{VAR}` | Reads and renders a Kame definition. |
-| `$@` | `@>` | First output. |
-| `$<` | `@<` | First input. |
-| `$^` | `@<*` | All normal inputs, rendered space-separated. |
-| `$?` | `@<?` | Changed normal file inputs by content digest, not timestamp; missing outputs/records select all. |
-| `$*` | `@{stem}` | Name an explicit target capture such as `{stem}`. |
-| `$(@D)`, `$(<D)` | `@(dirname @>)`, `@(dirname @<)` | Output and first-input directories. |
-| `out: in` | `./out : ./in` | Filesystem paths must be explicit. |
-| `%.o: %.c` | `./build/{name}.o : ./src/{name}.c` | The same named capture must match consistently. |
-| `make target` | `kame target` | Multiple targets can be requested in one invocation. |
-| `make -f FILE target` | `kame -f FILE target` | Use a `.kmk` source. |
-| `make -C DIR target` | `kame -C DIR target` | Sets Kame's working directory. |
-| `make -j N target` | `kame -j N target` | Limits concurrent graph nodes. |
-| `make -n target` | `kame -n target` | Kame plans and renders, without process or effect execution. |
-| `include rules.mk` | `(include ./rules.kmk)` | Merges the included Kame source depth-first under the caller's grammar; literal paths are relative to the including source. |
+For a recipe that needs POSIX shell syntax, attach `; {shell: "sh"}` to the
+declaration. Kame renders that recipe as a document template and runs the
+resulting shell script. Use `@{VAR}`, `@{inputs.0}`, or `@{outputs.0}` to
+interpolate Kame values. Use shell quoting and expansions for shell variables.
 
-## Example conversion
+## Convert a small C build
 
 GNU Make:
 
@@ -74,110 +64,73 @@ clean:
 Kame:
 
 ```kame
-default : ./build/app
+task default : ./build/app
 
-./build/{name}.o : ./src/{name}.c
-	cc -c @< -o @>
+rule ./build/{name}.o : ./src/{name}.c
+	cc -c $inputs.0 -o $outputs.0
 
-./build/app : ./build/main.o ./build/util.o
-	cc @<* -o @>
+rule ./build/app : ./build/main.o ./build/util.o
+	cc $...inputs -o $outputs.0
 
-clean :
+task clean
 	rm -rf ./build
 ```
 
-The `./` prefixes classify the outputs and inputs as file resources. `default`
-and `clean` are bare tasks and therefore run every time they are reached.
-Kame creates parent directories for declared file outputs before executing a
-file-rule recipe.
-
-For a split Makefile, migrate shared declarations into `.kmk` fragments and
-include them explicitly:
+Kame creates parent directories for declared file outputs before running the
+recipe. When splitting a build across files, include declarations using literal
+paths relative to the including source. Use imports when you want to bind
+specific exported names or a namespace.
 
 ```kame
-(include ./rules/common.kmk)
-(include ./rules/platform.kmk)
+include ./rules/common.km
+include? ./rules/local.km
 ```
 
-Kame merges the included definitions and rules into the caller's program.
-Repeated nonrecursive inclusion expands again; duplicate declarations still
-fail registration. Active-ancestry include cycles are errors. Use
-`(include? "local.kmk")` for a missing-only optional file and composition-only
-`if` to select include files. Extract conditional definitions/rules into those
-files; they are not valid `if` bodies. Legacy line includes and
-`when`/`otherwise`/`end` are rejected with migration guidance.
+## Inspect and exercise the converted build
 
-## Convert incrementally
+The `-f FILE`, `-C DIR`, `-j N`, and `-n` options select a source, set the
+working directory, limit concurrent work, and dry-run a build respectively.
+Multiple targets can be requested in one invocation.
 
-1. Copy the smallest useful Make target and its prerequisite closure into
-   `Makefile.kmk`.
-2. Change every file path in rule headers to an explicit `./path`, `../path`, or absolute
-   path. Keep logical task names bare.
-3. Translate only the automatic variables used by the initial recipe. Replace
-   Make functions and generated Make syntax with explicit Kame expressions or
-   ordinary shell code.
-4. Format and inspect before executing:
+```sh
+kame do fmt -n Makefile.km
+kame do plan ./build/app
+kame do inputs --depth -1 ./build/app
+kame do outputs --depth -1 ./src/main.c
+kame -n ./build/app
+kame ./build/app
+kame ./build/app
+```
 
-   ```sh
-   kame do fmt -n Makefile.kmk
-   kame do plan ./build/app
-   kame do inputs --depth -1 ./build/app
-   kame do outputs --depth -1 src/main.c
-   kame -n ./build/app
-   ```
+The second invocation can reuse a file rule when its recorded inputs and
+outputs still match. Touching a file without changing its bytes preserves
+content freshness. Changed bytes invalidate the rule even when the timestamp
+is preserved. Use `--force` to bypass freshness and cached-task hits.
 
-5. Run the target, then run it again. A file rule with accepted current outputs
-   and real declared/discovered dependencies should skip; an inputless file
-   rule or bare task should run again. Use `--force` only when intentionally
-   bypassing freshness and cached-task hits. File reuse compares content digests:
-   a metadata-only touch does not rebuild, while changed bytes invalidate even
-   with preserved timestamps. A first run establishes the successful record.
-6. Add patterns, generated inputs, and cached tasks only after the direct
-   graph is correct.
+## Convert Make metaprogramming
 
-## Redesign rather than transliterate
+- Use explicit rules for built-in implicit and suffix rules.
+- Use lazy values, declaration-time conditionals and loops, and typed
+  `generate` for `define`, `eval`, and generated Make syntax.
+- Use named target arguments for per-target parameters and recipe `env`
+  metadata for process environment. Use `?=` and `--define` for
+  configuration defaults and overrides.
+- Move process work from `$(shell ...)` during graph construction into a
+  recipe. Planning and foreign-shell template rendering run under read-only
+  restrictions.
+- Use a recipe attribute or an explicitly invoked script for workflow code
+  that depends on a specific shell or toolchain.
+  [SDK migration boundaries](../../../sdk-migration-boundaries.md)
 
-For SDK ports, keep vendor CLIs and installation/release/Terraform/HTML policy
-in workflow code. Do not add mutable Bash sessions, sourcing, or traps to Kash
-merely to copy a shell library. See [SDK migration boundaries](../../../sdk-migration-boundaries.md)
-for concrete cleanup cases and the capabilities that would justify a separate
-language request.
-
-Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
-
-- `define`, `eval`, and Make-generated source text: use value definitions and
-  bounded typed [generated declarations](../../../spec/025-generated-declarations.md);
-- built-in implicit rules, suffix rules, and Make's rule-search algorithm;
-- target-specific variables and Make exports: use scoped environment metadata
-  for recipe inheritance, and `?=`/`--define` for configuration defaults;
-- `$(shell ...)` and other Make functions that execute during parsing;
-- assumptions that each recipe line starts a separate shell.
-
-Use Kame definitions and expression operations for deterministic build data;
-use explicit prerequisite rules to generate files; and use the normal rule
-recipe as the process interface (shell by default, or explicitly selected Kash).
-Collected `sh!` calls belong in standalone execution or direct Kash recipes,
-subject to run grants and the target environment. Lazy definitions do not bypass
-the read-only planning and template-expansion phases.
-
-For dynamic source discovery, prefer an explicit definition:
+For dynamic source discovery, use a tracked glob to declare dependencies:
 
 ```kame
-SOURCES = ./src/*.c
+sources = ./src/*.c
 
-./build/sources.txt : @{SOURCES}
-	printf '%s\n' @{SOURCES} > @>
+rule ./build/sources.txt : ${sources}
+	printf '%s\n' $...inputs > $outputs.0
 ```
 
-The glob expression records a dependency on its result, so later membership changes
-can invalidate the consuming rule.
-
-## Migration review checklist
-
-- Every filesystem input and output in a rule header starts with `./`, `../`, or `/`.
-- The intended default is named `default`.
-- Always-run targets are bare; only cacheable work uses `task`.
-- Recipes use `@<`, `@<*`, and `@>` rather than Make automatic variables.
-- Make-only metaprogramming has been removed or explicitly redesigned.
-- `kame do plan`, `inputs`, and `outputs` describe the intended graph.
-- `kame -n TARGET` succeeds without writes, effects, or processes.
+A membership change can invalidate the consuming rule. Check that
+`kame do plan`, `kame do inputs`, and `kame do outputs` describe the intended
+graph and that `kame -n TARGET` previews it before running the recipes.

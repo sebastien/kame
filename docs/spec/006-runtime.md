@@ -35,7 +35,7 @@ filesystem access and starts no producer.
 Literal phony, cached-task, and service rules share the source-level target
 namespace. Defining the same literal name in more than one of those rule kinds
 is `TGT_AMBIG` during compilation. A definition may share that name because it
-uses a distinct `definition` key; rule lookup wins and `@{NAME}` explicitly
+uses a distinct `definition` key; rule lookup wins and `${NAME}` explicitly
 evaluates the definition. Unresolved template ambiguity remains a selection-time
 error after applying `045-rule-precedence.md`.
 
@@ -85,7 +85,7 @@ It does not evaluate body expressions or run commands.
 Freshness is `unknown` when body evaluation may discover dependencies. A plan
 never claims such a rule is fresh from declared inputs alone.
 
-Bare input names refer to symbolic resources. `@{NAME}` evaluates and recursively
+Bare input names refer to symbolic resources. `${NAME}` evaluates and recursively
 flattens the definition value into concrete inputs. Nil contributes no input.
 Values other than strings, resource references, lists, or nil are invalid rule
 inputs.
@@ -127,8 +127,6 @@ Rendering evaluates recipe string templates in source order with rule inputs,
 outputs, and captures in scope. It records:
 
 - Command lines.
-- `out` and `err` effects.
-- `yield` content.
 - Dynamic dependencies from library operations.
 - Source mapping from generated shell lines to recipe body spans.
 
@@ -166,7 +164,7 @@ to infer reads. Environment snapshots are persisted as digests, never plaintext.
 
 The interpreter is an execution dependency, not a render input. Changing it
 requires execution. It does not by itself require rendering, and it does not
-add environment names. Rendered command text and yielded bytes are results, not
+add environment names. Rendered command text and returned artifact bytes are results, not
 dependencies. A later invocation must not render in order to decide whether to
 render.
 
@@ -339,7 +337,7 @@ After capture rendering, duplicate output paths are `PARSE_ERR`.
 Every rendered sibling must select this same rule instance; shadowed or ambiguous
 sibling ownership is `TGT_AMBIG` before execution (`045-rule-precedence.md`).
 
-## Yield and Effects
+## Publication and effects
 
 The body form selects one producer. An expression body, `rule ./out : ./in =
 EXPR`, evaluates one Kame expression. It returns text or bytes, and the rule
@@ -600,7 +598,7 @@ bytes is a separate operation used by `cat`.
   equal or incomparable remaining matches produce `TGT_AMBIG`.
 - Captures render corresponding input and output templates.
 - Bare symbolic dependencies select rules before definitions with the same
-  name; explicit definition evaluation remains available through `@{NAME}`.
+  name; explicit definition evaluation remains available through `${NAME}`.
 - A diamond dependency graph executes its shared node once.
 - Existing fresh file outputs are skipped; missing outputs and changed content
   rebuild. A modification-time update that leaves the bytes alone does not.

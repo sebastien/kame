@@ -14,7 +14,7 @@ func TestCallableOwnershipRemediation(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "ownership.km", "")
+	parsed := script.ParseKameFile(a, "ownership.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"{f: (x => x)}.f 42",
@@ -65,7 +65,7 @@ func TestCallableOwnershipRemediation(t *testing.T) {
 		t.Error("native arity rejection missing")
 	}
 	result.Free(a)
-	result = evaluate(t, p, "(map (x => (if (eq x 1) then (y => y) else (uppercase 42))) [1, 2])")
+	result = evaluate(t, p, "(map (x => (if (eq? x 1) then (y => y) else (uppercase 42))) [1, 2])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("callback rejection missing")
 	}
@@ -85,7 +85,8 @@ func TestContextCallBorrowsCallableOperands(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "call.km", "")
+	operations.Register(registry)
+	parsed := script.ParseKameFile(a, "call.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	identity := evaluate(t, p, "(eval \"(x => x)\")")
 	operand := evaluate(t, p, "(eval \"(x => x)\")")
@@ -114,7 +115,7 @@ func TestDefinitionArgsReplacement(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "args.km", "")
+	parsed := script.ParseKameFile(a, "args.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	first := core.NewString(a, "first")
 	second := core.NewString(a, "second")
@@ -140,7 +141,7 @@ func TestDuplicateRecordTextCoercion(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "duplicate.km", "")
+	parsed := script.ParseKameFile(a, "duplicate.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	input := expr.Parse(a, "duplicate", "(out! {b: 3, a: 1, a: 2})")
 	c := &eval.Context{Program: p, Scope: p.Scope, Run: a}

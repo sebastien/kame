@@ -4,15 +4,19 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T048-09 Kash stdin record loops"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
-CLI_BIN="$CLI_BIN" CLI_ROOT="$CLI_ROOT" STDIN_WORK="$TMPDIR" node <<'JS'
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make -C "$CLI_ROOT" dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
+CLI_BIN="$CLI_BIN" WASM_RUNNER="$wasm_runner" STDIN_WORK="$TMPDIR" node <<'JS'
 const { spawnSync, spawn } = require('node:child_process');
 const { writeFileSync, openSync, closeSync, readSync, writeSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const assert = require('node:assert/strict');
 const work = process.env.STDIN_WORK;
 let checks = 0, next = 0;
-const runners = [[process.env.CLI_BIN], [process.execPath, join(process.env.CLI_ROOT, 'dist/kame.js')]];
+const runners = [[process.env.CLI_BIN], [process.execPath, process.env.WASM_RUNNER]];
 for (const runner of runners) {
   for (const mode of ['file', 'pipe']) {
     const run = (source, input, output, status = 0, code, extra = []) => {
@@ -45,11 +49,11 @@ for (const runner of runners) {
     run('for line from :stdin :lines\n\twith\n\t\tdefer printf D\n\t\tprintf %s $line\n\t\tcontinue\nprintf X', 'a\nb\n', 'aDbDX');
     run('for line from :stdin :lines\n\tdefer printf %s $line\nprintf X', 'a\nb\n', 'Xba');
     run('for line from :stdin :lines\n\tfor inner from :stdin :lines\n\t\tprintf forbidden', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
-    run('def helper\n\tfor inner from :stdin :lines\n\t\tprintf forbidden\nfor line from :stdin :lines\n\t(helper)', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
-    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nprintf %s $(printf %s (let [unused (consume)] "C"))\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'Cab');
-    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\ndefer (consume)\nfor line from :stdin :lines\n\tprintf %s $line\n\tbreak', 'a\nb\n', 'a');
-    run('def consume\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\nlet job = (run! :async :true (let [unused (consume)] "cat"))\n(await job)\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'ab');
-    run('for line from :stdin :lines\n\tlet event = (parse-json line)\n\tif (eq? event.kind "release")\n\t\tprintf %s $event.name', '{"kind":"skip"}\n{"kind":"release","name":"sdk"}\n', 'sdk');
+    run('def helper ()\n\tfor inner from :stdin :lines\n\t\tprintf forbidden\nfor line from :stdin :lines\n\t(helper ())', 'a\nb\n', '', 1, 'KASH_DOUBLE_CONSUME');
+    run('def consume ()\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn "C"\nprintf %s $(printf %s (consume ()))\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'Cab');
+    run('def consume ()\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn 0\ndefer (consume ())\nfor line from :stdin :lines\n\tprintf %s $line\n\tbreak', 'a\nb\n', 'a');
+    run('def consume ()\n\tfor line from :stdin :lines\n\t\tprintf forbidden\n\treturn ""\nlet job = $&(printf %s (consume ()))\nlet result = $?(wait $job)\nout! $result.value\nfor line from :stdin :lines\n\tprintf %s $line', 'a\nb\n', 'ab');
+    run('for line from :stdin :lines\n\tlet event = (parse-json line)\n\tif event.kind == "release"\n\t\tprintf %s $event.name', '{"kind":"skip"}\n{"kind":"release","name":"sdk"}\n', 'sdk');
     run('for line from :stdin :lines\n\tprintf %s (count line)', 'x'.repeat(65536), '65536');
     run('for line from :stdin :lines\n\tprintf %s (count line)', 'x'.repeat(65535) + '\n', '65535');
     run('for line from :stdin :lines\n\tprintf forbidden', 'x'.repeat(65537), '', 1, 'KASH_RECORD_LIMIT');
@@ -96,17 +100,18 @@ async function waits() {
     for (const signal of [false, true]) {
       const fd = fifo();
       try {
-        const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', signal ? '3000' : '500', '-l', 'kash', '-c', 'defer printf D\nprintf R\nfor line from :stdin :lines\n\tprintf forbidden'], { stdio: [fd, 'pipe', 'pipe'] });
+        // Leave time to start the WASM reactor before exercising the blocked read.
+        const child = spawn(runner[0], [...runner.slice(1), 'do', 'run', '--timeout', signal ? '10000' : '3000', '-l', 'kash', '-c', 'defer (out! "D")\nout! "R"\nfor line from :stdin :lines\n\tprintf forbidden'], { stdio: [fd, 'pipe', 'pipe'] });
         let output = '', error = '', sent = false;
         child.stdout.on('data', (chunk) => {
           output += chunk;
           if (signal && output.includes('R') && !sent) { sent = true; setTimeout(() => child.kill('SIGINT'), 30); }
         });
         child.stderr.on('data', (chunk) => { error += chunk; });
-        const timer = setTimeout(() => child.kill('SIGKILL'), 6000);
+        const timer = setTimeout(() => child.kill('SIGKILL'), 15000);
         const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
         clearTimeout(timer);
-        assert.equal(status, signal ? 130 : 1, error); assert.equal(output, 'RD');
+        assert.equal(status, signal ? 130 : 1, error); assert.equal(output, 'RD', error);
         if (!signal) assert.match(error, /RECIPE_TIMEOUT/);
         writeSync(fd, 'future\n');
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -117,7 +122,7 @@ async function waits() {
   }
   // Node cannot safely poll arbitrary sockets with its public FD API. It must
   // reject one before consuming, rather than start a blocking thread-pool read.
-  const unsupported = spawnSync(process.execPath, [join(process.env.CLI_ROOT, 'dist/kame.js'), 'do', 'run', '-l', 'kash', '-c', 'for line from :stdin :lines\n\tprintf forbidden'], { input: 'socket input\n', encoding: 'utf8', timeout: 6000 });
+  const unsupported = spawnSync(process.execPath, [process.env.WASM_RUNNER, 'do', 'run', '-l', 'kash', '-c', 'for line from :stdin :lines\n\tprintf forbidden'], { input: 'socket input\n', encoding: 'utf8', timeout: 6000 });
   assert.equal(unsupported.status, 1); assert.equal(unsupported.stdout, ''); assert.match(unsupported.stderr, /FEATURE_UNSUP/); checks++;
   console.log(`${checks} native/Node stdin-record checks passed`);
 }

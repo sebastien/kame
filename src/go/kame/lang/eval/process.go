@@ -38,8 +38,8 @@ type captureState struct {
 	Environment    []core.Value
 	Cwd            string
 	Timeout        int64
-	TTY            setupFlag // this stage's explicit :tty
-	Foreground     setupFlag // this stage's explicit :foreground
+	TTY            setupFlag // this stage's explicit tty:
+	Foreground     setupFlag // this stage's explicit foreground:
 	ID             int64
 	Done           bool
 	Async          bool
@@ -47,10 +47,23 @@ type captureState struct {
 	Value          core.Value
 	Effects        []Effect
 	WritePaths     []string
+	Callables      map[int]*preparedCallable
+	CallableStages []*functionStage
+	GraphTerminal  *core.Completion
 }
 
 func freeCaptureState(a mem.Allocator, value any) {
 	s := value.(*captureState)
+	for _, stage := range s.CallableStages {
+		stage.release()
+	}
+	for _, callable := range s.Callables {
+		callable.free(a)
+	}
+	if s.GraphTerminal != nil {
+		freeValueWithCallables(a, &s.GraphTerminal.Value)
+		s.GraphTerminal.Diagnostic.Free(a)
+	}
 	if s.Program != nil {
 		for i := range s.Program.StreamStates {
 			if s.Program.StreamStates[i] == s {
@@ -71,10 +84,7 @@ func freeCaptureState(a mem.Allocator, value any) {
 		s.OperandSlots[i].Free(a)
 	}
 	mem.FreeSlice(nil, s.OperandSlots)
-	for i := range s.Argv {
-		s.Argv[i].Free(a)
-	}
-	mem.FreeSlice(nil, s.Argv)
+	freeValuesWithCallables(a, s.Argv)
 	for i := range s.Stages {
 		s.Stages[i].Free(a)
 	}
@@ -93,7 +103,7 @@ func freeCaptureState(a mem.Allocator, value any) {
 		s.Environment[i].Free(a)
 	}
 	mem.FreeSlice(nil, s.Environment)
-	s.Value.Free(a)
+	freeValueWithCallables(a, &s.Value)
 	FreeEffects(a, s.Effects)
 	for i := range s.WritePaths {
 		mem.FreeString(a, s.WritePaths[i])
@@ -109,14 +119,12 @@ func (p *Program) capture(e *expr.Expr, c *Context) Result {
 	if c.Phase != EvaluatePhase {
 		return failure(c.Run, "PHASE_INVALID", e.Span, "process execution is invalid in this phase")
 	}
+	if e.ActionPrefix == "$&(" {
+		return p.startAsyncCapture(e, c)
+	}
 	if !e.Topology && hasProcessTopology(e) {
 		return p.captureTopology(e, c)
 	}
-	if !c.allowed(Run) {
-		return failure(c.Run, "CAP_DENIED", e.Span, "command substitution requires run capability")
-	}
-	previousStart, previousEnd := c.operationStart, c.operationEnd
-	c.operationStart, c.operationEnd = e.Span.Start, e.Span.End
 	previousInput, previousBackground := c.InputClosed, c.TerminalBackground
 	if e.Async {
 		c.TerminalBackground = p.Terminal && !previousInput && !c.RecordBody
@@ -126,13 +134,52 @@ func (p *Program) capture(e *expr.Expr, c *Context) Result {
 	if e.Kind == expr.CommandCapture || e.TypedCapture || e.Async {
 		c.InputClosed = true
 	}
-	r := p.captureRequest(e, c)
+	r, handled, heads := p.localCommand(e, c)
+	if !handled {
+		if (len(heads.emitters) != 0 || len(heads.callables) != 0) && !e.Topology {
+			c.InputClosed, c.TerminalBackground = previousInput, previousBackground
+			return p.captureTopology(e, c)
+		} else if !c.allowed(Run) && !outputOnlyGraph(e, heads) {
+			r = failure(c.Run, "CAP_DENIED", e.Span, "command substitution requires run capability")
+		} else {
+			previousStart, previousEnd := c.operationStart, c.operationEnd
+			c.operationStart, c.operationEnd = e.Span.Start, e.Span.End
+			r = p.captureRequest(e, c, heads)
+			c.operationStart, c.operationEnd = previousStart, previousEnd
+		}
+	}
 	c.InputClosed, c.TerminalBackground = previousInput, previousBackground
-	c.operationStart, c.operationEnd = previousStart, previousEnd
+	if e.ActionPrefix != "$?(" {
+		return r
+	}
+	if p.DryRun {
+		if r.Waiting || r.Diagnostic.Code != "" {
+			return r
+		}
+		r.Free(c.Run)
+		return Result{Completed: true}
+	}
+	if processFailureCanBeInspected(r.Diagnostic) {
+		record := processFailureOutcome(c, e, r.Diagnostic, r.Value)
+		r.Free(c.Run)
+		return record
+	}
 	return r
 }
 
-func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
+func outputOnlyGraph(e *expr.Expr, heads commandHeads) bool {
+	if len(heads.emitters) == 0 && len(heads.callables) == 0 {
+		return false
+	}
+	for i, stage := range e.Items {
+		if (stage.Kind == expr.CommandStage && heads.emitters[i] == nil && heads.callables[i] == nil) || stage.Text == "each" {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) Result {
 	if c.Engine == nil {
 		return failure(c.Run, "HOST_FAIL", e.Span, "process execution requires an execution host")
 	}
@@ -201,7 +248,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if state.Error != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Error))
 		}
-		return p.capture(e.Body[0], c)
+		return p.captureFallback(e, c)
 	}
 	if state.Stage == len(e.Items) && !demandProcessInput(c, state.Input) {
 		return Result{Waiting: true}
@@ -216,7 +263,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if state.Error != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Error))
 		}
-		return Result{Value: state.Value.Clone(c.Run)}
+		return Result{Value: borrowValue(c.Run, state.Value)}
 	}
 	if state.ID != 0 {
 		if state.Output != "" {
@@ -225,13 +272,45 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if state.Error != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Error))
 		}
-		if c.Completion().RequestID != state.ID {
-			return Result{Waiting: true}
+		var completion core.Completion
+		if len(state.CallableStages) == 0 {
+			if c.Completion().RequestID != state.ID {
+				return Result{Waiting: true}
+			}
+			completion = c.TakeCompletion()
+		} else {
+			joined, ready := state.joinCallableStages(c)
+			if !ready {
+				return Result{Waiting: true}
+			}
+			completion = joined
 		}
-		completion := c.TakeCompletion()
 		if completion.Diagnostic.Code != "" {
 			r := Result{Diagnostic: completion.Diagnostic.Clone(c.Run)}
 			completion.Diagnostic.Free(c.Run)
+			if r.Diagnostic.Exit.Requested && e.Kind == expr.CommandCapture && completion.HasValue {
+				captured := captureValue(c.Run, completion.Value, e.Span, true, false)
+				if captured.Diagnostic.Code != "" {
+					r.Free(c.Run)
+					r = captured
+				} else {
+					r.Value = captured.Value
+					if (e.ActionPrefix == "$?(" || c.captureListOutcome != nil) && inspectCaptureExit(r.Diagnostic) {
+						outcome := captureGraphExit(c, e, completion.Value, state.Stages, r)
+						if outcome.Diagnostic.Code != "" {
+							r.Free(c.Run)
+							r = outcome
+						} else if e.ActionPrefix == "$?(" {
+							r.Value.Free(c.Run)
+							r.Value = outcome.Value
+						} else {
+							c.recordListOperand(e, outcome.Value, false)
+							outcome.Free(c.Run)
+						}
+					}
+				}
+			}
+			freeValueWithCallables(c.Run, &completion.Value)
 			if r.Diagnostic.Span.Start == 0 && r.Diagnostic.Span.End == 0 {
 				r.Diagnostic.Span.Start, r.Diagnostic.Span.End = e.Span.Start, e.Span.End
 			}
@@ -253,7 +332,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			}
 		}
 		outcome := e.ActionPrefix == "$?("
-		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest || outcome, e.TypedCapture)
+		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest || (outcome && len(e.Body) == 0), e.TypedCapture)
 		if e.Topology && r.Diagnostic.Code == "RECIPE_FAIL" {
 			stages := host.PayloadStages(completion.Value)
 			for i := range stages {
@@ -306,9 +385,21 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 			}
 		}
-		completion.Value.Free(c.Run)
+		if operand := c.captureListOutcome; operand != nil && operand.graph == e &&
+			(r.Diagnostic.Code == "" || (eligibleCommandExit(r.Diagnostic) && len(e.Body) == 0)) {
+			record := captureOutcome(c, e, completion.Value, r.Value)
+			if e.Topology && record.Diagnostic.Code == "" {
+				record = processGraphResult(c.Run, record, e, completion.Value, state.Stages)
+			}
+			c.recordListOperand(e, record.Value, false)
+			record.Free(c.Run)
+		}
+		if c.asyncHandle != nil && (r.Diagnostic.Code == "" || (eligibleCommandExit(r.Diagnostic) && len(e.Body) == 0)) {
+			c.asyncHandle.recordOutcome(c, e, completion.Value, state.Stages)
+		}
+		freeValueWithCallables(c.Run, &completion.Value)
 		if r.Diagnostic.Code == "" {
-			state.Value, state.Done = r.Value.Clone(state.Alloc), true
+			state.Value, state.Done = borrowValue(state.Alloc, r.Value), true
 		}
 		return p.captureRecovery(e, c, state, r)
 	}
@@ -338,6 +429,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	for state.Stage < len(e.Items) {
 		stage := e.Items[state.Stage]
+		emitter := heads.emitters[state.Stage]
+		callable := heads.callables[state.Stage]
+		typedArgs := emitter != nil || callable != nil
+		head := heads.typed[state.Stage]
+		commandHead := expr.CommandHead(stage)
 		if stage.Kind == expr.CommandMux {
 			state.Stages = append(state.Stages, core.NewList(state.Alloc, nil))
 			setup := host.StageSetupPayload(state.Alloc, "", 0, nil)
@@ -363,7 +459,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 				cwd := state.Cwd
 				if cwd == "" {
-					cwd = c.Cwd
+					cwd = c.commandDirectory()
 				}
 				resolved := canonicalPath(state.Alloc, cwd, text)
 				mem.FreeString(c.Run, text)
@@ -383,6 +479,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandOperand {
+				if typedArgs {
+					return failure(c.Run, "EXPR_INVALID", word.Span, "callable command cannot use a live stream operand")
+				}
 				if len(state.Argv) == 0 {
 					return failure(c.Run, "EXPR_INVALID", word.Span, "live stream operand cannot be an executable")
 				}
@@ -405,7 +504,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 				before := len(c.Effects)
 				beforePaths := len(c.WritePaths)
-				r := p.commandWord(word.Items[0], c, "setup :"+word.Text)
+				r := p.commandWord(word.Items[0], c, "setup "+word.Text+":")
 				if r.Waiting || r.Diagnostic.Code != "" {
 					return r
 				}
@@ -473,7 +572,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 						mem.FreeString(c.Run, text)
 						return failure(c.Run, "EXPR_INVALID", word.Span, "stage cwd must not be empty")
 					}
-					state.Cwd = canonicalPath(state.Alloc, c.Cwd, text)
+					state.Cwd = canonicalPath(state.Alloc, c.commandDirectory(), text)
 				} else {
 					state.Environment = append(state.Environment, core.NewString(state.Alloc, word.Text+"="+text))
 				}
@@ -526,13 +625,37 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				state.Index++
 				continue
 			}
+			if typedArgs {
+				if word != commandHead {
+					before, beforePaths := len(c.Effects), len(c.WritePaths)
+					r := p.commandWord(word, c, "argument")
+					if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+						return r
+					}
+					rememberArgumentEffects(state, c, before, beforePaths)
+					if word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
+						if r.Value.Kind != core.List {
+							r.Free(c.Run)
+							return failure(c.Run, "EXPR_INVALID", word.Span, "list spread requires a list")
+						}
+						for _, item := range r.Value.List {
+							state.Argv = append(state.Argv, borrowValue(state.Alloc, item))
+						}
+					} else {
+						state.Argv = append(state.Argv, borrowValue(state.Alloc, r.Value))
+					}
+					r.Free(c.Run)
+				}
+				state.Index++
+				continue
+			}
 			before := len(c.Effects)
 			beforePaths := len(c.WritePaths)
 			destination := "argument"
 			if len(state.Argv) == 0 {
 				destination = "command head"
 			}
-			if len(state.Argv) == 0 && p.CommandAlias != nil && len(word.Parts) == 1 && word.Parts[0].Expr == nil {
+			if len(state.Argv) == 0 && p.CommandAlias != nil && literalSetupWord(word) && !strings.ContainsRune(word.Parts[0].Text, '/') {
 				if prefix := p.CommandAlias(p.CommandAliasState, word.Parts[0].Text); len(prefix) != 0 {
 					for _, argument := range prefix {
 						state.Argv = append(state.Argv, core.NewString(state.Alloc, argument))
@@ -541,7 +664,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					continue
 				}
 			}
-			r := p.commandWord(word, c, destination)
+			var r Result
+			if len(state.Argv) == 0 && head != nil {
+				r.Value = borrowValue(c.Run, *head)
+			} else {
+				r = p.commandWord(word, c, destination)
+			}
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
 			}
@@ -552,6 +680,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				return failure(c.Run, "EXPR_INVALID", word.Span, "list spread requires a flat list of scalar arguments")
 			}
 			if len(state.Argv) == 0 {
+				if stage.Kash && literalSetupWord(word) {
+					if tool, explicit := strings.CutPrefix(r.Value.Text, "x/"); explicit {
+						value := core.NewString(c.Run, tool)
+						r.Free(c.Run)
+						r.Value = value
+					}
+				}
 				executable := r.Value
 				if spread {
 					if len(r.Value.List) == 0 {
@@ -560,7 +695,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					}
 					executable = r.Value.List[0]
 				}
-				if executable.Kind != core.String || executable.Text == "" || strings.IndexByte(executable.Text, 0) >= 0 {
+				if !executable.IsPathText() || executable.Text == "" || strings.IndexByte(executable.Text, 0) >= 0 {
 					r.Free(c.Run)
 					return failure(c.Run, "EXPR_INVALID", word.Span, "executable requires one nonempty string or path without NUL")
 				}
@@ -584,14 +719,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			r.Free(c.Run)
 			state.Index++
 		}
-		if len(state.Argv) == 0 || state.Argv[0].Text == "" {
-			return failure(c.Run, "EXPR_INVALID", stage.Span, "expected nonempty executable")
-		}
 		cwd := state.Cwd
 		if cwd == "" {
-			cwd = c.Cwd
+			cwd = c.commandDirectory()
 		}
-		if state.Argv[0].ToolName == "" && strings.IndexByte(state.Argv[0].Text, '/') >= 0 {
+		if !typedArgs && (len(state.Argv) == 0 || state.Argv[0].Text == "") {
+			return failure(c.Run, "EXPR_INVALID", stage.Span, "expected nonempty executable")
+		}
+		if !typedArgs && state.Argv[0].ToolName == "" && strings.IndexByte(state.Argv[0].Text, '/') >= 0 {
 			resolved := canonicalPath(state.Alloc, cwd, state.Argv[0].Text)
 			state.Argv[0].Free(state.Alloc)
 			state.Argv[0] = core.Value{Kind: core.String, Text: resolved}
@@ -603,10 +738,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				break
 			}
 		}
-		if !p.DryRun {
+		if !typedArgs && !p.DryRun {
 			toolName := state.Argv[0].ToolName
 			if toolName == "" {
 				toolName = state.Argv[0].Text
+			}
+			if stage.Kash && !strings.ContainsRune(toolName, '/') && !authorizeExecutable(c, toolName) {
+				return failure(c.Run, "CAP_DENIED", headSpan, "executable access denied; PATH lookup requires unrestricted run capability")
 			}
 			previousCwd := c.Cwd
 			if p.SessionTool != nil {
@@ -623,7 +761,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			state.Argv[0].Free(state.Alloc)
 			state.Argv[0] = tool.Value
 		}
-		if !authorizeExecutable(c, state.Argv[0].Text) {
+		if !typedArgs && !authorizeExecutable(c, state.Argv[0].Text) {
 			return failure(c.Run, "CAP_DENIED", stage.Span, "executable access denied; PATH lookup requires unrestricted run capability")
 		}
 		for i := range stage.Items {
@@ -654,31 +792,34 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if e.Topology && !demandProcessInput(c, state.Input) {
 			return Result{Waiting: true}
 		}
-		var environment []core.Value
-		for i := range c.Environment {
-			environment = append(environment, core.NewString(state.Alloc, c.Environment[i]))
-		}
-		for i := range state.Environment {
-			assignment := state.Environment[i]
-			equal := strings.IndexByte(assignment.Text, '=')
-			replaced := false
-			for j := range environment {
-				if equal > 0 && strings.HasPrefix(environment[j].Text, assignment.Text[:equal+1]) {
-					environment[j].Free(state.Alloc)
-					environment[j] = assignment.Clone(state.Alloc)
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				environment = append(environment, assignment.Clone(state.Alloc))
-			}
-		}
 		timeout := state.Timeout
 		if timeout == 0 {
 			timeout = c.TimeoutMS
 		}
-		state.Setups = append(state.Setups, host.StageSetupPayload(state.Alloc, cwd, timeout, environment))
+		if c.PrepareDeferred == e && state.Cwd == "" && c.StageDirectory == "" {
+			cwd = ""
+		}
+		setup := host.StageSetupPayload(state.Alloc, cwd, timeout, state.Environment)
+		if emitter != nil {
+			r := p.prepareEmittedStage(emitter, state, c, stage)
+			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+				setup.Free(state.Alloc)
+				return r
+			}
+			host.ConfigureEmission(state.Alloc, &setup, r.Value.Bytes, emitter.OperationName == "err!")
+			r.Free(c.Run)
+		}
+		if callable != nil {
+			if state.Callables == nil {
+				state.Callables = make(map[int]*preparedCallable)
+			}
+			state.Callables[state.Stage] = &preparedCallable{callee: borrowValue(state.Alloc, *callable), args: state.Argv, span: headSpan}
+			state.Argv = nil
+		}
+		if c.PrepareDeferred != e {
+			setStageEnvironment(state.Alloc, &setup, c)
+		}
+		state.Setups = append(state.Setups, setup)
 		terminalStageSetup(state, &state.Setups[len(state.Setups)-1])
 		if state.Accepted.Kind == core.List {
 			setup := &state.Setups[len(state.Setups)-1]
@@ -706,10 +847,6 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			mem.FreeString(state.Alloc, state.Output)
 			state.Input, state.Output, state.Append = "", "", false
 		}
-		for i := range environment {
-			environment[i].Free(state.Alloc)
-		}
-		mem.FreeSlice(nil, environment)
 		mem.FreeString(state.Alloc, state.Cwd)
 		state.Cwd, state.Timeout = "", 0
 		for i := range state.Environment {
@@ -739,7 +876,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			return Result{Value: core.Value{Kind: core.Bool, Bool: false}}
 		}
 		if e.ActionPrefix == "$?(" {
-			return captureOutcome(c, e, core.Value{}, core.Value{})
+			return Result{Completed: true}
 		}
 		if e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph {
 			fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int}}}
@@ -757,11 +894,28 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if e.Topology {
 		inputRoot = e.InputRoot
 	}
-	inheritInput := p.InputSupplied && !c.InputClosed && !c.RecordBody && !state.Async && !e.Async && inputRoot >= 0 && state.Input == ""
-	if inheritInput && e.Topology && host.PayloadText(state.Setups[inputRoot], host.FieldInput) != "" {
-		inheritInput = false
+	defaultInput := !c.InputClosed && !c.RecordBody && !state.Async && !e.Async && inputRoot >= 0 && state.Input == ""
+	if heads.emitters[inputRoot] != nil {
+		defaultInput = false
 	}
-	configured := inheritInput || (c.Cwd != "" && c.Cwd != p.DefinitionCwd)
+	if defaultInput && e.Topology && host.PayloadText(state.Setups[inputRoot], host.FieldInput) != "" {
+		defaultInput = false
+	}
+	stage := c.functionStage
+	inheritInput := defaultInput && p.InputSupplied && (stage == nil || stage.borrowedInput)
+	var parent host.ProcessStageParent
+	if stage != nil {
+		parent = host.ProcessStageParent{
+			Graph: stage.graph, Index: stage.index, Input: defaultInput && stage.graphInput && !stage.inputEOF,
+			Stdout: e.Kind != expr.CommandCapture && !e.TypedCapture && e.ActionPrefix != "$?(" && c.commandOutput == nil,
+			Stderr: !host.PayloadBool(state.CapturePolicy, "stderr"),
+		}
+	}
+	// The callable reads borrowed stdin through the record reader, which
+	// preserves the descriptor's unread bytes and supports cancellation.
+	borrowedInput := inheritInput && state.Callables[inputRoot] != nil
+	inheritInput = inheritInput && !borrowedInput
+	configured := inheritInput || stage != nil || (c.commandDirectory() != "" && c.commandDirectory() != p.DefinitionCwd)
 	for i := range e.Items {
 		for j := range e.Items[i].Items {
 			if e.Items[i].Items[j].Kind == expr.CommandSetup {
@@ -770,7 +924,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 	}
 	var payload core.Value
-	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
+	if e.Topology || configured || state.Stderr || c.HasCommandEnvironment() || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	} else {
 		payload = host.ArgvPayload(c.Run, state.Stages[0].List)
@@ -782,6 +936,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			kind := ""
 			if e.Items[i].Kind == expr.CommandMux {
 				kind = streamKind(e.Items[i].Text)
+			} else if host.PayloadEmits(state.Setups[i]) {
+				kind = "emit"
+			} else if state.Callables[i] != nil {
+				kind = "callable"
 			}
 			if e.Items[i].Each {
 				kind, workers = "each", true
@@ -887,6 +1045,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if inheritInput {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "inputRoot"), Value: core.Value{Kind: core.Int, Int: int64(inputRoot)}})
 	}
+	if stage != nil {
+		host.ConfigureStageParent(c.Run, &payload, parent)
+		if parent.Input {
+			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "inputRoot"), Value: core.Value{Kind: core.Int, Int: int64(inputRoot)}})
+		}
+	}
 	if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
@@ -896,12 +1060,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	// Capture, background, cleanup and record-fed graphs keep their pipes; the
 	// same boundaries that close invocation input exclude the terminal. An
 	// interactive session's & graph runs (Async cleared) as a background graph.
-	eligible := (!c.InputClosed || c.TerminalBackground) && !c.RecordBody && !state.Async && !e.Async && len(e.Body) == 0 && (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult)
+	eligible := stage == nil && (!c.InputClosed || c.TerminalBackground) && !c.RecordBody && !state.Async && !e.Async && len(e.Body) == 0 && (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult)
 	if r := p.terminalPayload(state, &payload, eligible, e.Span, c); r.Diagnostic.Code != "" {
 		payload.Free(c.Run)
 		return r
 	}
-	if eligible && p.OutputPassthrough {
+	if eligible && p.OutputPassthrough && c.commandOutput == nil {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "passthrough"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	captureLimit := p.CaptureLimit
@@ -911,7 +1075,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if captureLimit > 0 {
 		payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(captureLimit)}})
 	}
-	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
+	if e.Topology || configured || state.Stderr || c.HasCommandEnvironment() || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit || e.ActionPrefix == "$?(" {
 		if state.CapturePolicy.Kind == core.Record {
 			payload.Record = append(payload.Record, core.RecordField{Key: owned(c.Run, "capture"), Value: state.CapturePolicy.Clone(c.Run)})
 		}
@@ -934,6 +1098,26 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	payload.Free(c.Run)
 	if state.ID == 0 {
 		return failure(c.Run, "HOST_FAIL", e.Span, "host request was not accepted")
+	}
+	for index := range e.Items {
+		if callable := state.Callables[index]; callable != nil {
+			setup := state.Setups[index]
+			graphInput := host.PayloadText(setup, host.FieldInput) != "" || parent.Input && index == inputRoot
+			graphOutput := false
+			for _, edge := range e.Edges {
+				if edge.To == index && edge.Argument == 0 {
+					graphInput = true
+				}
+				if edge.From == index {
+					graphOutput = true
+				}
+			}
+			stage := p.startCallableStage(c, state.ID, index, callable, setup, borrowedInput && index == inputRoot, graphInput, graphOutput)
+			if stage == nil {
+				return failure(c.Run, "HOST_FAIL", callable.span, "cannot schedule callable stage")
+			}
+			state.CallableStages = append(state.CallableStages, stage)
+		}
 	}
 	return Result{Waiting: true}
 }
@@ -984,7 +1168,19 @@ func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState,
 	c.handledFinalizerFailure()
 	state.Recovering = true
 	r.Free(c.Run)
-	return p.capture(e.Body[0], c)
+	return p.captureFallback(e, c)
+}
+
+func (p *Program) captureFallback(e *expr.Expr, c *Context) Result {
+	fallback := e.Body[0]
+	if e.ActionPrefix == "$?(" {
+		outcome := *fallback
+		outcome.ActionPrefix = e.ActionPrefix
+		fallback = &outcome
+	}
+	restoreOperand := c.redirectListOperand(e, fallback)
+	defer restoreOperand()
+	return p.capture(fallback, c)
 }
 
 // Reserved settings may interpret literal text. Evaluated fragments retain
@@ -1029,7 +1225,7 @@ func stageTimeout(value core.Value, literal bool) (int64, bool) {
 
 // Scalar conversion is shared with argv, but redirections never splice lists.
 func processScalar(a mem.Allocator, value core.Value) (string, bool) {
-	if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
+	if !value.IsPathText() && value.Kind != core.Symbol && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
 		return "", false
 	}
 	text, ok := Stringify(a, value)
@@ -1061,7 +1257,7 @@ func authorizeExecutable(c *Context, executable string) bool {
 }
 
 func appendArgument(state *captureState, value core.Value) bool {
-	if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
+	if !value.IsPathText() && value.Kind != core.Symbol && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
 		return false
 	}
 	text, ok := Stringify(state.Alloc, value)
@@ -1106,11 +1302,15 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 		}
 		value := operands.Values[next]
 		next++
+		if part.Form == "${" {
+			writeInterpolationText(c.Run, &b, value)
+			continue
+		}
 		if value.Kind == core.Nil {
 			// A nil fragment renders as empty text, like an unset shell variable.
 			continue
 		}
-		if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
+		if !value.IsPathText() && value.Kind != core.Symbol && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
 			b.Reset()
 			return failure(c.Run, "EXPR_INVALID", part.Span, destination+" word requires a scalar fragment; got "+core.KindName(value.Kind)+"; list splicing is only valid in standalone unquoted argv substitutions")
 		}

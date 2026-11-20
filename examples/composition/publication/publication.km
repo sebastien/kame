@@ -1,10 +1,7 @@
-# This value program also supplies the rule file's definitions unchanged.
+# This value program also supplies the build file's definitions.
 title = "Little publication"
-sources = ./notes/*.txt
-(page source) = (subst ./notes/{name:*}.txt ./public/{name}.txt source)
+sources = files ./notes/*.txt
+def page source = subst ./notes/{name:*}.txt ./public/{name}.txt source
 pages =
-  (if
-    (in? ./notes/index.txt sources)
-      (fail! "notes/index.txt is reserved for the publication index")
-    (map page sources))
-publication = [title: title sources: sources pages: pages count: (count pages)]
+	if in? ./notes/index.txt sources then fail! "notes/index.txt is reserved for the publication index" else map page sources
+publication = {title, sources, pages, count: count pages}

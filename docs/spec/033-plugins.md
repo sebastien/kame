@@ -93,6 +93,9 @@ contains exactly one tagged `value`, or an `error` with a stable code and
 bounded message. Unknown fields or mismatched identity fail with
 `PLUGIN_PROTOCOL`.
 
+A symbol such as `:+ready` uses `{"kind":"symbol","data":"+ready"}`. The data
+contains the symbol name without its leading colon.
+
 Callback results may be promises. Rejected promises become `PLUGIN_FAIL`;
 expired calls become `PLUGIN_TIMEOUT`. The runtime aborts the callback signal
 on cancellation, timeout, or terminal completion, copies the response before

@@ -8,7 +8,7 @@ import (
 
 func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {
 	a := t.Allocator()
-	result := rule.ParseRule(a, "order.km", "rule ./out : \"./input|literal\" | prepare @(nop [./directory]) ; {env: {MODE: \"debug\"}}\n\tcat @<* > @>\n")
+	result := rule.ParseRule(a, "order.km", "rule ./out : \"./input|literal\" | prepare ${nop [./directory]} ; {env: {MODE: \"debug\"}}\n\tcat $...inputs > $outputs.0\n")
 	if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 3 {
 		t.Fatal("order-only rule failed to parse")
 		result.Free()
@@ -43,6 +43,13 @@ func TestRuleRequiresDeclarationKeywordAndColonSeparator(t *testing.T) {
 		parsed := rule.ParseRule(t.Allocator(), "invalid.km", text)
 		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Errorf("invalid standalone declaration was accepted: %q", text)
+		}
+		parsed.Free()
+	}
+	for _, text := range []string{"rule ./out :", "task lint :", "service dev :"} {
+		parsed := rule.ParseRule(t.Allocator(), "empty.km", text)
+		if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 0 {
+			t.Errorf("declaration rejected an explicit empty prerequisite list: %q", text)
 		}
 		parsed.Free()
 	}

@@ -67,3 +67,33 @@ func TestNativeInteractiveHistoryScopesAndPrivacy(t *testing.T) {
 		t.Fatal("clear did not leave an empty versioned history store")
 	}
 }
+
+func TestNativeInteractiveHistoryRecordsOnlySubmittedEntries(t *testing.T) {
+	h, root := historyFixture(t)
+	init := filepath.Join(root, "init.kash")
+	nativeCLIWrite(t, init, "echo startup-marker\ndef kash-prompt info = \"prompt-marker> \"\n")
+	s := startTerminalSession(t, nativeCLIBinary(t), root, []string{"KASH_INIT=" + init, "KASH_HISTORY=" + h.path}, "do", "run", "-i")
+	s.waitFor("startup-marker")
+	s.waitFor("prompt-marker> ")
+	s.waitReading()
+	s.send("echo interrupted-marker")
+	if frame := s.redraw(); !strings.Contains(frame, "interrupted-marker") {
+		t.Fatalf("interrupted input was missing before Ctrl-C: %q", frame)
+	}
+	s.send("\x03")
+	s.waitFor("^C")
+	s.waitReading()
+	before := len(s.raw())
+	s.send("history scope global\r")
+	s.waitReadingAfterSubmission(before)
+	s.send("printf '%s%s\\n' kept- entry\r")
+	s.waitFor("kept-entry")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("interactive session exited %d: %q", status, s.text())
+	}
+	h.now = time.Now
+	h.refresh(root)
+	if len(h.entries) != 1 || h.entries[0].Text != "printf '%s%s\\n' kept- entry" {
+		t.Fatalf("history contained entries besides the submitted command: %+v", h.entries)
+	}
+}

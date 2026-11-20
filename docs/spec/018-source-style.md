@@ -100,10 +100,10 @@ not itself prohibit CLI overrides.
 - Use one space around `=`, `?=`, `+=`, `=>`, `|>`, `??`, `:` in rule headers,
   and every binary operator: `a + b`, `a == b`, `a and b`, `a / b`. Spaces are
   required around `-` and `/` (`055` §3.2) and canonical around the others.
-- Separate list elements, record fields, import names and export names with `, `.
-  Write record fields as `key: value`, with no space before `:`.
-- A trailing comma is not significant; canonical output has one exactly when
-  the collection is expanded. Process groups never take a trailing comma.
+- Separate inline list elements, record fields, import names and export names
+  with `, `. Write record fields as `key: value`, with no space before `:`.
+- Expanded lists use newlines between elements. Expanded records end each
+  field with a comma. Process groups never take a trailing comma.
 - Write no space inside brackets, braces or parentheses: `[a, b]`, `{a: 1}`,
   `(x => x + 1)`. Empty collections are `[]` and `{}`.
 - Write zero-argument calls as `f ()`, with one space before `()`.
@@ -131,8 +131,8 @@ such as `map` and `filter`.
 
 ### Structure the formatter preserves
 
-Formatting changes whitespace, line breaks and insignificant trailing commas
-only. It never:
+Formatting changes whitespace, line breaks, collection separators and
+continuations. It never:
 
 - inserts, removes or moves parentheses, because a parenthesized group with a
   top-level placeholder is a section (`055` §4.3);
@@ -143,8 +143,8 @@ only. It never:
 - changes literal kinds: path atoms, quoted strings, raw strings, symbols and
   numbers keep their authored kind and spelling.
 
-It does normalize insignificant syntax: a trailing comma appears exactly when a
-list or record is expanded, and an authored backslash continuation is joined.
+Formatting joins authored backslash continuations when possible and emits a
+continuation when a list item or record field contains a wrapped application.
 
 Because newlines end an expression except where `055` §4.1 allows continuation,
 an expanded layout only breaks a line at a point where the expression continues:
@@ -177,14 +177,16 @@ navigation = map (page =>
 ```
 
 Inside an open delimiter, an expanded application keeps its head on the opening
-line and puts each argument on its own line, one tab deeper:
+line and puts each argument on its own line, one tab deeper. At list or record
+depth, the formatter adds explicit backslash continuations when it wraps the
+application:
 
 ```kame
 items = [
-	navigation-item
-		section.metadata.navigation-title
-		(page-url section.parent.name)
-		section.order,
+	navigation-item \
+		section.metadata.navigation-title \
+		(page-url section.parent.name) \
+		section.order
 ]
 ```
 
@@ -194,9 +196,9 @@ The head can itself be an expression and follows the same rules.
 
 Lists, records and parenthesized groups share one expanded layout: the opening
 delimiter ends its line, each element goes on its own line one tab deeper,
-every element of an expanded list or record is followed by `,` (including the
-last), and the closing delimiter returns to the indentation of the line that
-opened it. An expanded `$(…)`, `$?(…)` or `$&(…)` puts its command list on the
+and the closing delimiter returns to the indentation of the line that opened
+it. Expanded lists use newlines alone. Expanded records include a comma after
+each field. An expanded `$(…)`, `$?(…)` or `$&(…)` puts its command list on the
 following lines one tab deeper, one statement per line, and returns the closing
 `)` to the opening line's indentation. Delimiters opened on the same line close
 together on one line (`})`):
@@ -299,7 +301,7 @@ deeper:
 ```kame
 output = (if valid-page? page then page-output page
 	elif draft? page then nil
-	else fail! "Invalid page: @{page.name}"
+	else fail! "Invalid page: ${page.name}"
 )
 ```
 
@@ -315,9 +317,9 @@ consecutive single-line arms is aligned by padding the patterns with spaces:
 
 ```kame
 def object-path source = match source
-	./src/{path:**}.c => ./build/@{path}.o
-	./gen/{name}.c    => ./build/gen/@{name}.o
-	else              => fail! "not a source: @{source}"
+	./src/{path:**}.c => ./build/${path}.o
+	./gen/{name}.c    => ./build/gen/${name}.o
+	else              => fail! "not a source: ${source}"
 ```
 
 An arm whose result does not fit ends with `=>` and puts the result on the next
@@ -337,7 +339,7 @@ Short definitions remain inline:
 
 ```kame
 page-names = map page-name pages
-def page-url name = "/@{name}/"
+def page-url name = "/${name}/"
 ```
 
 If a definition does not fit inline, end the line with `=` and put the value on
@@ -505,7 +507,7 @@ not replace surrounding grammars:
 - Template text, foreign-shell recipe text and raw strings remain literal
   content, not source to be reindented. Template directives (`@if EXPR`,
   `@for x in xs`) keep their operands on the directive line in compact
-  expression formatting. `@{EXPR}` interpolations use compact expression
+  expression formatting. `${EXPR}` interpolations use compact expression
   formatting and must not introduce physical line breaks into their enclosing
   text.
 - Quoted string escaping and interpolation spelling follow `055` §3.3 and 004.
@@ -530,7 +532,7 @@ page-names = pages |> map (page => page.name)
 navigation = map navigation-item pages
 
 # Page transformations
-def page-url name = "/@{name}/"
+def page-url name = "/${name}/"
 def publishable? page = not page.draft
 
 def navigation-item page = {label: page.title, href: page-url page.name}
@@ -560,12 +562,13 @@ transformations next, and find rules or execution at the end of the file.
 - Parsing formatted output produces an equivalent AST, excluding spans.
 - Native and WASM hosts produce identical canonical text.
 - Formatting never inserts or removes parentheses, placeholders or pipes, and
-  never changes a literal's kind. Expanded lists and records end with a
-  trailing comma and inline ones do not; process groups never take one.
-- Formatting joins authored backslash continuations and never emits them.
-- Indentation is one tab per block or continuation level; separators are `, `;
-  binary operators have one space on each side; block headers have no trailing
-  `:`.
+  never changes a literal's kind. Expanded lists use newlines, expanded records
+  use commas after each field, and process groups have no trailing comma.
+- Formatting joins authored backslash continuations when possible and emits
+  them when wrapping applications directly inside lists or records.
+- Indentation is one tab per block or continuation level. Inline separators are
+  `, `. Binary operators have one space on each side. Block headers have no
+  trailing `:`.
 - Golden cases cover inline and expanded forms, nesting, long heads and
   definition headers, record fields, lambdas, `if` expressions inside and
   outside delimiters, `match` arm alignment, rule headers with groups, order-only

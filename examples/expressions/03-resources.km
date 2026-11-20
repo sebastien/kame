@@ -1,4 +1,4 @@
-# Discovery is a value computation with a tracked filesystem dependency.
-sources = ./notes/*.txt
-pages = (subst ./notes/{name:*}.txt ./public/{name}.txt sources)
-publication = [sources: sources pages: pages count: (count pages)]
+# Explicit discovery records a filesystem dependency.
+sources = files ./notes/*.txt
+pages = subst ./notes/{name:*}.txt ./public/{name}.txt sources
+publication = {sources, pages, count: count pages}

@@ -31,7 +31,7 @@ func TestKnownKashRecipeInspectionUsesAuthoredSpansAndFormatsBlocks(t *testing.T
 
 func TestRecipeInspectionDefersUnknownSelectorsAndPreservesForeignText(t *testing.T) {
 	for _, example := range []struct{ lang, text, want string }{
-		{"rule", "task check ; {shell: \"sh\"}\n  f() { return 0; }; f\n", "task check ; {shell: \"sh\"}\n\tf() { return 0; }; f"},
+		{script.KameFileLanguage, "task check ; {shell: \"sh\"}\n  f() { return 0; }; f\n", "task check ; {shell: \"sh\"}\n\tf() { return 0; }; f\n"},
 		{"km", "SHELL = selected\ntask check\n  f() { return 0; }; f\n", "SHELL = selected\ntask check\n\tf() { return 0; }; f\n"},
 		{"km", "include ./config.km\ntask check\n  f() { return 0; }; f\n", "include ./config.km\ntask check\n\tf() { return 0; }; f\n"},
 	} {
@@ -40,7 +40,7 @@ func TestRecipeInspectionDefersUnknownSelectorsAndPreservesForeignText(t *testin
 			t.Errorf("foreign or unknown recipe formatted as %q: %s", result.Text, result.Message)
 		}
 	}
-	for _, lang := range []string{"rule", script.KameFileLanguage} {
+	for _, lang := range []string{"km", script.KameFileLanguage} {
 		const text = "rule ./out\n  return 1 ?\n"
 		result := format.Source(nil, lang, "program.km", text, "tabs", 4)
 		var encoded bytes.Buffer

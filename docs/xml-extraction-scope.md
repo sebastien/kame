@@ -7,10 +7,11 @@ final-row and large-input regressions.
 
 ## Existing caller and required behavior
 
-The SDK's legacy `sdk.mk/bin/sdk-collate` uses ElementTree `root.itertext()`;
-`sdk.km/src/km/collate.km` handles JSON, and `bin/sdk-collate.kmk` explicitly rejects
-XML sources. The legacy XML path has no configured XML selectors or XPath calls.
-Do not confuse JSON key paths (`.`, `*`, `@`) with an established XML API.
+The SDK's `sdk.mk/bin/sdk-collate` extracts XML text with ElementTree
+`root.itertext()` without configured selectors or XPath calls. The Kame
+implementation in `sdk.km/src/km/collate.km` handles JSON. Its collation command
+rejects XML sources. JSON key paths use
+`.`, `*`, and `@`.
 
 Required collation behavior:
 

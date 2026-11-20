@@ -5,7 +5,7 @@ import "kame/host"
 // ABIRequestPayload selects the primitive payload transported to a WASM host.
 func ABIRequestPayload(r host.Request) string {
 	switch r.Kind {
-	case host.RequestRecordRead, host.RequestRecordClose, host.RequestPublishFile, host.RequestPlugin, host.RequestTimer, host.RequestProcessCancel:
+	case host.RequestRecordRead, host.RequestRecordClose, host.RequestPublishFile, host.RequestPlugin, host.RequestTimer, host.RequestProcessCancel, host.RequestProcessStageIO:
 		return host.PayloadText(r.Payload, "data")
 	case host.RequestProcess, host.RequestPrepareOutputs:
 		if s := host.PayloadText(r.Payload, "data"); s != "" {
@@ -25,6 +25,8 @@ func ABIRequestKind(r host.Request) uint32 {
 		switch op {
 		case "resolve-tool":
 			return 18
+		case host.OpDirectoryCheck:
+			return 43
 		case "tool-exists":
 			return 19
 		case "output-exists":
@@ -47,6 +49,8 @@ func ABIRequestKind(r host.Request) uint32 {
 			return 31
 		case "wildcard":
 			return 6
+		case host.OpDeclarationFiles:
+			return 45
 		}
 		return 1
 	case host.RequestProcess:
@@ -118,6 +122,10 @@ func ABIRequestKind(r host.Request) uint32 {
 		return 41
 	case host.RequestLoadSource:
 		return 42
+	case host.RequestProcessSignal:
+		return 44
+	case host.RequestProcessStageIO:
+		return 46
 	default:
 		return uint32(r.Kind)
 	}

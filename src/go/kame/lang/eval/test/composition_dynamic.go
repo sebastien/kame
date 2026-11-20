@@ -17,7 +17,7 @@ func TestCompositionDynamicTextRejectsHeadsBeforeEffects(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	parsed := script.Parse(a, "empty.km", "")
+	parsed := script.ParseKameFile(a, "empty.km", "")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()

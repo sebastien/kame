@@ -34,32 +34,37 @@ type Runtime struct {
 	ExprParsed           *expr.Result
 	// Target mode uses the portable build runtime with an in-memory host. It is
 	// mutually exclusive with the single-expression mode above.
-	Host               *MemoryHost
-	Program            *program.Program
-	Session            *program.Session
-	BuildSources       []program.CompileSource
-	BuildDefines       []string
-	BuildParameters    []string
-	BuildToolOverrides []string
-	BuildEnvironment   []string
-	BuildForce         bool
-	BuildTrackTimings  bool
-	BuildTimeoutMS     int64
-	BuildRetryCount    int
-	BuildRetainBytes   int
-	BuildCaptureLimit  int
-	Handle             *program.Handle
-	Watching           bool
-	Finalizing         bool
-	WatchHandles       []*program.Handle
-	Environment        []string
-	ToolPaths          []program.Tool
-	InspectionGrants   []eval.Grant
-	InspectionPolicy   bool
-	Forwarding         bool
-	EventJSON          []byte
-	Effects            []eval.Effect
-	EffectIndex        int
+	Host                        *MemoryHost
+	Program                     *program.Program
+	expressionProgram           *program.Program // Owns the evaluator and engine for composed expressions.
+	Session                     *program.Session
+	BuildSources                []program.CompileSource
+	BuildCompositionDiscoveries []program.DeclarationSnapshot
+	BuildDefines                []string
+	BuildParameters             []string
+	BuildToolOverrides          []string
+	BuildEnvironment            []string
+	BuildForce                  bool
+	BuildTrackTimings           bool
+	BuildJobs                   int
+	BuildTimeoutMS              int64
+	BuildRetryCount             int
+	BuildRetainBytes            int
+	BuildCaptureLimit           int
+	declarationRequests         declarationRequests
+	declarationSnapshots        []program.DeclarationSnapshot
+	Handle                      *program.Handle
+	Watching                    bool
+	Finalizing                  bool
+	WatchHandles                []*program.Handle
+	Environment                 []string
+	ToolPaths                   []program.Tool
+	InspectionGrants            []eval.Grant
+	InspectionPolicy            bool
+	Forwarding                  bool
+	EventJSON                   []byte
+	Effects                     []eval.Effect
+	EffectIndex                 int
 	// Directory is owned by Alloc. It defaults to "."; hosts use SetDirectory
 	// to replace the working directory the build runtime canonicalizes against.
 	Directory string
@@ -181,7 +186,37 @@ func (r *Runtime) RequestExpression(text string) PureResult {
 		parsed.Free()
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "expected one valid expression")}
 	}
+	if len(r.BuildSources) != 0 {
+		compiled := r.compileBuild(program.Options{
+			Directory: r.Directory, Environment: r.Environment,
+			Grants: r.grants(), ForwardRequests: r.Forwarding,
+		})
+		defer compiled.Free(r.Alloc)
+		if compiled.RegistrationPending {
+			parsed.Free()
+			return PureResult{HostNeeded: true}
+		}
+		r.freeDeclarationReads()
+		if compiled.Program == nil {
+			parsed.Free()
+			return r.buildCompileFailure(&compiled)
+		}
+		r.Eval.Free()
+		r.Engine.Free()
+		r.expressionProgram = compiled.Program
+		r.Eval, r.Engine = compiled.Program.Eval, compiled.Program.Engine
+		r.Eval.DirectHostRequests = true
+		r.Eval.DefinitionDependencyContextObserver = nil
+		r.Eval.SetDefinitionEffectSink(sessionEffect, r)
+		origin := 0
+		if r.BuildSources[0].SourceDirectory != "" {
+			origin = 1
+		}
+		eval.SetExpressionSourceOrigin(parsed.Expr, origin, parsed.Source)
+	}
 	r.Expr, r.ExprParsed = parsed.Expr, parsed
+	r.Eval.SetDefinitionCwd(r.Directory)
+	r.Eval.SetDefinitionDependencyObserver(observeExpressionTool, r)
 	state := mem.Alloc[runtimeState](r.Alloc)
 	state.Runtime = r
 	key := core.NewResourceKey(r.Alloc, core.ResourceTarget, "<wasm-expr>")
@@ -189,6 +224,9 @@ func (r *Runtime) RequestExpression(text string) PureResult {
 	key.Free(r.Alloc)
 	if r.Node == nil {
 		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "cannot schedule expression")}
+	}
+	if r.expressionProgram != nil {
+		r.Eval.AttachImports(r.Node)
 	}
 	r.Engine.Request(r.Node)
 	return PureResult{}
@@ -211,6 +249,12 @@ func (r *Runtime) Prepare() PureResult {
 		options.Grants = r.InspectionGrants
 	}
 	compiled := r.compileBuild(options)
+	if compiled.RegistrationPending {
+		r.Host = nil // The suspended compile released its private program and host.
+		compiled.Free(r.Alloc)
+		return PureResult{HostNeeded: true}
+	}
+	r.freeDeclarationReads()
 	if compiled.Program == nil {
 		r.Host = nil
 		out := r.buildCompileFailure(&compiled)
@@ -570,6 +614,12 @@ func (r *Runtime) RequestTarget(target string) PureResult {
 		options.Grants = r.InspectionGrants
 	}
 	compiled := r.compileBuild(options)
+	if compiled.RegistrationPending {
+		r.Host = nil
+		compiled.Free(r.Alloc)
+		return PureResult{HostNeeded: true}
+	}
+	r.freeDeclarationReads()
 	if compiled.Program == nil {
 		// Compile released the host on failure, so drop the borrowed pointer too.
 		r.Host = nil
@@ -696,6 +746,12 @@ func (r *Runtime) ProcessGraphSnapshot(request host.Request, value core.Value) b
 func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) {
 	if r != nil && r.Program != nil {
 		r.Program.ProcessStream(request, stderr, data)
+	} else if r != nil && r.Eval != nil && !stderr {
+		if _, overflow := r.Eval.CaptureCommandOutput(request.ID, data); overflow {
+			payload := host.ServiceCancelPayload(r.Alloc, request.ID, 100)
+			r.Eval.Requests.Submit(request.NodeID, request.Generation, request.Attempt, host.RequestProcessCancel, payload)
+			payload.Free(r.Alloc)
+		}
 	}
 }
 
@@ -717,15 +773,48 @@ func (r *Runtime) ProcessTerminal(request host.Request, stdout []byte, stderr []
 
 func freeRuntimeState(a mem.Allocator, value any) { mem.Free(a, value.(*runtimeState)) }
 
+func observeExpressionTool(state any, key core.ResourceKey) {
+	r := state.(*Runtime)
+	if key.Kind == core.ResourceTool {
+		r.Engine.Add(key, resolveExpressionTool, r)
+	}
+}
+
+// Standalone expressions resolve tools through the host using the same request
+// as builds. Their dependencies live only for the duration of the expression.
+func resolveExpressionTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
+	r := c.Context().(*Runtime)
+	a := c.Allocator()
+	completion := c.Completion()
+	if completion.RequestID == 0 {
+		payload := host.FilePayload(a, "resolve-tool", r.Engine.LookupID(nodeID).Key.Name)
+		id := r.Eval.Requests.Submit(nodeID, c.Generation(), c.Attempt(), host.RequestReadFile, payload)
+		payload.Free(a)
+		c.Submit(id)
+		return core.ProducerSubmitted
+	}
+	if completion.Diagnostic.Code != "" {
+		completion.Value.Free(a)
+		if completion.Diagnostic.Code != "TOOL_MISSING" {
+			c.Fail(completion.Diagnostic)
+			return core.ProducerFailed
+		}
+		completion.Diagnostic.Free(a)
+		c.Publish(core.Value{})
+		return core.ProducerCompleted
+	}
+	c.Publish(completion.Value)
+	return core.ProducerCompleted
+}
+
 func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID
 	state := c.Context().(*runtimeState)
 	r := state.Runtime
-	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
-	if r.InspectionPolicy {
-		grants = r.InspectionGrants
+	context := &eval.Context{
+		Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Cwd: r.Directory,
+		Grants: r.grants(), DirectHostRequests: true, DependencyObserver: observeExpressionTool, ResolverState: r,
 	}
-	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Cwd: r.Directory, Grants: grants, DirectHostRequests: true}
 	result := r.Eval.EvaluateWith(r.Expr, context)
 	if result.Waiting {
 		eval.FreeEffects(c.Allocator(), context.Effects)
@@ -753,8 +842,15 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	return core.ProducerCompleted
 }
 
+func (r *Runtime) grants() []eval.Grant {
+	if r.InspectionPolicy {
+		return r.InspectionGrants
+	}
+	return []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
+}
+
 // ExpressionEffectKind returns the next standalone expression effect: 1 out,
-// 2 err, 3 yield, or 0 when the completed expression has none left.
+// 2 err, or 0 when the completed expression has none left.
 func (r *Runtime) ExpressionEffectKind() uint32 {
 	if r != nil {
 		for r.EffectIndex < len(r.Effects) && r.Effects[r.EffectIndex].Kind == eval.EffectProcessWrite {
@@ -771,9 +867,6 @@ func (r *Runtime) ExpressionEffectKind() uint32 {
 	}
 	if kind == eval.EffectErr {
 		return 2
-	}
-	if kind == eval.EffectYield {
-		return 3
 	}
 	return 0
 }
@@ -878,10 +971,16 @@ func (r *Runtime) Complete(request host.Request, value core.Value, diagnostic di
 		diagnostic.Free(mem.System)
 		return
 	}
+	if r.completeDeclarationRead(request, value, diagnostic) {
+		return
+	}
 	r.retireFinalizationRequest(request.ID)
 	if r.Program != nil {
 		r.Program.Complete(request, value, diagnostic)
 		return
+	}
+	if r.Eval != nil {
+		r.Eval.ReleaseCommandOutput(request.ID)
 	}
 	if r.Engine == nil {
 		value.Free(r.Alloc)
@@ -997,6 +1096,8 @@ func (r *Runtime) Free() {
 	if r == nil {
 		return
 	}
+	r.freeDeclarationReads()
+	r.saveDeclarationSnapshots(nil)
 	mem.FreeSlice(nil, r.FinalizationRequests)
 	r.freeWatchHandles()
 	if r.Handle != nil {
@@ -1032,8 +1133,12 @@ func (r *Runtime) Free() {
 	if r.ExprParsed != nil {
 		r.ExprParsed.Free()
 	}
-	r.Eval.Free()
-	r.Engine.Free()
+	if r.expressionProgram != nil {
+		r.expressionProgram.Free()
+	} else {
+		r.Eval.Free()
+		r.Engine.Free()
+	}
 	r.Registry.Free()
 	r.Parsed.Free()
 	r.freeBuildSources()

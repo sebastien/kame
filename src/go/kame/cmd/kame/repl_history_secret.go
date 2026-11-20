@@ -38,6 +38,7 @@ var (
 
 func historySensitiveName(name string) bool {
 	name = strings.ToLower(strings.TrimLeft(name, "-"))
+	name = strings.TrimPrefix(name, "env/")
 	name = strings.ReplaceAll(name, "-", "_")
 	name = "_" + strings.TrimSuffix(name, ":") + "_"
 	for _, sensitive := range []string{"password", "passwd", "pwd", "secret", "token", "api_key", "access_key", "private_key", "client_secret", "credential"} {

@@ -17,7 +17,7 @@ for backend in native wasm; do
 	invoke() { "${runner[@]}" do run -C "$work" --allow-run --allow-read --allow-write "$@"; }
 	test-step "$backend list spread and line framing"
 	invoke -l expr -c '(prefix => [...prefix, "two words", "", ...[], ...[[1], nil]]) ["printf", "<%s>"]' >"$work/out"
-	if [ "$(cat "$work/out")" = '["printf" "<%s>" "two words" "" [1] nil]' ]; then test-ok "$backend one-level spread"; else test-fail "$backend spread values"; cat "$work/out"; fi
+	if [ "$(cat "$work/out")" = '["printf", "<%s>", "two words", "", [1], nil]' ]; then test-ok "$backend one-level spread"; else test-fail "$backend spread values"; cat "$work/out"; fi
 	invoke -l kash -c '(out! (json (map line ["", "plain", " x \n", "a\n\n", "a\r\n", "a\r", "a\nb"])))' >"$work/out"
 	if [ "$(cat "$work/out")" = '["","plain"," x ","a\n","a\r","a\r","a\nb"]' ]; then test-ok "$backend one terminal LF"; else test-fail "$backend line framing"; cat "$work/out"; fi
 

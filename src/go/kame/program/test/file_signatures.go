@@ -33,8 +33,8 @@ func inputSnapshotAllocations(t *testing.T, count int) uint64 {
 		source.WriteString("./" + name.Text)
 		name.Free(a)
 	}
-	source.WriteString("]\n./output : @{INPUTS} ; {shell: kame}\n\t(text (read ./extra))\n")
-	parsed := script.Parse(a, "snapshot.kmk", source.String())
+	source.WriteString("]\nrule ./output : ${INPUTS} = text (read ./extra)\n")
+	parsed := script.ParseKameFile(a, "snapshot.km", source.String())
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -127,7 +127,7 @@ func externalFileSignature(t *testing.T, forwarded bool, content core.Value) cor
 	} else if content.Kind == core.Bool {
 		memory.Mkdir("input", 0o755)
 	}
-	parsed := script.Parse(a, "test.kmk", "value = (exists? \"./input\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "value = (exists? \"./input\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", ForwardRequests: forwarded, Grants: []eval.Grant{{Capability: eval.Read}}})

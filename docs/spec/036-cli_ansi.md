@@ -766,8 +766,9 @@ work runs and honors publication backpressure; it is not buffered until completi
 ## Command-by-command presentation contract
 
 All command-specific help advertises global presentation selection and the
-command's JSON framing. Direct invocation and `do run` remain equivalent. Removed
-`do expr` and `do kash` names remain removed and provide structured migration help.
+command's JSON framing. Direct invocation and `do run` share presentation rules.
+`do kash` follows the presentation contract for `do run --lang kash`. `do expr`
+reports `CMD_UNKNOWN` with help naming `do run --lang expr -c TEXT`.
 
 | Command surface | ANSI/text | JSON |
 | --- | --- | --- |

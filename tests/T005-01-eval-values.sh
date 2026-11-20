@@ -24,9 +24,9 @@ evaluates() { # EXPR EXPECTED
 }
 
 test-step "atomic literal output"
-evaluates ':nil' ':nil'
-evaluates ':true' ':true'
-evaluates ':false' ':false'
+evaluates 'nil' 'nil'
+evaluates 'true' 'true'
+evaluates 'false' 'false'
 evaluates '42' '42'
 evaluates '-7' '-7'
 evaluates '0x10' '16'
@@ -34,7 +34,7 @@ evaluates '0o17' '15'
 evaluates '0b101' '5'
 evaluates '1_000' '1000'
 evaluates '1.5' '1.5'
-evaluates '1e3' '1000'
+evaluates '1e3' '1000.0'
 evaluates '"hello"' '"hello"'
 
 test-step "escape sequences"
@@ -44,18 +44,18 @@ evaluates '"a\"b"' '"a\"b"'
 evaluates '"back\\slash"' '"back\\slash"'
 
 test-step "string interpolation"
-	evaluates '"value=@(join "" ["x" "y"])"' '"value=xy"'
-	evaluates '"value=@(nth 1 [10 20])"' '"value=20"'
-	evaluates '"outer @(join "" ["x" "y"]) end"' '"outer xy end"'
+evaluates '"value=${join "" ["x", "y"]}"' '"value=xy"'
+evaluates '"value=${nth 1 [10, 20]}"' '"value=20"'
+evaluates '"outer ${join "" ["x", "y"]} end"' '"outer xy end"'
 
 test-step "lists and records"
-evaluates '(list 1 "a" :true)' '[1 "a" :true]'
-evaluates '(list)' '[]'
-evaluates '(json [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
-evaluates '(json [a: 1])' '"{\"a\":1}"'
+evaluates 'list 1 "a" true' '[1, "a", true]'
+evaluates 'list ()' '[]'
+evaluates 'json {b: 2, a: "x"}' '"{\"a\":\"x\",\"b\":2}"'
+evaluates 'json {a: 1}' '"{\"a\":1}"'
 
-test-step "list rendering joins items with spaces in the canonical notation"
-evaluates '(list "a" "b" "c")' '["a" "b" "c"]'
-evaluates '(list (list 1 2) (list 3))' '[[1 2] [3]]'
+test-step "list display uses commas"
+evaluates 'list "a" "b" "c"' '["a", "b", "c"]'
+evaluates 'list (list 1 2) (list 3)' '[[1, 2], [3]]'
 
 test-end

@@ -99,6 +99,29 @@ func TestInteractiveEntriesDoNotCopySessionSource(t *testing.T) {
 	}
 }
 
+func TestInteractiveAssignmentUsesSessionLetsAndRejectsCaptures(t *testing.T) {
+	s := interactiveTestSession(t)
+	interactiveTestEntry(t, s, "<bind>", "let value = 40")
+	interactiveTestEntry(t, s, "<set>", "set value = value + 2")
+	interactiveTestEntry(t, s, "<check>", `(if value != 42 then fail! "assignment did not persist" else nil)`)
+	interactiveTestEntry(t, s, "<capture>", "def read-value ()\n  return value")
+	for _, text := range []string{"set value = 0", "set missing = 0"} {
+		first, diagnostics := s.AppendKash("<rejected>", text)
+		if len(diagnostics) != 1 || diagnostics[0].Code != "PARSE_ERR" || len(s.Work) != first {
+			t.Fatalf("%s: assignment was not rejected before queuing work: %+v", text, diagnostics)
+		}
+	}
+}
+
+func TestInteractiveLetShadowsWithinOneEntry(t *testing.T) {
+	s := interactiveTestSession(t)
+	interactiveTestEntry(t, s, "<entry>", `let value = 1
+let original = (() => value)
+let value = value + 1`)
+	interactiveTestEntry(t, s, "<set>", "set value = value + 1")
+	interactiveTestEntry(t, s, "<check>", `(if (original ()) != 1 or value != 3 then fail! "wrong shadowed value" else nil)`)
+}
+
 func TestSessionRetiresStatementsWithoutReplayingLazyEffects(t *testing.T) {
 	s := interactiveTestSession(t)
 	outputs := 0

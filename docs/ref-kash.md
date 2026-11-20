@@ -1,207 +1,227 @@
 # Kash reference
 
-Kash is Kame's process language: shell-like command scripts that keep Kame's
-typed values, lazy definitions and dependency tracking. It is **not** a POSIX
-shell or KornShell. Values are never turned into shell text and reparsed: argv is
-built directly, without implicit splitting or globbing.
-
-Kash is used in three ways:
-
-- **Scripts**: `.kash` files (`.ksh` is equivalent) run by `kash` or `kame do run`.
-- **Recipes**: `.kmk` rules with `SHELL = kash`, or rule metadata `[shell: kash]`.
-- **Interactive shell**: a REPL over one live session (`kash` on a terminal).
-
-Key terms:
+Kash is Kame's process language. It builds argv from typed values and
+connects commands, functions, and stream operators into process graphs.
+Scripts use `.kash` or `.ksh`. Indented Kame recipes use Kash by default.
+On a terminal, running `kash` opens the interactive shell.
 
 | Term | Meaning |
 | --- | --- |
-| Statement | One command graph, definition, or control block; ends at newline or `;`. |
-| Command graph | Stages joined by pipes and operators, launched together. |
-| Stage | One executable invocation, with its setup (`:cwd`, `:timeout`, env) and redirections. |
-| Expression | A parenthesized Kame expression `(…)`, evaluated by the Kame evaluator. |
-| Capture | `$(COMMAND)`: run a graph and return its stdout as a string. |
-| Result | Record describing a completed process: `status`, `signal`, `stages`, … |
-| Execution scope | Script, function call, or `with` block: owns locals, async work and defers. |
-| Session | One engine and policy shared by every source fragment or interactive entry. |
+| Statement | A command graph, definition, binding, or control block. |
+| Command graph | Stages connected by pipes or stream operators. |
+| Stage | An executable or function invocation, with its setup and redirections. |
+| Capture | `$(COMMAND)` collects a graph's stdout as text. |
+| Outcome | `$?(COMMAND)` retains invocation status, captured stdout, and failure details. |
+| Execution scope | A boundary that owns its async work and deferred cleanup. |
 
 ## Running
 
 ```sh
-kash ./publish.kash preview          # file, then program arguments
-kash -c 'echo $args' one two         # inline text
-kash                                  # REPL on a terminal; piped stdin is read as source
-kash -i ./lib.kash                    # load sources, then go interactive
-kash --login                          # login profile, then REPL on a terminal
-kash -lc 'echo hello'                  # login profile, then noninteractive command
+kash ./publish.kash preview
+kash -c 'printf "%s\n" $...args' one two
+kash -i ./lib.kash
+kash --login
+kash -lc 'echo hello'
 kame do run ./publish.kash -- preview
 kame do run --lang kash -c 'echo hello'
+kame do kash -c 'echo hello'
 kame do parse --lang kash ./publish.kash
 kame do fmt --lang kash -n ./publish.kash
 ```
 
-- `kash` is the `kame` binary invoked under that name; it implies `--lang kash`
-  and treats arguments after the source as program arguments. A
-  `#!/usr/bin/env kash` shebang works since `#` starts a comment.
-- All fragments are parsed before execution and share one engine and policy.
-- Kash-first sessions get build-like default grants; Kash appended to a value
-  session inherits its stricter policy. Capability, timeout and `-C` options
-  apply as for any session.
+`kame do kash` starts the unified runner in Kash, like `do run --lang kash`.
+Invoking the executable as `kash` selects Kash and binds operands after the
+source to `args`. A `#!/usr/bin/env kash` shebang works in a file. A terminal
+with no source opens the REPL. Piped stdin with no source is read as Kash.
+
+Ordered fragments share one execution session. Kash-first sessions receive
+build-like default grants. Appending Kash to a value session retains that
+session's grant policy. Capability, timeout, and `-C` options apply across
+the session. [CLI reference](skills/kame/ref/cli.md)
 
 ## Language
 
-### Statements and definitions
+### Bindings and functions
 
 ```kash
-name = "Ada Lovelace"                 # lazy, evaluated on first use
-let workspace = (line $(mktemp -d))   # eager, evaluated when reached
-(greet WHO) = (str "Hello, " WHO)     # expression-bodied function
+def name = "Ada Lovelace"
+def greet who = str "Hello, " who
+let workspace = line $(mktemp -d)
+defer rm -rf $workspace
 
-def probe dir
-	if test -f "${dir}/ready"
-		return 0
-	return 75 ?
+def ready dir
+	if $?(test -f "${dir}/ready").ok
+		return true
+	return false
 
 echo (greet name)
+echo (ready workspace)
 ```
 
-- `NAME = RHS` is lazy and memoized. The RHS is one Kame expression, a `$ref`,
-  a `$(…)` capture, or a `??` chain of those.
-- `let NAME = RHS` runs when execution reaches it. Reading it earlier raises
-  `BINDING_UNINITIALIZED`; it cannot be redeclared or overridden by `--set`.
-- `def NAME PARAM… [rest...]` defines a native function with an indented body
-  (no braces, no `end`). Each call gets fresh locals and its own async/cleanup
-  lifetime. Call functions through expressions, `(probe ./ws)`, not as commands.
-- `return STATUS` (0–255) leaves the function; `return N ?` returns an accepted
-  nonzero Result. Test it with `(success? …)`, since a Result record is truthy.
-- `#` at word start begins a comment; `//` is literal text.
-- A statement starting with `(EXPRESSION)` is evaluated for its effects.
+`def NAME = EXPRESSION` defines a lazy value. `let NAME = EXPRESSION`
+evaluates when execution reaches it. `set NAME = EXPRESSION` updates an
+existing eligible `let` binding in the same invocation. A read before its
+initializer reports `BINDING_UNINITIALIZED`.
+
+Functions can have an expression body or an indented action block. Write
+`def NAME ()` for a zero-parameter header and `rest...` for a final rest
+parameter. A bare command head can call a function, and a value call keeps
+its return value. In value position, use `NAME ()` to call with no arguments.
+Function stdout and stderr can participate in pipes and redirections.
+
+`return VALUE` exits the function with a value. A generator uses `yield VALUE`
+to produce a lazy stream element and a bare `return` to end the stream.
+Yielded values go to a value consumer such as `for` or `collect!`. Stdout
+travels through the process output channel. Early closure runs the generator's
+pending defers. [Generator specification](spec/012-streams.md#generator-streams)
+
+A statement beginning with `(EXPRESSION)` evaluates it for effects. A
+word-start `#` begins a comment. `//` is literal.
 
 ### Words and argv
 
-| Form | Meaning |
+| Form | Behavior |
 | --- | --- |
-| `$name`, `$a.b`, `${name}` | Kame reference (`${name}.c` appends `.c`, `$name.c` reads field `c`). |
-| `$...cmd` | Spread a flat list as argv, including the executable at command position. |
-| `(EXPRESSION)` | Kame expression, standalone or as a word fragment: `--out=(name).json`. |
-| `$(COMMAND)` | Capture stdout of a graph or `&&`/`||` list. |
-| `$env.NAME` | Environment lookup (needs a read grant). `$PATH` is a Kame binding, not the env. |
-| `"…"` | Groups one word; expands `$…` and `$(…)`, keeps `(…)` literal. |
+| `$name`, `$files.0` | Read a value. |
+| `${EXPR}`, `(EXPR)` | Compute a value for an argument or a fragment of a mixed word. `${name}.c` appends a suffix. |
+| `$...files`, `$...{project.command}` | Spread a flat list into separate argv entries. |
+| `$(COMMAND)` | Capture stdout from a graph or command list. |
+| `${env/HOME}` | Read one environment variable under an environment grant. |
+| `"…"` | Group one word with `$` substitutions. |
+| `'…'` | Group a literal word. |
 
-- A scalar is always exactly one argument, whitespace included.
-- A standalone list (`$files`, `(wildcard ./src/*.c)`) splices its items; an
-  empty list adds nothing. Mixed or quoted words require scalars.
-- Nil behaves like an unset shell variable: a standalone nil adds no argument,
-  and inside a quoted or mixed word it reads as empty text.
-- Raw `*.c` is literal: use `(wildcard …)` to glob.
-- Single quotes and legacy `@(…)` are rejected.
-- Captures keep output exactly, trailing newline included: use `(line …)` to
-  drop one final LF, or `(strip …)` when the contract allows it.
+A scalar contributes one argument, including any whitespace. A standalone
+`nil` contributes no argument. In quotes or a mixed word it contributes empty
+text. A `${EXPR}` fragment in quotes or a mixed word renders like a Kame
+string. For example, `echo "Repos ${(dirs REPOS)}"` passes one argument
+containing the paths separated by spaces. Use `$...files` to pass each path in
+its own argument. Raw wildcard characters remain text.
 
-### Processes
+An unbraced reference stops at `/`. In `$dir/file.txt`, only `dir` is
+substituted. `${EXPR}` accepts qualified names such as `${lib/name}` and calls
+such as `${(dirs REPOS)}`. An unbound
+uppercase name can read the environment when permitted. Use `x/NAME` in
+command position to select an external executable directly.
+
+### Processes and outcomes
 
 ```kash
 cat < ./input.txt | sort > ./output.txt
 build >> ./build.log 2>&1
-:cwd ./build :timeout 30 :NODE_ENV production npm test
-:env $exports :accept-exit [1] checker --report
+let environment = {MODE: "release"}
+cwd: ./build timeout: 30 env: $environment npm test
+let result = $?(accept-exit: [1, 7] checker --report)
+let job = $&(worker --once)
+let finished = $?(wait $job)
 ```
 
-- `|` streams stdout to stdin with backpressure. `<` applies to the first stage,
-  `>`/`>>` to the last. `2>`, `2>>` and `2>&1` (order-sensitive) handle stderr.
-  `>&out` and `>&err` route to the current output or error sink.
-- Stage setup precedes the executable: `:cwd`, `:timeout` (seconds), `:env RECORD`,
-  `:KEY VALUE` env overrides, `:accept-exit [codes]`.
-- Every reached command head is resolved and tracked as a tool dependency, using
-  the startup `PATH` and `--tool NAME=PATH` in scripts and recipes; interactive
-  and login sessions use the current session `PATH`. Missing tools report `TOOL_MISSING`.
-- `(capture! POLICY … CMD ARGS…)` returns a Result with exact `stdout`/`stderr`
-  bytes; `(run! …)` and `(pipe! …)` build graphs from expressions.
-- A trailing `&` runs a graph asynchronously; the owning scope joins it. Bind a
-  handle with `(run! :async :true …)` and `(await job)`.
-- Advanced POSIX topology (groups, `|(merge)`, `|(broadcast)`, `|(tee PATH)`,
-  `|(frame :lines)`, `|(filter …)`, `|(each)`, `stream` channels, `<(graph)`
-  operands) is documented in the [Kash skill reference](skills/kame/ref/kash.md).
+`|` streams stdout to stdin with backpressure. Use `>` or `>>` for stdout and
+`2>` or `2>>` for stderr. `2>&1` copies stdout's destination at that point.
+`>&out` and `>&err` route output to the current invocation's sinks.
+Stage settings precede the executable. `timeout:` is in seconds.
+Ordinary `NAME: VALUE` settings add child environment assignments.
 
-### Failure and recovery
+Reached external command heads resolve through the current unit's `PATH`
+and tool overrides. Resolved
+executables become build dependencies. Missing executables report
+`TOOL_MISSING`.
+
+`$(COMMAND)` preserves UTF-8 stdout, including trailing newlines.
+`$?(COMMAND)` retains invocation status and captured output under `value`.
+Its `state` describes how the invocation ended. A generator waiting for its
+next pull keeps its suspension state internally.
+Use `capture! POLICY …` to capture selected stdout and stderr as bytes.
+A terminal `&` starts a graph asynchronously. `$&(COMMAND)` also returns a
+handle. The owning scope joins or cancels its work. [Process inspection](spec/049-process-inspection.md)
+
+### Failure and control flow
 
 | Form | Behavior |
 | --- | --- |
-| `A && B`, `A \|\| B` | Sequential list; `\|\|` runs only after a process exit or signal. |
-| `CMD ?` | Accept a nonzero or signal exit; stderr stays visible. |
-| `CMD ? FALLBACK` | Run a fallback command on recoverable failure. |
-| `x = A ?? B` | Use `B` when `A` is nil or failed (definition RHS only). |
-| `:accept-exit [1 7]` | Treat only those exit codes as success for one stage. |
+| `A && B` | Run `B` when `A` succeeds. |
+| `A \|\| B` | Run `B` after an eligible process exit failure. |
+| `CMD ?` | Accept an ordinary nonzero exit while retaining its raw status. |
+| `CMD ? FALLBACK` | Run the fallback after a recoverable command failure. |
+| `accept-exit: [1, 7]` | Accept the specified ordinary nonzero exits for one stage. |
+| `A ?? B` | Use `B` when the value `A` is nil or a lookup is missing. |
 
-An unhandled failure stops the scope. Pipelines fail if any stage fails. Recovery
-never hides capability denial, cancellation or `exit`.
-
-### Control flow
+An accepted exit has `state == :completed` and `effectiveStatus == 0`.
+Its raw nonzero status leaves `ok` false. Capability denial and cancellation
+of the owning invocation propagate. [Selected exits](spec/048-kash-practical-scripting.md)
 
 ```kash
-if test -f ./out.txt
+if $?(test -f ./out.txt).ok
 	echo exists
-elif (nop options.release)
+elif options.release
 	echo release
 else
 	echo missing
 
-match $target
-	case ./src/{name:*}.c
+match target
+	./src/{name:*}.c =>
 		echo $name
 
-for f in files
-	convert $f
-while probe --pending
+for file in files
+	convert $file
+while $?(probe --pending).ok
 	worker --one
 for line from ./events.jsonl :lines
 	handle $line
 ```
 
-- Command conditions test exit success; expression conditions use Kame truth.
-- `for NAME in LIST` iterates a materialized list. `for NAME from SOURCE :lines|:nul`
-  streams records (max 64 KiB each) from a file or `:stdin`.
-- `break` and `continue` target the nearest loop in the same function.
-- Bodies are indented; keywords sit on their own lines. Each branch and
-  iteration has fresh locals.
+Conditions use Kame truthiness. Test a command with `$?(COMMAND).ok`
+or use `.state == :completed` to count accepted exits. List and stream loops receive typed values. Record
+loops read `:lines` or `:nul` records from a file or `:stdin`. `break` and
+`continue` target the nearest loop in the same invocation. Each iteration
+has fresh bindings.
 
-### Scopes, cleanup and exit
+### Scopes, cleanup, and exit
 
 ```kash
-with :cwd ./project :env [MODE: "release"]
+let environment = {MODE: "release"}
+with cwd: ./project env: $environment
 	defer rm -f ./scratch
 	configure && compile
 ```
 
-- `with` runs a body with a scoped cwd and environment, and owns its async work
-  and defers. Host cwd and environment are never mutated.
-- `defer COMMAND` snapshots argv now and runs it at scope end; `defer (EXPR)`
-  evaluates later. Defers run in LIFO order, even after failure, within a
-  five-second budget.
-- `exit STATUS` ends the whole execution boundary (script, recipe attempt or
-  interactive session), joining or cancelling owned work and running defers.
+`with` owns its cwd, child environment, work, and defers. It leaves the
+host's cwd and environment intact. `defer COMMAND` snapshots command
+operands at registration. `defer (EXPRESSION)` evaluates at cleanup. Pending
+defers run in reverse order under the cleanup budget.
 
-### Environment overlay (recipes)
+`exit STATUS` ends the innermost process-like boundary, including the
+script, recipe, capture, or interactive entry. It runs cleanup while unwinding.
+`return` exits a function or value-producing body.
 
-`export NAME = VALUE` and `unset NAME…` edit the child environment of the current
-scope; nested scopes revert on exit. Reads and removals need recipe metadata
-`[authority: [read: […] unset: […]]`; `[tty: :true foreground: :true]` hands the
-terminal to foreground commands. Direct `do run` sessions have no such metadata.
+Recipe metadata can grant scoped environment reads and removals through
+`{authority: {read: […], unset: […]}}`. Use `{tty: true, foreground: true}`
+to hand the terminal to foreground recipe commands when supported.
+`set env/NAME = VALUE` updates the unit's child environment. Use
+`set env/NAME = nil` to remove a variable under the applicable authority.
 
-### Libraries, recipes and context
+### Modules and recipes
 
 ```kash
-(include ./lib/checks.kash)
-config = (joinpath (source-dir) "defaults.json")
+include ./lib/checks.kash
+import ./lib/archive.km as archive
+def config = joinpath module/dir "defaults.json"
+check-config $config
+archive/create ./dist/app.tgz
 ```
 
-- Included files hold definitions only (comments, `=` definitions, `def`,
-  nested includes). Includes are literal, top-level and relative to the
-  including file. `.km`/`.kmk` programs can include `.kash` libraries too.
-- `(kash ./mod.kash)` loads a module value (`mod.fn`); `(kash TEXT)` builds a
-  script callable from text.
-- `(source-dir)` is the directory of the authored file.
-- In recipes and scripts: `inputs`, `outputs`, `inputs/changed` and `args` are
-  typed lists (`args.0` for the first argument).
+`include` binds definitions in the caller's scope. Use `include?` to
+tolerate a missing file. Kash sources include other Kash sources. Import
+exports from either language with `import` or `from … import …`.
+Relative source paths use the directory of the containing source.
+`module/dir` and `module/file` identify a definition's authoring source.
+[Modules](spec/050-kash-libraries.md)
+
+Recipes bind `inputs`, `outputs`, `changed-inputs`, `captures`, and named
+captures or arguments. Use `$inputs.0` for the first input and `$...inputs`
+to pass each input as a separate argv entry. `args` holds the current script
+or function arguments. Use a rule's `; {shell: "sh"}` metadata for a
+foreign-shell recipe whose text is rendered using `@{EXPRESSION}`.
+[Advanced process topology](skills/kame/ref/kash.md#explicit-process-topology-posix)
 
 ## Interactive shell
 
@@ -257,41 +277,36 @@ All entries share one engine, top-level scope, capability policy and cleanup sco
 | --- | --- |
 | `let NAME = …` | Evaluated now; a later `let` rebinds it. |
 | `def NAME …` | A later `def` replaces it. |
-| `NAME = …` | Lazy, defined once: redefinition is `DEF_INVALID` (use `let`). |
-| `NAME += …` | `DEF_INVALID`. |
+| `set NAME = …` | Updates an existing eligible `let` binding. |
+| `import PATH`, `from PATH import …` | Binds exports for later entries. |
 | Rules, includes | `FEATURE_UNSUP` in entries; preload them as files instead. |
 
 ### Session commands
 
-These single-line entries change shell session state, rather than running
-external processes:
+These statements update state for subsequent work in the interactive session.
 
-| Entry | Effect |
+| Statement | Effect |
 | --- | --- |
-| `cd [DIR]` | Change the session directory. No operand is `$HOME`; `-` is the previous directory; `~` expands. |
-| `export NAME=VALUE…` | Set variables in the child environment of later commands. |
-| `unset NAME…` | Remove variables from that environment. |
+| `cd [DIR]` | Change the session directory. No operand selects `$HOME`. A single dash selects the previous directory. |
+| `set env/NAME = VALUE` | Set a scalar in the child environment. |
+| `set env/NAME = nil` | Remove a variable from the child environment. |
 
-Operands split on blanks. Single quotes are literal; `$NAME`/`${NAME}` expand
-from the session environment as it was before the entry (missing names expand
-to empty). With default grants, read/write grants follow `cd`; explicit grants
-never move.
+With default grants, read and write grants follow `cd`. Explicit grants stay
+scoped as supplied. `cd` and environment writes from a function stay visible
+after return. Captures own child units, so their writes stay local.
 
-In interactive and login sessions, executable lookup and `tool`/`x/NAME` use
-the current session `PATH`. Exporting or unsetting PATH affects subsequent
-commands, including aliases, pipelines and captures, without restarting running
-jobs. Relative and empty PATH entries search relative to the lookup directory.
-`--tool` overrides still win, and explicit run grants do not broaden.
-Stage-local `:env` records do not change session lookup; ordinary batch scripts
-and recipes retain startup-PATH lookup. Already evaluated lazy values do not
-refresh after an environment change.
+An updated PATH affects later lookups, including aliases, pipelines, and
+captures. Relative and empty PATH entries resolve against the lookup
+directory. Tool overrides still take precedence and run grants still apply.
+A stage-local environment override changes only that child.
+[Session directory and environment](spec/052-kash-interactive.md#session-directory-and-environment)
 
 ### Aliases
 
 Put shortcuts in `~/.config/kash/init.kash`, then invoke their bare names:
 
-```kash
-alias ll = ["ls" "-lah"]
+```kash-repl
+alias ll = ["ls", "-lah"]
 ll ./src | head -n 10
 alias ll                         # show one
 alias                            # list all, sorted by name
@@ -300,14 +315,13 @@ unalias ll
 
 The nonempty literal string list is an argv prefix. Caller arguments append
 without splitting, globbing, interpolation or reparsing. Expansion happens once,
-so `alias ls = ["ls" "-lah"]` invokes the real `ls`, not itself recursively.
+so `alias ls = ["ls", "-lah"]` invokes the real `ls`, not itself recursively.
 Computed command heads and explicit executable paths bypass aliases.
 Ordinary value bindings are not aliases.
 
 Redefinition replaces an alias; invalid declarations leave it unchanged.
-Reserved keywords and session-command names cannot be aliases. Whole-line
-aliases of `cd`, `export` and `unset` work, but those commands still cannot
-appear in pipelines or functions.
+Reserved keywords and builtin names cannot be aliases. An alias whose prefix
+starts with `cd` invokes the directory builtin.
 
 Alias declarations and removals are whole top-level session entries. They can
 use multiline lists and are understood by `do parse` and `do fmt`:
@@ -316,14 +330,14 @@ use multiline lists and are understood by `do parse` and `do fmt`:
 kame do fmt --lang kash -i ~/.config/kash/init.kash
 ```
 
-Batch execution rejects session commands with `FEATURE_UNSUP` before running
-any statements; formatting a startup file does not execute it.
+An interactive-only alias declaration in an ordinary script reports
+`PARSE_ERR`. Formatting a startup file leaves its commands unevaluated.
 
 ### Terminal, interrupts and exit
 
 - Foreground statements get the terminal on every stream they would otherwise
   share with the session. Eligible `&` graphs attach without taking the
-  foreground. Captures, defers and record loops keep pipes; `:tty :false` opts
+  foreground. Captures, defers and record loops keep pipes; `tty: false` opts
   a stage out.
 - Ctrl-C reaches the running command only; the entry ends with status 130 and
   the session continues. Ctrl-C at the prompt clears the pending input. A
@@ -407,13 +421,13 @@ strings are Kash, not POSIX shell source.
 `$XDG_CONFIG_HOME` when nonempty, otherwise `$HOME/.config`, and an
 unresolvable `$HOME` leaves no default path. Only this file and the profile are
 read; other files in the directory are not. A `kash-prompt` function receives
-`[status: dir: name: jobs:]` and returns the prompt string; `kash-rprompt`
+a record with `status`, `dir`, `name`, and `jobs` fields and returns the prompt string; `kash-rprompt`
 receives the same record and returns a right prompt, drawn at the right edge
 of the entry's last line:
 
 ```kash
-(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
-(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
+def kash-prompt info = str info.name (if info.status == 0 then "" else " !") " $ "
+def kash-rprompt info = if info.jobs == 0 then "" else str "[" info.jobs " jobs]"
 ```
 
 ### Editing, completion and highlighting

@@ -66,7 +66,7 @@ func TestSessionKashEagerBindingsFollowFragmentOrderAndExecutionPolicy(t *testin
 }
 
 func TestSessionKashEagerBindingsRejectCrossFragmentCollisions(t *testing.T) {
-	pairs := []string{"let value = 1", "def value = 1", "value ?= 1", "value += [1]", "def value ()\n\treturn 0"}
+	pairs := []string{"def value = 1", "value ?= 1", "value += [1]", "def value ()\n\treturn 0"}
 	for i := range pairs {
 		for order := 0; order < 2; order++ {
 			a := t.Allocator()
@@ -76,7 +76,7 @@ func TestSessionKashEagerBindingsRejectCrossFragmentCollisions(t *testing.T) {
 				{Name: "first.kash", Lang: "kash", Text: texts[order]},
 				{Name: "second.kash", Lang: "kash", Text: texts[1-order]},
 			}
-			if i == 2 || i == 3 {
+			if i == 1 || i == 2 {
 				fragments[1-order].Lang = "km"
 			}
 			compiled := program.CompileSession(a, fragments, registry, program.Options{})

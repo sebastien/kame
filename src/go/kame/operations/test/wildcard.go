@@ -54,14 +54,14 @@ func TestWildcardUnionResumesWithoutRevisitingEarlierPatterns(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	text := strings.Builder{}
-	text.WriteString(`(wildcard ["./entries/z", "./entries/a"]`)
+	text.WriteString(`(wildcard [./entries/z, ./entries/a]`)
 	const count = 16
 	for i := 0; i < count; i++ {
 
-		text.WriteString(` "./union/` + strconv.Itoa(i) + `/*"`)
+		text.WriteString(` ./union/` + strconv.Itoa(i) + `/*`)
 	}
 	text.WriteByte(')')
 	document := expr.Parse(a, "union.km", text.String())
@@ -109,7 +109,7 @@ func TestWildcardUnionResumesWithoutRevisitingEarlierPatterns(t *testing.T) {
 			}
 			if !node.Current || len(node.Latest.List) != 3 || globs != count {
 				t.Error("union did not settle or repeated host requests")
-			} else if node.Latest.List[0].Text != "./entries/a" || node.Latest.List[1].Text != middle || node.Latest.List[2].Text != "./entries/z" {
+			} else if node.Latest.List[0].Kind != core.Path || node.Latest.List[1].Kind != core.Path || node.Latest.List[0].Text != "./entries/a" || node.Latest.List[1].Text != middle || node.Latest.List[2].Text != "./entries/z" {
 				t.Error("union lost sorted membership after invalidation")
 			}
 		}
@@ -130,9 +130,9 @@ func TestWildcardUnionPreservesFirstPathProvenance(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	document := expr.Parse(a, "union.km", `((name => (wildcard ["./z", "./a", "./z"] [./path/@{name}, "./a"] ["./path/*"])) "*")`)
+	document := expr.Parse(a, "union.km", `((name => (wildcard [./z, ./a, ./z] [./path/${name}, ./a] [./path/\*])) "*")`)
 	context := eval.Context{Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
 	r := p.EvaluateWith(document.Expr, &context)
 	if r.Waiting || r.Diagnostic.Code != "" || len(r.Value.List) != 3 {
@@ -153,7 +153,7 @@ func TestWildcardFilteringResumesWithoutRevisitingEarlierEntries(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	document := expr.Parse(a, "progress.km", `(files ./entries/*)`)
 	state := mem.Alloc[wildcardProgressState](a)
@@ -233,15 +233,25 @@ func TestWildcardFlagsRejectInvalidCallsBeforeRequests(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{`(wildcard :+files)`, `(wildcard :-dir :-symlinks)`, `(wildcard :+files :-files ./entries/*)`, `(wildcard :-dir :+dir ./entries/*)`, `(wildcard :+bogus ./entries/*)`, `(wildcard "-unknown" ./entries/*)`, `(wildcard "+files/child")`, `(wildcard :+bogus (x => x))`, `(wildcard :+files :-files (x => x))`}
+	texts = append(texts,
+		`wildcard "./entries/*"`,
+		`wildcard ./entries/literal`,
+		`wildcard ./entries/{name}`,
+		`wildcard (resource "file:///entries/a")`,
+		`wildcard ["./entries/a"]`,
+		`wildcard [[./entries/a]]`,
+		`files "./entries/*"`,
+		`dirs ./entries/literal`,
+	)
 	for i := range texts {
 		e := expr.Parse(a, "flags.km", texts[i])
 		context := eval.Context{Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
 		r := p.EvaluateWith(e.Expr, &context)
 		if r.Diagnostic.Code != "EXPR_INVALID" || r.Waiting || p.Requests.Next().OK {
-			t.Error("invalid wildcard flag call was not rejected before requests")
+			t.Errorf("invalid discovery call was not rejected before requests: %s (%s)", texts[i], r.Diagnostic.Code)
 		}
 		r.Free(a)
 		e.Free()
@@ -260,12 +270,46 @@ func TestWildcardKindMasksRetainExcludedEntryObservations(t *testing.T) {
 	checkWildcardKinds(t, `(wildcard :+files ./entries/*)`, "", true)
 }
 
+func TestWildcardDeniedOrPurePredicateLeavesHostIdle(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	defer engine.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	parsed := script.ParseKameFile(a, "discovery.km", "")
+	defer parsed.Free()
+	p := eval.Compile(a, engine, parsed, registry)
+	defer p.Free()
+	for _, policy := range []struct {
+		grants        []eval.Grant
+		purePredicate bool
+		want          string
+	}{
+		{grants: []eval.Grant{{Capability: eval.Read, Names: []string{"/other"}}}, want: "CAP_DENIED"},
+		{grants: []eval.Grant{{Capability: eval.Read}}, purePredicate: true, want: "KASH_PREDICATE_EFFECT"},
+	} {
+		for _, operation := range []string{"files", "dirs", "wildcard"} {
+			parsed := expr.Parse(a, "discovery.km", operation+" ./protected/*")
+			context := eval.Context{
+				Run: a, Cwd: "/workspace", Grants: policy.grants, PurePredicate: policy.purePredicate, DirectHostRequests: true,
+			}
+			result := p.EvaluateWith(parsed.Expr, &context)
+			if result.Diagnostic.Code != policy.want || result.Waiting || p.Requests.HasRequests() {
+				t.Errorf("%s did not reject discovery before host access: %s %s (want %s)", operation, result.Diagnostic.Code, result.Diagnostic.Message, policy.want)
+			}
+			result.Free(a)
+			parsed.Free()
+		}
+	}
+}
+
 func checkWildcardKinds(t *testing.T, text string, want string, failMetadata bool) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	document := expr.Parse(a, "kinds.km", text)
 	state := mem.Alloc[observedFileState](a)

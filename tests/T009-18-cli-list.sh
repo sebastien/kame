@@ -5,33 +5,59 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T009-18 target listing and typo matching"
 cli_require_tools
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
 native_bin="$CLI_BIN"
 wasm_bin="$TEST_PATH/kame-wasm"
-printf '#!/usr/bin/env bash\nexec node %q "$@"\n' "$CLI_ROOT/dist/kame.js" >"$wasm_bin"
+printf '#!/usr/bin/env bash\nexport KAME_WASM=%q\nexec node %q "$@"\n' "${KAME_WASM:-}" "${KAME_TEST_WASM_WRAPPER:-$CLI_ROOT/dist/kame.js}" >"$wasm_bin"
 chmod +x "$wasm_bin"
 
 project="$TEST_PATH/project"
 mkdir -p "$project/rules"
-cat >"$project/Makefile.kmk" <<'KMK'
+cat >"$project/Makefile.km" <<'KM'
 ROOT = "./build"
 VALUE = 42
-(include ./rules/outputs.kmk)
-build : unknown-prerequisite
+include ./rules/outputs.km
+task build : unknown-prerequisite
 	touch forbidden
-builder :
-rebuild :
-task test {mode} :
-service daemon :
-./café :
-generate extra = [[kind: "task" target: "generated" inputs: [] order-only: [] recipe: ["touch forbidden"]]]
-KMK
-cat >"$project/rules/outputs.kmk" <<'KMK'
-@{ROOT}/{name}.o : ./src/{name}.c
+task builder
+task rebuild
+task cached test {mode}
+service daemon
+rule ./café
+def extra () =
+	task generated
+		touch forbidden
+generate extra ()
+KM
+cat >"$project/rules/outputs.km" <<'KM'
+rule ${ROOT}/{name}.o : ./src/{name}.c
 	touch forbidden
-./build/app ./build/app.map : ./missing-input
+rule ./build/app ./build/app.map : ./missing-input
 	touch forbidden
-KMK
+KM
+generated_project="$TEST_PATH/generated"
+mkdir -p "$generated_project"
+cat >"$generated_project/Makefile.km" <<'KM'
+import ./constructors.km as constructors
+def local prefix = [
+	(rule ./${prefix}.txt = "local"),
+	(task ${prefix}-plain),
+	(task cached ${prefix}-cache),
+	(service ${prefix}-service {port=8081}),
+]
+generate local "local"
+generate constructors/make "sample"
+KM
+cat >"$generated_project/constructors.km" <<'KM'
+export make
+task hidden
+def make prefix = [
+	(rule ./${prefix}.txt = "generated"),
+	(task ${prefix}-plain),
+	(task cached ${prefix}-cache),
+	(service ${prefix}-service {port=8080}),
+]
+KM
 
 for backend in native wasm; do
   if [ "$backend" = native ]; then CLI_BIN="$native_bin"; else CLI_BIN="$wasm_bin"; fi
@@ -63,7 +89,7 @@ for backend in native wasm; do
   cli_run -- do list --json -C "$project" --set 'ROOT="./other"' other
   cli_expect_status 0
   cli_expect_json_query "$CLI_OUT" '. == ["./other/{name}.o"]' true
-  cli_run -- do list --json -c 'only :'
+  cli_run -- do list --json -c 'task only'
   cli_expect_status 0
   cli_expect_json_query "$CLI_OUT" '. == ["only"]' true
   cli_run -- do list --json -c 'VALUE = 1'
@@ -85,33 +111,43 @@ for backend in native wasm; do
   cli_expect_no_file "$project/build"
   cli_expect_no_file "$project/.kame"
 
+  test-step "$backend reports every generated rule kind from local and imported constructors"
+  cli_run -- do plan --json -C "$generated_project" ./sample.txt sample-plain sample-cache sample-service port=9090 ./local.txt local-plain local-cache local-service
+  cli_expect_status 0
+  cli_expect_json_query "$CLI_OUT" '[.producers[] | .kind] == ["file","target","task","service","file","target","task","service"]' true
+  cli_expect_json_query "$CLI_OUT" 'all(.producers[]; .generator.name == "generate")' true
+  cli_expect_json_query "$CLI_OUT" '[.producers[] | select(.kind == "service") | .arguments.port] == ["9090","8081"]' true
+  cli_expect_json_query "$CLI_OUT" 'all(.producers[] | select(.kind == "task"); .reusePolicy == "fingerprint")' true
+  cli_run -- do list --json -C "$generated_project"
+  cli_expect_status 0
+  cli_expect_json_query "$CLI_OUT" '. == ["./local.txt","./sample.txt","local-cache","local-plain","local-service","sample-cache","sample-plain","sample-service"]' true
+  cli_expect_no_file "$generated_project/local.txt"
+  cli_expect_no_file "$generated_project/sample.txt"
+
   test-step "$backend shows read-only content/cache status with semantic colors"
   status_project="$TEST_PATH/status-$backend"
   mkdir -p "$status_project"
   printf 'unique-seed-content' >"$status_project/seed"
-  cat >"$status_project/Makefile.kmk" <<'KMK'
-build : ./result checked
-service daemon :
+  cat >"$status_project/Makefile.km" <<'KM'
+task build : ./result checked
+service daemon
 	touch forbidden-service
-task checked : ./seed ; [shell: kash]
+task cached checked : ./seed
 	(out! (text (read ./seed)))
-task never : ./seed
+task cached never : ./seed
 	touch forbidden-task
-task parameterized {mode} :
-task defaulted {mode=debug} : ./seed ; [shell: kash]
+task cached parameterized {mode}
+task cached defaulted {mode=debug} : ./seed
 	(out! mode)
-./result : ./seed ; [shell: kame]
-	(read ./seed)
-./absent : ./seed
+rule ./result : ./seed = read ./seed
+rule ./absent : ./seed
 	touch forbidden-file
-./downstream : ./obj/one.o ; [shell: kame]
-	(read ./obj/one.o)
-./obj/{name}.o : ./src/{name}.c ; [shell: kame]
-	(read (first inputs))
-./pair ./pair.map : ./seed
+rule ./downstream : ./obj/one.o = read ./obj/one.o
+rule ./obj/{name}.o : ./src/{name}.c = read inputs.0
+rule ./pair ./pair.map : ./seed
 	cat ./seed > ./pair
 	cp ./pair ./pair.map
-KMK
+KM
   mkdir -p "$status_project/src"
   printf 'pattern-seed' >"$status_project/src/one.c"
   cli_run -- do list --output text -C "$status_project"

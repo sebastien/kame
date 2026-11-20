@@ -14,7 +14,7 @@ func TestClosedConfigurationLiterals(t *testing.T) {
 		}
 		parsed.Free()
 	}
-	invalid := []string{`name`, `name.field`, `(nop 1)`, `(x => x)`, `$(printf bad)`, `"@{name ()}"`, `./@{name ()}/file`, `[1, name]`, `{x: (env "HOME")}`, `./*.c`}
+	invalid := []string{`name`, `name.field`, `(nop 1)`, `(x => x)`, `$(printf bad)`, `"${name ()}"`, `./${name ()}/file`, `[1, name]`, `{x: (env "HOME")}`, `./*.c`}
 	for i := range invalid {
 		parsed := expr.Parse(t.Allocator(), "literal", invalid[i])
 		if len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr) {

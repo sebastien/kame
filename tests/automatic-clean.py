@@ -45,7 +45,7 @@ def protect(binary: str, root: Path, mode: str, name: str) -> None:
 def project(root: Path, body: str | None = None) -> None:
 	root.mkdir()
 	(root / "input").write_text("seed\n")
-	(root / "Makefile.kmk").write_text(body or "default : ./build/out\n./build/out : ./input\n\tcp @< @>\n")
+	(root / "Makefile.km").write_text(body or "task default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0\n")
 
 
 def records(root: Path) -> list[Path]:
@@ -77,7 +77,7 @@ def stop(process: subprocess.Popen[str]) -> tuple[str, str]:
 
 def live_boundaries(binary: str, base: Path) -> None:
 	root = base / "live-build"
-	project(root, "default : ./build/out ./build/other\n./build/out : ./input\n\tcp @< @>\n\tprintf started > ./started\n\tread reply < ./gate\n./build/other : ./input\n\tcp @< @>\n\tprintf other-started > ./other-started\n\tread reply < ./other-gate\n")
+	project(root, "task default : ./build/out ./build/other\nrule ./build/out : ./input ; {shell: \"sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf started > ./started\n\tread reply < ./gate\nrule ./build/other : ./input ; {shell: \"sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf other-started > ./other-started\n\tread reply < ./other-gate\n")
 	os.mkfifo(root / "gate")
 	os.mkfifo(root / "other-gate")
 	builder = subprocess.Popen([binary, "-C", str(root), "./build/out"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -123,7 +123,7 @@ def live_boundaries(binary: str, base: Path) -> None:
 	assert clean(binary, root)["removed"] == 2
 
 	root = base / "cancelled-build"
-	project(root, "default : ./build/out\n./build/out : ./input\n\tcp @< @>\n\tprintf started > ./started\n\tread reply < ./gate\n")
+	project(root, "task default : ./build/out\nrule ./build/out : ./input ; {shell: \"sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf started > ./started\n\tread reply < ./gate\n")
 	os.mkfifo(root / "gate")
 	builder = subprocess.Popen([binary, "-C", str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 	try:
@@ -208,7 +208,7 @@ def capture_faults(binary: str, base: Path) -> None:
 	# Cancellation after capture must restore the link itself, even though its
 	# relative destination resolves differently inside the private ledger.
 	root = base / 'symlink-cancel-capture'
-	project(root, 'default : ./build/out\n./build/out : ./input\n\tln -s ../input @>\n')
+	project(root, 'task default : ./build/out\nrule ./build/out : ./input\n\tln -s ../input $outputs.0\n')
 	env = {**os.environ, 'KAME_CLEAN_TEST_FAULT': 'cancel-capture'}
 	run(binary, root, env=env)
 	state = root / '.kame/outputs'
@@ -224,7 +224,7 @@ def managedSymlinks(binary: str, base: Path) -> None:
 	for kind in ('file', 'directory', 'dangling', 'external', 'long'):
 		root = base / f'symlink-{kind}'
 		target = {'file': '../input', 'directory': '../source', 'dangling': '../missing', 'external': str(base / 'external-referent'), 'long': '../' + 'missing/' * 80}[kind]
-		project(root, f'default : ./build/out\n./build/out : ./input\n\tln -s "{target}" @>\n')
+		project(root, f'task default : ./build/out\nrule ./build/out : ./input\n\tln -s "{target}" $outputs.0\n')
 		(root / 'source').mkdir()
 		(root / 'source/valuable').write_text('keep')
 		(base / 'external-referent').write_text('external')
@@ -244,7 +244,7 @@ def managedSymlinks(binary: str, base: Path) -> None:
 
 	for change in ('retarget', 'replace-link', 'replace-file', 'keep', 'release', 'failed'):
 		root = base / f'symlink-{change}'
-		project(root, 'default : ./build/out\n./build/out : ./input\n\tln -s ../input @>\n' + ('\texit 1\n' if change == 'failed' else ''))
+		project(root, 'task default : ./build/out\nrule ./build/out : ./input\n\tln -s ../input $outputs.0\n' + ('\texit 1\n' if change == 'failed' else ''))
 		run(binary, root, status=1 if change == 'failed' else 0)
 		output = root / 'build/out'
 		if change in ('retarget', 'replace-link', 'replace-file'):
@@ -271,7 +271,7 @@ def quotedInputs(binary: str, base: Path) -> None:
 		root = base / f'quoted-input-{index}'
 		inputPath = './' + name
 		quoted = json.dumps(inputPath).replace('@', '\\@')
-		project(root, f'SHELL = kash\ndefault : "./build/out file"\n"./build/out file" : {quoted}\n\t(yield! (read (first inputs)))\n')
+		project(root, f'task default : "./build/out file"\nrule "./build/out file" : {quoted}\n\treturn (read (first inputs))\n')
 		(root / name).write_text('quoted seed')
 		run(binary, root)
 		before = {p.name: p.read_bytes() for p in records(root)}
@@ -284,25 +284,26 @@ def quotedInputs(binary: str, base: Path) -> None:
 	root = base / 'quoted-external-input'
 	project(root)
 	run(binary, root)
-	(root / 'Makefile.kmk').write_text('default :\nconsumer : "./build/out"\n')
+	(root / 'Makefile.km').write_text('task default :\ntask consumer : "./build/out"\n')
 	assert reasons(clean(binary, root)) == {'current-source-or-external-input'}
 	assert (root / 'build/out').read_text() == 'seed\n'
 
 
 def contextBlockers(binary: str, base: Path) -> None:
 	cases = [
-		('target-arguments', 'unused {variant} :\n', '{variant}'),
-		('computed-prerequisite', 'unused : @(nop ./input)\n', '@(nop ./input)'),
-		('interpolated-prerequisite', 'BASE = "./"\nunused : "@{BASE}input"\n', '"@{BASE}input"'),
-		('wildcard-prerequisite', 'unused : ./sources/*.txt\n', './sources/*.txt'),
-		('capture-prerequisite', './unused/{name} : ./source/{name}\n', './source/{name}'),
-		('generated-declarations', 'generate batch = [[kind: "task" target: "unused" inputs: [] order-only: [] recipe: []]]\n', None),
+		('target-arguments', 'task unused {variant} :\n', '{variant}'),
+		('computed-prerequisite', 'task unused : ${nop ./input}\n', '${nop ./input}'),
+		('interpolated-prerequisite', 'BASE = "./"\ntask unused : "${BASE}input"\n', '"${BASE}input"'),
+		('wildcard-prerequisite', 'task unused : ./sources/*.txt\n', './sources/*.txt'),
+		('capture-prerequisite', 'rule ./unused/{name} : ./source/{name}\n', './source/{name}'),
+		('generated-declarations', 'generate (task unused)\n', None),
+		('generated-declarations', 'generate []\n', None),
 	]
-	for reason, declaration, token in cases:
-		root = base / reason
-		project(root, '(include ./rules.kmk)\ndefault : ./build/out\n./build/out : ./input\n\tcp @< @>\n')
+	for index, (reason, declaration, token) in enumerate(cases):
+		root = base / f'{index}-{reason}'
+		project(root, 'include ./rules.km\ntask default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0\n')
 		text = 'SECRET = "cleanup-secret-must-not-appear"\n' + declaration
-		(root / 'rules.kmk').write_text(text)
+		(root / 'rules.km').write_text(text)
 		run(binary, root)
 		before = {p.name: p.read_bytes() for p in records(root)}
 		for dry in (True, False):
@@ -310,7 +311,7 @@ def contextBlockers(binary: str, base: Path) -> None:
 			assert reasons(report) == {'context-unverifiable'}, report
 			blocker = report['contextBlocker']
 			assert blocker['reason'] == reason, blocker
-			assert Path(blocker['source']).resolve() == root / 'rules.kmk', blocker
+			assert Path(blocker['source']).resolve() == root / 'rules.km', blocker
 			span = blocker['span']
 			assert text[span['start']:span['end']] == (token or declaration.rstrip('\n')), blocker
 			prefix = text[:span['start']]
@@ -320,7 +321,7 @@ def contextBlockers(binary: str, base: Path) -> None:
 			assert before == {p.name: p.read_bytes() for p in records(root)}
 		result = subprocess.run([binary, 'do', 'clean', '-C', str(root)], capture_output=True, text=True, timeout=20)
 		assert result.returncode == 0, (result.stdout, result.stderr)
-		assert reason in result.stderr and 'rules.kmk:' in result.stderr, result.stderr
+		assert reason in result.stderr and 'rules.km:' in result.stderr, result.stderr
 		assert 'cleanup-secret' not in result.stderr, result.stderr
 		assert (root / 'build/out').read_text() == 'seed\n'
 
@@ -328,7 +329,7 @@ def contextBlockers(binary: str, base: Path) -> None:
 def scopedConsumer(binary: str, base: Path) -> None:
 	# Base-scope evaluation would miss this external input selected by a parent.
 	root = base / 'scoped-consumer'
-	project(root, 'SOURCE ?= "./unselected"\ndefault : produce\nproduce : ; [shell: kash]\n\t(write! ./important "keep")\nscoped : reader ; env "KAME_SOURCE=./important"\nreader : @{SOURCE} ; [shell: kash]\n\t(out! SOURCE)\n')
+	project(root, 'SOURCE ?= "./unselected"\ntask default : produce\ntask produce :\n\t(write! ./important "keep")\ntask scoped : reader ; {env: {KAME_SOURCE: "./important"}}\ntask reader : ${SOURCE}\n\t(out! SOURCE)\n')
 	run(binary, root)
 	assert run(binary, root, 'scoped').stdout == './important'
 	before = {p.name: p.read_bytes() for p in records(root)}
@@ -360,8 +361,8 @@ def wasmBoundary(binary: str, wrapper: str, base: Path) -> None:
 	result = subprocess.run(['node', wrapper, '-C', str(root), 'clean'], capture_output=True, text=True, timeout=20)
 	assert result.returncode == 1 and 'TGT_NO_RULE' in result.stderr, result
 	assert before == {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
-	with (root / 'Makefile.kmk').open('a') as source:
-		source.write('clean : ; [shell: kash]\n\t(out! "authored-clean")\n')
+	with (root / 'Makefile.km').open('a') as source:
+		source.write('task clean :\n\t(out! "authored-clean")\n')
 	result = subprocess.run(['node', wrapper, '-C', str(root), 'clean'], capture_output=True, text=True, timeout=20)
 	assert result.returncode == 0 and result.stdout == 'authored-clean', result
 	result = subprocess.run(['node', wrapper, 'do', 'clean', '-C', str(root)], capture_output=True, text=True, timeout=20)
@@ -377,10 +378,10 @@ def wasmBoundary(binary: str, wrapper: str, base: Path) -> None:
 # -----------------------------------------------------------------------------
 
 def main(binary: str, wrapper: str = '') -> None:
-	with tempfile.TemporaryDirectory(prefix="automatic-clean-", dir="/tmp/opencode") as directory:
+	with tempfile.TemporaryDirectory(prefix="automatic-clean-") as directory:
 		base = Path(directory)
 		root = base / "accumulation"
-		project(root, "default : ./build/a\n./build/{name} : ./input\n\tcp @< @>\n")
+		project(root, "task default : ./build/a\nrule ./build/{name} : ./input\n\tcp $inputs.0 $outputs.0\n")
 		run(binary, root)
 		run(binary, root, "./build/b")
 		(root / "build/unrelated").write_text("keep\n")
@@ -417,17 +418,17 @@ def main(binary: str, wrapper: str = '') -> None:
 		root = base / "changed-rules"
 		project(root)
 		run(binary, root)
-		(root / "Makefile.kmk").write_text("default : ./build/out\n")
+		(root / "Makefile.km").write_text("task default : ./build/out\n")
 		assert "current-source-or-external-input" in reasons(clean(binary, root))
 		assert (root / "build/out").read_text() == "seed\n"
-		(root / "Makefile.kmk").write_text("default :\n")
+		(root / "Makefile.km").write_text("task default :\n")
 		assert reasons(clean(binary, root)) == {"build-context-changed"}
 		assert len(records(root)) == 1
 
 		root = base / "recipe-edit"
 		project(root)
 		run(binary, root)
-		(root / "Makefile.kmk").write_text("default : ./build/out\n./build/out : ./input\n\tcp @< @> # changed\n")
+		(root / "Makefile.km").write_text("task default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0 # changed\n")
 		assert reasons(clean(binary, root)) == {"build-context-changed"}
 
 		root = base / "keep-release"
@@ -443,16 +444,16 @@ def main(binary: str, wrapper: str = '') -> None:
 		assert reasons(clean(binary, root)) == {"explicitly-protected"}
 
 		root = base / "partial-group"
-		project(root, "default : ./a\n./a ./b : ./input\n\tcp ./input ./a\n\texit 1\n")
+		project(root, "task default : ./a\nrule ./a ./b : ./input\n\tcp ./input ./a\n\texit 1\n")
 		run(binary, root, status=1)
 		assert (root / "a").exists()
 		assert reasons(clean(binary, root)) == {"uncertain-production"}
 		assert len(records(root)) == 2
 
 		root = base / "group-removal"
-		project(root, "default : ./a\n./a ./b : ./input\n\tcp ./input ./a\n\tcp ./input ./b\n")
+		project(root, "task default : ./a\nrule ./a ./b : ./input\n\tcp ./input ./a\n\tcp ./input ./b\n")
 		run(binary, root)
-		(root / "Makefile.kmk").write_text("default : ./a\n./a : ./input\n\tcp ./input ./a\n")
+		(root / "Makefile.km").write_text("task default : ./a\nrule ./a : ./input\n\tcp ./input ./a\n")
 		assert reasons(clean(binary, root)) == {"build-context-changed"}
 		assert (root / "a").exists() and (root / "b").exists()
 
@@ -514,7 +515,7 @@ def main(binary: str, wrapper: str = '') -> None:
 		assert clean(binary, root)["missing"] == 1 and not records(root)
 
 		root = base / "authored-clean"
-		project(root, "default : ./build/out\n./build/out : ./input\n\tcp @< @>\nclean :\n\tprintf authored > ./marker\n")
+		project(root, "task default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0\ntask clean :\n\tprintf authored > ./marker\n")
 		run(binary, root)
 		run(binary, root, "clean")
 		assert (root / "marker").read_text() == "authored"
@@ -527,21 +528,21 @@ def main(binary: str, wrapper: str = '') -> None:
 		assert not (root / "build/out").exists()
 
 		root = base / "graph-clean-target"
-		project(root, "default : ./build/out\n./build/out : ./input\n\tcp @< @>\ncleanup : clean\n")
+		project(root, "task default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0\ntask cleanup : clean\n")
 		run(binary, root)
 		run(binary, root, "cleanup")
 		assert not (root / "build/out").exists(), "automatic target was not available in the graph"
 
 		root = base / "explicit-source"
 		project(root)
-		run(binary, root, "-f", "Makefile.kmk")
+		run(binary, root, "-f", "Makefile.km")
 		assert len(records(root)) == 1, "unified session omitted production"
 		report = clean(binary, root)
 		assert report["removed"] == 1, report
 
 		root = base / "external-output"
 		external = base / "external-artifact"
-		project(root, f"default : {external}\n{external} : ./input\n\tcp @< @>\n")
+		project(root, f"task default : {external}\nrule {external} : ./input\n\tcp $inputs.0 $outputs.0\n")
 		run(binary, root)
 		assert len(records(root)) == 1, "external production was forgotten"
 		assert reasons(clean(binary, root)) == {"outside-cleanup-scope"}
@@ -552,35 +553,35 @@ def main(binary: str, wrapper: str = '') -> None:
 		root = base / "restricted-clean"
 		project(root)
 		run(binary, root)
-		denied = subprocess.run([binary, "do", "run", "-C", str(root), "-f", "Makefile.kmk", "--entry", "clean", f"--allow-read={root}"], capture_output=True, text=True, timeout=20)
+		denied = subprocess.run([binary, "do", "run", "-C", str(root), "-f", "Makefile.km", "--entry", "clean", f"--allow-read={root}"], capture_output=True, text=True, timeout=20)
 		assert denied.returncode == 1 and "CAP_DENIED" in denied.stderr, (denied.stdout, denied.stderr)
 		assert (root / "build/out").exists()
 
 		root = base / "yield-and-write"
-		project(root, 'default : ./empty\n./empty : ./input ; [shell: kash]\n\t(write! "./side" "side")\n\t(yield! "")\n')
+		project(root, 'task default : ./empty\nrule ./empty : ./input\n\t(write! "./side" "side")\n\treturn ""\n')
 		run(binary, root)
 		assert (root / "empty").stat().st_size == 0 and (root / "side").read_text() == "side"
 		assert len(records(root)) == 2
 		assert clean(binary, root)["removed"] == 2
 
 		root = base / "unproduced-input"
-		project(root, "default : ./input\n")
+		project(root, "task default : ./input\n")
 		run(binary, root)
 		assert not records(root)
 		assert clean(binary, root)["removed"] == 0 and (root / "input").exists()
 
 		root = base / "include-edit"
-		project(root, "(include ./rules.kmk)\n")
-		(root / "rules.kmk").write_text("default : ./build/out\n./build/out : ./input\n\tcp @< @>\n")
+		project(root, "include ./rules.km\n")
+		(root / "rules.km").write_text("task default : ./build/out\nrule ./build/out : ./input\n\tcp $inputs.0 $outputs.0\n")
 		run(binary, root)
-		with (root / "rules.kmk").open("a") as source:
+		with (root / "rules.km").open("a") as source:
 			source.write("# authored formatting changed\n")
 		assert reasons(clean(binary, root)) == {"build-context-changed"}
 
 		root = base / "invalid-current-source"
 		project(root)
 		run(binary, root)
-		(root / "Makefile.kmk").write_text("default : (\n")
+		(root / "Makefile.km").write_text("task default : (\n")
 		report = clean(binary, root, status=1)
 		assert "build-context-invalid" in reasons(report) and report["preserved"] == 1
 		assert (root / "build/out").exists()

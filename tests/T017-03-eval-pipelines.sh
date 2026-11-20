@@ -6,7 +6,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-03 embedded Kash pipeline parity"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 cli_build
 work="$TMPDIR/pipelines"
 mkdir -p "$work"
@@ -16,7 +16,7 @@ parity() {
 	set +e
 	"$CLI_BIN" do run --lang expr --allow-run --capture-limit=32 -c "$expression" >"$work/native.out" 2>"$work/native.err"
 	local native_status=$?
-	node "$CLI_ROOT/dist/kame.js" do run --lang expr --allow-run --capture-limit=32 -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
+	node "$wasm_cli" do run --lang expr --allow-run --capture-limit=32 -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
 	local wasm_status=$?
 	set -e
 	if [ "$native_status" = "$expected" ] && [ "$wasm_status" = "$expected" ] && cmp -s "$work/native.out" "$work/wasm.out"; then test-ok "$expression"; else test-fail "pipeline backend mismatch: native=$native_status wasm=$wasm_status: $expression"; fi
@@ -32,7 +32,7 @@ parity '$(printf "abc\n"|tr a-z A-Z|cat)' 0
 grep -q '"ABC' "$work/native.out"
 parity '$(printf "a|b" | cat)' 0
 parity '$(printf "%s" $(printf nested | tr a-z A-Z) | cat)' 0
-parity '(map ([x] $(printf "%s" $x | tr a-z A-Z)) ["a" "b"])' 0
+parity '(map (x => $(printf "%s" $x | tr a-z A-Z)) ["a", "b"])' 0
 parity '(str $(printf a | cat) $(printf b | cat))' 0
 
 test-step "all stages contribute to failure"
@@ -62,11 +62,11 @@ done
 
 test-step "invalid arguments and denied later stages launch nothing"
 marker="$work/should-not-exist"
-expression="\$(sh -c \"touch '$marker'\" | printf (nop [invalid: 1]))"
+expression="\$(sh -c \"touch '$marker'\" | printf (nop {invalid: 1}))"
 parity "$expression" 1 EXPR_INVALID
 if [ ! -e "$marker" ]; then test-ok "all argv validated before launch"; else test-fail "invalid later stage launched earlier work"; fi
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_cli"); fi
 	set +e
 	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf -c "\$(/usr/bin/printf x | /bin/sh -c \"touch '$marker'\")" >"$work/$backend.out" 2>"$work/$backend.err"
 	status=$?
@@ -75,10 +75,10 @@ for backend in native wasm; do
 done
 
 test-step "pipeline syntax and formatting parity"
-printf '%s\n' '$(printf "a|b"|tr ("a" | uppercase) X|cat)' >"$work/expression.km"
+printf '%s\n' '$(printf "a|b"|tr ("a" |> uppercase) X|cat)' >"$work/expression.km"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" --lang expr "$work/expression.km" >"$work/native.out"
-	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm.out"
+	node "$wasm_cli" do "$operation" --lang expr "$work/expression.km" >"$work/wasm.out"
 	if cmp -s "$work/native.out" "$work/wasm.out"; then test-ok "$operation pipeline parity"; else test-fail "$operation pipeline parity"; fi
 done
 parity '$(printf x || cat)' 0
@@ -89,15 +89,15 @@ done
 test-step "timeout and capture overflow terminate and reap every stage"
 pid_token='\$\$'
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_cli"); fi
 	for scenario in timeout overflow; do
 		first="$work/$backend-$scenario-first.pid"
 		last="$work/$backend-$scenario-last.pid"
 		# Overflow must reach capture processing before the invocation deadline.
 		if [ "$scenario" = timeout ]; then producer='sleep 30'; code=RECIPE_TIMEOUT; budget=200; else producer=yes; code=CAPTURE_LIMIT; budget=5000; fi
-		printf '%s\n' "result = \$(sh -c \"printf '%s' $pid_token > '$first'; exec $producer\" | sh -c \"printf '%s' $pid_token > '$last'; exec cat\")" >"$work/cleanup.kmk"
+		printf '%s\n' "def result = \$(sh -c \"printf '%s' $pid_token > '$first'; exec $producer\" | sh -c \"printf '%s' $pid_token > '$last'; exec cat\")" >"$work/cleanup.km"
 		set +e
-		"${command[@]}" --timeout "$budget" --capture-limit 32 -f "$work/cleanup.kmk" result >"$work/$backend.out" 2>"$work/$backend.err"
+		"${command[@]}" do run --allow-run --timeout "$budget" --capture-limit 32 "$work/cleanup.km" result >"$work/$backend.out" 2>"$work/$backend.err"
 		status=$?
 		set -e
 		if [ "$status" = 1 ] && grep -q "$code" "$work/$backend.err"; then test-ok "$backend $scenario reports $code"; else test-fail "$backend $scenario cleanup failed: $(cat "$work/$backend.err")"; fi

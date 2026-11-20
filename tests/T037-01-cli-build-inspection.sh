@@ -6,15 +6,20 @@ test-start "T037-01 recursive build inspection"
 test-step "build both hosts"
 cli_require_tools
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 native_bin="$CLI_BIN"
 wasm_bin="$TEST_PATH/kame-wasm"
-printf '#!/usr/bin/env bash\nexec node %q "$@"\n' "$CLI_ROOT/dist/kame.js" >"$wasm_bin"
+printf '#!/usr/bin/env bash\nexec node %q "$@"\n' "$wasm_wrapper" >"$wasm_bin"
 chmod +x "$wasm_bin"
 
 # Use the same controlled environment and safety deadline for both hosts.
 inspection_run() {
-  cli_run -- "$@"
+  local environment=()
+  if [ "$backend" = wasm ] && [ -n "${KAME_WASM:-}" ]; then
+    environment+=(--env "KAME_WASM=$KAME_WASM" --env "NODE_NO_WARNINGS=1")
+  fi
+  cli_run "${environment[@]}" -- "$@"
   cat "$CLI_OUT"
   cat "$CLI_ERR" >&2
   return "$CLI_STATUS"
@@ -25,35 +30,35 @@ mkdir -p "$project/src" "$project/rules"
 printf 'one' >"$project/src/one.c"
 printf 'two' >"$project/src/two.c"
 printf 'version' >"$project/seed"
-cat >"$project/Makefile.kmk" <<'KMK'
-(include ./rules/build.kmk)
-default : build
-build : ./bin/one ./bin/two cached daemon
-task cached :
+cat >"$project/Makefile.km" <<'KM'
+include ./rules/build.km
+task default : build
+task build : ./bin/one ./bin/two cache-entry daemon
+task cached cache-entry :
 	touch forbidden-cache
 service daemon :
 	touch forbidden-service
-unrelated :
+task unrelated :
 	touch forbidden-unrelated
-KMK
-cat >"$project/rules/build.kmk" <<'KMK'
+KM
+cat >"$project/rules/build.km" <<'KM'
 SOURCES = (wildcard ./src/*.c)
-./bin/one ./bin/one.map : @{SOURCES} ./version | prepare
+rule ./bin/one ./bin/one.map : ${SOURCES} ./version | prepare
 	touch forbidden-recipe
-./bin/two : ./version
+rule ./bin/two : ./version
 	touch forbidden-recipe
-./version : ./seed
+rule ./version : ./seed
 	touch forbidden-recipe
-prepare :
+task prepare :
 	touch forbidden-recipe
-KMK
+KM
 for backend in native wasm; do
   if [ "$backend" = native ]; then CLI_BIN="$native_bin"; else CLI_BIN="$wasm_bin"; fi
   runner=(inspection_run)
   test-step "$backend keeps producer details concise unless verbose"
-  "${runner[@]}" do plan --output text -c './out : ./in' ./out >"$project/concise" 2>"$project/error"
-  "${runner[@]}" do plan --output text --verbose -c './out : ./in' ./out >"$project/verbose" 2>"$project/error"
-  if ! grep -Eq 'freshness: unknown|captures|tools' "$project/concise" && grep -q 'source: <command>' "$project/concise" && grep -q 'freshness: unknown' "$project/verbose" && grep -q captures "$project/verbose" && grep -q tools "$project/verbose"; then test-ok "$backend producer verbosity"; else test-fail "$backend producer verbosity"; fi
+  "${runner[@]}" do plan --output text -c 'rule ./out : ./in' ./out >"$project/concise" 2>"$project/error"
+  "${runner[@]}" do plan --output text --verbose -c 'rule ./out : ./in' ./out >"$project/verbose" 2>"$project/error"
+  if ! grep -Eq 'freshness: unknown|captures|tools' "$project/concise" && grep -q 'source: <command>' "$project/concise" && grep -q 'freshness: unknown' "$project/verbose" && grep -q captures "$project/verbose" && ! grep -q tools "$project/verbose"; then test-ok "$backend producer verbosity"; else test-fail "$backend producer verbosity"; fi
   test-step "$backend inventories concrete inputs, products and persistent intermediates"
   for kind in plan inputs outputs; do
     "${runner[@]}" do "$kind" --json -C "$project" >"$project/$backend.$kind.json" 2>"$project/error"
@@ -68,7 +73,7 @@ for backend in native wasm; do
     any(.dependencies[]; .orderOnly) and
     any(.resources[]; .display == "./src/one.c") and any(.resources[]; .display == "./src/two.c") and
     any(.resources[]; .display == "./seed") and
-    any(.resources[]; .display == "./rules/build.kmk" and (.roles | index("configuration")))
+    any(.resources[]; .display == "./rules/build.km" and (.roles | index("configuration")))
   ' "$project/$backend.plan.json" >/dev/null; then test-ok "$backend classification, sibling sharing and computed traversal"; else test-fail "$backend incomplete graph"; fi
   if [ ! -e "$project/bin" ] && [ ! -e "$project/version" ] && [ ! -e "$project/.kame" ] && ! compgen -G "$project/forbidden-*" >/dev/null; then test-ok "$backend inspection is effect-free"; else test-fail "$backend inspection executed work"; fi
   "${runner[@]}" do plan --output text -C "$project" >"$project/$backend.text" 2>"$project/error"
@@ -91,47 +96,71 @@ for backend in native wasm; do
     "${runner[@]}" do inputs --json --depth "$depth" -C "$project" >"$project/depth" 2>"$project/error"
     if jq -e --argjson depth "$depth" '.depth == $depth and .truncated and (if $depth == 0 then (.items | length == 0) and (.dependencies | length == 0) else true end)' "$project/depth" >/dev/null; then test-ok "$backend depth $depth"; else test-fail "$backend depth $depth"; fi
   done
-  "${runner[@]}" do plan --json -c $'default : first, second\nfirst :\nsecond :\n' >"$project/sequence" 2>"$project/error"
+  "${runner[@]}" do plan --json -c $'task default : first, second\ntask first :\ntask second :\n' >"$project/sequence" 2>"$project/error"
   if jq -e '[.dependencies[].group] == [1,2] and [.stages[].producers] == [[2],[3],[1]]' "$project/sequence" >/dev/null; then test-ok "$backend sequence stages"; else test-fail "$backend sequence order"; fi
+  test-step "$backend reports selected tools once at their earliest stage"
+  tool_plan=$'task default : middle\n\t(capture! {stdout: true} "git" "--version")\ntask middle : early\n\tprintf middle\n\tcat /dev/null\ntask early :\n\tprintf early\ntask unrelated :\n\tsleep 5\n'
+  "${runner[@]}" do plan --json -C "$project" -c "$tool_plan" >"$project/$backend.tool-plan.json"
+  if jq -e '[.tools[] | [.name, .stage]] == [["printf", 1], ["cat", 2], ["git", 3]] and all(.tools[]; .path | startswith("/")) and all(.producers[]; has("tools") | not)' "$project/$backend.tool-plan.json" >/dev/null; then
+    test-ok "$backend tools follow stage order and selected producers"
+  else
+    test-fail "$backend incorrect tool stages: $(jq -c .tools "$project/$backend.tool-plan.json")"
+  fi
+  "${runner[@]}" do plan --output text --verbose -C "$project" -c "$tool_plan" >"$project/$backend.tool-plan.text"
+  if grep -Fxq '  tools · first required stage' "$project/$backend.tool-plan.text" && grep -q '^    stage 1 · printf → /' "$project/$backend.tool-plan.text" && ! grep -Fq ' · tools:' "$project/$backend.tool-plan.text"; then
+    test-ok "$backend renders tool requirements outside producer rows"
+  else
+    test-fail "$backend tool section layout"
+  fi
   test-step "$backend diagnoses cycles and unknown descendants without partial documents"
-  for source in $'default : child\nchild : default\n' $'default : unknown\n'; do
+  for kind in plan inputs; do
+    status=0
+    "${runner[@]}" do "$kind" --json -C "$project" -c $'rule ./collision/{left:*}x.o = "left"\nrule ./collision/x{right:*}.o = "right"\n' ./collision/xx.o >"$project/ambiguous" 2>"$project/error" || status=$?
+    if [ "$status" = 1 ] && jq -es 'length == 1 and .[0].type == "diagnostic" and .[0].diagnostic.code == "TGT_AMBIG"' "$project/ambiguous" >/dev/null && [ ! -e "$project/collision" ]; then
+      test-ok "$backend $kind diagnoses overlapping producers without effects"
+    else
+      test-fail "$backend $kind hid an ambiguous producer"
+      cat "$project/ambiguous" "$project/error"
+    fi
+  done
+  for source in $'task default : child\ntask child : default\n' $'task default : unknown\n'; do
     status=0
     "${runner[@]}" do plan --json -c "$source" >"$project/failure" 2>"$project/error" || status=$?
     if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and (.diagnostic.code == "DEP_CYCLE" or .diagnostic.code == "TGT_NO_RULE") and (.diagnostic.targetStack | length >= 2)' "$project/failure" >/dev/null; then test-ok "$backend descendant failure"; else test-fail "$backend lost descendant diagnostic"; fi
   done
   test-step "$backend reports unavailable generated discovery without executing its producer"
   printf './manifest' >"$project/selection"
-  cat >"$project/deferred.kmk" <<'KMK'
+  cat >"$project/deferred.km" <<'KM'
 FILES = (text (read (text (read ./selection))))
-default : @{FILES}
-./manifest : ./seed
+task default : ${FILES}
+rule ./manifest : ./seed
 	touch forbidden-manifest
-KMK
-  "${runner[@]}" do inputs --json -C "$project" -f deferred.kmk >"$project/$backend.deferred" 2>"$project/error"
+KM
+  "${runner[@]}" do inputs --json -C "$project" -f deferred.km >"$project/$backend.deferred" 2>"$project/error"
   if jq -e 'any(.deferred[]; .reason == "generated-input-unavailable") and any(.producers[]; .target | endswith("/manifest")) and any(.resources[]; .display == "./seed")' "$project/$backend.deferred" >/dev/null && [ ! -e "$project/manifest" ] && [ ! -e "$project/forbidden-manifest" ]; then test-ok "$backend generated read boundary"; else test-fail "$backend generated read boundary missing"; fi
-  "${runner[@]}" do inputs --output text -C "$project" -f deferred.kmk >"$project/deferred-text" 2>"$project/error"
+  "${runner[@]}" do inputs --output text -C "$project" -f deferred.km >"$project/deferred-text" 2>"$project/error"
   if grep -q '^    ./manifest · generated-input-unavailable' "$project/deferred-text"; then test-ok "$backend generated boundary names the affected file"; else test-fail "$backend missing generated boundary path"; fi
   if ! grep -q 'no inputs' "$project/deferred-text"; then test-ok "$backend partial is not empty"; else test-fail "$backend misleading empty inventory"; fi
   test-step "$backend read denials and invalid phases remain errors"
   for expression in '(text (read ../blocked))' '(out! "forbidden-effect")'; do
     status=0
-    "${runner[@]}" do plan --json -C "$project" -c "default : @(nop $expression)" >"$project/failure" 2>"$project/error" || status=$?
+    "${runner[@]}" do plan --json -C "$project" -c "task default : \${nop $expression}" >"$project/failure" 2>"$project/error" || status=$?
     if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and (.diagnostic.code == "CAP_DENIED" or .diagnostic.code == "PHASE_INVALID")' "$project/failure" >/dev/null; then test-ok "$backend read-only authority"; else test-fail "$backend authority failure hidden"; fi
   done
-  cat >"$project/failed-read.kmk" <<'KMK'
+  cat >"$project/failed-read.km" <<'KM'
 FILES = (list (exists? ./manifest) (text (read ./missing-external)))
-default : @{FILES}
-./manifest : ./seed
+task default : ${FILES}
+rule ./manifest : ./seed
 	touch forbidden-manifest
-KMK
+KM
   status=0
-  "${runner[@]}" do inputs --json -C "$project" -f failed-read.kmk >"$project/failure" 2>"$project/error" || status=$?
+  "${runner[@]}" do inputs --json -C "$project" -f failed-read.km >"$project/failure" 2>"$project/error" || status=$?
   if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and .diagnostic.code == "FS_ERR"' "$project/failure" >/dev/null; then test-ok "$backend missing generated input does not hide unrelated read failures"; else test-fail "$backend unrelated read failure hidden"; fi
   test-step "$backend artifact status verifies signatures without rebuilding"
   status_project="$TMPDIR/status-$backend"
   mkdir -p "$status_project"
   printf one >"$status_project/seed"
-  printf './result : ./seed ; [shell: kame]\n\t(read ./seed)\n' >"$status_project/Makefile.kmk"
+  printf 'rule ./result : ./seed = read ./seed\n' >"$status_project/Makefile.km"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "missing")' "$project/status" >/dev/null; then test-ok "$backend absent artifact is missing"; else test-fail "$backend missing status"; fi
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
@@ -140,7 +169,7 @@ KMK
   metadata_project="$TMPDIR/status-metadata-$backend"
   mkdir -p "$metadata_project"
   printf one >"$metadata_project/seed"
-  printf './result : ./seed ; [shell: kame]\n\t(str (get "size" (stat ./seed)))\n' >"$metadata_project/Makefile.kmk"
+  printf 'rule ./result : ./seed = str (get "size" (stat ./seed))\n' >"$metadata_project/Makefile.km"
   "${runner[@]}" -C "$metadata_project" ./result >"$project/metadata-value" 2>"$project/error"
   "${runner[@]}" do plan --json -C "$metadata_project" ./result >"$project/metadata-status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "built")' "$project/metadata-status" >/dev/null; then test-ok "$backend metadata identity survives inspection"; else test-fail "$backend metadata status: $(cat "$project/metadata-status")"; fi
@@ -155,38 +184,38 @@ KMK
   if jq -e 'any(.resources[]; .display == "./result" and .status == "outdated")' "$project/status" >/dev/null && [ "$(cat "$status_project/result")" = bad ]; then test-ok "$backend tampered artifact is outdated without repair"; else test-fail "$backend output signature status"; fi
   "${runner[@]}" do plan --json --allow-read="$project" -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "unknown")' "$project/status" >/dev/null; then test-ok "$backend denied status observation stays unknown"; else test-fail "$backend denied artifact observation"; fi
-  printf './result : ./seed\n\t@{x/sh} -c '\''cat ./seed > ./result'\''\n' >"$status_project/Makefile.kmk"
+  printf 'rule ./result : ./seed\n\tx/sh -c "cat ./seed > ./result"\n' >"$status_project/Makefile.km"
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "built")' "$project/status" >/dev/null; then test-ok "$backend verifies tool metadata without treating it as file content"; else test-fail "$backend tool artifact status"; fi
-  printf '# source changed\n' >>"$status_project/Makefile.kmk"
+  printf '# source changed\n' >>"$status_project/Makefile.km"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "unknown")' "$project/status" >/dev/null; then test-ok "$backend changed source guard needs reevaluation, not a freshness guess"; else test-fail "$backend source guard status"; fi
   test-step "$backend downstream source impact, patterns and absent glob members"
   impact="$TMPDIR/impact-$backend"
   mkdir -p "$impact/src"
   printf seed >"$impact/src/one.txt"
-  cat >"$impact/Makefile.kmk" <<'KMK'
+  cat >"$impact/Makefile.km" <<'KM'
 SOURCES = (wildcard ./src/*.txt)
 PAGES = (wildcard ./build/**/*.json)
-default : site
-site : ./site/one.html ./catalogue ./assets
-./build/{name}.json ./build/{name}.map : ./src/{name}.txt
+task default : site
+task site : ./site/one.html ./catalogue ./assets
+rule ./build/{name}.json ./build/{name}.map : ./src/{name}.txt
 	touch forbidden
-./site/{name}.html : ./build/{name}.json ./catalogue
+rule ./site/{name}.html : ./build/{name}.json ./catalogue
 	touch forbidden
-./catalogue : @{PAGES}
+rule ./catalogue : ${PAGES}
 	touch forbidden
-./assets : ./catalogue
+rule ./assets : ./catalogue
 	touch forbidden
-./other : ./unrelated
+rule ./other : ./unrelated
 	touch forbidden
-./ordered : | ./src/one.txt
+rule ./ordered : | ./src/one.txt
 	touch forbidden
-./all-sources : @{SOURCES}
+rule ./all-sources : ${SOURCES}
 	touch forbidden
-unrelated :
-KMK
+task unrelated :
+KM
   # Explicit paths select files; exact declared logical names still win.
   "${runner[@]}" do outputs --json -C "$impact" unrelated >"$project/logical" 2>"$project/error"
   if jq -e '.targets == ["unrelated"] and (.items | length == 0)' "$project/logical" >/dev/null; then test-ok "$backend exact logical name wins"; else test-fail "$backend logical/path collision"; fi
@@ -218,43 +247,41 @@ KMK
   if [ ! -e "$impact/build" ] && [ ! -e "$impact/.kame" ] && [ ! -e "$impact/forbidden" ]; then test-ok "$backend impact queries have no effects"; else test-fail "$backend impact executed work"; fi
   test-step "$backend consumer discovery limits and relevant cycles"
   status=0
-  "${runner[@]}" do outputs --json -c $'./out : ./seed\n' unknown-target >"$project/unknown-impact-root" 2>"$project/error" || status=$?
+  "${runner[@]}" do outputs --json -c $'rule ./out : ./seed\n' unknown-target >"$project/unknown-impact-root" 2>"$project/error" || status=$?
   if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and .diagnostic.code == "TGT_NO_RULE"' "$project/unknown-impact-root" >/dev/null; then test-ok "$backend unknown logical change root remains an error"; else test-fail "$backend unknown logical root accepted"; fi
-  "${runner[@]}" do outputs --json -c $'./out/{name} : ./src/{_0}\n' ./src/one >"$project/positional-impact" 2>"$project/error"
+  "${runner[@]}" do outputs --json -c $'rule ./out/{name} : ./src/{_0}\n' ./src/one >"$project/positional-impact" 2>"$project/error"
   if jq -e 'any(.producers[]; .target == "./out/one") and any(.resources[]; .display == "./out/one" and (.roles | index("artifact")))' "$project/positional-impact" >/dev/null; then test-ok "$backend positional input capture inversion"; else test-fail "$backend positional consumer lost"; fi
-  "${runner[@]}" do plan --affected --json -c $'build-{name} : seed-{name}\nseed-one :\n./out : build-one\n' seed-one >"$project/logical-pattern-impact" 2>"$project/error"
+  "${runner[@]}" do plan --affected --json -c $'task build-{name} : seed-{name}\ntask seed-one :\nrule ./out : build-one\n' seed-one >"$project/logical-pattern-impact" 2>"$project/error"
   if jq -e 'any(.producers[]; .target == "build-one") and any(.producers[]; .target == "./out")' "$project/logical-pattern-impact" >/dev/null; then test-ok "$backend logical pattern consumers"; else test-fail "$backend logical pattern consumer lost"; fi
   for depth in -1 0; do
-    "${runner[@]}" do outputs --json --depth "$depth" -c $'./out : ./seed\nunrelated : unknown\n./seed : @(text (read ./missing-review-input))\n' ./seed >"$project/unrelated-failure" 2>"$project/error"
+    "${runner[@]}" do outputs --json --depth "$depth" -c $'rule ./out : ./seed\ntask unrelated : unknown\nrule ./seed : ${text (read ./missing-review-input)}\n' ./seed >"$project/unrelated-failure" 2>"$project/error"
     if jq -e '.type == "outputs" and .direction == "downstream"' "$project/unrelated-failure" >/dev/null; then test-ok "$backend depth $depth ignores unrelated and excluded seed failures"; else test-fail "$backend unrelated resolution aborted impact query"; fi
   done
   status=0
-  "${runner[@]}" do outputs --json -c $'./out : ./seed unknown\n' ./seed >"$project/relevant-failure" 2>"$project/error" || status=$?
+  "${runner[@]}" do outputs --json -c $'rule ./out : ./seed unknown\n' ./seed >"$project/relevant-failure" 2>"$project/error" || status=$?
   if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and .diagnostic.code == "TGT_NO_RULE"' "$project/relevant-failure" >/dev/null; then test-ok "$backend relevant consumer failure retained"; else test-fail "$backend affected diagnostic suppressed"; fi
-  "${runner[@]}" do outputs --output text -c $'./out : middle\nmiddle : ./seed\n' ./seed >"$project/$backend.logical-impact-text" 2>"$project/error"
+  "${runner[@]}" do outputs --output text -c $'rule ./out : middle\ntask middle : ./seed\n' ./seed >"$project/$backend.logical-impact-text" 2>"$project/error"
   if grep -q './seed → middle' "$project/$backend.logical-impact-text" && grep -q 'middle → ./out' "$project/$backend.logical-impact-text"; then test-ok "$backend logical consumer impact chain"; else test-fail "$backend logical impact relationship omitted"; fi
-  "${runner[@]}" do outputs --json -c $'./out/{name} : ./seed\ntask deploy {mode} : ./seed\n' ./seed >"$project/boundary" 2>"$project/error"
+  "${runner[@]}" do outputs --json -c $'rule ./out/{name} : ./seed\ntask deploy {mode} : ./seed\n' ./seed >"$project/boundary" 2>"$project/error"
   if jq -e '(.items | length == 0) and any(.deferred[]; .reason == "pattern-captures-unbound") and any(.deferred[]; .reason == "target-arguments-required")' "$project/boundary" >/dev/null; then test-ok "$backend unbound discovery is partial, not empty"; else test-fail "$backend missing unbound discovery boundaries"; fi
-  "${runner[@]}" do outputs --output text --depth 0 -c $'./out/{name} : ./seed\n' ./seed >"$project/boundary-text" 2>"$project/error"
+  "${runner[@]}" do outputs --output text --depth 0 -c $'rule ./out/{name} : ./seed\n' ./seed >"$project/boundary-text" 2>"$project/error"
   if grep -q 'consumer discovery · pattern-captures-unbound' "$project/boundary-text" && ! grep -q 'no declared artifacts' "$project/boundary-text"; then test-ok "$backend global boundaries have safe human labels"; else test-fail "$backend global boundary presentation"; fi
-  "${runner[@]}" do outputs --json -c $'./out : ./seed\n./a : ./b\n./b : ./a\n' ./seed >"$project/unrelated-cycle" 2>"$project/error"
+  "${runner[@]}" do outputs --json -c $'rule ./out : ./seed\nrule ./a : ./b\nrule ./b : ./a\n' ./seed >"$project/unrelated-cycle" 2>"$project/error"
   if jq -e '(.producers | length == 1) and .producers[0].target == "./out"' "$project/unrelated-cycle" >/dev/null; then test-ok "$backend unrelated cycles are outside affected work"; else test-fail "$backend unrelated cycle leaked"; fi
   status=0
-  "${runner[@]}" do plan --affected --json -c $'./a : ./b\n./b : ./a\n' ./a >"$project/affected-cycle" 2>"$project/error" || status=$?
+  "${runner[@]}" do plan --affected --json -c $'rule ./a : ./b\nrule ./b : ./a\n' ./a >"$project/affected-cycle" 2>"$project/error" || status=$?
   if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and .diagnostic.code == "DEP_CYCLE"' "$project/affected-cycle" >/dev/null; then test-ok "$backend affected cycle diagnosed"; else test-fail "$backend affected cycle was hidden"; fi
-  "${runner[@]}" do outputs --json -C "$project" -f deferred.kmk ./seed >"$project/downstream-deferred" 2>"$project/error"
+  "${runner[@]}" do outputs --json -C "$project" -f deferred.km ./seed >"$project/downstream-deferred" 2>"$project/error"
   if jq -e 'any(.deferred[]; .reason == "generated-input-unavailable") and any(.resources[]; .display == "./manifest" and (.roles | index("artifact")))' "$project/downstream-deferred" >/dev/null && [ ! -e "$project/manifest" ]; then test-ok "$backend downstream generated read stays deferred"; else test-fail "$backend generated read impact boundary"; fi
   test-step "$backend omitted generated prerequisites cannot prove downstream freshness"
   freshness="$TMPDIR/impact-freshness-$backend"
   mkdir -p "$freshness"
   printf trigger >"$freshness/trigger"
   printf one >"$freshness/source"
-  cat >"$freshness/Makefile.kmk" <<'KMK'
-./generated : ./source ; [shell: kame]
-	(read ./source)
-./out : ./trigger ./generated ; [shell: kame]
-	(read ./generated)
-KMK
+  cat >"$freshness/Makefile.km" <<'KM'
+rule ./generated : ./source = read ./source
+rule ./out : ./trigger ./generated = read ./generated
+KM
   "${runner[@]}" -C "$freshness" ./out >"$project/value" 2>"$project/error"
   printf two >"$freshness/source"
   "${runner[@]}" do outputs --json -C "$freshness" ./trigger >"$project/downstream-freshness" 2>"$project/error"

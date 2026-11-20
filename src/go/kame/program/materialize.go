@@ -148,7 +148,12 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 				c.Fail(failure(c.Allocator(), "HOST_FAIL", "invalid wildcard observation"))
 				return core.ProducerFailed
 			}
-			c.Publish(completion.Value)
+			value, d := host.FilterDiscovery(c.Allocator(), state.Name, completion.Value)
+			if d.Code != "" {
+				c.Fail(d)
+				return core.ProducerFailed
+			}
+			c.Publish(value)
 			return core.ProducerCompleted
 		}
 		result := state.Program.wildcard(state.Name)
@@ -190,7 +195,13 @@ func (p *Program) Materialize(target string) Result {
 }
 
 func (p *Program) Start(target string) HandleStart {
-	p.clearChangedProductionInputs()
+	return p.startEntry(target, false)
+}
+
+func (p *Program) startEntry(target string, sharedEpoch bool) HandleStart {
+	if !sharedEpoch {
+		p.clearChangedProductionInputs()
+	}
 	resolved := p.producerFor(target)
 	node, plan, d := resolved.Node, resolved.Plan, resolved.Diagnostic
 	if d.Code != "" {
@@ -206,7 +217,7 @@ func (p *Program) Start(target string) HandleStart {
 	}
 	plan.Free(p.Alloc)
 	index := p.instanceIndex(node)
-	if index >= 0 && node.Interest == 0 {
+	if index >= 0 && node.Interest == 0 && !sharedEpoch {
 		// A new root validates resources through their producers on both hosts.
 		// Retained watch roots are invalidated by their resource notifications.
 		nodes := p.Engine.TrackedNodes()
@@ -222,11 +233,13 @@ func (p *Program) Start(target string) HandleStart {
 		if !p.claimEnvironment(index, p.Options.Environment) {
 			return HandleStart{Diagnostic: p.environmentFailure(index, "active target has a different recipe environment")}
 		}
-		p.epoch++
+		if !sharedEpoch {
+			p.epoch++
+		}
 		p.Instances[index].runEpoch = p.epoch
 		p.invalidateStaleBareTasks(index, p.epoch)
 	}
-	if index >= 0 && taskTerminal(node.State) {
+	if index >= 0 && taskTerminal(node.State) && (!sharedEpoch || p.Instances[index].satisfiedEpoch != p.epoch) {
 		entry := &p.Instances[index]
 		if entry.Rule.Kind == rule.FileRule && node.State == core.NodeComplete {
 			p.Engine.Invalidate(node)
@@ -352,6 +365,7 @@ func (p *Program) readyForTick(wait int) []*core.Node {
 	p.serviceRecordRequests()
 	p.Eval.PollFinalizers()
 	p.tickServiceReadiness()
+	p.releaseJobSlots()
 	// Pending host requests are local work too: synchronous reads must be
 	// serviced before sleeping for events from asynchronous processes.
 	if p.Engine.HasWork() || p.Eval.Requests.HasRequests() {
@@ -366,6 +380,7 @@ func (p *Program) readyForTick(wait int) []*core.Node {
 	p.drainRequests()
 	p.serviceRecordRequests()
 	p.Engine.DrainCompletions()
+	p.releaseJobSlots()
 	jobs := p.Options.Jobs
 	if jobs <= 0 {
 		jobs = 1
@@ -445,7 +460,9 @@ func (p *Program) dispatchWork(node *core.Node) {
 			p.ObserveWork(node, target, true)
 		}
 	}
+	p.takeJobSlot(node)
 	p.Engine.Dispatch(node)
+	p.releaseJobSlots()
 	if p.ObserveWork != nil && target != "" {
 		p.ObserveWork(node, target, false)
 	}
@@ -619,6 +636,11 @@ func (p *Program) producerFor(target string) instanceResult {
 	if node == nil {
 		plan.Free(p.Alloc)
 		return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")}
+	}
+	// A module-authored constructor is already linked in its own lexical
+	// scope. Entry-file imports do not participate in its recipe.
+	if p.declarationSourceName(plan.Rule.SourceOrigin) == "" {
+		p.Eval.AttachImports(node)
 	}
 	p.Instances = append(p.Instances, instance{Rule: plan.Rule, Captures: cloneCaptures(p.Alloc, plan.Captures), Node: node, Plan: plan})
 	node.DisableReuse = plan.Rule.Always || plan.Rule.Kind == rule.TaskRule || p.Options.Force

@@ -12,6 +12,19 @@ import (
 func opMap(c *eval.Context, s any, v []core.Value) eval.Result     { return transform(c, s, v, false) }
 func opFlatMap(c *eval.Context, s any, v []core.Value) eval.Result { return transform(c, s, v, true) }
 
+// indexed transfers the list elements into zero-based [index, element] pairs.
+func opIndexed(c *eval.Context, _ any, v []core.Value) eval.Result {
+	if v[0].Kind != core.List {
+		return invalidArgument(c, v, 0, "list")
+	}
+	pairs := make([]core.Value, len(v[0].List))
+	for i, item := range v[0].List {
+		index := core.Value{Kind: core.Int, Int: int64(i)}
+		pairs[i] = core.NewList(c.Run, []core.Value{index, item})
+	}
+	return eval.Result{Value: core.Value{Kind: core.List, List: pairs}}
+}
+
 type callbackState struct {
 	Alloc          mem.Allocator
 	Index          int

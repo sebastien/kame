@@ -13,8 +13,8 @@ or create a new program on every timer tick.
 
 The host uses OS notifications to trigger fingerprint scans and debounces changes
 for 100 ms by default. `--watch=MS` sets the quiet period in milliseconds; bare
-`--watch` retains the default. Native Linux uses inotify (including Cosmopolitan when running on
-Linux); Node/WASM uses Node's built-in `fs.watch`. Healthy notification mode
+`--watch` retains the default. Native Linux uses inotify. Node/WASM uses
+Node's built-in `fs.watch`. Healthy notification mode
 reconciles every 10 seconds. If any resource cannot be subscribed, the host falls
 back to 200 ms scans while retaining successful subscriptions. Other native
 platforms currently use polling fallback. Produced outputs are excluded. Configuration

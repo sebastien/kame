@@ -32,7 +32,7 @@ func TestKashCommentFormattingPreservesAuthoredDepth(t *testing.T) {
 
 func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := "# source\ndef name = \"world\"; def number = 1;\necho revision=$name # inline\ndef banner WHO = (cat \"hi \" WHO)\ndef copy = name; def files = ./output;\n:cwd . printf \"%s\" (banner name) | cat > \"output file\"\n"
+	text := "# source\ndef name = \"world\"; def number = 1;\necho revision=$name # inline\ndef banner WHO = (cat \"hi \" WHO)\ndef copy = name; def files = ./output;\ncwd: . printf \"%s\" (banner name) | cat > \"output file\"\n"
 	s := script.ParseKash(a, "test.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 9 {
@@ -276,7 +276,7 @@ func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 
 func TestKashRejectsLegacyBoundariesButKeepsQuotedData(t *testing.T) {
 	a := t.Allocator()
-	invalid := []string{"printf @{name}", "printf \\@{name}", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  \"x\" =>\n    printf bad", "printf > @{name}", ":cwd @{name} printf bad"}
+	invalid := []string{"printf @{name}", "printf \\@{name}", "value = @(name ())", "if @(name ())\n  printf bad", "match @(name ())\n  \"x\" =>\n    printf bad", "printf > @{name}", "cwd: @{name} printf bad"}
 	for i := range invalid {
 		s := script.ParseKash(a, "legacy.kash", invalid[i])
 		if len(s.Diagnostics) == 0 {
@@ -360,7 +360,7 @@ func TestKashListSpreadPreservesReferenceAndFormat(t *testing.T) {
 	if formatted != again {
 		t.Error("list spread formatting is not idempotent")
 	}
-	invalid := []string{"$...", "$...{CMD", "$....CMD", "printf \"$...CMD\"", "printf prefix$...CMD", "printf $...{CMD}suffix", "printf $...CMD\"\"", "printf $...CMD$other", "value = $...CMD", ":cwd $...CMD printf bad", ":env $...CMD printf bad", "printf > $...CMD", "match $...CMD\n  \"x\" =>\n    printf bad"}
+	invalid := []string{"$...", "$...{CMD", "$....CMD", "printf \"$...CMD\"", "printf prefix$...CMD", "printf $...{CMD}suffix", "printf $...CMD\"\"", "printf $...CMD$other", "value = $...CMD", "cwd: $...CMD printf bad", "env: $...CMD printf bad", "printf > $...CMD", "match $...CMD\n  \"x\" =>\n    printf bad"}
 	for i := range invalid {
 		bad := script.ParseKash(a, "invalid.kash", invalid[i])
 		if len(bad.Diagnostics) == 0 {

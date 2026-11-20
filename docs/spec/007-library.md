@@ -129,9 +129,9 @@ The general operations are:
 | `eval` | `eval TEXT`: parse one expression and evaluate it in value context in the current lexical scope and phase (`055` §13) |
 
 `json` uses deterministic JSON for compatible scalars, lists and records with
-stable record key order. `str` performs textual conversion/concatenation only;
-both are distinct from the Kame value display of `005-evaluation.md`. Bytes
-require explicit decoding and are not silently converted or JSON-encoded.
+stable record key order. Convert symbols explicitly with `str` to use their
+names as JSON strings. Bytes require explicit decoding with `text`. `fmt`
+preserves symbol syntax, including the leading colon.
 
 `get` uses byte-exact string keys and returns the selected value with its type
 and callable ownership intact. An invalid record/key type is `EXPR_INVALID`.
@@ -264,7 +264,7 @@ section (`filter (_ == "x") xs`). `=` is never an operator.
 
 `gt? LEFT RIGHT` is `LEFT > RIGHT`, and likewise for the other names.
 Comparison operators do not chain: `a < b < c` is `PARSE_ERR`. `eq?` and `ne?`
-support nil, boolean, number, string, bytes, lists, and records. Equality is not
+support nil, boolean, number, string, symbol, path, bytes, lists, and records. Equality is not
 identity. The contract is recursive:
 
 - Nil and booleans compare by value; `nil` and `false` are distinct.
@@ -276,6 +276,8 @@ identity. The contract is recursive:
 - Strings compare exact bytes without Unicode normalization. Bytes compare
   length and every byte, including NUL and invalid UTF-8. Bytes and strings are
   different kinds and are never implicitly converted for comparison.
+- Symbols compare by name, including any sign. A symbol and a string with
+  the same text are unequal. Paths compare by their path text.
 - Lists compare length and corresponding items, recursively and in order.
 - Records compare the same key set and recursively equal field values;
   authored/insertion order does not affect equality. Iteration and display order
@@ -318,6 +320,7 @@ The collection operations are:
 | `filter-out` | Remove list items or record fields for which a predicate is true, with the same callback arguments |
 | `in?` | `in? ITEM LIST` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
 | `reduce` | Fold a list from left to right, passing the accumulator, the item, and its position |
+| `collect!` | Explicitly consume a generator stream into one list in yield order |
 | `indexed` | `indexed LIST`: `[[0, x0], [1, x1], …]`, pairing each item with its zero-based position |
 | `concat` | Concatenate lists or append scalar values |
 | `slice` | Half-open list or string slice |
@@ -339,6 +342,14 @@ callback result as its value, and `filter`/`filter-out` keep the selected
 fields in order. `flatmap`, `reduce`, `indexed`, and the membership operations
 accept lists only.
 
+`collect! STREAM` pulls until the generator ends. `collect! LIMIT STREAM`
+pulls at most a non-negative integer number of values. Reaching the limit
+closes the source and runs pending cleanup before returning the list. A zero
+limit claims the source and returns an empty list without entering the
+generator. Pulls use the invocation's grants. A generator failure fails
+collection, and a second consumer is invalid. Stdout remains separate from
+the list of yielded values.
+
 Use `in?` for list membership, `has-key?` for record presence, and `includes?`
 for text substrings. The three domains are explicit and do not silently coerce.
 
@@ -348,7 +359,7 @@ respectively, using the same recursive equality contract as `eq?`, including
 bytes, lists, and records. Unsupported values remain errors.
 
 ```kame
-objects = sources |> map (s => ./build/@{basename s}.o)
+objects = sources |> map (s => ./build/${basename s}.o)
 headers = files ./include/*.h |> filter-out ./include/config.h
 total = sizes |> reduce (acc n => acc + n) 0
 ```
@@ -441,21 +452,22 @@ strings replaces literal occurrences and retains ordinary eager evaluation.
 Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named
-captures bound locally; `./{name}`, `"@{name}"`, `name`, and `(uppercase name)`
+captures bound locally; `./{name}`, `"${name}"`, `name`, and `(uppercase name)`
 can all use `{name:*}`:
 
 ```kame
 stems = sources |> subst ./src/{name:*}.c name
 ```
 
- With two operands it returns a callable of arity one
+With two operands it returns a callable of arity one
 that defers the replacement until applied by `map`, a pipe, or a direct call.
 A string subject produces the replacement string or the original string on no
-match; a list subject maps in order and preserves nonmatching entries. Invalid
-pattern combinations and missing expansion-pattern capture references are
-`PAT_INVALID`; unknown
-ordinary names in a selected expression retain `REF_MISSING`. Full semantics
-are specified in `014-patterns.md`.
+match; a list subject maps in order and preserves nonmatching entries.
+A path pattern subject discovers a list of paths via the rules for `wildcard`
+before substitution. Invalid pattern combinations and missing expansion
+captures report `PAT_INVALID`. Unknown ordinary names in a selected
+expression retain `REF_MISSING`. See `014-patterns.md` and
+`041-pattern-predicates-and-substitution.md`.
 
 ## Path Operations
 
@@ -485,7 +497,7 @@ itself is `./`. Parent traversal still normalizes: `joinpath ./sdk ".." ".."`
 is `..`, not a fabricated parent prefix. Unanchored and absolute inputs retain
 their ordinary cleaned spelling. A module reaches files beside its own source
 with `joinpath module/dir "templates"` or the path atom
-`@{module/dir}/templates`.
+`${module/dir}/templates`.
 
 ## Filesystem Operations
 
@@ -545,7 +557,7 @@ is added or removed. See `023-wildcard-sources.md`.
 Relative paths resolve against the root directory (`055` §9.2). Pattern
 operands are `PathPattern` values written as path atoms; `wildcard` supports
 `*`, `?`, character classes, and recursive `**`. A computed pattern is built
-with interpolation in a path atom (`./@{dir}/*.c`), whose inserted bytes stay
+with interpolation in a path atom (`./${dir}/*.c`), whose inserted bytes stay
 literal. Strings are not patterns: a string operand is `EXPR_INVALID`. Results
 are `Path` values relative to the root, with `./` prefixes where possible, sorted
 by raw UTF-8 bytes. Each pattern operand retains its own glob dependency,

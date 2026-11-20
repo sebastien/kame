@@ -5,7 +5,11 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T038-02 wildcard kind masks"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
@@ -20,7 +24,7 @@ for backend in native wasm; do
 	ln -s loop "$work/assets/loop"
 	ln -s missing "$work/assets/nested/dangling"
 	mkfifo "$work/assets/fifo"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
 	check() {
 		local want="$1" expression="$2"; shift 2
 		if timeout 20 "${runner[@]}" do run -C "$work" --lang expr --allow-read="$work" "$@" -c "$expression" >"$work/out" 2>"$work/err" && [ "$(cat "$work/out")" = "$want" ]; then
@@ -36,44 +40,44 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects $code"; else test-fail "$backend $expression ($status)"; cat "$work/out" "$work/err"; fi
 	}
 	test-step "$backend union masks, flag order, duplicates and computed flags"
-	check '["./assets/file"]' '(wildcard :+files ./assets/*)'
-	check '["./assets/file"]' '(files ./assets/*)'
-	check '["./assets/nested"]' '(wildcard ./assets/* :+dir)'
-	check '["./assets/nested"]' '(dirs ./assets/*)'
-	check '["./assets/dangling" "./assets/dirlink" "./assets/linkfile" "./assets/loop"]' '(wildcard :+symlinks ./assets/*)'
-	check '["./assets/dangling" "./assets/dirlink" "./assets/file" "./assets/linkfile" "./assets/loop"]' '(wildcard :+files ./assets/* :+symlinks :-dir :+files)'
-	check '["./assets/file" "./assets/nested"]' '(wildcard :-symlinks ./assets/* :+files :+dir)'
-	check '["./assets/fifo"]' '(wildcard :-files :-dir :-symlinks ./assets/*)'
-	check '["./assets/file"]' '(let [flags ["+files" "-symlinks"]] (wildcard flags.0 ./assets/* flags.1))'
-	check '["./+files"]' '(wildcard :+files ./+files)'
-	check '["./+files"]' '(files ./+files)'
+	check '[./assets/file]' '(wildcard :+files ./assets/*)'
+	check '[./assets/file]' '(files ./assets/*)'
+	check '[./assets/nested]' '(wildcard ./assets/* :+dir)'
+	check '[./assets/nested]' '(dirs ./assets/*)'
+	check '[./assets/dangling, ./assets/dirlink, ./assets/linkfile, ./assets/loop]' '(wildcard :+symlinks ./assets/*)'
+	check '[./assets/dangling, ./assets/dirlink, ./assets/file, ./assets/linkfile, ./assets/loop]' '(wildcard :+files ./assets/* :+symlinks :-dir :+files)'
+	check '[./assets/file, ./assets/nested]' '(wildcard :-symlinks ./assets/* :+files :+dir)'
+	check '[./assets/fifo]' '(wildcard :-files :-dir :-symlinks ./assets/*)'
+	check '[./assets/file]' '(flags => wildcard flags.0 ./assets/* flags.1) [:+files, :-symlinks]'
+	check '[./+files]' '(wildcard :+files (pattern "./+files"))'
+	check '[./+files]' '(files (pattern "./+files"))'
 	test-step "$backend traversal, literal matches, dangling links and empty results"
-	check '["./assets/file" "./assets/nested/sub"]' '(wildcard :+files ./assets/** ./assets/nested/*)'
-	check '["./assets/file" "./assets/nested/sub"]' '(files ./assets/** ./assets/nested/*)'
-	check '["./assets/nested"]' '(wildcard :+dir ./assets/**)'
-	check '["./assets/nested"]' '(dirs ./assets/**)'
-	check '["./assets/dangling"]' '(wildcard :+symlinks ./assets/dangling)'
-	check '["./assets/nested/dangling"]' '(wildcard :+symlinks ./assets/*/dangling)'
+	check '[./assets/file, ./assets/nested/sub]' '(wildcard :+files ./assets/** ./assets/nested/*)'
+	check '[./assets/file, ./assets/nested/sub]' '(files ./assets/** ./assets/nested/*)'
+	check '[./assets/nested]' '(wildcard :+dir ./assets/**)'
+	check '[./assets/nested]' '(dirs ./assets/**)'
+	check '[./assets/dangling]' '(wildcard :+symlinks (pattern "./assets/dangling"))'
+	check '[./assets/nested/dangling]' '(wildcard :+symlinks ./assets/*/dangling)'
 	check '[]' '(wildcard :+files ./absent/**)'
-	check '["./assets/dirlink/secret"]' '(wildcard :+files ./assets/dirlink/*)'
-	check ':true' '(get "regular" (lstat ./assets/file))'
-	check ':false' '(get "regular" (lstat ./assets/linkfile))'
+	check '[./assets/dirlink/secret]' '(wildcard :+files ./assets/dirlink/*)'
+	check 'true' '(get "regular" (lstat ./assets/file))'
+	check 'false' '(get "regular" (lstat ./assets/linkfile))'
 	test-step "$backend invalid flags and real metadata errors"
-	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")' '(files)' '(dirs)' '(files :+dir ./assets/*)' '(dirs :+files ./assets/*)' '(files "+files")'; do reject EXPR_INVALID "$expression"; done
+	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")' 'files ()' 'dirs ()' '(files :+dir ./assets/*)' '(dirs :+files ./assets/*)' '(files "+files")'; do reject EXPR_INVALID "$expression"; done
 	reject FS_ERR '(wildcard :+files ./assets/loop/*)'
 	test-step "$backend memory resources expose normalized entry kinds"
-	check '["mem://masks/root"]' '(wildcard :+dir (resource "mem://masks/*"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
-	check '["mem://masks/root/input"]' '(wildcard :+files (resource "mem://masks/**"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
+	check '[mem://masks/root]' '(wildcard :+dir (pattern "mem://masks/*"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
+	check '[mem://masks/root/input]' '(wildcard :+files (pattern "mem://masks/**"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
 	test-step "$backend kind changes invalidate shared filtered watch consumers"
 	mkdir -p "$work/watch/items/slot"
 	printf x >"$work/watch/seed"
-	cat >"$work/watch/Makefile.kmk" <<'KMK'
+	cat >"$work/watch/Kamefile" <<'KMK'
 SHELL = kash
 FILES = (wildcard :+files ./items/*)
 DIRS = (wildcard :+dir ./items/*)
-report :
-	(write! ./file-report (join "," FILES))
-	(write! ./dir-report (join "," DIRS))
+task report
+	(write! ./file-report (join "," (map std/str FILES)))
+	(write! ./dir-report (join "," (map std/str DIRS)))
 KMK
 	settled() {
 		local files="$1" dirs="$2" cycles="$3"
@@ -83,7 +87,7 @@ KMK
 		done
 		return 1
 	}
-	timeout -k 2 30 "${runner[@]}" -C "$work/watch" --json --watch report >"$work/watch/log" 2>"$work/watch/err" &
+	timeout -k 2 30 "${runner[@]}" -C "$work/watch" --json --allow-read --allow-write --watch report >"$work/watch/log" 2>"$work/watch/err" &
 	watcher=$!
 	if settled '' './items/slot' 1; then test-ok "$backend initial shared directory selection"; else test-fail "$backend initial filtered watch"; fi
 	rmdir "$work/watch/items/slot"
@@ -108,11 +112,11 @@ else
 		ln -s writerless "$work/items/linkfifo"
 		printf before >"$work/items/visible"
 		cp -p "$work/items/visible" "$work/seed"
-		cat >"$work/Makefile.kmk" <<'KMK'
+		cat >"$work/Kamefile" <<'KMK'
 SHELL = kash
 FILES = (wildcard :+files ./items/*)
-report :
-	(write! ./file-report (join "," FILES))
+task report
+	(write! ./file-report (join "," (map std/str FILES)))
 	(write! ./content-report (read ./items/visible))
 KMK
 		fifo_settled() {
@@ -123,7 +127,7 @@ KMK
 			done
 			return 1
 		}
-		timeout -k 2 30 env KAME_WASM="$CLI_ROOT/dist/kame.wasm" node "$CLI_ROOT/src/js/kame.js" -C "$work" --json --watch report >"$work/log" 2>"$work/err" &
+		timeout -k 2 30 node "$wasm_runner" -C "$work" --json --allow-read --allow-write --watch report >"$work/log" 2>"$work/err" &
 		watcher=$!
 		trap 'kill -TERM "$watcher" 2>/dev/null || true; wait "$watcher" 2>/dev/null || true' EXIT
 		if fifo_settled './items/visible' before 1; then test-ok "wasm initial build excludes FIFO and symlink to FIFO without blocking"; else test-fail "wasm initial FIFO watch"; cat "$work/log" "$work/err"; fi

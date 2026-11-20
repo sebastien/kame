@@ -297,6 +297,19 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool, verbose b
 			reportText(out, reportField(p, "target").Text, "value.target", styled)
 			fmt.Fprintf(out, " · group %d follows earlier groups\n", reportField(d, "group").Int)
 		}
+		tools := reportField(doc, "tools")
+		if len(tools.List) != 0 {
+			io.WriteString(out, "  tools · first required stage\n")
+			for _, tool := range tools.List {
+				fmt.Fprintf(out, "    stage %d · ", reportField(tool, "stage").Int)
+				reportText(out, reportField(tool, "name").Text, "worker.tool", styled)
+				if path := reportField(tool, "path").Text; path != "" {
+					io.WriteString(out, " → ")
+					reportText(out, path, "value.path", styled)
+				}
+				io.WriteString(out, "\n")
+			}
+		}
 	}
 	if reportField(doc, "truncated").Bool {
 		if downstream {

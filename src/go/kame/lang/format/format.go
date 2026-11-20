@@ -5,7 +5,6 @@ package format
 import (
 	"kame/internal/mem"
 	"kame/lang/expr"
-	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
@@ -66,38 +65,18 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 		freeIndent(a, indentBuf)
 		return Result{Text: formatted, OK: true}
 	}
-	if lang == "rule" {
-		result := rule.ParseRule(a, name, text)
-		if len(result.Diagnostics) != 0 {
-			out := diagnosticResult(a, result.Diagnostics[0].Code, result.Diagnostics[0].Message, result.Diagnostics[0].Span)
-			result.Free()
-			freeIndent(a, indentBuf)
-			return out
-		}
-		body := script.InspectStandaloneKashRule(a, result.Source, result.Rule)
-		if body != nil && len(body.Diagnostics) != 0 {
-			out := diagnosticResult(a, body.Diagnostics[0].Code, body.Diagnostics[0].Message, body.Diagnostics[0].Span)
-			body.Free()
-			result.Free()
-			freeIndent(a, indentBuf)
-			return out
-		}
-		formatted := script.FormatInspectedRule(a, result.Rule, body, indent)
-		body.Free()
-		result.Free()
-		freeIndent(a, indentBuf)
-		return Result{Text: formatted, OK: true}
-	}
 	var result *script.Script
 	var authored *source.Source
 	if lang == "kash" {
-		result = script.ParseKash(a, name, text)
+		result = script.ParseKashSessionText(a, name, text)
 	} else if lang == "km" || lang == script.KameFileLanguage {
 		authored = source.New(a, name, text)
 		result = script.ParseFragment(a, authored, lang, 0, len(text))
+		result.ValidateAssignments()
 		script.InspectKashRecipes(result)
 	} else {
-		result = script.Parse(a, name, text)
+		freeIndent(a, indentBuf)
+		return diagnosticResult(a, "OPT_VALUE_INVALID", "invalid language: "+lang, source.Span{})
 	}
 	if len(result.Diagnostics) != 0 {
 		out := diagnosticResult(a, result.Diagnostics[0].Code, result.Diagnostics[0].Message, result.Diagnostics[0].Span)

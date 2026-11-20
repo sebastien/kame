@@ -49,7 +49,10 @@ embedding export is configured.
 the filename alone does not select a parser. `kame.parse(language, source)` returns
 an AST document, `kame.format(language, source)` formatted text, and `program.ast`
 a copied AST document. `format` also accepts `indentStyle` and `indentWidth`.
-Execution options belong to each `evaluate`, `build`, or `watch` call, not `create`.
+For relative `include`, `import` and `from` paths, pass the absolute source
+filename as `name`. Read grants in the `compile` options authorize authored
+source loads, including modules first reached during a later operation. Each
+`evaluate`, `build`, or `watch` call takes its own execution grants.
 
 ## Python: source checkout
 
@@ -88,8 +91,8 @@ Each operation launches a CLI process; compiled sources live in temporary files.
 
 ## Results
 
-- Pure evaluation returns text, not a native JS/Python value: `42`, `:true`,
-  `[value: 1]`, or a quoted Kame string. Byte results can be raw UTF-8 text.
+- Pure evaluation returns Kame text such as `42`, `true`, `{value: 1}`,
+  or a quoted string. Byte results can be raw UTF-8 text.
   Python returns captured stdout with trailing newlines removed, so `out!` output
   is mixed with the displayed result; stderr is not part of that value.
 - Both build APIs return `{ results, events }` in target/event order; `targets`
@@ -119,6 +122,8 @@ intercepted requests; there is no automatic fallback for an unhandled completion
 Its frozen request descriptor contains `id` (opaque BigInt handle), numeric `kind`,
 string `payload`, copied `data` bytes, optional `key`/`record` bytes (or `null`),
 `capability` (`read`/`write`/`run`/`env` or `null`), and cancellation `signal`.
+Declaration discovery requests (kind 45) carry the scan pattern as `payload`
+and a `kindMask` using the filesystem kind bits defined by the WASM ABI.
 For example, pass these options to `program.evaluate('(read "data.txt")', ...)`:
 
 ```js
@@ -167,8 +172,8 @@ Python has no host-request callback API.
   records from `snapshot.resources` to `watch.invalidate(resources)`. Keep consuming
   the iterator to drive work. Close the active watch before other program operations
   (`BUSY`). Always `await watch.close()` in `finally`, even after breaking iteration.
-- Python watches require `kmk` and yield individual CLI JSON events, not snapshots;
-  filesystem watching is performed by the CLI. `program.watch(targets,
+- Python watches require a Kame program and yield individual CLI JSON events
+  from the CLI's filesystem watcher. `program.watch(targets,
   debounce_ms=200, cancel_on_change=True)` configures the quiet period and
   cancels active work on a detected change. There is no `invalidate` method.
   Always `await watch.close()` in `finally`; a loop break alone does not close it.

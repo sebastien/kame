@@ -35,7 +35,7 @@ func TestReviewRuntimeOwnershipAndReversePhase(t *testing.T) {
 
 func TestReviewPureDiscardsEffectsOnEveryExit(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{`(out! "hello")`, `(list (err! "hello") missing)`, `(list (yield! "hello") (read "missing"))`}
+	inputs := []string{`(out! "hello")`, `(list (err! "hello") missing)`, `(list (out! "hello") (read "missing"))`}
 	for i := range inputs {
 		result := wasm.EvaluatePure(a, inputs[i])
 		if i == 0 && result.Text != `"hello"` {
@@ -159,7 +159,7 @@ func TestReviewHeapTargetFailureOwnedByRuntime(t *testing.T) {
 	buf := make([]byte, 1024*1024)
 	defer mem.FreeSlice(nil, buf)
 	heap := wasm.NewHeap(buf)
-	start := wasm.NewRuntimeWithHeap(&heap, "target.kmk", "")
+	start := wasm.NewRuntimeWithHeap(&heap, "target.km", "")
 	if start.Runtime == nil {
 		start.Result.Free(&heap)
 		t.Fatal("create heap runtime")

@@ -5,13 +5,14 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T038-01 direct Kash recipes and expressions"
 test-step "build native and WASM artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
-printf '%s\n' '(nop [status: 0])' 'if (= 1 1)' '  printf "%s" (join "-" ["a" "b"])' 'printf "%s" ./@(join " " ["two" "words"])/file' >"$TMPDIR/source.kash"
+printf '%s\n' '(nop {status: 0})' 'if (1 == 1)' '  printf "%s" (join "-" ["a", "b"])' 'printf "%s" (nop ./${join " " ["two", "words"]}/file)' >"$TMPDIR/source.kash"
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	check() {
 		local expected="$1"; shift
 		local invocation=("${runner[@]}")
@@ -32,156 +33,161 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects $code before effects"; else test-fail "$backend rejection ($status)"; cat "$work/out" "$work/err"; fi
 	}
 	test-step "$backend signed symbols are ordinary text values"
-	check '["+files" "-symlinks" "+true" "-nil"]' do run --lang expr -c '[:+files :-symlinks :+true :-nil]'
-	check '["+files" "-dir"]' do run --print-result --lang km -c $'flags = [:+files :-dir]\nflags'
+	check '[:+files, :-symlinks, :+true, :-nil]' do run --lang expr -c '[:+files, :-symlinks, :+true, :-nil]'
+	check '[:+files, :-dir]' do run --print-result --lang km -c $'flags = [:+files, :-dir]\nflags'
 	check '+files|-symlinks' do run --allow-run --lang kash -c 'printf "%s|%s" (nop :+files) (nop :-symlinks)'
 	for symbol in ':+ ' ':-1' ':++files' ':--files'; do
 		reject PARSE_ERR do run --lang expr -c "$symbol"
 	done
 	test-step "$backend structural path interpolation preserves data and glob provenance"
-	check '"./two words/file"' do run --lang expr -c '@(nop "./two words")/file'
-	check '"./build/a b/main.js"' do run --lang expr -c './build/@(join " " ["a" "b"])/main.js'
-	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" @(nop "./two words")/file'
-	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" ./@(join " " ["two" "words"])/file'
+	check '"./two words/file"' do run --lang expr -c 'str (${nop "./two words"}/file)'
+	check '"./build/a b/main.js"' do run --lang expr -c 'str (./build/${join " " ["a", "b"]}/main.js)'
+	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" (nop ${nop "./two words"}/file)'
+	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" (nop ./${join " " ["two", "words"]}/file)'
 	data=$'$(touch forbidden) @(missing) {(missing)} "quotes"\nline'
-	printf 'name = """%s"""\nresult = ./@{name}/file\n' "$data" >"$work/path-data.km"
-	check "$(jq -cn --arg name "./$data/file" '$name')" do run path-data.km result
+	printf 'name = """%s"""\nresult = str (./${name}/file)\n' "$data" >"$work/path-data.km"
+	check "./$data/file" do cat -f path-data.km result
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend interpolated path bytes are never source"; else test-fail "$backend interpolated path executed data"; fi
-	for value in ':nil' ':true' '42' '[]' '[a: 1]' '([x] x)'; do
-		reject EXPR_INVALID do run --lang expr -c "./@(nop $value)/file"
+	for value in 'nil' 'true' '42' '[]' '{a: 1}' '(x => x)'; do
+		reject EXPR_INVALID do run --lang expr -c "./\${nop $value}/file"
 	done
-	reject EXPR_INVALID do run --lang expr -c '@(nop "src")/file'
+	reject EXPR_INVALID do run --lang expr -c '${nop "src"}/file'
 	mkdir -p "$work/literal*?[x]\\name" "$work/literalZZxname"
 	printf literal >"$work/literal*?[x]\\name/a.txt"
 	printf decoy >"$work/literalZZxname/a.txt"
 	cat >"$work/path-glob.km" <<'KM'
 root = "./literal*?[x]\\name"
-matches = (wildcard @{root}/*.txt)
+matches = map str (wildcard ${root}/*.txt)
 KM
 	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read="$work/literal*?[x]\\name" path-glob.km matches
 	reject CAP_DENIED do run --allow-read="$work/literalZZxname" path-glob.km matches
-	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard "./literal*/a.txt")'
-	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard "./literalZZxname/../literal*/a.txt")'
-	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read --lang expr -c '(let [root "./literal*?[x]\\name"] (wildcard (nop @{root}/*.txt)))'
-	printf '%s\n' './@(join " " ["a" "b"])/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
+	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard ./literal*/a.txt)'
+	reject CAP_DENIED do run --allow-read="$work/literalZZxname" --lang expr -c '(wildcard ./literalZZxname/../literal*/a.txt)'
+	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read --lang expr -c '(root => map str (wildcard (nop ${root}/*.txt))) "./literal*?[x]\\name"'
+	printf '%s\n' './${join " " ["a", "b"]}/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
 	if jq -e '.ast.kind == "path" and (.ast.parts | length) == 3 and .ast.parts[1].expression.kind == "application"' "$work/path-ast.json" >/dev/null; then test-ok "$backend path AST exposes interpolation children"; else test-fail "$backend path AST lost children"; cat "$work/path-ast.json"; fi
 	test-step "$backend expression statements and typed arguments"
-	check '' do run --lang kash -c '(nop [status: 0])'
-	check '' do run --lang kash -c $'if (nop :true)\n\t(nop [status: 0])'
-	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop :nil)\nprintf "%s" (join\n "-" ["a" "b"])\nif (=\n 1 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail! "unselected")'
-	check 'captured' do run --allow-run --lang kash -c $'name = $(printf captured)\nmatch $name\n\tcase "captured"\n\t\tprintf "%s" $name'
-	check 'expression' do run --allow-run --lang kash -c $':MODE (nop "expression") printenv MODE'
+	check '' do run --lang kash -c '(nop {status: 0})'
+	check '' do run --lang kash -c $'if true\n\t(nop {status: 0})'
+	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop nil)\nprintf "%s" (join\n "-" ["a", "b"])\nif (1 ==\n 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail! "unselected")'
+	check 'captured' do run --allow-run --lang kash -c $'let name = $(printf captured)\nmatch name\n\t"captured" =>\n\t\tprintf "%s" $name'
+	check 'expression' do run --allow-run --lang kash -c $'MODE: (nop "expression") printenv MODE'
 	test-step "$backend direct recipes preserve data, selectors and rule arguments"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = (nop kash)
 data = """@if(:false) $(touch forbidden) {(missing)} "quotes" end"""
-chosen {mode=sso} :
-	if (= mode "sso")
+task chosen {mode=sso}
+	if mode == "sso"
 		printf "%s" $data
 	else
 		(fail! "unselected")
-./nested/output :
-	printf "%s" "artifact" > @>
-generated-source = """printf "%s" (join "-" ["generated" "direct"])"""
-generate generated = [[kind: "task" target: "generated" inputs: [] order-only: [] recipe: [generated-source]]]
-KMK
+rule ./nested/output
+	printf "%s" "artifact" > $outputs.0
+def make-generated () =
+	task generated
+		printf "%s" (join "-" ["generated", "direct"])
+generate make-generated ()
+KM
 	check '@if(:false) $(touch forbidden) {(missing)} "quotes" end' chosen
 	check '' ./nested/output
 	if [ "$(cat "$work/nested/output")" = artifact ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend data is never reparsed and selectors retain the frame"; else test-fail "$backend direct data or publication"; fi
 	check 'generated-direct' generated
 	test-step "$backend typed argv needs no source serialization or escaping"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-data = ["" "two words" "line\nbreak" "\"quotes\"" """$missing @(missing) {(missing)}""" """\@(missing)"""]
-script = (kash """printf "<%s>" $data""")
-chosen :
-	printf "<%s>" $data
-	printf "<%s>" (nop data)
+data = ["", "two words", "line\nbreak", "\"quotes\"", """$missing @(missing) {(missing)}""", """\@(missing)"""]
+def script ()
+	printf "<%s>" $...data
+task chosen
+	printf "<%s>" $...data
+	let expanded = nop data
+	printf "<%s>" $...expanded
 	printf "<%s>" "@(missing) {(missing)}"
-captured :
+task captured
 	printf "<%s>" $(printf "%s" "@(missing) {(missing)}")
-callable :
-	(script)
-explicit :
-	generated = (kash (render [name: "explicit"] "plain" """printf "%s" "@{name}" """))
-	(generated)
-KMK
+task callable
+	(script ())
+task explicit
+	printf "%s" (render {name: "explicit"} "plain" """@{name}""")
+KM
 	argv_expected=$'<><two words><line\nbreak><"quotes"><$missing @(missing) {(missing)}><\\@(missing)>'
 	check "${argv_expected}${argv_expected}<@(missing) {(missing)}>" chosen
 	check '<@(missing) {(missing)}>' captured
 	check "$argv_expected" callable
 	check explicit explicit
 	test-step "$backend explicit argv spreads include command heads"
-	check '<two words><><tail>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>" "two words" ""]\n$...CMD tail'
-	check '<1><true><two words>' do run --allow-run --lang kash -c $'args = [1 :true "two words"]\nprintf "<%s>" $...args'
-	check '<tail>' do run --allow-run --lang kash -c $'args = []\nprintf "<%s>" $...args tail'
-	check '<field>' do run --allow-run --lang kash -c $'commands = [main: ["printf" "<%s>"]]\n$...{commands.main} field'
-	check '<pipeline>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>"]\n:cwd . $...CMD pipeline | cat'
-	check '<capture>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>"]\nprintf "%s" $($...CMD capture)'
-	check 'selected' do run --allow-run --lang kash -c $'CMD = ["true"]\nif $...CMD\n  printf selected'
-	check 'recovered' do run --allow-run --lang kash -c $'CMD = ["false"]\n$...CMD ? printf recovered'
-	check '' do run --allow-run --lang kash -c $'CMD = ["true"]\n$...CMD &'
-	check '<$missing @(missing) ; | *>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>" """$missing @(missing) ; | *"""]\n$...CMD'
-	for value in '[]' '[""]' '[1]' '[:true]' '["printf" []]' '["printf" :nil]' '["printf" [key: "value"]]' '"printf"' ':nil'; do
-		reject EXPR_INVALID do run --allow-run --lang kash -c "CMD = $value"$'\n$...CMD printf forbidden'
+	check '<two words><><tail>' do run --allow-run --lang kash -c $'def CMD = ["printf", "<%s>", "two words", ""]\n$...CMD tail'
+	check '<1><true><two words>' do run --allow-run --lang kash -c $'def args = [1, true, "two words"]\nprintf "<%s>" $...args'
+	check '<tail>' do run --allow-run --lang kash -c $'def args = []\nprintf "<%s>" $...args tail'
+	check '<field>' do run --allow-run --lang kash -c $'def commands = {main: ["printf", "<%s>"]}\n$...{commands.main} field'
+	check '<pipeline>' do run --allow-run --lang kash -c $'def CMD = ["printf", "<%s>"]\ncwd: . $...CMD pipeline | cat'
+	check '<capture>' do run --allow-run --lang kash -c $'def CMD = ["printf", "<%s>"]\nprintf "%s" $($...CMD capture)'
+	check 'selected' do run --allow-run --lang kash -c $'def CMD = ["true"]\nif $?($...CMD).ok\n  printf selected'
+	check 'recovered' do run --allow-run --lang kash -c $'def CMD = ["false"]\n$...CMD ? printf recovered'
+	check '' do run --allow-run --lang kash -c $'def CMD = ["true"]\n$...CMD &'
+	check '<$missing @(missing) ; | *>' do run --allow-run --lang kash -c $'def CMD = ["printf", "<%s>", """$missing @(missing) ; | *"""]\n$...CMD'
+	for value in '[]' '[""]' '[1]' '[true]' '["printf", []]' '["printf", nil]' '["printf", {key: "value"}]' '"printf"' 'nil'; do
+		reject EXPR_INVALID do run --allow-run --lang kash -c "def CMD = $value"$'\n$...CMD printf forbidden'
 	done
-	reject EXPR_INVALID do run --allow-run --lang kash -c $'CMD = ["printf"]\n$CMD forbidden'
-	reject EXPR_INVALID do run --allow-run --lang kash -c $'args = "scalar"\nprintf "%s" $...args'
+	reject EXPR_INVALID do run --allow-run --lang kash -c $'def CMD = ["printf"]\n$CMD forbidden'
+	reject EXPR_INVALID do run --allow-run --lang kash -c $'def args = "scalar"\nprintf "%s" $...args'
 	printf '\0' >"$work/nul"
-	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'CMD = ["printf" (text (read ./nul))]\n$...CMD'
-	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'CMD = [(text (read ./nul))]\n$...CMD'
-	for source in 'printf "$...CMD"' 'printf prefix$...CMD' 'printf $...{CMD}suffix' ':cwd $...CMD printf bad' 'printf > $...CMD' 'value = $...CMD'; do
+	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'def CMD = ["printf", (text (read ./nul))]\n$...CMD'
+	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'def CMD = [(text (read ./nul))]\n$...CMD'
+	for source in 'printf "$...CMD"' 'printf prefix$...CMD' 'printf $...{CMD}suffix' 'cwd: $...CMD printf bad' 'printf > $...CMD' 'let value = $...CMD'; do
 		reject PARSE_ERR do run --allow-run --lang kash -c $'printf forbidden\n'"$source"
 	done
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-CMD = ["printf" "<%s>" "recipe argument"]
-chosen :
+CMD = ["printf", "<%s>", "recipe argument"]
+task chosen
 	$...CMD tail
-KMK
+KM
 	check '<recipe argument><tail>' chosen
 	test-step "$backend selected syntax is checked before any statement executes"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-chosen :
+task chosen
 	printf forbidden
-	if (nop :false)
+	if false
 		printf "%s" (nop
-KMK
+KM
 	reject PARSE_ERR chosen
 	reject PARSE_ERR --dry-run chosen
-	test-step "$backend migration diagnostics and external-shell templates"
-	for source in 'printf @(name)' '\@(out! "forbidden")' 'name = @(out! "forbidden")' ':cwd @(name) printf forbidden' 'printf forbidden > @(name)' '@if(:true)'; do
-		printf 'SHELL = kash\nchosen :\n\t%s\n' "$source" >"$work/Makefile.kmk"
+	test-step "$backend Kash word boundaries and external-shell templates"
+	for source in 'printf @{name}' 'printf prefix@{out! "forbidden"}' 'let name = @{out! "forbidden"}' 'cwd: @{name} printf forbidden' 'printf forbidden > @{name}' '@{true}'; do
+		printf 'task chosen\n\t%s\n' "$source" >"$work/Makefile.km"
 		reject PARSE_ERR chosen
 		reject PARSE_ERR do run --allow-run --lang kash -c "$source"
 	done
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
+SHELL = "sh"
 name = "external"
-chosen :
+task chosen
 	printf "%s" "@{name}"
-KMK
+KM
 	check external chosen
-	prefix=$'SHELL = kash\nchosen :\n\t'
+	prefix=$'task chosen\n\t'
 	head='kame-038-missing-head'
-	printf '%s%s\n' "$prefix" "$head" >"$work/Makefile.kmk"
+	printf '%s%s\n' "$prefix" "$head" >"$work/Makefile.km"
 	status=0
 	"${runner[@]}" -C "$work" --json chosen >"$work/diagnostic.jsonl" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && jq -e -s --arg source "$work/Makefile.kmk" --argjson start "${#prefix}" --argjson end "$((${#prefix}+${#head}))" 'any(.[]; .diagnostic.code == "TOOL_MISSING" and .diagnostic.source == $source and .diagnostic.span.start == $start and .diagnostic.span.end == $end)' "$work/diagnostic.jsonl" >/dev/null; then test-ok "$backend missing tool retains exact authored head span"; else test-fail "$backend authored head diagnostic"; cat "$work/diagnostic.jsonl"; fi
+	if [ "$status" = 1 ] && jq -e -s --arg source "$work/Makefile.km" --argjson start "${#prefix}" --argjson end "$((${#prefix}+${#head}))" 'any(.[]; .diagnostic.code == "TOOL_MISSING" and .diagnostic.source == $source and .diagnostic.span.start == $start and .diagnostic.span.end == $end)' "$work/diagnostic.jsonl" >/dev/null; then test-ok "$backend missing tool retains exact authored head span"; else test-fail "$backend authored head diagnostic"; cat "$work/diagnostic.jsonl"; fi
 	test-step "$backend suspension retains effects and publication remains atomic"
 	printf 'input' >"$work/input"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-./published : ./input
-	value = (let [] (out! "once") "A")
+rule ./published : ./input
+	(out! "once")
+	let value = "A"
 	(write! ./side-output "staged")
-	(yield! (str value (text (read ./late))))
-./late : ./input ; [shell: "/bin/sh"]
-	printf B > @>
-./failed : ./input
+	return (str value (text (read ./late)))
+rule ./late : ./input ; {shell: "/bin/sh"}
+	printf B > @{outputs.0}
+rule ./failed : ./input
 	(write! ./failed-side "must-not-publish")
 	(fail! "intentional")
-KMK
+KM
 	check once ./published
 	if [ "$(cat "$work/published")" = AB ] && [ "$(cat "$work/side-output")" = staged ]; then test-ok "$backend suspended effects publish once"; else test-fail "$backend suspension or publication"; fi
 	reject USER_ERROR ./failed
@@ -193,37 +199,37 @@ KMK
 	printf '#!/bin/sh\nprintf child\n' >"$work/child tools/kame-direct-tool"
 	printf '#!/bin/sh\nprintf override\n' >"$work/override-tool"
 	chmod +x "$work/startup tools/kame-direct-tool" "$work/child tools/kame-direct-tool" "$work/override-tool"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-chosen :
-	command = "kame-direct-tool"
-	resolved = x/kame-direct-tool
+task chosen
+	let command = "kame-direct-tool"
+	let resolved = x/kame-direct-tool
 	kame-direct-tool
 	$command
-	$x/kame-direct-tool
+	x/kame-direct-tool
 	${x/kame-direct-tool}
 	$resolved
 	printf "%s" $(kame-direct-tool | cat)
-	:PATH "./child tools" kame-direct-tool
-	if (nop :false)
+	PATH: "./child tools" kame-direct-tool
+	if false
 		kame-unused-missing-tool
-KMK
+KM
 	PATH="$work/startup tools:$PATH" check 'startupstartupstartupstartupstartupstartupstartup' chosen
 	PATH="$work/startup tools:$PATH" check 'overrideoverrideoverrideoverrideoverrideoverrideoverride' --tool kame-direct-tool=./override-tool chosen
-	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'CMD = ["kame-direct-tool"]\n$...CMD'
-	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'CMD = [x/kame-direct-tool]\n$...CMD'
-	reject TOOL_MISSING do run --allow-run --lang kash -c $'CMD = ["kame-038-missing-spread-tool"]\n$...CMD'
+	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'def CMD = ["kame-direct-tool"]\n$...CMD'
+	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'def CMD = [x/kame-direct-tool]\n$...CMD'
+	reject TOOL_MISSING do run --allow-run --lang kash -c $'def CMD = ["kame-038-missing-spread-tool"]\n$...CMD'
 	reject TOOL_MISSING chosen
-	printf 'SHELL = kash\nchosen :\n\t./override-tool\n' >"$work/Makefile.kmk"
-	check override do run --allow-run="$work/override-tool" "$work/Makefile.kmk" chosen
-	printf 'SHELL = kash\nchosen :\n\tprintf denied\n' >"$work/Makefile.kmk"
-	reject CAP_DENIED do run --allow-run="$work/other-tool" --tool printf=./override-tool "$work/Makefile.kmk" chosen
+	printf 'task chosen\n\t./override-tool\n' >"$work/Makefile.km"
+	check override do run --allow-run="$work/override-tool" "$work/Makefile.km" chosen
+	printf 'task chosen\n\tprintf denied\n' >"$work/Makefile.km"
+	reject CAP_DENIED do run --allow-run="$work/other-tool" --tool printf=./override-tool "$work/Makefile.km" chosen
 	test-step "$backend executable identity invalidates persisted freshness"
-	cat >"$work/Makefile.kmk" <<'KMK'
+	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
-./cached : ./input
-	./cached-tool @>
-KMK
+rule ./cached : ./input
+	./cached-tool $outputs.0
+KM
 	printf '#!/bin/sh\nprintf first > "$1"\nprintf x >> tool-runs\n' >"$work/cached-tool"
 	chmod +x "$work/cached-tool"
 	check '' ./cached
@@ -236,7 +242,7 @@ KMK
 	printf '%s\n' '$...CMD $...{project.args}' >"$work/spread.kash"
 	"${runner[@]}" do fmt --lang kash "$work/spread.kash" >"$work/spread.fmt"
 	if cmp -s "$work/spread.kash" "$work/spread.fmt"; then test-ok "$backend formatting preserves explicit spreads"; else test-fail "$backend spread formatting"; cat "$work/spread.fmt"; fi
-	"${runner[@]}" do parse --lang kash "$TMPDIR/source.kash" >"$TMPDIR/$backend.ast"
+	"${runner[@]}" do parse --json --lang kash "$TMPDIR/source.kash" >"$TMPDIR/$backend.ast"
 	"${runner[@]}" do fmt --lang kash "$TMPDIR/source.kash" >"$TMPDIR/$backend.fmt"
 	"${runner[@]}" do fmt --lang kash "$TMPDIR/$backend.fmt" >"$work/again"
 	if cmp -s "$TMPDIR/$backend.fmt" "$work/again"; then test-ok "$backend formatting is idempotent"; else test-fail "$backend formatting"; fi

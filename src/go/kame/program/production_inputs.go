@@ -234,6 +234,9 @@ func acceptProductionInput(c *core.EngineContext, state *productionValidationSta
 		return false
 	}
 	item := input.Observation
+	if p.Forwarding && item.Key.Kind == core.ResourceGlob && completion.Diagnostic.Code == "" && completion.HasValue {
+		completion.Value, completion.Diagnostic = host.FilterDiscovery(p.Alloc, item.Key.Name, completion.Value)
+	}
 	signature := core.Signature{}
 	if completion.Diagnostic.Code == "" && completion.HasValue {
 		signature = observationSignature(item.Key, item.Aspect, completion.Value)
@@ -398,7 +401,7 @@ func validateProductionInputs(c *core.EngineContext, nodeID int64) core.Producer
 
 func (p *Program) appendProductionPath(message *strings.Builder, prefix string, name string) {
 	message.WriteString(prefix)
-	display := p.relativePath(name)
+	display := p.relativePath(host.DiscoveryPattern(name))
 	message.WriteString(display)
 	mem.FreeString(p.Alloc, display)
 }

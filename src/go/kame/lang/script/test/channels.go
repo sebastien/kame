@@ -73,7 +73,7 @@ func TestStreamingGraphFormatting(t *testing.T) {
 			continue
 		}
 		formatted := script.FormatWithIndent(a, s, "  ")
-		if i == 0 && formatted != "printf a\n  |(broadcast) (\n    cat > ./left,\n    cat > ./right\n  )\n" {
+		if i == 0 && formatted != "printf a |(broadcast) (\n  cat > ./left,\n  cat > ./right\n)\n" {
 			t.Errorf("unexpected streaming layout: %s", formatted)
 		}
 		copy := script.ParseKash(a, "formatted.kash", formatted)

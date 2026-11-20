@@ -10,16 +10,21 @@ test-start "T010-26 wasm service readiness forwarding"
 cd "$CLI_ROOT"
 
 test-step "build WASM CLI"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then
+	wasm_cli="$CLI_ROOT/src/js/kame.js"
+else
+	make dist-wasm >/dev/null
+	wasm_cli="$CLI_ROOT/dist/kame.js"
+fi
 
 work="$TMPDIR/service-readiness"
 mkdir -p "$work"
-cli="$CLI_ROOT/dist/kame.js"
+cli="$wasm_cli"
 
-cat >"$work/Makefile.kmk" <<'EOF'
-service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000]]
+cat >"$work/Makefile.km" <<'EOF'
+service daemon ; {shell: "sh", ready: {argv: ["test", "-f", "ready-marker"], interval-ms: 10, timeout-ms: 3000}}
 	touch ready-marker; while :; do sleep 1; done
-consumer : daemon
+task consumer : daemon
 	test -f ready-marker
 EOF
 if (cd "$work" && timeout --kill-after=2 10 node "$cli" consumer >out 2>err) && [ -f "$work/ready-marker" ]; then
@@ -28,10 +33,10 @@ else
 	test-fail "forwarded readiness did not release its dependent"
 fi
 
-cat >"$work/Makefile.kmk" <<'EOF'
-service daemon : ; [ready: [argv: ["false"] interval-ms: 10 timeout-ms: 100]]
+cat >"$work/Makefile.km" <<'EOF'
+service daemon ; {shell: "sh", ready: {argv: ["false"], interval-ms: 10, timeout-ms: 100}}
 	printf '%s\n' "$$" > timeout-service.pid; while :; do sleep 1; done
-consumer : daemon
+task consumer : daemon
 	true
 EOF
 # Scope cleanup traps to this probe; preserve the parent harness traps.
@@ -63,10 +68,10 @@ EOF
 )
 
 rm -f "$work/first-start" "$work/ready-marker" "$work/healthy-marker" "$work/starts"
-cat >"$work/Makefile.kmk" <<'EOF'
-service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000] restart: [attempts: 1 backoff-ms: 10]]
+cat >"$work/Makefile.km" <<'EOF'
+service daemon ; {shell: "sh", ready: {argv: ["test", "-f", "ready-marker"], interval-ms: 10, timeout-ms: 3000}, restart: {attempts: 1, backoff-ms: 10}}
 	printf 'start\n' >> starts; if [ ! -f first-start ]; then touch first-start; exit 1; fi; touch ready-marker; while :; do sleep 1; done
-consumer : daemon
+task consumer : daemon
 	test -f ready-marker
 EOF
 if (cd "$work" && timeout --kill-after=2 10 node "$cli" consumer >out 2>err) && [ -f "$work/first-start" ] && [ -f "$work/ready-marker" ] && [ "$(wc -l <"$work/starts")" = 2 ]; then
@@ -76,10 +81,15 @@ else
 fi
 
 rm -f "$work/first-start" "$work/ready-marker" "$work/healthy-marker" "$work/starts"
-cat >"$work/Makefile.kmk" <<'EOF'
-service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000] health: [argv: ["test" "-f" "healthy-marker"] interval-ms: 10 failures: 1] restart: [attempts: 1 backoff-ms: 10]]
+cat >"$work/Makefile.km" <<'EOF'
+service daemon ; {
+	shell: "sh",
+	ready: {argv: ["test", "-f", "ready-marker"], interval-ms: 10, timeout-ms: 3000},
+	health: {argv: ["test", "-f", "healthy-marker"], interval-ms: 10, failures: 1},
+	restart: {attempts: 1, backoff-ms: 10},
+}
 	printf 'start\n' >> starts; if [ ! -f first-start ]; then touch first-start; else touch healthy-marker; fi; touch ready-marker; while :; do sleep 1; done
-consumer : daemon
+task consumer : daemon ; {shell: "sh"}
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do if test -f healthy-marker; then exit 0; fi; sleep 0.1; done; exit 1
 EOF
 if (cd "$work" && timeout --kill-after=2 10 node "$cli" consumer >out 2>err) && [ -f "$work/first-start" ] && [ -f "$work/healthy-marker" ] && [ "$(wc -l <"$work/starts")" = 2 ]; then
@@ -88,16 +98,26 @@ else
 	test-fail "forwarded health restart did not recover: status=$? err=$(cat "$work/err")"
 fi
 
-cat >"$work/Makefile.kmk" <<'EOF'
-service daemon : ; [stop: [grace-ms: 0]]
-	trap '' TERM; while :; do sleep 1; done
-consumer : daemon
-	true
+cat >"$work/Makefile.km" <<'EOF'
+service daemon ; {shell: "sh", ready: {argv: ["test", "-f", "stop-ready"], interval-ms: 10, timeout-ms: 3000}, stop: {grace-ms: 0}}
+	trap '' TERM; touch stop-ready; while :; do sleep 1; done
+task consumer : daemon
+	python3 -c 'import time; print(time.monotonic_ns())' > consumer-finished
 EOF
-if (cd "$work" && timeout --kill-after=2 3 node "$cli" consumer >out 2>err); then
+if (cd "$work" && timeout --kill-after=2 12 node "$cli" consumer >out 2>err) &&
+	python3 - "$work/consumer-finished" <<'PY'
+import pathlib
+import sys
+import time
+
+started = int(pathlib.Path(sys.argv[1]).read_text())
+elapsed = (time.monotonic_ns() - started) / 1_000_000_000
+assert elapsed < 3.5, f"service shutdown took {elapsed:.3f}s with zero grace"
+PY
+then
 	test-ok "forwarded stop request applies the configured grace period"
 else
-	test-fail "forwarded service stop exceeded its zero grace period"
+	test-fail "forwarded service stop failed: $(cat "$work/err")"
 fi
 
 test-end

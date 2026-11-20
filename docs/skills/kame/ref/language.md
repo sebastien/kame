@@ -1,60 +1,48 @@
 # Kame language reference
 
-Kame has independently parseable expression, template, and rule languages.
-The script parser composes definitions, expressions, and rules. Kash adds a
-process-oriented outer syntax, using the same Kame expression/value language.
+Kame programs contain lazy definitions, build declarations, and expressions.
+Kash uses the same values and expressions in commands and action blocks.
+Templates render values and calculations as text.
 
-## Read by task
+| Task | Reference |
+| --- | --- |
+| Compute or transform a value | [Expressions](./expressions.md) |
+| Bind lazy values or compose program sources | [Scripts](./scripts.md) |
+| Expand text or generate a document | [Templates](./templates.md) |
+| Declare artifacts, dependencies, and recipes | [Rules](./rules.md) |
+| Orchestrate commands and process graphs | [Kash](./kash.md) |
+| Look up operation signatures, capabilities, or effects | [Library](./library.md) |
+| Run, inspect, parse, or format | [CLI](./cli.md) |
+| Translate a GNU Make build | [Make migration](./make-migration.md) |
 
-- [Expressions](./expressions.md): compute or transform a value.
-- [Scripts](./scripts.md): bind lazy values and compose program sources.
-- [Templates](./templates.md): expand text or generate a document.
-- [Rules](./rules.md): declare artifacts, dependencies, and recipes.
-- [Kash](./kash.md): orchestrate commands and streaming process graphs.
-- [Library](./library.md): operation signatures, capabilities, and effects.
-- [CLI](./cli.md): run, inspect, parse, and format.
-- [Make migration](./make-migration.md): translate a build model, not Make syntax.
-
-## Boundary checklist
+## Context determines syntax
 
 | Context | Interpretation |
 | --- | --- |
-| `(f x)` in an expression | Call `f` with the value of `x`. |
-| `@{reference}` in template text | Read and render a binding without invoking it. |
-| `@(f x)` in template text | Evaluate `(f x)` and render its value as text. |
-| `@(f)` in template text | Invoke `f` with no arguments and render the result. |
-| `(f x)` in a Kash word | Supply a typed standalone value or a scalar fragment of a mixed word. |
-| Expression in a `[shell: kame]` rule body | Compute text or bytes for the rule's single file artifact, without actions. |
-| `$(command)` in an expression or Kash word | Parse the contents as Kash and capture stdout, subject to execution policy. |
-| `$(command)` in a plain Kame string/document | Literal text unless explicitly inside expression interpolation. |
-| `$(command)` in recipe text | Owned by the selected interpreter: shell by default, Kash when explicitly configured. |
-| `{name}` in a rule target | Capture a nonempty target segment and reuse it in input templates. |
-| `{name}` in an expression pattern | Expansion reference, not a matcher; use `{name:*}` to match. |
-| `@if(...)` in a document directive | Template control, not a Kash statement or shell conditional; blocks may be whole-line or inline. |
+| `f x` in an expression | Call `f` with the value of `x`. Use `f ()` for a call with no arguments. |
+| `@{f x}` in a template | Evaluate and render the result of `f x`. |
+| `(f x)` in a Kash word | Evaluate a typed argument or the scalar fragment of a mixed word. |
+| `rule ./out = EXPR` | Publish the calculated text or bytes to one output. |
+| An indented recipe | Run a Kash action block. A foreign `shell` setting selects a document template that renders to one shell script. |
+| `$(command)` in an expression or Kash word | Capture stdout from a Kash process, subject to execution policy. |
+| `$(command)` in plain text | Keep the text literal. A foreign shell interprets it if it appears in the rendered recipe. |
+| `{name}` in a rule output | Capture a target segment. The input side may reuse its value. |
+| `{name:*}` in an expression pattern | Match a segment and bind it under `name`. Use `{name}` in the expansion pattern. |
+| `@if EXPR` in a document directive | Conditionally render a whole-line or inline template block. |
 
-There is one interpolation grammar: `@{reference}` for lookup and `@`-prefixed
-parenthesized expressions for evaluation. Bare `{(...)}` does not interpolate.
-No legacy parser mode, automatic formatter migration or runtime-type fallback
-is provided. Formatting preserves authored pipes and nested calls.
-Selectors require their rule/function context. Template rendering is text
-conversion, not shell quoting, HTML escaping, or typed argv conversion.
+Use `object.field` for property access and `module/name` for an imported
+name. `env/NAME` reads a permitted environment variable. Template
+interpolation performs text conversion. Quote interpolated shell arguments
+and escape document content for the target format as appropriate.
 
-## Source and tools
+## Sources and tools
 
-Sources are UTF-8; diagnostics retain byte spans. Value/rule sources accept
-whole-line `#` and `//` comments. Kash uses word-start `#` comments and treats
-`//` literally. Canonical formatting uses LF and retains source comments.
+The source is UTF-8, and diagnostics use byte spans. Canonical formatting uses
+LF and retains source comments. Select `expr`, `km`, `kash`, or `template`
+for parse and format probes. `do parse --lang template` inspects inline syntax.
+`do fmt --lang template --comment STYLE` formats document directives while
+preserving other document bytes.
 
-Use `do parse` and `do fmt` with an explicit language when inspecting a
-fragment. `expr`, `template`, and `rule` select individual grammars; `script`
-selects the composite grammar. `km` selects value programs without rules;
-`kmk` selects rule programs; `kash` selects process scripts. Script tooling
-handles top-level value expressions.
-Executable `do run` languages are only `km`, `kmk`, `kash`, and `expr`.
-`do parse --lang template` inspects inline syntax; `do fmt --lang template
---comment STYLE` canonicalizes document directives, preserving non-directive bytes.
-
-Parsing and formatting never execute processes. A capability grant does not
-override phase restrictions: planning must not perform writes or process
-execution. Validate implementation/backend support before presenting a
-specified feature as runnable.
+Parsing and formatting run without executing processes. Planning and
+template evaluation apply phase restrictions even when a capability is granted
+for execution. Check runnable examples with the intended native or WASM host.

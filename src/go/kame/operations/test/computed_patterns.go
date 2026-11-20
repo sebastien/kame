@@ -13,18 +13,18 @@ func TestComputedPatternMatchAndReplacement(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "computed", "")
+	parsed := script.ParseKameFile(a, "computed", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(match? @{ROOT}/{name:*}.@{EXT} "./src/demo.c")`,
-		`(subst @{ROOT}/{name:*}.@{EXT} @{OUT}/{name} "./src/demo.c")`,
-		`(capture "name" (regex-match @{ROOT}/{name:~[a-z]+}.@{EXT} "./src/demo.c"))`,
-		`(resub @{ROOT}/{name:~[a-z]+}.@{EXT} @{OUT}/{name} "./src/demo.c")`,
+		`(match? ${ROOT}/{name:*}.${EXT} "./src/demo.c")`,
+		`(subst ${ROOT}/{name:*}.${EXT} ${OUT}/{name} "./src/demo.c")`,
+		`(regex-group "name" (regex-match ${ROOT}/{name:~[a-z]+}.${EXT} "./src/demo.c"))`,
+		`(resub ${ROOT}/{name:~[a-z]+}.${EXT} ${OUT}/{name} "./src/demo.c")`,
 		`match "./src/demo.c"
-    @{ROOT}/{name:*}.@{EXT} => name`,
-		`(match? ./a*/@{EXT}/{name:*} "./abc/c/demo")`,
-		`(match? ./a*/@{EXT}/{name:*} "./a*/c/demo")`,
-		`(subst @{ROOT}/{**}.@{EXT} @{OUT}/{_0} "./src/demo.c")`,
+    ${ROOT}/{name:*}.${EXT} => name`,
+		`(match? ./a\*/${EXT}/{name:*} "./abc/c/demo")`,
+		`(match? ./a*/${EXT}/{name:*} "./a*/c/demo")`,
+		`(subst ${ROOT}/{**}.${EXT} ${OUT}/{_0} "./src/demo.c")`,
 	}
 	for i := range texts {
 		r := evaluate(t, p, `((ROOT OUT EXT => `+texts[i]+`) "./src" """../out {literal}""" "c")`)
@@ -41,10 +41,12 @@ func TestComputedPatternMatchAndReplacement(t *testing.T) {
 			}
 		} else {
 			want := "demo"
+			kind := core.String
 			if i == 1 || i == 3 || i == 7 {
 				want = "../out {literal}/demo"
+				kind = core.Path
 			}
-			if r.Value.Kind != core.String || r.Value.Text != want {
+			if r.Value.Kind != kind || r.Value.Text != want {
 				t.Error("computed capture/expansion failed")
 			}
 		}

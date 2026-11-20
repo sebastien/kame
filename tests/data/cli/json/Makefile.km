@@ -1,0 +1,18 @@
+# JSON event fixture with text, binary, and failing outputs.
+rule ./text.out ; {shell: "/bin/sh"}
+	printf 'plain text\n' > @{outputs.0}
+
+rule ./binary.out ; {shell: "/bin/sh"}
+	printf '\377\376\000binary'
+	echo done > @{outputs.0}
+
+rule ./fail.out ; {shell: "/bin/sh"}
+	echo before-failure
+	exit 7
+
+task cached speak ; {shell: "/bin/sh"}
+	echo to-stdout
+	echo to-stderr >&2
+
+task pipeline
+	printf one | cat | cat | cat | cat

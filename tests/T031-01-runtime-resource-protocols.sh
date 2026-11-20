@@ -7,7 +7,8 @@ test-start "T031-01 resource URI protocols"
 test-step "build native and WASM runners"
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 
 printf 'file-uri' >"$TMPDIR/file-resource.txt"
 file_uri="file://$TMPDIR/file-resource.txt"
@@ -17,7 +18,7 @@ for host in native wasm; do
 	mkdir -p "$TMPDIR/$host-work"
 	# Isolate the process cwd as well as -C: bad URI parent traversal used to
 	# create empty scheme-named directories outside the selected build directory.
-	if [ "$host" = native ]; then runner=(env -C "$TMPDIR/$host-work" "$CLI_BIN"); else runner=(env -C "$TMPDIR/$host-work" node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$host" = native ]; then runner=(env -C "$TMPDIR/$host-work" "$CLI_BIN"); else runner=(env -C "$TMPDIR/$host-work" node "$wasm_wrapper"); fi
 	if (cd "$TMPDIR/$host-work" && "${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
 		-c '(write! (resource "mem://workspace/out.txt") "memory-uri")' \
 		-c '(read (resource "mem://workspace/out.txt"))' >"$TMPDIR/$host.memory.out" 2>"$TMPDIR/$host.memory.err"); then
@@ -41,8 +42,8 @@ for host in native wasm; do
 	"${runner[@]}" do run --lang expr --allow-write=mem://glob/ --allow-read=mem://glob/ \
 		-c '(write! (resource "mem://glob/a.txt") "a")' \
 		-c '(write! (resource "mem://glob/sub/b.txt") "b")' \
-		-c '(wildcard (resource "mem://glob/**/*.txt"))' >"$TMPDIR/$host.glob.out" 2>"$TMPDIR/$host.glob.err"
-	if [ "$(cat "$TMPDIR/$host.glob.out")" = '["mem://glob/a.txt" "mem://glob/sub/b.txt"]' ]; then
+		-c '(wildcard (pattern "mem://glob/**/*.txt"))' >"$TMPDIR/$host.glob.out" 2>"$TMPDIR/$host.glob.err"
+	if [ "$(cat "$TMPDIR/$host.glob.out")" = '[mem://glob/a.txt, mem://glob/sub/b.txt]' ]; then
 		test-ok "$host lists sorted recursive memory URI matches"
 	else
 		test-fail "$host memory URI glob: $(cat "$TMPDIR/$host.glob.err") $(cat "$TMPDIR/$host.glob.out")"
@@ -99,7 +100,7 @@ for host in native wasm; do
 	mkdir -p "$TMPDIR/$host-glob/a%#?"
 	printf 'escaped-glob' >"$TMPDIR/$host-glob/a%#?/entry%#?.txt"
 	"${runner[@]}" do run --lang expr "--allow-read=$file_root" \
-		-c "(map ([name] (read (resource name))) (wildcard (resource \"$file_glob\")))" \
+		-c "(map read (wildcard (pattern \"$file_glob\")))" \
 		>"$TMPDIR/$host.escaped-glob.out" 2>"$TMPDIR/$host.escaped-glob.err"
 	# read returns bytes, displayed without string quotes inside the list.
 	if [ "$(cat "$TMPDIR/$host.escaped-glob.out")" = '[escaped-glob]' ]; then
@@ -119,7 +120,7 @@ for host in native wasm; do
 	fi
 	status=0
 	"${runner[@]}" do run --lang expr --allow-read=mem://workspace/ \
-		-c '(wildcard (resource "mem://other/**/*.txt"))' \
+		-c '(wildcard (pattern "mem://other/**/*.txt"))' \
 		>"$TMPDIR/$host.denied-glob.out" 2>"$TMPDIR/$host.denied-glob.err" || status=$?
 	if [ "$status" -ne 0 ] && grep -Fq 'CAP_DENIED' "$TMPDIR/$host.denied-glob.err"; then
 		test-ok "$host keeps wildcard namespace grants isolated"
@@ -133,7 +134,7 @@ for host in native wasm; do
 	fi
 done
 
-python3 - "$CLI_BIN" "$CLI_ROOT/dist/kame.js" <<'PY'
+python3 - "$CLI_BIN" "$wasm_wrapper" <<'PY'
 import pathlib
 import subprocess
 import sys
@@ -147,9 +148,8 @@ for runner in ([native], ['node', wasm]):
         source = work / 'input.txt'
         source.write_text('first')
         uri = 'file://' + str(source)
-        (work / 'Makefile.kmk').write_text(
-            f'./output : @(list (resource "{uri}")) ; [shell: kame]\n'
-            f'\t(read (resource "{uri}"))\n')
+        (work / 'Makefile.km').write_text(
+            f'rule ./output : ${{resource "{uri}"}} = read (resource "{uri}")\n')
         process = subprocess.Popen(
             runner + ['-C', directory, '--watch', './output'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

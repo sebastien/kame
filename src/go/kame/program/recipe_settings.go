@@ -50,7 +50,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	entry.ExecutorVersion = cloneText(p.Alloc, "local-v1")
 	state := recipeSettingsResolver{Program: p}
 	c := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolveRecipeDefinition, ResolverState: &state}
-	scope := p.ruleScope(c, entry.Captures, entry.Plan.Arguments)
+	scope := p.ruleScope(c, entry.Rule, entry.Captures, entry.Plan.Arguments)
 	c.Scope = scope
 	defer scope.Free()
 	defer p.freeSettingsContext(&state, c)
@@ -138,17 +138,12 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	entry.Kash = false
 	expr.Free(p.Alloc, entry.KameExpression)
 	entry.KameExpression = nil
-	kame := false
-	if entry.Rule.BodyExpression != nil || explicit && p.Eval.IsKameSelector(shell) {
-		kame = true
+	expressionBody := entry.Rule.BodyExpression != nil
+	if expressionBody {
 		if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 || entry.Executor != "local" {
 			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "expression body requires exactly one local file output")
 		}
-		if entry.Rule.BodyExpression != nil {
-			entry.KameExpression = expr.Clone(p.Alloc, entry.Rule.BodyExpression)
-		} else if d := p.parseKameRecipe(entry); d.Code != "" {
-			return d
-		}
+		entry.KameExpression = expr.Clone(p.Alloc, entry.Rule.BodyExpression)
 	} else if explicit {
 		if p.Eval.IsKashSelector(shell) {
 			entry.Kash = true
@@ -159,19 +154,17 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 			for i := range shell.List {
 				v := shell.List[i]
 				if v.Kind != core.String || strings.IndexByte(v.Text, 0) >= 0 || (i == 0 && v.Text == "") {
-					return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
+					return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kash, an executable string, or a nonempty string argv list")
 				}
 				entry.Shell = append(entry.Shell, cloneText(p.Alloc, v.Text))
 			}
 		} else {
-			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
+			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kash, an executable string, or a nonempty string argv list")
 		}
-	} else if entry.Rule.Declaration {
-		entry.Kash = true
 	} else {
-		entry.Shell = cloneStrings(p.Alloc, p.Options.Shell)
+		entry.Kash = true
 	}
-	if !entry.Kash && !kame {
+	if !entry.Kash && !expressionBody {
 		for i := range entry.Rule.RecipeDiagnostics {
 			d := entry.Rule.RecipeDiagnostics[i]
 			if d.Severity >= source.Error {
@@ -200,13 +193,50 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	if c.PhaseInvalid() || len(c.Effects) != 0 {
 		return failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "recipe settings cannot perform effects")
 	}
-	return p.terminalSettings(entry, metadata, kame)
+	if d := p.environmentAuthority(entry, metadata); d.Code != "" {
+		return d
+	}
+	return p.terminalSettings(entry, metadata)
+}
+
+func (p *Program) environmentAuthority(entry *instance, metadata core.Value) diagnostic.Diagnostic {
+	entry.EnvironmentRead, entry.EnvironmentUnset = nil, nil
+	for _, setting := range metadata.Record {
+		if setting.Key != "authority" {
+			continue
+		}
+		span := diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End}
+		if setting.Value.Kind != core.Record {
+			return failureAt(p.Alloc, "EXPR_INVALID", span, "authority metadata requires a record")
+		}
+		for _, field := range setting.Value.Record {
+			var names *[]string
+			switch field.Key {
+			case "read":
+				names = &entry.EnvironmentRead
+			case "unset":
+				names = &entry.EnvironmentUnset
+			default:
+				return failureAt(p.Alloc, "EXPR_INVALID", span, "authority metadata accepts only read and unset")
+			}
+			if field.Value.Kind != core.List {
+				return failureAt(p.Alloc, "EXPR_INVALID", span, "authority requires a list of environment names")
+			}
+			for _, value := range field.Value.List {
+				if value.Kind != core.String || !validEnvironmentName(value.Text) || slices.Contains(*names, value.Text) {
+					return failureAt(p.Alloc, "EXPR_INVALID", span, "authority requires distinct valid environment names")
+				}
+				*names = append(*names, strings.Clone(value.Text))
+			}
+		}
+	}
+	return diagnostic.Diagnostic{}
 }
 
 // terminalSettings validates the tty and foreground metadata of 051. Only
 // true and false are valid; absence is false, and foreground needs tty.
 // Kash recipes receive the grant; other recipe bodies cannot apply it.
-func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bool) diagnostic.Diagnostic {
+func (p *Program) terminalSettings(entry *instance, metadata core.Value) diagnostic.Diagnostic {
 	entry.Terminal = eval.TerminalAuthority{}
 	span := diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}
 	if entry.Rule.Metadata != nil {
@@ -229,34 +259,11 @@ func (p *Program) terminalSettings(entry *instance, metadata core.Value, kame bo
 	if entry.Terminal.Foreground && !entry.Terminal.TTY {
 		return failureAt(p.Alloc, "EXPR_INVALID", span, "foreground metadata requires tty: true")
 	}
-	// A rule that launches no process ignores the grant.
-	if entry.Terminal.TTY && len(entry.Rule.Body) != 0 && (!entry.Kash || kame) {
+	// A declaration without a body has no recipe to authorize.
+	if entry.Terminal.TTY && !entry.Kash && (len(entry.Rule.Body) != 0 || entry.Rule.BodyExpression != nil) {
 		return failureAt(p.Alloc, "FEATURE_UNSUP", span, "terminal handoff requires a Kash recipe")
 	}
 	return diagnostic.Diagnostic{}
-}
-
-func (p *Program) parseKameRecipe(entry *instance) diagnostic.Diagnostic {
-	if len(entry.Rule.Body) == 0 {
-		return failureAt(p.Alloc, "PARSE_ERR", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "a Kame body requires one expression")
-	}
-	body := entry.Rule.Body
-	parsed := expr.ParseRange(p.Alloc, p.Parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(p.Parsed.Source.Text, body[0].Span.Start))
-	defer mem.FreeSlice(nil, parsed.Diagnostics)
-	entry.KameExpression = parsed.Expr
-	if len(parsed.Diagnostics) != 0 {
-		d := parsed.Diagnostics[0]
-		return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message)
-	}
-	return diagnostic.Diagnostic{}
-}
-
-func recipeIndent(text string, start int) string {
-	line := start
-	for line > 0 && text[line-1] != '\n' {
-		line--
-	}
-	return text[line:start]
 }
 
 func (p *Program) freeSettingsContext(state *recipeSettingsResolver, c *eval.Context) {
@@ -316,7 +323,7 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	state := mem.Alloc[renderDependencyState](p.Alloc)
 	*state = renderDependencyState{Program: p, Index: index}
 	frames := make([]eval.RuleFrame, 1)
-	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule}
+	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, Captures: captureValues(p.Alloc, entry.Captures), FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule}
 	if entry.NewerInputs != nil {
 		for i := range entry.NewerInputs.Values {
 			frames[0].NewerInputs = append(frames[0].NewerInputs, entry.NewerInputs.Values[i].Clone(p.Alloc))
@@ -325,8 +332,17 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Environment: entry.Environment, HasEnvironment: true, TimeoutMS: p.Options.TimeoutMS, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.EvaluatePhase, ResolverState: state, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: frames}
 	p.bindDefinitionEnvironment(context)
-	context.Scope = p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
+	context.Scope = p.ruleScope(context, entry.Rule, entry.Captures, entry.Plan.Arguments)
 	context.RecipeNode = entry.Node.ID
+	context.RecipeOutput = func(effect eval.Effect) {
+		p.commitEffects(&p.Instances[index], []eval.Effect{effect}, nil, false)
+	}
+	context.SourceOrigin = entry.Rule.SourceOrigin
+	context.Unit = &eval.ExecutionUnit{}
+	context.EnvironmentUnset = entry.EnvironmentUnset
+	if len(entry.EnvironmentRead) != 0 {
+		context.Grants = append(slices.Clone(context.Grants), eval.Grant{Capability: eval.Env, Names: entry.EnvironmentRead})
+	}
 	context.Terminal = entry.Terminal
 	if context.Terminal.TTY {
 		context.Terminal.StageTTY, context.Terminal.StageForeground = kashUsesSetup(p.Alloc, entry.Script, "tty"), kashUsesSetup(p.Alloc, entry.Script, "foreground")
@@ -352,6 +368,7 @@ func (p *Program) freeKashContext(context *eval.Context) {
 		freeValues(p.Alloc, context.RuleFrames[i].Inputs)
 		freeValues(p.Alloc, context.RuleFrames[i].Outputs)
 		freeValues(p.Alloc, context.RuleFrames[i].NewerInputs)
+		freeValues(p.Alloc, context.RuleFrames[i].Captures)
 	}
 	mem.FreeSlice(nil, context.RuleFrames)
 	eval.FreeEffects(p.Alloc, context.Effects)
@@ -366,29 +383,33 @@ func (p *Program) kashDiagnostic(index int, d diagnostic.Diagnostic) diagnostic.
 }
 
 func (p *Program) kashDiagnosticText(index int, text string, d diagnostic.Diagnostic) diagnostic.Diagnostic {
-	if d.Source != "" && d.Source != "<recipe>" {
-		return d
+	if !d.Owned {
+		d = d.Clone(p.Alloc)
 	}
 	entry := &p.Instances[index]
-	d.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, d.Span.Start), End: kashAuthoredOffset(entry, text, d.Span.End)}
+	authoredLocation := func(span diagnostic.Span) eval.Location {
+		return p.targetLocation(rule.Target{SourceOrigin: entry.Rule.SourceOrigin, Span: source.Span{
+			Start: kashAuthoredOffset(entry, text, span.Start), End: kashAuthoredOffset(entry, text, span.End),
+		}})
+	}
 	for i := range d.Frames {
 		frame := &d.Frames[i]
 		if frame.Source != "<recipe>" {
 			continue
 		}
-		frame.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, frame.Span.Start), End: kashAuthoredOffset(entry, text, frame.Span.End)}
-		location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: frame.Span.Start, End: frame.Span.End})
-		if d.Owned {
-			mem.FreeString(p.Alloc, frame.Source)
-		}
+		location := authoredLocation(frame.Span)
+		mem.FreeString(p.Alloc, frame.Source)
 		frame.Source = cloneText(p.Alloc, location.Source)
+		frame.SourceText = ""
 		frame.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 	}
-	if d.Owned {
+	if d.Source == "" || d.Source == "<recipe>" {
+		location := authoredLocation(d.Span)
 		mem.FreeString(p.Alloc, d.Source)
+		d.Source = cloneText(p.Alloc, location.Source)
+		d.SourceText = ""
+		d.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 	}
-	d.Source = ""
-	p.locateDiagnostic(&d, d.Span)
 	return d
 }
 
@@ -521,7 +542,6 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	if p.Forwarding {
 		pending := mem.Alloc[forwardEffectsState](p.Alloc)
 		pending.WritePaths = cloneStrings(p.Alloc, context.WritePaths)
-		pending.HasYield = hasYield(context.Effects)
 		for i := range context.Effects {
 			effect := context.Effects[i]
 			pending.Effects = append(pending.Effects, eval.Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(effect.Data)})
@@ -529,7 +549,7 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 		entry.ForwardEffects = pending
 		return p.continueForwardEffects(c, index)
 	}
-	if len(context.WritePaths) != 0 || hasYield(context.Effects) {
+	if len(context.WritePaths) != 0 || hasPublication(context.Effects) {
 		if d := p.beginOwnership(entry, "", context.Effects, context.WritePaths); d.Code != "" {
 			p.failRule(c, index, d)
 			return core.ProducerFailed
@@ -541,5 +561,5 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	}
 	// An executed file recipe publishes its artifact path after verifying outputs.
 	// finishRecipe also commits the existing cached-task key and context stamp.
-	return p.finishRecipe(c, index, "", hasYield(context.Effects))
+	return p.finishRecipe(c, index, "")
 }

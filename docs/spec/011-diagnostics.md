@@ -173,6 +173,25 @@ meaning by themselves.
 | `RECIPE_TIMEOUT` | error | Recipe process timed out |
 | `CAPTURE_LIMIT` | error | Command substitution exceeded its capture byte limit |
 | `CAPTURE_ENCODING` | error | Captured text is not valid UTF-8 |
+| `KASH_CHANNEL_DUP_WRITER` | error | More than one producer owns a named channel |
+| `KASH_CHANNEL_DUP_READER` | error | More than one consumer owns a named channel |
+| `KASH_CHANNEL_UNBOUND` | error | Missing or out-of-scope channel endpoint, or absent current input |
+| `KASH_MUX_ARITY` | error | Invalid graph, operator, or group endpoint cardinality |
+| `KASH_REJOIN_OUT_OF_SCOPE` | error | Invalid branch exit or missing lexical continuation |
+| `KASH_DOUBLE_CONSUME` | error | A channel, port, or redirection destination has conflicting claims |
+| `KASH_FRAME_REQUIRED` | error | A record operation received unframed bytes |
+| `KASH_FRAME_MISMATCH` | error | An adapter, merge, or rejoin received incompatible framing |
+| `KASH_FRAME_ENCODING` | error | A line record is not valid UTF-8 |
+| `KASH_RECORD_LIMIT` | error | A record exceeds its byte limit |
+| `KASH_BUFFER_LIMIT` | error | A complete record exceeds the configured working payload budget |
+| `KASH_PREDICATE_EFFECT` | error | A stream predicate attempted an effect, observation, or suspension |
+| `KASH_PREDICATE_BOOLEAN` | error | A stream predicate returned a value other than Boolean |
+| `KASH_PREDICATE_FAILED` | error | A stream predicate failed during evaluation |
+| `KASH_STREAM_OPERAND_UNSUPPORTED` | error | The host cannot provide a live stream operand |
+| `KASH_GRAPH_CYCLE` | error | An unsupported feedback cycle occurs in a process graph |
+| `KASH_FAILURE_POLICY` | error | Graph owners declare conflicting failure policies |
+| `KASH_AMBIGUOUS_CAPTURE` | error | A capture or producer has multiple unmerged terminal outputs |
+| `KASH_TERMINAL_UNSUPPORTED` | error | A callable process stage requests terminal streams that its process ports cannot attach |
 | `SERVICE_READY_TIMEOUT` | error | Service did not become ready before its timeout |
 | `SERVICE_START_FAILED` | error | Service exited before becoming ready |
 | `SERVICE_EXITED` | error | Service exited unexpectedly after becoming ready |
@@ -192,6 +211,9 @@ meaning by themselves.
 | `PLUGIN_FAIL` | error | Plugin host/process reports an operation failure |
 | `PLUGIN_TIMEOUT` | error | Plugin operation exceeded its timeout |
 | `OUTPUT_MISSING` | error | Successful recipe omitted a declared output |
+| `OUTPUT_CONFLICT` | error | A recipe combines output publication with shell commands |
+| `INPUT_UNSTABLE` | warning | Inputs changed during production |
+| `INPUT_CHANGE_CANCELLED` | warning | Watch cancelled active production after an input changed and queued a restart |
 | `CACHE_UNUSABLE` | warning | Cache record or manifest cannot be used |
 | `CLEAN_STATE` | error/warning | Output ownership cannot be persisted or cleanup requires safety/recovery review; uncertain production is a warning when ordinary publication remains valid |
 | `CLEAN_BUSY` | error | A cooperating producer, service or cleanup operation holds the project cleanup boundary |
@@ -204,6 +226,7 @@ meaning by themselves.
 | `OPT_CONFLICT` | error | Conflicting CLI options |
 | `OPT_VALUE_INVALID` | error | Invalid CLI option value |
 | `BUILD_NO_SOURCE` | error | No build source was found |
+| `PICK_UNAVAILABLE` | error | Interactive target selection cannot obtain a terminal, picker, or usable selection |
 | `NO_ARTIFACT` | error | Requested target has no readable artifact |
 | `VAL_NOT_JSON` | error | Human `do cat` definition value has no plain JSON representation |
 
@@ -216,6 +239,8 @@ not portable runtime diagnostics; they are documented with the embedding API.
 - Wrapping adds context but retains the original code, severity, message, and
   primary source span.
 - Command exit uses `RECIPE_FAIL`; inability to spawn or reap uses `HOST_FAIL`.
+  If the working directory prevents startup, name the resolved directory and
+  state whether it is missing, is not a directory, or cannot be accessed.
 - A missing requested source file uses `FS_ERR`; a file target with no rule and
   no existing file uses `TGT_NO_RULE`.
 - A target-less invocation with no `default` target uses `TGT_NO_DEFAULT` and
@@ -299,9 +324,9 @@ evaluated values and environment contents are not included to illustrate errors.
 
 | Failure | Required explanation and recovery |
 | --- | --- |
-| Rendering a callable (`EXPR_INVALID`) | Identify the actual callable kind, not a record/bytes conversion failure. For `@{name}`, suggest `@{name ()}` or `@{name ARG…}` when invocation is intended; a bare name is the function value and is never invoked implicitly. |
-| Applying a noncallable (`EXPR_INVALID`) | Identify the actual head kind and authored application. If the head is a value applied to arguments, such as `@{name x}`, suggest `@{name}` for lookup or grouping the intended callee; never fall back to that interpretation. |
-| Invalid interpolation (`PARSE_ERR`) | State that `@{...}` holds exactly one expression; point at the invalid body and name the missing delimiter or unexpected token. |
+| Rendering a callable (`EXPR_INVALID`) | Identify the actual callable kind, not a record/bytes conversion failure. For `${name}`, suggest `${name ()}` or `${name ARG…}` when invocation is intended; a bare name is the function value and is never invoked implicitly. |
+| Applying a noncallable (`EXPR_INVALID`) | Identify the actual head kind and authored application. If the head is a value applied to arguments, such as `${name x}`, suggest `${name}` for lookup or grouping the intended callee; never fall back to that interpretation. |
+| Invalid interpolation (`PARSE_ERR`) | State that `${...}` holds exactly one expression; point at the invalid body and name the missing delimiter or unexpected token. |
 | Invalid mixed Kash word (`EXPR_INVALID`) | Name the destination (argument, command head, redirection or setup key), actual fragment kind, and scalar constraint. Explain that list splicing is only valid for standalone unquoted argv substitutions. |
 | Missing/invalid rule context (`SEL_NO_CONTEXT`, `SEL_INDEX_INVALID`) | Identify the required frame or invalid bound. In template text and foreign-shell recipes, also explain `@@` for a literal at-sign when the authored `@{` may have been meant literally; do not guess from an external executable name. |
 | Missing explicit file prefix (`PARSE_ERR`, or `TGT_NO_RULE` where applicable) | Distinguish a logical name from a file path and suggest `./` when a file path is plausible. Never silently reclassify a name or modify source. |

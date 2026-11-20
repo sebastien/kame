@@ -14,7 +14,7 @@ const defEscapeMessage = "function value captures a scope that cannot own the bi
 // ordinary registry operations. Special forms cannot be registered as operations.
 func IsSpecialForm(name string) bool {
 	switch name {
-	case "let", "eval", "if", "and", "or", "with", "match", "run!", "capture!", "pipe!", "await":
+	case "let", "if", "and", "or", "with", "match", "run!", "capture!", "pipe!", "await":
 		return true
 	}
 	return false
@@ -58,9 +58,6 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 		if name.Kind != expr.Name || !expr.ValidBindingName(name.Text) {
 			return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name")
 		}
-		if context.ReserveEnv && name.Text == "env" {
-			return failure(context.Run, "DEF_INVALID", name.Span, "env is reserved in Kash")
-		}
 		r := p.evaluate(context.Engine, child, values[0].Items[i+1], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
@@ -71,41 +68,6 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 		r.Value.Free(context.Run)
 	}
 	return p.body(child, values[1:], context)
-}
-
-func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	if len(values) != 1 {
-		return failure(context.Run, "EXPR_INVALID", span, "eval needs one string")
-	}
-	r := p.evaluate(context.Engine, scope, values[0], context)
-	if r.Waiting || r.Diagnostic.Code != "" {
-		return r
-	}
-	if r.Value.Kind != core.String {
-		freeCallables(context.Run, &r.Value)
-		r.Value.Free(context.Run)
-		return failure(context.Run, "EXPR_INVALID", span, "eval needs text")
-	}
-	parsed := expr.Parse(context.Run, "<eval>", r.Value.Text)
-	r.Value.Free(context.Run)
-	if len(parsed.Diagnostics) != 0 {
-		parseDiagnostic := parsed.Diagnostics[0]
-		parsed.Free()
-		return Result{Diagnostic: diagnostic.Diagnostic{Code: parseDiagnostic.Code, Severity: diagnosticSeverity(parseDiagnostic.Severity), Message: parseDiagnostic.Message, Span: diagnostic.Span{Start: parseDiagnostic.Span.Start, End: parseDiagnostic.Span.End}}}
-	}
-	previousCallPath := context.CallPath
-	previousMemo := context.DisableMemo
-	previousClone := context.CloneCallableAST
-	context.CloneCallableAST = true
-	context.DisableMemo = true
-	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
-	result := p.evaluate(context.Engine, scope, parsed.Expr, context)
-	mem.FreeString(context.Run, context.CallPath)
-	context.CallPath = previousCallPath
-	context.DisableMemo = previousMemo
-	context.CloneCallableAST = previousClone
-	parsed.Free()
-	return result
 }
 
 func truthValue(v core.Value) bool { return v.Kind != core.Nil && !(v.Kind == core.Bool && !v.Bool) }
@@ -156,10 +118,6 @@ func (p *Program) scopedWith(scope *Scope, values []*expr.Expr, context *Context
 	r.Value.Unshare(context.Run)
 	for i := range r.Value.Record {
 		key := r.Value.Record[i].Key
-		if context.ReserveEnv && key == "env" {
-			r.Free(context.Run)
-			return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash")
-		}
 		if !child.trySetValue(key, r.Value.Record[i].Value) {
 			reject := rejectStrandedCapture(context.Run, &r.Value, values[0].Span)
 			return reject
@@ -184,10 +142,8 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 	if sub.Waiting || sub.Diagnostic.Code != "" {
 		return sub
 	}
-	var subjectText string
 	switch sub.Value.Kind {
-	case core.String, core.Pattern:
-		subjectText = sub.Value.Text
+	case core.Nil, core.Bool, core.Int, core.Float, core.String, core.Symbol, core.Path:
 	case core.Bytes:
 		freeCallables(context.Run, &sub.Value)
 		sub.Value.Free(context.Run)
@@ -195,7 +151,7 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 	default:
 		freeCallables(context.Run, &sub.Value)
 		sub.Value.Free(context.Run)
-		return failure(context.Run, "EXPR_INVALID", values[0].Span, "match subject must be text")
+		return failure(context.Run, "EXPR_INVALID", values[0].Span, "match subject must be a scalar literal or path")
 	}
 	// Scan clauses without evaluating bodies. Only the selected body runs.
 	var elseBody []*expr.Expr
@@ -208,7 +164,7 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 			return failure(context.Run, "EXPR_INVALID", clause.Span, "match clause needs [pattern body...]")
 		}
 		head := clause.Items[0]
-		if head.Kind == expr.Symbol && head.Text == "else" {
+		if head.Kind == expr.KashBranch && head.Text == "else" {
 			if ci != len(values)-1 {
 				freeCallables(context.Run, &sub.Value)
 				sub.Value.Free(context.Run)
@@ -229,17 +185,9 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 			sub.Value.Free(context.Run)
 			return pr
 		}
-		mout := matchPattern(context.Run, subjectText, &pr.Value, head.Span)
+		mout := matchArmValue(context.Run, &sub.Value, &pr.Value, head.Span)
 		matched, names, captures := mout.Matched, mout.Names, mout.Captures
 		diag := mout.Diag
-		if context.ReserveEnv {
-			for i := range names {
-				if names[i] == "env" && diag.Code == "" {
-					denied := failure(context.Run, "DEF_INVALID", head.Span, "env is reserved in Kash")
-					diag = denied.Diagnostic
-				}
-			}
-		}
 		freeCallables(context.Run, &pr.Value)
 		pr.Value.Free(context.Run)
 		if diag.Code != "" {
@@ -328,29 +276,19 @@ type matchOutcome struct {
 	Diag     diagnostic.Diagnostic
 }
 
-func matchArmValue(a mem.Allocator, subject, pattern *core.Value, glob bool, span source.Span) matchOutcome {
-	if (glob || pattern.Kind == core.Pattern) && subject.Kind != core.String {
-		return matchOutcome{Diag: failure(a, "EXPR_INVALID", span, "pattern subject must be a path or string").Diagnostic}
-	}
-	if glob {
-		text := pattern.Text
-		if pattern.GlobPattern != "" {
-			text = pattern.GlobPattern
+func matchArmValue(a mem.Allocator, subject, pattern *core.Value, span source.Span) matchOutcome {
+	if pattern.Kind == core.Pattern || pattern.Kind == core.PathPattern {
+		if !subject.IsPathText() {
+			return matchOutcome{Diag: failure(a, "EXPR_INVALID", span, "pattern subject must be a path or string").Diagnostic}
 		}
-		matched, limited := expr.MatchGlob(text, subject.Text)
-		if limited {
-			return matchOutcome{Diag: failure(a, "PAT_LIMIT", span, "glob match exceeded its step budget").Diagnostic}
-		}
-		return matchOutcome{Matched: matched}
-	}
-	if pattern.Kind == core.Pattern {
 		return matchPattern(a, subject.Text, pattern, span)
 	}
+
 	if subject.Kind != pattern.Kind {
 		return matchOutcome{}
 	}
 	switch pattern.Kind {
-	case core.String:
+	case core.String, core.Symbol, core.Path:
 		return matchOutcome{Matched: subject.Text == pattern.Text}
 	case core.Int:
 		return matchOutcome{Matched: subject.Int == pattern.Int}
@@ -366,64 +304,59 @@ func matchArmValue(a mem.Allocator, subject, pattern *core.Value, glob bool, spa
 // matchPattern tests subject against a pattern value. Misuse is reported in
 // Diag with PAT_INVALID / EXPR_INVALID codes.
 func matchPattern(a mem.Allocator, subject string, pattern *core.Value, span source.Span) matchOutcome {
-	switch pattern.Kind {
-	case core.String:
-		if pattern.Text == subject {
+	var parsed expr.PatternParse
+	if pattern.Kind == core.PathPattern {
+		parsed = expr.ParsePathPatternText(a, pattern.Text)
+	} else {
+		parsed = expr.ParsePatternText(a, pattern.Text, 0)
+	}
+	if len(parsed.Diagnostics) != 0 {
+		parsed.Pattern.Free(a)
+		mem.FreeSlice(nil, parsed.Diagnostics)
+		return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "invalid match pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
+	}
+	mem.FreeSlice(nil, parsed.Diagnostics)
+	if parsed.Pattern.References != 0 {
+		parsed.Pattern.Free(a)
+		return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "match pattern must not be an expansion pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
+	}
+	if parsed.Pattern.Matchers == 0 && parsed.Pattern.Globs == 0 {
+		// No groups: exact text match on canonical form.
+		matched := parsed.Pattern.Parts != nil && len(parsed.Pattern.Parts) == 1 && parsed.Pattern.Parts[0].Kind == expr.PatternLiteral && parsed.Pattern.Parts[0].Text == subject
+		if len(parsed.Pattern.Parts) == 0 && subject == "" {
+			matched = true
+		}
+		parsed.Pattern.Free(a)
+		if matched {
 			return matchOutcome{Matched: true}
 		}
 		return matchOutcome{}
-	case core.Pattern:
-		parsed := expr.ParsePatternText(a, pattern.Text, 0)
-		if len(parsed.Diagnostics) != 0 {
-			parsed.Pattern.Free(a)
-			mem.FreeSlice(nil, parsed.Diagnostics)
-			return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "invalid match pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
-		}
-		mem.FreeSlice(nil, parsed.Diagnostics)
-		if parsed.Pattern.References != 0 {
-			parsed.Pattern.Free(a)
-			return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "match pattern must not be an expansion pattern"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
-		}
-		if parsed.Pattern.Matchers == 0 {
-			// No groups: exact text match on canonical form.
-			matched := parsed.Pattern.Parts != nil && len(parsed.Pattern.Parts) == 1 && parsed.Pattern.Parts[0].Kind == expr.PatternLiteral && parsed.Pattern.Parts[0].Text == subject
-			if len(parsed.Pattern.Parts) == 0 && subject == "" {
-				matched = true
-			}
-			parsed.Pattern.Free(a)
-			if matched {
-				return matchOutcome{Matched: true}
-			}
-			return matchOutcome{}
-		}
-		res := parsed.Pattern.MatchText(a, subject)
-		var names []string
-		for i := range parsed.Pattern.Names {
-			names = append(names, owned(a, parsed.Pattern.Names[i]))
-		}
-		parsed.Pattern.Free(a)
-		if !res.Matched {
-			mem.FreeSlice(nil, res.Captures)
-			for i := range names {
-				mem.FreeString(a, names[i])
-			}
-			mem.FreeSlice(nil, names)
-			if res.Limited {
-				return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneFailureText(a, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
-			}
-			return matchOutcome{}
-		}
-		var captures []string
-		for i := range res.Captures {
-			captures = append(captures, owned(a, res.Captures[i]))
-		}
-		mem.FreeSlice(nil, res.Captures)
-		// Normalize lengths: anonymous matchers still occupy slots.
-		for len(captures) < len(names) {
-			captures = append(captures, owned(a, ""))
-		}
-		return matchOutcome{Matched: true, Names: names, Captures: captures}
-	default:
-		return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "EXPR_INVALID"), Severity: diagnostic.Error, Message: cloneFailureText(a, "match pattern must be text"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
 	}
+	res := parsed.Pattern.MatchText(a, subject)
+	var names []string
+	for i := range parsed.Pattern.Names {
+		names = append(names, owned(a, parsed.Pattern.Names[i]))
+	}
+	parsed.Pattern.Free(a)
+	if !res.Matched {
+		mem.FreeSlice(nil, res.Captures)
+		for i := range names {
+			mem.FreeString(a, names[i])
+		}
+		mem.FreeSlice(nil, names)
+		if res.Limited {
+			return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneFailureText(a, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
+		}
+		return matchOutcome{}
+	}
+	var captures []string
+	for i := range res.Captures {
+		captures = append(captures, owned(a, res.Captures[i]))
+	}
+	mem.FreeSlice(nil, res.Captures)
+	// Normalize lengths: anonymous matchers still occupy slots.
+	for len(captures) < len(names) {
+		captures = append(captures, owned(a, ""))
+	}
+	return matchOutcome{Matched: true, Names: names, Captures: captures}
 }

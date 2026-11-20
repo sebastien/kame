@@ -1,0 +1,16 @@
+# Plan and graph fixture (spec 006 planning).
+task default : ./artifact.txt
+
+rule ./artifact.txt : ./input.txt
+	echo build >> ./runs.log
+	cp $inputs.0 $outputs.0
+
+rule ./capture-{name}.o : ./src/{name}.c
+	cp $inputs.0 $outputs.0
+
+rule ./dynamic.out = str (count (wildcard ./src/*.c)) "\n"
+
+task multi : ./artifact.txt ./dynamic.out
+
+# Body-less rule. Planning computes freshness from the filesystem.
+rule ./static.out : ./input.txt

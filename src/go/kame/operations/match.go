@@ -9,16 +9,16 @@ import (
 
 func opMatch(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
-	if values[0].Kind != core.Pattern {
+	if values[0].Kind != core.Pattern && values[0].Kind != core.PathPattern {
 		return invalidArgument(c, values, 0, "match pattern")
 	}
-	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
-	invalid := len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers == 0 || parsed.Pattern.References != 0
+	parsed := parsePatternValue(c.Run, values[0])
+	invalid := len(parsed.Diagnostics) != 0 || parsed.Pattern.References != 0
 	mem.FreeSlice(nil, parsed.Diagnostics)
 	if invalid {
 		parsed.Pattern.Free(c.Run)
 		discardArgCallables(c, values)
-		return ownedFailure(c.Run, "PAT_INVALID", "match? needs a matcher group and no expansion references")
+		return ownedFailure(c.Run, "PAT_INVALID", "match? requires a matching pattern")
 	}
 	if len(values) == 1 {
 		function := mem.Alloc[eval.Function](c.Run)
@@ -30,7 +30,7 @@ func opMatch(c *eval.Context, state any, values []core.Value) eval.Result {
 		function.NativeFree = matchFree
 		return eval.Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	}
-	if values[1].Kind != core.String {
+	if !values[1].IsPathText() {
 		parsed.Pattern.Free(c.Run)
 		return invalidArgument(c, values, 1, "string")
 	}
@@ -44,7 +44,7 @@ func matchFree(a mem.Allocator, state any) {
 }
 
 func matchCall(c *eval.Context, state any, values []core.Value) eval.Result {
-	if values[0].Kind != core.String {
+	if !values[0].IsPathText() {
 		return invalidArgument(c, values, 0, "string")
 	}
 	pattern := state.(*expr.Pattern)

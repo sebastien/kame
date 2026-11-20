@@ -31,7 +31,7 @@ test-step "standalone Kash process lessons execute from isolated copies"
 	cd kash
 	cli_run -- do run ./01-values.kash
 	cli_expect_status 0
-	cli_expect_stdout $'Little publication\n[hello world.txt]\n[second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n<>\n<two words>\n<a; echo surprise>\nsource=./sample.txt\n'
+	cli_expect_stdout $'Little publication\n[hello world.txt]\n[second.txt]\nNames: [hello world.txt second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n<>\n<two words>\n<a; echo surprise>\nsource=./sample.txt\n'
 	cli_run -- do run ./02-pipelines.kash
 	cli_expect_status 0
 	cli_expect_stdout $'hello\nworld\nhello\nworld\n12\nhello\nworld\n'
@@ -46,10 +46,13 @@ test-step "value programs, functions, pipes, discovery and lazy failure"
 	cd expressions
 	cli_run -- -f ./01-values.km publication
 	cli_expect_status 0
-	cli_expect_stdout '[title: "Little publication" pages: ["./public/hello.txt" "./public/world.txt"] count: 2]'
+	cli_expect_stdout '{title: "Little publication", pages: [./public/hello.txt, ./public/world.txt], count: 2}'
 	cli_run -- -f ./01-values.km first-page
 	cli_expect_status 0
-	cli_expect_stdout '"./public/hello.txt"'
+	cli_expect_stdout './public/hello.txt'
+	cli_run -- -f ./01-values.km page-summary
+	cli_expect_status 0
+	cli_expect_stdout '"Pages: ./public/hello.txt ./public/world.txt"'
 	cli_run -- -f ./01-values.km unused
 	cli_expect_status 1
 	cli_expect_stderr_contains EXPR_INVALID
@@ -57,13 +60,13 @@ test-step "value programs, functions, pipes, discovery and lazy failure"
 	cli_expect_status 0
 	cli_run -- -f ./02-functions.km pages
 	cli_expect_status 0
-	cli_expect_stdout '["./public/world.txt" "./public/hello.txt" "./public/hello.txt"]'
+	cli_expect_stdout '[./public/world.txt, ./public/hello.txt, ./public/hello.txt]'
 	cli_run -- -f ./02-functions.km publication
 	cli_expect_status 0
-	cli_expect_stdout '[pages: ["./public/hello.txt" "./public/world.txt"] labels: ["HELLO.TXT" "WORLD.TXT"]]'
+	cli_expect_stdout '{pages: ["./public/hello.txt", "./public/world.txt"], labels: ["HELLO.TXT", "WORLD.TXT"]}'
 	cli_run -- --allow-read -f ./03-resources.km publication
 	cli_expect_status 0
-	cli_expect_stdout '[sources: ["./notes/hello.txt" "./notes/world.txt"] pages: ["./public/hello.txt" "./public/world.txt"] count: 2]'
+	cli_expect_stdout '{sources: [./notes/hello.txt, ./notes/world.txt], pages: [./public/hello.txt, ./public/world.txt], count: 2}'
 	printf 'a new note\n' >./notes/third.txt
 	cli_run -- --allow-read -f ./03-resources.km publication
 	cli_expect_status 0
@@ -74,7 +77,7 @@ test-step "value programs, functions, pipes, discovery and lazy failure"
 		test-fail "a value program created public/"
 	fi
 	for file in ./*.km; do
-		cli_run -- do parse --lang script "$file"
+		cli_run -- do parse --lang km "$file"
 		cli_expect_status 0
 		cli_run -- do fmt -n "$file"
 		cli_expect_status 0
@@ -93,7 +96,7 @@ for project in rules/publication composition/publication; do
 	test-step "$project: plan, demand, freshness and explicit action"
 	(
 		cd "$project"
-		cli_run -- do fmt -n ./Makefile.kmk
+		cli_run -- do fmt -n ./Makefile.km
 		cli_expect_status 0
 		cli_run -- do plan ./public/hello.txt
 		cli_expect_status 0
@@ -183,7 +186,7 @@ test-step "native source composition reuses the value program unchanged"
 	cli_expect_status 0
 	cli_expect_stdout_contains 'count: 3'
 	cp "$CLI_OUT" ./value-result
-	cli_run -- -f ./Makefile.kmk publication
+	cli_run -- -f ./Makefile.km publication
 	cli_expect_status 0
 	if cmp -s ./value-result "$CLI_OUT"; then
 		test-ok "standalone and included value programs agree"
@@ -196,7 +199,7 @@ test-step "composed Kash lesson invokes Kame subprocesses from PATH"
 (
 	cd composition-kash
 	mkdir -p ./bin
-	ln -s "$CLI_ROOT/build/kame.debug" ./bin/kame
+	ln -s "$CLI_BIN" ./bin/kame
 	PATH="$PWD/bin:$PATH"
 	export PATH
 	cli_run -- do run ./publish.kash
@@ -205,7 +208,7 @@ test-step "composed Kash lesson invokes Kame subprocesses from PATH"
 )
 
 test-step "available Kash boundary: typed argv, capture, explicit grants"
-cli_run -- do run --lang expr --allow-run -c '(let [names ["hello world.txt" "second.txt" "a; echo surprise"]] $(printf "[%s]\n" $names))'
+cli_run -- do run --lang expr --allow-run -c '(names => $(printf "[%s]\n" $...names)) ["hello world.txt", "second.txt", "a; echo surprise"]'
 cli_expect_status 0
 cli_expect_stdout '"[hello world.txt]\n[second.txt]\n[a; echo surprise]\n"'
 cli_run -- do run --lang expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
@@ -215,13 +218,13 @@ cli_run -- do run --lang expr -c '$(printf denied)'
 cli_expect_status 1
 cli_expect_stderr_contains CAP_DENIED
 
-test-step "legacy language projects build from isolated copies"
+test-step "language projects build from isolated copies"
 cp -R "$CLI_ROOT/examples/language" ./language
 for project in hello patterns; do
 	(
 		cd "language/$project"
 		rm -rf ./build ./.kame
-		cli_run -- do fmt -n ./*.kmk
+		cli_run -- do fmt -n ./*.km
 		cli_expect_status 0
 		cli_run --
 		cli_expect_status 0
@@ -241,7 +244,7 @@ if command -v pandoc >/dev/null 2>&1; then
 	(
 		cd blog
 		rm -rf ./build ./.kame
-		cli_run -- do fmt -n ./Makefile.kmk
+		cli_run -- do fmt -n ./Makefile.km
 		cli_expect_status 0
 		cli_run --
 		cli_expect_status 0

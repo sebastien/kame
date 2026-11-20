@@ -11,13 +11,14 @@ test-start "T010-19 wasm cache host requests"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 
 project="$TMPDIR/wasm-cache"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF'
-task cached : ; [shell: kash]
+cat >"$project/Makefile.km" <<'EOF'
+task cached replay
 	echo run >> runs.log
 	(out! "cached-output")
 EOF
@@ -27,13 +28,13 @@ runs() {
 }
 
 test-step "a cached task replays on the wasm backend"
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >"$project/out1.txt" 2>"$project/err1.txt"
+(cd "$project" && node "$wasm_wrapper" replay) >"$project/out1.txt" 2>"$project/err1.txt"
 if [ "$(runs "$project")" = 1 ] && grep -q 'cached-output' "$project/out1.txt"; then
 	test-ok "first wasm run executes the recipe"
 else
 	test-fail "first run: runs=$(runs "$project") err=$(cat "$project/err1.txt")"
 fi
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >"$project/out2.txt" 2>"$project/err2.txt"
+(cd "$project" && node "$wasm_wrapper" replay) >"$project/out2.txt" 2>"$project/err2.txt"
 if [ "$(runs "$project")" = 1 ] && cmp -s "$project/out1.txt" "$project/out2.txt"; then
 	test-ok "second wasm run is a cache hit with identical output"
 else
@@ -52,13 +53,13 @@ fi
 test-step "the wasm cache matches native"
 native="$TMPDIR/wasm-cache-native"
 mkdir -p "$native"
-cat >"$native/Makefile.kmk" <<'EOF'
-task cached : ; [shell: kash]
+cat >"$native/Makefile.km" <<'EOF'
+task cached replay
 	echo run >> runs.log
 	(out! "cached-output")
 EOF
-(cd "$native" && "$CLI_BIN" cached) >"$native/out1.txt" 2>/dev/null
-(cd "$native" && "$CLI_BIN" cached) >"$native/out2.txt" 2>/dev/null
+(cd "$native" && "$CLI_BIN" replay) >"$native/out1.txt" 2>/dev/null
+(cd "$native" && "$CLI_BIN" replay) >"$native/out2.txt" 2>/dev/null
 if [ "$(runs "$native")" = 1 ] && cmp -s "$native/out1.txt" "$project/out1.txt" && cmp -s "$native/out2.txt" "$project/out2.txt"; then
 	test-ok "native and wasm agree on cache hits and replay output"
 else
@@ -67,7 +68,7 @@ fi
 
 test-step "deleting the record forces a rerun"
 find "$project/.kame/cache/host" -type f ! -size 12c -delete
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
+(cd "$project" && node "$wasm_wrapper" replay) >/dev/null 2>&1
 if [ "$(runs "$project")" = 2 ]; then
 	test-ok "a missing cache record reruns the recipe"
 else
@@ -79,13 +80,13 @@ record="$(find "$project/.kame/cache/host" -type f ! -size 12c -print -quit)"
 printf marker >"$project/marker"
 rm -f "$record"
 ln -s "$project/marker" "$record"
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
+(cd "$project" && node "$wasm_wrapper" replay) >/dev/null 2>&1
 if [ "$(cat "$project/marker")" = marker ] && [ ! -L "$record" ] && [ "$(runs "$project")" = 3 ]; then
  test-ok "cache put preserves symlink target and replaces the record"
 else
  test-fail "cache publication followed a symlink"
 fi
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
+(cd "$project" && node "$wasm_wrapper" replay) >/dev/null 2>&1
 if [ "$(runs "$project")" = 3 ]; then test-ok "published record is readable on the next invocation"; else test-fail "published record was not complete"; fi
 if find "$project" -name '.kame-write-*' -print -quit | grep -q .; then test-fail "cache publication leaked staging"; else test-ok "cache staging was cleaned"; fi
 

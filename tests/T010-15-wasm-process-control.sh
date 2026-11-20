@@ -11,23 +11,27 @@ test-start "T010-15 wasm process timeout and retry"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-process"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF'
-./slow.txt :
+cat >"$project/Makefile.km" <<'EOF'
+rule ./slow.txt ; {shell: "/bin/sh"}
 	sleep 5
 	printf slow > slow.txt
 
-./flaky.txt :
+rule ./flaky.txt ; {shell: "/bin/sh"}
 	if [ -f marker ]; then printf ok > flaky.txt; else touch marker; false; fi
 EOF
 
 test-step "--timeout kills an overrunning recipe"
 set +e
-(cd "$project" && timeout 20 node "$CLI_ROOT/dist/kame.js" --timeout 300 ./slow.txt) >"$project/out" 2>"$project/err"
+(cd "$project" && timeout 20 node "$wasm_runner" --timeout 300 ./slow.txt) >"$project/out" 2>"$project/err"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'RECIPE_TIMEOUT' "$project/err"; then
@@ -39,13 +43,13 @@ fi
 test-step "--retry reruns a failed recipe"
 rm -f "$project/marker" "$project/flaky.txt"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" --retry 1 ./flaky.txt) >"$project/out" 2>"$project/err"
+(cd "$project" && node "$wasm_runner" --retry 1 ./flaky.txt) >"$project/out" 2>"$project/err"
 retry_status=$?
 set -e
 retry_file="$(cat "$project/flaky.txt" 2>/dev/null)"
 rm -f "$project/marker" "$project/flaky.txt"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" ./flaky.txt) >"$project/out2" 2>"$project/err2"
+(cd "$project" && node "$wasm_runner" ./flaky.txt) >"$project/out2" 2>"$project/err2"
 plain_status=$?
 set -e
 if [ "$retry_status" = 0 ] && [ "$retry_file" = "ok" ] && [ "$plain_status" = 1 ]; then

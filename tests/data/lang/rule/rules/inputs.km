@@ -4,7 +4,7 @@ rule ./bundle : ./a.o ./b.o
 rule ./strings : "literal input"
 	echo $...inputs
 
-rule ./generated : @{wildcard ./src/*.c}
+rule ./generated : ${wildcard ./src/*.c}
 	echo $...inputs
 
 rule ./named : build clean

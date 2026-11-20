@@ -117,7 +117,7 @@ func (inv *Invocation) Free() {
 // by concatenation, whose storage does not outlive the returning call.
 func (inv *Invocation) fail(code string, message string) {
 	if code == "OPT_UNKNOWN" && (strings.HasSuffix(message, ": --define-value") || strings.Contains(message, ": --define-value=")) {
-		message = "--define-value was removed; use --set NAME=LITERAL for typed data; NAME=TEXT and --define remain strings"
+		message = "unknown option: --define-value. Use --set NAME=LITERAL for typed data"
 	}
 	inv.Error = Diagnostic{Code: code, Message: cloneText(message)}
 	inv.OK = false
@@ -150,11 +150,6 @@ func Parse(command string, args []string) Invocation {
 }
 
 func parseCommand(command string, args []string) Invocation {
-	if message := RemovedCommandMessage(command); message != "" {
-		inv := Invocation{Name: command}
-		inv.fail("CMD_UNKNOWN", message)
-		return inv
-	}
 	if command == "run" {
 		return parseRun(args, false)
 	}
@@ -166,7 +161,7 @@ func parseCommand(command string, args []string) Invocation {
 		mem.FreeSlice(nil, prefixed)
 		return invocation
 	}
-	inv := Invocation{Name: command, Directory: ".", Jobs: 1, WatchDebounceMS: 100, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
+	inv := Invocation{Name: command, Directory: ".", Jobs: 1, WatchDebounceMS: 100, Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if command == "help" {
 		if len(args) != 0 && args[0] == "--" {
 			args = args[1:]
@@ -210,7 +205,7 @@ func parseCommand(command string, args []string) Invocation {
 		return parseRun(args, true)
 	}
 	if !isCommand(command) {
-		inv.fail("CMD_UNKNOWN", "unknown command: "+command)
+		inv.fail("CMD_UNKNOWN", UnknownCommandMessage(command))
 		return inv
 	}
 	if command == "" || command == "build" {
@@ -269,12 +264,13 @@ func isCommand(command string) bool {
 	return command == "" || command == "build" || command == "help" || command == "run" || command == "kash" || command == "list" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
 }
 
-// RemovedCommandMessage keeps native/WASM migration diagnostics identical.
-func RemovedCommandMessage(command string) string {
+// UnknownCommandMessage supplies the shared diagnostic for unsupported commands.
+func UnknownCommandMessage(command string) string {
+	message := "unknown command: " + command
 	if command == "expr" {
-		return "do expr was removed; use kame do run --lang expr -c TEXT (or - for stdin)"
+		message += ". Use kame do run --lang expr -c TEXT (or - for stdin)"
 	}
-	return ""
+	return message
 }
 
 // parseBuild mirrors the primary and do-plan/cat/tools grammar.
@@ -361,7 +357,7 @@ func parseBuild(inv *Invocation, args []string) {
 			if inv.Error.Code != "" {
 				return
 			}
-			if len(arg) >= 4 && arg[:4] == "env." {
+			if len(arg) >= 4 && arg[:4] == "env/" {
 				continue
 			}
 		}
@@ -411,9 +407,9 @@ func assignmentOperand(inv *Invocation, arg string) bool {
 		if arg[i] != '=' {
 			continue
 		}
-		if len(arg) >= 4 && arg[:4] == "env." {
+		if len(arg) >= 4 && arg[:4] == "env/" {
 			if i <= 4 || !definition.ValidName(arg[4:i]) {
-				inv.fail("OPT_VALUE_INVALID", "environment assignment must be env.NAME=VALUE")
+				inv.fail("OPT_VALUE_INVALID", "environment assignment must be env/NAME=VALUE")
 				return true
 			}
 			assignBuildOption(inv, "--env", arg[4:])
@@ -775,7 +771,7 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_CONFLICT", "-i and -n cannot be used together")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "km" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}
@@ -787,8 +783,8 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_VALUE_INVALID", "invalid comment style: "+inv.Comment)
 		return
 	}
-	if (indentSelected || widthSelected) && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
-		inv.fail("OPT_CONFLICT", "indent options require km, kash, rule, or script language")
+	if (indentSelected || widthSelected) && inv.Lang != "km" && inv.Lang != "kash" {
+		inv.fail("OPT_CONFLICT", "indent options require km or kash language")
 		return
 	}
 	if widthSelected && inv.Indent != "spaces" {
@@ -835,7 +831,6 @@ func parseIndentWidth(value string) (int, bool) {
 
 // parseParse mirrors do parse. Unlike do fmt, --lang has no default.
 func parseParse(inv *Invocation, args []string) {
-	inv.Lang = ""
 	after := false
 	languageSelected := false
 	for i := 0; i < len(args); i++ {
@@ -889,7 +884,7 @@ func parseParse(inv *Invocation, args []string) {
 		inv.fail("OPT_NO_VALUE", "missing required --lang")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "km" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}

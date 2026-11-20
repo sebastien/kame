@@ -19,20 +19,19 @@ func TestKameBodyPublishesExactContentAndReusesTrackedInputs(t *testing.T) {
 		return
 	}
 	sources := []string{
-		"SHELL = kash\n./output : ./input ; {shell: kame}\n\t(str \"Hello, \"\n\t  (strip (text (read @<))) \"!\\n\")\n",
-		"./output : ./input ; {shell: kame}\n\t(read @<)\n",
-		"./output : ./input ; {shell: kame}\n\t\"\"\n",
-		"./output : ./input ; {shell: kame}\n\t\"\"\"first\n\t  second\n\t\"\"\"\n",
-		"./output : ./input ; {shell: kame}\n\t\"first\n\t  second\n\t\"\n",
-		"./output : ./input ; {shell: kame}\n    \"\"\"first\n      second\n    \"\"\"\n",
-		"./output : ./input ; {shell: kame}\n\t\"\"\"\n\t@if(false)\n\tdata\n\t@end\n\t\"\"\"\n",
-		"SHELL = kame\n./output : ./input\n\t(read @<)\n",
-		"MODE = kame\n./output : ./input ; {shell: MODE}\n\t(read @<)\n",
+		"rule ./output : ./input = (str \"Hello, \"\n\t(strip (text (read inputs.0))) \"!\\n\")\n",
+		"rule ./output : ./input = read inputs.0\n",
+		"rule ./output : ./input = \"\"\n",
+		"rule ./output : ./input = \"\"\"first\n  second\n\"\"\"\n",
+		"rule ./output : ./input = \"first\n  second\n\"\n",
+		"rule ./output : ./input\n    return \"\"\"first\n      second\n    \"\"\"\n",
+		"rule ./output : ./input = \"\"\"\n@if false\ndata\n@end\n\"\"\"\n",
+		"rule ./output : ./input\n\treturn (read inputs.0)\n",
 	}
-	wants := []string{"Hello, Ada!\n", "Ada\n", "", "first\n  second\n", "first\n  second\n", "first\n  second\n", "\n@if(false)\ndata\n@end\n", "Ada\n", "Ada\n"}
+	wants := []string{"Hello, Ada!\n", "Ada\n", "", "first\n  second\n", "first\n  second\n", "first\n  second\n", "\n@if false\ndata\n@end\n", "Ada\n"}
 	for i := range sources {
 		if code, _ := materializeSource(t, dir, sources[i], true, false); code != "" {
-			t.Error("Kame body failed: " + code)
+			t.Errorf("body %d failed: %s", i, code)
 			continue
 		}
 		if !tempMatches(t, dir+"/output", wants[i]) {
@@ -54,7 +53,7 @@ func TestComputedRootCapturePrerequisiteExecutesAndTracksChanges(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	source := "ROOT = \".\"\n./out{path} : @{ROOT}/input-{path} ; {shell: kame}\n\t(read @<)\n"
+	source := "ROOT = \".\"\nrule ./out{path} : ${ROOT}/input-{path} = read inputs.0\n"
 	for i := 0; i < 3; i++ {
 		want := "first"
 		if i == 2 {
@@ -85,9 +84,9 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 		t.Fatal("output write failed")
 		return
 	}
-	bodies := []string{"42", "nil", "[1, 2]", "(x => x)", "(yield! \"bad\")", "(out! \"bad\")", "(write! ./side \"bad\")", "$(touch side)", "(now ())", "VALUE", "(helper ())"}
+	bodies := []string{"42", "nil", "[1, 2]", "(x => x)", "(err! \"bad\")", "(out! \"bad\")", "(write! ./side \"bad\")", "$(touch side)", "(now ())", "VALUE", "(helper ())"}
 	for i := range bodies {
-		text := "VALUE = (sh! \"touch side\")\ndef helper () = (out! \"bad\")\n./output : ; {shell: kame}\n\t" + bodies[i] + "\n"
+		text := "VALUE = (sh! \"touch side\")\ndef helper () = (out! \"bad\")\nrule ./output = " + bodies[i] + "\n"
 		code, _ := materializeSource(t, dir, text, true, false)
 		want := "PHASE_INVALID"
 		if i < 4 {
@@ -102,18 +101,16 @@ func TestKameBodiesRejectEffectsInvalidValuesAndAmbiguousProducers(t *testing.T)
 		}
 	}
 	sources := []string{
-		"./output : ; {shell: kame}\n\t\"one\"\n\t\"two\"\n",
-		"./output : ; {shell: kame}\n",
-		"./output ./sibling : ; {shell: kame}\n\t\"content\"\n",
+		"rule ./output = \"one\"\n\t\"two\"\n",
+		"rule ./output =\n",
+		"rule ./output ./sibling = \"content\"\n",
+		"rule ./output ; {shell: kame}\n\t\"content\"\n",
 	}
+	codes := []string{"PARSE_ERR", "PARSE_ERR", "EXPR_INVALID", "REF_MISSING"}
 	for i := range sources {
 		code, _ := materializeSource(t, dir, sources[i], true, false)
-		want := "EXPR_INVALID"
-		if i < 2 {
-			want = "PARSE_ERR"
-		}
-		if code != want {
-			t.Error("invalid body mode accepted: " + code)
+		if code != codes[i] {
+			t.Errorf("invalid body mode %d returned %s, want %s", i, code, codes[i])
 		}
 		mem.FreeString(a, code)
 	}

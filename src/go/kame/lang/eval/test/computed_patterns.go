@@ -15,9 +15,9 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "computed", "")
+	parsed := script.ParseKameFile(a, "computed", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`@{nop """../two {evil:*} *?[\] @() words"""}/{name:*}.@{nop "[a-z]+"}`, `@{nop "src"}/{name:*}`, `@{nop "file://root"}/{name:*}`, `@{nop "C:\\root"}/{name:*}`, `./@{nop 42}/{name:*}`, "./@{nop \"\x00\"}/{name:*}", `@{nop "/root"}/{name:*}`, `@{nop "./root"}/{name:*}`, `@{nop "../root"}/{name:*}`, `@{nop "./C:\\root"}/{name:*}`, `./@{pattern "{name:*}"}/{other:*}`, `./@{nop []}/{name:*}`}
+	texts := []string{`${nop """../two {evil:*} *?[\] @() words"""}/{name:*}.${nop "[a-z]+"}`, `${nop "src"}/{name:*}`, `${nop "file://root"}/{name:*}`, `${nop "C:\\root"}/{name:*}`, `./${nop 42}/{name:*}`, "./${nop \"\x00\"}/{name:*}", `${nop "/root"}/{name:*}`, `${nop "./root"}/{name:*}`, `${nop "../root"}/{name:*}`, `${nop "./C:\\root"}/{name:*}`, `./${pattern "{name:*}"}/{other:*}`, `./${nop []}/{name:*}`}
 	for i := range texts {
 		e := expr.Parse(a, "computed", texts[i])
 		if len(e.Diagnostics) != 0 {
@@ -27,7 +27,7 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 		}
 		r := p.Evaluate(a, e.Expr, p.Scope)
 		if i == 0 {
-			if r.Diagnostic.Code != "" || r.Value.Kind != core.Pattern {
+			if r.Diagnostic.Code != "" || r.Value.Kind != core.PathPattern {
 				t.Error("computed captures enumerated a glob or failed")
 				r.Free(a)
 				e.Free()
@@ -35,7 +35,7 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 			}
 			copy := r.Value.Clone(a)
 			r.Free(a)
-			pattern := expr.ParsePatternText(a, copy.Text, 0)
+			pattern := expr.ParsePathPatternText(a, copy.Text)
 			if len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers != 1 || pattern.Pattern.Parts[0].Text != "../two {evil:*} *?[\\] @() words/" {
 				t.Error("dynamic bytes injected capture syntax")
 			}
@@ -48,7 +48,7 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 			mem.FreeSlice(nil, pattern.Diagnostics)
 			copy.Free(a)
 		} else if i >= 6 && i <= 9 {
-			if r.Diagnostic.Code != "" || r.Value.Kind != core.Pattern {
+			if r.Diagnostic.Code != "" || r.Value.Kind != core.PathPattern {
 				t.Error("explicit root or literal backslash was rejected")
 			}
 			r.Free(a)
@@ -71,18 +71,18 @@ func TestPathReferencesResolveLexicalSymbols(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "paths", "")
+	parsed := script.ParseKameFile(a, "paths", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`((ROOT => ((path => @{ROOT}/js/{path}.js) "widgets/button")) "./src")`,
-		`((path => ./src/js/{path}.js) "widgets/button")`,
-		`((ROOT => ((path => (nop @{ROOT}/js/{path}.js)) "widgets/button")) "./src")`,
-		`((ROOT => ((path => @{ROOT}/js/{path}.js) """*{literal}""")) "./src")`,
-		`((ROOT => @{ROOT}/js/\{path\}.js) "./src")`,
-		`((ROOT => "@{ROOT}/js/{path}.js") "./src")`,
-		`((ROOT => @{ROOT}/js/{missing}.js) "./src")`,
-		`((ROOT => ((path => @{ROOT}/js/{path}.js) 42)) "./src")`,
-		"((ROOT => ((path => @{ROOT}/js/{path}.js) \"\x00\")) \"./src\")",
+		`((ROOT => ((path => ${ROOT}/js/${path}.js) "widgets/button")) "./src")`,
+		`((path => ./src/js/${path}.js) "widgets/button")`,
+		`((ROOT => ((path => (nop ${ROOT}/js/${path}.js)) "widgets/button")) "./src")`,
+		`((ROOT => ((path => ${ROOT}/js/${path}.js) """*{literal}""")) "./src")`,
+		`((ROOT => ${ROOT}/js/\{path\}.js) "./src")`,
+		`((ROOT => "${ROOT}/js/{path}.js") "./src")`,
+		`((ROOT => ${ROOT}/js/${missing}.js) "./src")`,
+		`((ROOT => ((path => ${ROOT}/js/${path}.js) 42)) "./src")`,
+		"((ROOT => ((path => ${ROOT}/js/${path}.js) \"\x00\")) \"./src\")",
 	}
 	for i := range texts {
 		e := expr.Parse(a, "paths", texts[i])
@@ -100,7 +100,11 @@ func TestPathReferencesResolveLexicalSymbols(t *testing.T) {
 			if i == 4 || i == 5 {
 				want = "./src/js/{path}.js"
 			}
-			if r.Diagnostic.Code != "" || r.Value.Kind != core.String || r.Value.Text != want {
+			kind := core.Path
+			if i == 5 {
+				kind = core.String
+			}
+			if r.Diagnostic.Code != "" || r.Value.Kind != kind || r.Value.Text != want {
 				t.Errorf("path reference case %d failed: %s", i, r.Diagnostic.Code)
 			}
 		} else {
@@ -129,7 +133,7 @@ func TestComputedPatternRetainsChildrenAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "computed", "result = ./@{str (once ())}/{name:*}.@{str (async ())}")
+	parsed := script.ParseKameFile(a, "computed", "result = ./${str (once ())}/{name:*}.${str (async ())}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -147,7 +151,7 @@ func TestComputedPatternRetainsChildrenAcrossSuspension(t *testing.T) {
 		if generation == 2 {
 			want = "./2/{name:*}.42"
 		}
-		if !node.Current || node.Latest.Kind != core.Pattern || node.Latest.Text != want || state.Calls != generation || state.Effects != generation {
+		if !node.Current || node.Latest.Kind != core.PathPattern || node.Latest.Text != want || state.Calls != generation || state.Effects != generation {
 			t.Error("computed children/effects replayed or canonical text lost")
 		}
 		if generation == 1 {
@@ -168,7 +172,7 @@ func TestPathReferencesRetainChildrenAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "paths", "part = (str (async ()))\nresult = ./@{str (once ())}/{part}")
+	parsed := script.ParseKameFile(a, "paths", "part = (str (async ()))\nresult = ./${str (once ())}/${part}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -183,7 +187,7 @@ func TestPathReferencesRetainChildrenAcrossSuspension(t *testing.T) {
 		request.Request.Free(a)
 	}
 	stepUntilCurrent(engine, node)
-	if !node.Current || node.Latest.Kind != core.String || node.Latest.Text != "./1/42" || state.Calls != 1 || state.Effects != 1 {
+	if !node.Current || node.Latest.Kind != core.Path || node.Latest.Text != "./1/42" || state.Calls != 1 || state.Effects != 1 {
 		t.Error("path reference replayed operands or lost its resumed value")
 	}
 	engine.Free()

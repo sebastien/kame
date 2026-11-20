@@ -35,13 +35,68 @@ func ParseDeclaration(a mem.Allocator, s *source.Source, start, end int) Part {
 	return Part{Rule: p.declaration(), Diagnostics: p.diags}
 }
 
+func init() {
+	expr.ParseRuleValue = parseRuleValue
+}
+
+func parseRuleValue(a mem.Allocator, s *source.Source, start int, delimited bool) (*expr.RuleSyntax, int, []source.Diagnostic) {
+	bounded := *s
+	end := len(s.Text)
+	if delimited {
+		if stop := ruleValueDelimiter(s.Text, start); stop >= 0 {
+			end = stop
+		}
+	}
+	bounded.Text = s.Text[:end]
+	part := ParseDeclaration(a, &bounded, start, end)
+	syntax := &expr.RuleSyntax{Declaration: part.Rule, Alloc: a, References: 1,
+		Release: func(a mem.Allocator, value any) { FreeRule(a, value.(*Rule)) },
+		Format:  func(a mem.Allocator, value any) string { return FormatRule(a, value.(*Rule)) }}
+	return syntax, part.Rule.Span.End, part.Diagnostics
+}
+
+func ruleValueDelimiter(text string, start int) int {
+	depth := 0
+	var quote byte
+	end := source.LogicalLineEnd(text, start)
+	for i := start; i < end; i++ {
+		b := text[i]
+		if b == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		if quote != 0 {
+			if b == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch b {
+		case '"', '\'':
+			quote = b
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func (p *parser) declaration() *Rule {
 	text := p.s.Text[:p.end]
 	lineEnd := source.LogicalLineEnd(text, p.start)
 	start, end := trim(text, p.start, lineEnd)
 	kind, width, ok := declarationHead(text[start:end])
 	r := mem.Alloc[Rule](p.a)
-	r.Declaration, r.Kind = true, kind
+	r.Kind = kind
 	r.Header = source.Span{Start: start, End: end}
 	r.Span = source.Span{Start: p.start, End: lineEnd}
 	if !ok {
@@ -89,9 +144,6 @@ func (p *parser) declaration() *Rule {
 	p.ruleTargets(r, head, targetEnd)
 	if inputStart >= 0 {
 		p.ruleInputs(r, inputStart, tail)
-		if len(r.Inputs) == 0 {
-			p.error(targetEnd, inputStart, "expected prerequisites after ':'")
-		}
 	}
 	p.classify(r)
 	p.validateArguments(r)

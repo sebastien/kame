@@ -10,7 +10,6 @@ import (
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
-	"strings"
 )
 
 // AppendKash parses one interactive Kash entry into the live session and
@@ -23,7 +22,8 @@ import (
 func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagnostic) {
 	p := s.Program
 	first := len(s.Work)
-	part := script.ParseKash(p.Alloc, name, text)
+	part := script.ParseKashEntry(p.Alloc, name, text)
+	captured := p.Eval.CheckInteractiveAssignments(part)
 	eval.SetInteractiveSource(part)
 	var diagnostics []diagnostic.Diagnostic
 	located := func(code string, span source.Span, message string) diagnostic.Diagnostic {
@@ -45,7 +45,7 @@ func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagno
 		}
 	}
 	if len(diagnostics) == 0 {
-		diagnostics = p.Eval.RegisterInteractive(definitions)
+		diagnostics = p.Eval.RegisterInteractive(definitions, captured)
 		for i := range diagnostics {
 			diagnostics[i].Source = name
 			diagnostics[i].SourceText = text
@@ -102,46 +102,6 @@ func (p *Program) PendingNodes() []int64 {
 		nodes = append(nodes, p.Pending[i].NodeID)
 	}
 	return nodes
-}
-
-// SetDirectory moves the session working directory used by later work. When
-// followGrants is set, read/write grants naming the previous directory, as
-// the default session policy does, move with it; explicit grants never do.
-func (p *Program) SetDirectory(directory string, followGrants bool) {
-	previous := p.Options.Directory
-	p.Options.Directory = cloneText(p.Alloc, directory)
-	p.Eval.SetDefinitionCwd(directory)
-	if followGrants {
-		for i := range p.Options.Grants {
-			grant := &p.Options.Grants[i]
-			if grant.Capability != eval.Read && grant.Capability != eval.Write {
-				continue
-			}
-			for j := range grant.Names {
-				if grant.Names[j] == previous {
-					grant.Names[j] = p.Options.Directory
-				}
-			}
-		}
-		p.Eval.SetGrants(p.Options.Grants)
-	}
-}
-
-// SetEnvironment replaces or, when present is false, removes one variable of
-// the child environment that later processes inherit. Kame's own process
-// environment is unchanged. Names compare exactly, as configured reads do.
-func (p *Program) SetEnvironment(name string, value string, present bool) {
-	kept := p.Options.Environment[:0]
-	for _, entry := range p.Options.Environment {
-		key, _, _ := strings.Cut(entry, "=")
-		if key != name {
-			kept = append(kept, entry)
-		}
-	}
-	p.Options.Environment = kept
-	if present {
-		p.Options.Environment = append(p.Options.Environment, cloneText(p.Alloc, name+"="+value))
-	}
 }
 
 // SuspendRoots pauses an interactive job's roots and their host work (052).

@@ -59,8 +59,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         source = 'printf "%s" (str "two " "words")\n(nop {value: 1})\n'
         sourcePath = self.root / 'direct.kash'
         sourcePath.write_text(source, encoding='utf-8')
-        await self.client._run(['do', 'fmt', '--lang', 'kash', str(sourcePath)])
-        formatted = sourcePath.read_text(encoding='utf-8')
+        formatted = await self.client._run(['do', 'fmt', '--lang', 'kash', str(sourcePath)])
         for text in (source, formatted):
             program = await self.client.compile(text, name='direct.kash')
             items = program.ast['ast']['items']
@@ -77,8 +76,9 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_typed_expression_argv_is_not_template_reparsed(self):
         program = await self.client.compile(
-            'SHELL = kash\nrule ./argv.txt\n'
-            '\tprintf "<%s>" (concat [(str """@(missing)""" " two words")] ["*.c", """$(touch injected)""", ""]) > ./argv.txt\n'
+            'rule ./argv.txt\n'
+            '\tlet argv = concat [(str """@(missing)""" " two words")] ["*.c", """$(touch injected)""", ""]\n'
+            '\tprintf "<%s>" $...argv > ./argv.txt\n'
             '\t(nop {value: 1})\n', name='typed-argv.km',
         )
         await program.build('./argv.txt', grants={'run': True, 'write': ['.']})
@@ -93,7 +93,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(json.loads(await self.client.evaluate('json {value: [1, 2]}'))), {'value': [1, 2]})
 
     async def test_canonical_action_effects_and_authored_failure_are_not_display_or_recovery(self):
-        self.assertEqual(await self.client.evaluate('{value: 1}'), '[value: 1]')
+        self.assertEqual(await self.client.evaluate('{value: 1}'), '{value: 1}')
         self.assertEqual(await self.client.evaluate('out! "out"'), 'out"out"')
         communicate = self.client._communicate
         captured = []

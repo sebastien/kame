@@ -7,8 +7,8 @@
 # DIRECTORY holds the platform binaries and Windows archive, for example a
 # downloaded published release. See `package-manifests` in release.kash.
 
-(include ./release.kash)
+include ./release.kash
 
-options = (operand-record args)
+let options = (operand-record args)
 
 (package-manifests (required-operand "directory" options) (required-operand "output" options) (required-operand "version" options))

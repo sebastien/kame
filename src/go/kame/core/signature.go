@@ -193,9 +193,9 @@ func (s *Digest) value(v Value, depth int) bool {
 			n = 0x7ff8000000000000
 		}
 		s.Uint64(n)
-	case String, Pattern:
+	case String, Symbol, Pattern, Path, PathPattern, PathTemplate:
 		s.Text(v.Text)
-		if v.Kind == String && v.GlobPattern != "" {
+		if v.IsPathText() && v.GlobPattern != "" {
 			s.Text("glob-pattern")
 			s.Text(v.GlobPattern)
 		}

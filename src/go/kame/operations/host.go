@@ -78,6 +78,9 @@ func freeReadRequestState(a mem.Allocator, value any) {
 
 func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
 	name, op := host.PayloadPath(payload), host.PayloadText(payload, host.FieldOp)
+	if discovery := host.PayloadText(payload, host.FieldDiscoveryKey); op == host.OpWildcard && discovery != "" {
+		name = discovery
+	}
 	if kind == host.RequestEnvironment {
 		name = payload.Text
 	}
@@ -139,6 +142,15 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 			observeReadRequest(c, state, core.Signature{})
 			return c.InvalidOperation("host completion omitted its result")
 		}
+		if state.Op == host.OpWildcard {
+			var d diagnostic.Diagnostic
+			completion.Value, d = host.FilterDiscovery(c.Run, state.Name, completion.Value)
+			if d.Code != "" {
+				state.Done, state.Diagnostic = true, d
+				observeReadRequest(c, state, core.Signature{})
+				return readRequestValue(c, state)
+			}
+		}
 		state.Value, state.Done = completion.Value.Clone(state.Alloc), true
 		if state.Kind == host.RequestReadFile && state.Op == host.OpRead {
 			if state.Value.Kind == core.Bytes {
@@ -198,17 +210,25 @@ func dependency(c *eval.Context, kind core.ResourceKind, name string) bool {
 }
 func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	name := ""
-	if value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile {
+	grouped := false
+	if op == host.OpWildcard {
+		if value.Kind != core.PathPattern {
+			c.DiscardCallables(&value)
+			return c.InvalidArgument(0, "path pattern", value.Kind)
+		}
+		glob, hasGroups, ok := wildcardPatternText(c.Run, value)
+		if !ok || glob == "" {
+			return ownedFailure(c.Run, "PAT_INVALID", "invalid discovery pattern")
+		}
+		defer mem.FreeString(c.Run, glob)
+		name, grouped = glob, hasGroups
+	} else if value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile {
 		name = value.Resource.Name
-	} else if value.Kind == core.String {
+	} else if value.IsPathText() {
 		name = value.Text
 	} else {
-		// No ownership transfers on rejection; the caller frees storage only.
 		c.DiscardCallables(&value)
 		return c.InvalidArgument(0, "string or file resource", value.Kind)
-	}
-	if op == host.OpWildcard && value.GlobPattern != "" {
-		name = value.GlobPattern
 	}
 	// Scoped absolute cwd must reach the host as well as the graph edge. Keep
 	// boundary-relative logical names (including glob identities) host-owned.
@@ -229,10 +249,27 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
 	}
+	if grouped {
+		root := c.Cwd
+		if c.Program != nil {
+			root = c.Program.DefinitionCwd
+		}
+		name = host.DiscoveryKey(c.Run, name, value.Text, c.Cwd, root)
+		defer mem.FreeString(c.Run, name)
+	}
 	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}
 	}
 	result := request(c, host.RequestReadFile, host.FilePayload(c.Run, op, name))
+	if grouped && (c.Engine == nil || c.Program == nil) && !result.Waiting && result.Diagnostic.Code == "" {
+		result.Value, result.Diagnostic = host.FilterDiscovery(c.Run, name, result.Value)
+	}
+	if op == host.OpWildcard && !result.Waiting && result.Diagnostic.Code == "" {
+		if !discoveryPaths(c, &result.Value) {
+			result.Value.Free(c.Run)
+			result = failure("HOST_FAIL", "wildcard observation must return a list of paths")
+		}
+	}
 	if result.Diagnostic.Code != "" {
 		if !result.Diagnostic.Owned {
 			owned := result.Diagnostic.Clone(c.Run)
@@ -241,11 +278,29 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		}
 		// Keep the failing resource identity, not file contents. Inspection can
 		// then distinguish proven generated absence from an unrelated read error.
-		label := core.NewString(c.Run, name)
+		label := core.NewString(c.Run, host.DiscoveryPattern(name))
 		kind := core.NewString(c.Run, "resource")
 		result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: kind.Text, Label: label.Text})
 	}
 	return result
+}
+
+// The host wire carries path names as strings. Expose typed values without
+// changing the host protocol or mutating shared observation storage.
+func discoveryPaths(c *eval.Context, value *core.Value) bool {
+	if value.Kind != core.List {
+		return false
+	}
+	for _, member := range value.List {
+		if !member.IsPathText() {
+			return false
+		}
+	}
+	value.Unshare(c.Run)
+	for i := range value.List {
+		value.List[i].Kind = core.Path
+	}
+	return true
 }
 
 // Check the literal search root, not the escaped glob spelling or its matches.
@@ -332,33 +387,25 @@ func wildcardPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result {
 
 func opFiles(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	return wildcardShorthand(c, v, "files", "+files")
+	return wildcardShorthand(c, v, "files", host.DiscoveryFile)
 }
 
 func opDirs(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	return wildcardShorthand(c, v, "dirs", "+dir")
+	return wildcardShorthand(c, v, "dirs", host.DiscoveryDirectory)
 }
 
 // files and dirs are wildcard with a fixed entry kind. Extra kind flags stay
 // on wildcard, where unions and exclusions are explicit.
-func wildcardShorthand(c *eval.Context, v []core.Value, name string, flag string) eval.Result {
+func wildcardShorthand(c *eval.Context, v []core.Value, name string, kind int) eval.Result {
 	for i := range v {
 		value := v[i]
-		if value.Kind == core.String && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
+		if (value.Kind == core.Symbol || value.Kind == core.String) && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
 			discardArgCallables(c, v)
 			return c.InvalidOperation(name + " does not accept kind flags; use wildcard")
 		}
 	}
-	flagValue := core.NewString(c.Run, flag)
-	args := []core.Value{flagValue}
-	for i := range v {
-		args = append(args, v[i])
-	}
-	result := opWildcard(c, nil, args)
-	flagValue.Free(c.Run)
-	mem.FreeSlice(nil, args)
-	return result
+	return wildcard(c, v, kind)
 }
 
 func kindShorthandPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result {
@@ -380,14 +427,23 @@ func kindShorthandPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result
 
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
+	return wildcard(c, v, 0)
+}
+
+func wildcard(c *eval.Context, v []core.Value, kind int) eval.Result {
+	declaration := c.Phase == eval.PlanningPhase && c.DeclarationFiles != nil
 	var patterns []core.Value
-	positive, negative := 0, 0
+	var positions []int
+	defer func() {
+		mem.FreeSlice(nil, patterns)
+		mem.FreeSlice(nil, positions)
+	}()
+	positive, negative := kind, 0
 	for i := range v {
 		value := v[i]
-		if value.Kind == core.String && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
+		if (value.Kind == core.Symbol || value.Kind == core.String) && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
 			bit := wildcardKindFlag(value.Text[1:])
 			if bit == 0 {
-				mem.FreeSlice(nil, patterns)
 				discardArgCallables(c, v)
 				return c.InvalidOperation("unknown wildcard kind flag: " + value.Text)
 			}
@@ -397,34 +453,36 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 				negative |= bit
 			}
 			if positive&negative != 0 {
-				mem.FreeSlice(nil, patterns)
 				discardArgCallables(c, v)
 				return c.InvalidOperation("opposite wildcard kind flags are invalid")
 			}
 		} else {
 			if value.Kind == core.List {
 				for j := range value.List {
-					if value.List[j].Kind != core.String {
-						mem.FreeSlice(nil, patterns)
-						return invalidArgument(c, v, i, "flat list of path strings")
+					if value.List[j].Kind != core.Path {
+						return invalidArgument(c, v, i, "flat list of paths")
 					}
 				}
-			} else if value.Kind != core.String && !(value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile) {
-				mem.FreeSlice(nil, patterns)
-				return invalidArgument(c, v, i, "string")
+			} else if value.Kind != core.PathPattern {
+				return invalidArgument(c, v, i, "path pattern or list of paths")
 			}
 			patterns = append(patterns, value)
+			if declaration {
+				positions = append(positions, i)
+			}
 		}
 	}
 	if len(patterns) == 0 {
-		mem.FreeSlice(nil, patterns)
 		return c.InvalidOperation("wildcard requires at least one pattern")
 	}
 	mask := positive
 	if mask == 0 {
-		mask = 15
+		mask = host.DiscoveryAll
 	}
 	mask &= ^negative
+	if declaration {
+		return declarationWildcard(c, patterns, positions, mask)
+	}
 	previous := c.CallPath
 
 	identity := core.NewString(c.Run, previous+"/wildcard-mask:"+strconv.Itoa(mask))
@@ -445,21 +503,92 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	c.CallPath = previous
 	identity.Free(c.Run)
-	mem.FreeSlice(nil, patterns)
 	return result
 }
 
 func wildcardKindFlag(name string) int {
 	if name == "files" {
-		return 1
+		return host.DiscoveryFile
 	}
 	if name == "dir" {
-		return 2
+		return host.DiscoveryDirectory
 	}
 	if name == "symlinks" {
-		return 4
+		return host.DiscoveryLink
 	}
 	return 0
+}
+
+func declarationWildcard(c *eval.Context, operands []core.Value, positions []int, kinds int) eval.Result {
+	var paths []core.Value
+	defer func() { freeValues(c, paths) }()
+	for i, operand := range operands {
+		if operand.Kind != core.List {
+			observed := observeDeclarationPattern(c, operand, positions[i], kinds)
+			if observed.Waiting || observed.Diagnostic.Code != "" {
+				return observed
+			}
+			for _, value := range observed.Value.List {
+				paths = append(paths, value.Clone(c.Run))
+			}
+			observed.Value.Free(c.Run)
+			continue
+		}
+		// An already discovered path is literal. A kind filter observes that
+		// exact path; no component can become a glob in the second operation.
+		for _, value := range operand.List {
+			if kinds != host.DiscoveryAll {
+				observed := observeDeclarationPattern(c, value, positions[i], kinds)
+				if observed.Waiting || observed.Diagnostic.Code != "" {
+					return observed
+				}
+				matches := len(observed.Value.List) != 0
+				observed.Value.Free(c.Run)
+				if !matches {
+					continue
+				}
+			}
+			paths = append(paths, value.Clone(c.Run))
+		}
+	}
+	paths = sortedWildcardPaths(c.Run, paths)
+	return eval.Result{Value: core.NewList(c.Run, paths)}
+}
+
+func observeDeclarationPattern(c *eval.Context, value core.Value, position, kinds int) eval.Result {
+	var scan string
+	grouped := false
+	if value.Kind == core.PathPattern {
+		var ok bool
+		scan, grouped, ok = wildcardPatternText(c.Run, value)
+		if !ok || scan == "" {
+			mem.FreeString(c.Run, scan)
+			return ownedFailure(c.Run, "PAT_INVALID", "invalid discovery pattern")
+		}
+	} else {
+		var escaped strings.Builder
+		for i := range len(value.Text) {
+			b := value.Text[i]
+			if strings.ContainsRune("\\*?[]", rune(b)) {
+				escaped.WriteByte('\\')
+			}
+			escaped.WriteByte(b)
+		}
+		scan = core.NewString(c.Run, escaped.String()).Text
+		escaped.Reset()
+	}
+	defer mem.FreeString(c.Run, scan)
+	if !allowsWildcard(c, scan) {
+		return failure("CAP_DENIED", "read access denied; grant the required path with --allow-read=ROOT")
+	}
+	key := scan
+	if grouped {
+		key = host.DiscoveryKey(c.Run, scan, value.Text, c.Cwd, c.Cwd)
+		defer mem.FreeString(c.Run, key)
+	}
+	observation := host.DeclarationDiscoveryKey(c.Run, key, kinds)
+	defer mem.FreeString(c.Run, observation)
+	return c.DeclarationFiles(c.ResolverState, observation, value.Text, c.ArgumentSpan(position), c.SourceOrigin)
 }
 
 type wildcardState struct {
@@ -526,7 +655,6 @@ func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Res
 			discardWildcard(c, state)
 			return result
 		}
-		bit := 8 // Other filesystem entries remain in the default selection.
 		regular, directory, link := false, false, false
 		fields := 0
 		for j := range result.Value.Record {
@@ -552,14 +680,7 @@ func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Res
 			discardWildcard(c, state)
 			return failure("HOST_FAIL", "wildcard kind filtering requires normalized lstat regular, dir and link fields")
 		}
-		if link {
-			bit = 4
-		} else if directory {
-			bit = 2
-		} else if regular {
-			bit = 1
-		}
-		if mask&bit != 0 {
+		if mask&host.DiscoveryKind(regular, directory, link) != 0 {
 			state.Values = append(state.Values, state.Matches.List[i].Clone(state.Alloc))
 		}
 		state.Index++
@@ -607,22 +728,25 @@ func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 		result.Value.Free(c.Run)
 		state.Index++
 	}
-	// Stable order retains the first value's literal-path provenance on ties.
-	slices.SortStableFunc(state.Values, compareWildcardPaths)
-	count := 0
-	for i := range state.Values {
-		item := state.Values[i]
-		if count != 0 && state.Values[count-1].Text == item.Text {
-			item.Free(state.Alloc)
-		} else {
-			state.Values[count] = item
-			count++
-		}
-	}
-	state.Values = state.Values[:count]
+	state.Values = sortedWildcardPaths(state.Alloc, state.Values)
 	out := core.NewList(c.Run, state.Values)
 	discardWildcard(c, state)
 	return eval.Result{Value: out}
+}
+
+func sortedWildcardPaths(a mem.Allocator, paths []core.Value) []core.Value {
+	// Stable order retains the first value's literal-path provenance on ties.
+	slices.SortStableFunc(paths, compareWildcardPaths)
+	count := 0
+	for _, item := range paths {
+		if count != 0 && paths[count-1].Text == item.Text {
+			item.Free(a)
+		} else {
+			paths[count] = item
+			count++
+		}
+	}
+	return paths[:count]
 }
 
 func compareWildcardPaths(a core.Value, b core.Value) int {
@@ -633,7 +757,7 @@ func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	path := ""
 	if v[0].Kind == core.Resource && v[0].Resource.Kind == core.ResourceFile {
 		path = v[0].Resource.Name
-	} else if v[0].Kind == core.String {
+	} else if v[0].IsPathText() {
 		path = v[0].Text
 	} else {
 		return invalidArgument(c, v, 0, "string or file resource")
@@ -680,6 +804,9 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	if !c.Allows(eval.Env, v[0].Text) {
 		return c.EnvironmentDenied(v[0].Text)
 	}
+	if value, written := c.EnvironmentEdit(v[0].Text); written {
+		return eval.Result{Value: value}
+	}
 	if c.HasEnvironment {
 		// The snapshot supplies the value; only the requested name is observed.
 		for i := range c.Environment {
@@ -723,10 +850,7 @@ func opSh(c *eval.Context, s any, v []core.Value) eval.Result {
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}
 	}
-	if c.HasEnvironment {
-		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[command].Text, c.Environment))
-	}
-	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[command].Text))
+	return request(c, host.RequestProcess, c.ShellPayload(v[command].Text))
 }
 
 func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -779,10 +903,7 @@ func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
 		}
 		b.WriteByte('\'')
 	}
-	if c.HasEnvironment {
-		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, b.String(), c.Environment))
-	}
-	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, b.String()))
+	return request(c, host.RequestProcess, c.ShellPayload(b.String()))
 }
 
 // opNow reads the host wall clock as nanoseconds since the Unix epoch. Clocks

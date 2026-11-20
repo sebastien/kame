@@ -6,29 +6,28 @@ does not imply complete SDK workflow coverage.
 
 ## Truth is not emptiness (K24)
 
-Only `:nil` and `:false` are false. Zero (integer or float), empty strings,
+Only `nil` and `false` are false. Zero (integer or float), empty strings,
 empty lists, empty records, and empty bytes are true. `bool`, `not`, expression
 conditions, and predicate filtering share that rule. `and` and `or` short-circuit
 and return an operand, not a coerced boolean. A successful process exit is a
 separate Kash command-condition contract; it does not make numeric zero false.
 
-Ask the question that the workflow means:
+Use a predicate that matches the value the workflow needs to distinguish.
 
 ```kame
-(nonempty VALUE) = (> (count VALUE) 0)
-(if (nonempty FILES) "build" "nothing to build")
-(if (!= LIMIT 0) "nonzero" "zero")
-(if (!= OPTIONAL :nil) "present" "missing")
+def nonempty value = (count value) > 0
+if nonempty FILES then "build" else "nothing to build"
+if LIMIT != 0 then "nonzero" else "zero"
+if OPTIONAL != nil then "present" else "missing"
 ```
 
 `count` accepts strings, bytes, lists, and records, not numbers, booleans, or nil.
-For an optional collection, guard missing values explicitly:
-`(and (!= OPTIONAL :nil) (nonempty OPTIONAL))`. A list containing nil and a
-record with a nil-valued field are nonempty. Whitespace-only text is nonempty;
-testing `(count (strip TEXT))` instead is an explicit, different policy.
+For an optional collection, `OPTIONAL != nil and (nonempty OPTIONAL)` checks
+that the collection exists before counting its elements. A list containing nil
+and a record with a nil-valued field are nonempty. Whitespace-only text is
+nonempty. Use `count (strip TEXT)` to count characters after trimming whitespace.
 Source-composition `if` uses the same truthiness as runtime `if`; use `nonempty`
-when selection depends on collection membership. Legacy `when` declarations
-must migrate to `if` selecting branch files, not inline declaration bodies.
+when selection depends on collection membership.
 
 ## Capture is data, not an identifier conversion (K25)
 
@@ -63,12 +62,12 @@ SDK cases from `sdk.km/src/km/sdk`:
 
 | Case | Existing behavior / real need | Boundary |
 | --- | --- | --- |
-| HTML Tidy and XSLT (`www.kmk`) | Write directly to the final output; failed or interrupted transforms can leave partial bytes or replace a previous good artifact. | Need an invocation-owned temporary path and publication policy, not mutable shell state. Do not delete the previous good output or a concurrent producer's temporary file. |
-| Tool downloads (`tools.kmk`) | Download directly to the final executable path, then chmod it. Failure or interruption can leave a partial or unusable executable. | The same owned-temporary-file need; installer authentication, retries and package-manager policy remain SDK work. |
-| Compilers/bundlers (`js.kmk`) | Redirections and external tools can leave partial main files or side assets. | Successful output validation is not rollback. Variable asset membership first needs the [output ownership contract](spec/039-output-ownership.md); a cleanup block alone cannot establish ownership. |
-| Managed links (`opencode.kmk`) | Prep preserves user-owned files; clean explicitly refuses without a manifest. | Removing stale owned links is reconciliation, not failure cleanup. Require a validated ownership manifest and race-aware deletion; `lstat`/`readlink` alone is insufficient. |
-| Release/deployment (`release.kmk`) | A tag may exist locally after push failure; deployment can fail after remote changes. | Preserve the failure and support explicit retry/reconciliation. Do not automatically delete tags or undo remote work. |
-| Terraform (`tf.kmk`) | A failed provider operation may leave useful state, logs, and partial remote changes. | Preserve state and diagnostics; let the vendor tool govern recovery. Workspace synchronization/deletion is separate, explicit SDK policy. |
+| HTML Tidy and XSLT | Direct writes can leave partial output after an interruption or replace a previous good artifact. | Stage output in an invocation-owned temporary path, preserve the last good output, and publish only after the transform succeeds. |
+| Tool downloads | An interruption before download or `chmod` completes can leave an unusable executable. | Stage downloads in an invocation-owned path. The SDK controls authentication, retries, and installer policy. |
+| Compilers and bundlers | Redirections and external tools can leave partial main files or side assets. | Use the [output ownership contract](spec/039-output-ownership.md) for variable asset membership. Validation and rollback are separate operations. |
+| Managed links | Preparation preserves user-owned files. Removal requires a manifest. | Validate the ownership manifest and account for races when removing stale links. Treat removal as reconciliation. |
+| Release and deployment | Push failure may leave a local tag. Deployment may fail after making remote changes. | Preserve the failure and support explicit retry or reconciliation. Leave tags and remote state for explicit recovery. |
+| Terraform | A failed provider operation may leave useful state, logs, and partial remote changes. | Preserve state and diagnostics for provider recovery. The SDK controls workspace synchronization and deletion. |
 
 The runtime cancels/reaps owned process graphs and services; it does not remove
 external programs' files or reverse earlier effects. Choose the right cleanup scope:
@@ -85,8 +84,7 @@ external programs' files or reverse earlier effects. Choose the right cleanup sc
 Neither finalizer safely acquires resources on its own, proves deletion ownership,
 or makes redirection/publication transactional. Fresh private workspaces remain
 the author's responsibility; temporary-resource APIs, atomic publication of
-external artifacts, and remote rollback are separate contracts. Native
-`write!`/`yield!` publication is not a transaction for a multi-output recipe.
+external artifacts, and remote rollback are separate contracts. Native `write!` and returned rule content publish individual files.
 
 Test failed publication and interruption, not only nonzero tool exits. Do not add
 persistent mutable Bash sessions, sourcing or traps merely to transliterate shell

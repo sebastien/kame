@@ -2,7 +2,9 @@ package wasm
 
 import (
 	"bytes"
+	"encoding/hex"
 	"kame/core"
+	"kame/host"
 	json "kame/internal/jsonstream"
 	"kame/internal/mem"
 	"kame/lang/eval"
@@ -29,7 +31,7 @@ func (r *Runtime) RequestWatch(data []byte) PureResult {
 		}
 	}
 	started := r.RequestTarget(targets.List[0].Text)
-	if started.Code != "" {
+	if started.Code != "" || started.HostNeeded {
 		return started
 	}
 	for i := 1; i < len(targets.List); i++ {
@@ -126,6 +128,18 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		}
 		e.Str("name")
 		e.Str(keys[i].Name)
+		if keys[i].Kind == core.ResourceGlob {
+			if scan := host.DiscoveryScan(keys[i].Name); scan != keys[i].Name {
+				e.Str("scan")
+				e.Str(scan)
+				e.Str("pattern")
+				e.Str(host.DiscoveryPattern(keys[i].Name))
+				if node := r.Program.Engine.Lookup(keys[i]); node != nil && node.Current {
+					e.Str("signature")
+					e.Str(hex.EncodeToString(node.Signature.Digest[:]))
+				}
+			}
+		}
 		if keys[i].Kind == core.ResourceFile {
 			e.Str("metadata")
 			e.Bool(r.Program.ResourceMetadataObserved(keys[i]))
@@ -166,6 +180,29 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Reset()
 	return PureResult{Text: text}
+}
+
+// WatchGlobFingerprint compares exact membership without changing watch state.
+func (r *Runtime) WatchGlobFingerprint(name string, data []byte) PureResult {
+	if !r.Watching || r.Program == nil {
+		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no active watch session")}
+	}
+	key := core.ResourceKey{Kind: core.ResourceGlob, Name: name}
+	if host.DiscoveryScan(name) == name || r.Program.Engine.Lookup(key) == nil {
+		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "unknown grouped watch resource")}
+	}
+	var candidates core.Value
+	if !CompletionValueFromJSON(r.Alloc, data, &candidates) {
+		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid wildcard candidates")}
+	}
+	matches, d := host.FilterDiscovery(r.Alloc, name, candidates)
+	defer matches.Free(r.Alloc)
+	defer d.Free(r.Alloc)
+	if d.Code != "" {
+		return PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message)}
+	}
+	signature := core.ValueSignature(matches)
+	return PureResult{Text: pureText(r.Alloc, hex.EncodeToString(signature.Digest[:]))}
 }
 
 func freeWatchKeys(a mem.Allocator, keys []core.ResourceKey) {
@@ -215,7 +252,12 @@ func (r *Runtime) parseWatchBatch(data []byte, withObserved bool) watchBatch {
 				}
 			}
 		}
-		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob" && kind.Text != "tool") || name.Kind != core.String || name.Text == "" || strings.IndexByte(name.Text, 0) >= 0 {
+		validName := name.Kind == core.String && name.Text != ""
+		if validName && strings.IndexByte(name.Text, 0) >= 0 {
+			validName = kind.Text == "glob" && host.DiscoveryScan(name.Text) != name.Text &&
+				r.Program.Engine.Lookup(core.ResourceKey{Kind: core.ResourceGlob, Name: name.Text}) != nil
+		}
+		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob" && kind.Text != "tool") || !validName {
 			freeWatchKeys(r.Alloc, keys)
 			mem.FreeSlice(nil, observedOnly)
 			return watchBatch{Result: PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch resource key")}}

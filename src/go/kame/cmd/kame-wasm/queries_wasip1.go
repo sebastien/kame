@@ -2,6 +2,7 @@ package main
 
 import (
 	"kame/host/wasm"
+	"kame/internal/mem"
 )
 
 func query(i *instance, r wasm.PureResult, dst, size, out uint32) uint32 {
@@ -47,6 +48,46 @@ func query_watch_state(handle uint64, dst, size, out uint32) uint32 {
 		return code
 	}
 	return query(i, i.runtime.WatchStateJSON(), dst, size, out)
+}
+
+//go:wasmexport kame_wasm_declaration_state
+func query_declaration_state(handle uint64, dst, size, out uint32) uint32 {
+	i, code := runtimeInstance(handle)
+	if code != 0 {
+		return code
+	}
+	var diagnostic string
+	return finish(i.runtime.DeclarationStateJSON(), dst, size, out, &diagnostic)
+}
+
+//go:wasmexport kame_wasm_declaration_fingerprint
+func query_declaration_fingerprint(handle uint64, src, length, dst, size, out uint32) uint32 {
+	i := instances[handle]
+	if i == nil {
+		return 1
+	}
+	data, ok := region(src, length)
+	if !ok {
+		return 4
+	}
+	return query(i, wasm.DeclarationWatchFingerprint(mem.System, data), dst, size, out)
+}
+
+//go:wasmexport kame_wasm_watch_glob_fingerprint
+func query_watch_glob_fingerprint(handle uint64, name, nameLength, candidates, candidatesLength, dst, size, out uint32) uint32 {
+	i, code := runtimeInstance(handle)
+	if code != 0 {
+		return code
+	}
+	n, ok := text(name, nameLength)
+	if !ok {
+		return 4
+	}
+	data, ok := region(candidates, candidatesLength)
+	if !ok {
+		return 4
+	}
+	return query(i, i.runtime.WatchGlobFingerprint(n, data), dst, size, out)
 }
 
 //go:wasmexport kame_wasm_result_diagnostic

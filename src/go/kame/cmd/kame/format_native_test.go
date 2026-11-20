@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// These checks must run against the compiled So CLI, not the Go filesystem
-// extern doubles. Set KAME_NATIVE_FORMAT_TEST_BINARY to an absolute binary path.
+// These checks exercise the compiled Go CLI across a process boundary.
+// Set KAME_NATIVE_FORMAT_TEST_BINARY to an absolute binary path.
 func nativeFormatBinary(t *testing.T) string {
 	t.Helper()
 	binary := os.Getenv("KAME_NATIVE_FORMAT_TEST_BINARY")
@@ -39,7 +39,7 @@ func TestNativeFormatPreservesPermissionsAndIgnoresStagingSymlink(t *testing.T) 
 			name := filepath.Join(directory, "source.km")
 			victim := filepath.Join(directory, "victim")
 			staging := name + ".kame-fmt.tmp"
-			if err := os.WriteFile(name, []byte("[1,   2]\n"), mode); err != nil {
+			if err := os.WriteFile(name, []byte("value = [1,   2]\n"), mode); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.Chmod(name, mode); err != nil {
@@ -64,7 +64,7 @@ func TestNativeFormatPreservesPermissionsAndIgnoresStagingSymlink(t *testing.T) 
 				t.Fatalf("source mode: %v, want %o", info.Mode(), mode)
 			}
 			data, err = os.ReadFile(name)
-			if err != nil || string(data) != "[1, 2]\n" {
+			if err != nil || string(data) != "value = [1, 2]\n" {
 				t.Fatalf("formatted source: %q, %v", data, err)
 			}
 			if target, err := os.Readlink(staging); err != nil || target != victim {
@@ -83,7 +83,7 @@ func TestNativeFormatSourceSymlinkAndUnchangedFile(t *testing.T) {
 	directory := t.TempDir()
 	target := filepath.Join(directory, "target.km")
 	name := filepath.Join(directory, "source.km")
-	if err := os.WriteFile(target, []byte("[1,   2]\n"), 0o600); err != nil {
+	if err := os.WriteFile(target, []byte("value = [1,   2]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, name); err != nil {
@@ -98,7 +98,7 @@ func TestNativeFormatSourceSymlinkAndUnchangedFile(t *testing.T) {
 		t.Fatalf("source symlink replacement mode: %v", info.Mode())
 	}
 	data, err := os.ReadFile(target)
-	if err != nil || string(data) != "[1,   2]\n" {
+	if err != nil || string(data) != "value = [1,   2]\n" {
 		t.Fatalf("source target changed: %q, %v", data, err)
 	}
 	nativeFormat(t, binary, name)
@@ -115,7 +115,7 @@ func TestNativeFormatConcurrentPublication(t *testing.T) {
 	binary := nativeFormatBinary(t)
 	directory := t.TempDir()
 	name := filepath.Join(directory, "source.km")
-	if err := os.WriteFile(name, []byte("[1,   2]\n"), 0o600); err != nil {
+	if err := os.WriteFile(name, []byte("value = [1,   2]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	commands := make([]*exec.Cmd, 16)
@@ -131,7 +131,7 @@ func TestNativeFormatConcurrentPublication(t *testing.T) {
 		}
 	}
 	data, err := os.ReadFile(name)
-	if err != nil || string(data) != "[1, 2]\n" {
+	if err != nil || string(data) != "value = [1, 2]\n" {
 		t.Fatalf("concurrent output: %q, %v", data, err)
 	}
 	info, err := os.Stat(name)
@@ -163,7 +163,7 @@ func TestNativeFormatReplacementFailurePreservesSource(t *testing.T) {
 	}
 	directory := t.TempDir()
 	name := filepath.Join(directory, "source.km")
-	if err := os.WriteFile(name, []byte("[1,   2]\n"), 0o600); err != nil {
+	if err := os.WriteFile(name, []byte("value = [1,   2]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(directory, 0o500); err != nil {
@@ -175,7 +175,7 @@ func TestNativeFormatReplacementFailurePreservesSource(t *testing.T) {
 		t.Fatalf("replacement diagnostic: %v\n%s", err, output)
 	}
 	data, err := os.ReadFile(name)
-	if err != nil || string(data) != "[1,   2]\n" {
+	if err != nil || string(data) != "value = [1,   2]\n" {
 		t.Fatalf("failed replacement changed source: %q, %v", data, err)
 	}
 	info, err := os.Stat(name)

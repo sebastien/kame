@@ -33,7 +33,7 @@ func TestGoSuite(t *testing.T) {
 	t.Run("FormatDocumentCanonicalizesInlineDirectives", func(t *testing.T) { TestFormatDocumentCanonicalizesInlineDirectives(legacy.Wrap(t)) })
 	t.Run("FormatTemplateCanonicalizesEscapes", func(t *testing.T) { TestFormatTemplateCanonicalizesEscapes(legacy.Wrap(t)) })
 	t.Run("FormattingPreservesEscapedAndRawTemplateBytes", func(t *testing.T) { TestFormattingPreservesEscapedAndRawTemplateBytes(legacy.Wrap(t)) })
-	t.Run("MalformedExpansionStaysLiteralWithWarning", func(t *testing.T) { TestMalformedExpansionStaysLiteralWithWarning(legacy.Wrap(t)) })
+	t.Run("MalformedExpansionStaysLiteralWithError", func(t *testing.T) { TestMalformedExpansionStaysLiteralWithError(legacy.Wrap(t)) })
 	t.Run("MalformedSelectorStaysLiteral", func(t *testing.T) { TestMalformedSelectorStaysLiteral(legacy.Wrap(t)) })
 	t.Run("RawBlockAcceptsLabeledRawEnd", func(t *testing.T) { TestRawBlockAcceptsLabeledRawEnd(legacy.Wrap(t)) })
 	t.Run("RawScannerFindsClosingAfterLiteralDirectiveOnSameLine", func(t *testing.T) { TestRawScannerFindsClosingAfterLiteralDirectiveOnSameLine(legacy.Wrap(t)) })

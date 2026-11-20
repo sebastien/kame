@@ -1,0 +1,5 @@
+# Include shared values, then make one file.
+include ./messages.km
+
+task default : ./build/greeting.txt
+rule ./build/greeting.txt = str GREETING "\n"

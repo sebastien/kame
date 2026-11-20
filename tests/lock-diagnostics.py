@@ -103,7 +103,7 @@ def terminalWait(command: list[str], root: Path, *, color: bool = True, environm
 
 def nativeLocks(binary: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('TOKEN = "default"\ndefault :\n\tprintf "result\\n"\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf "held\\n"\n')
+	(root / "Makefile.km").write_text('TOKEN = "default"\ntask default :\n\tprintf "result\\n"\ntask hold : ; {shell: "sh"}\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf "held\\n"\n')
 	with ExitStack() as stack:
 		owner = start(stack, [binary, "--define", "TOKEN=secret-not-for-lock-logs", "hold"], root, "owner")
 		waitFor(lambda: (root / "ready").exists(), owner)
@@ -112,7 +112,7 @@ def nativeLocks(binary: str, root: Path) -> None:
 		free = subprocess.run([binary], cwd=root, capture_output=True, text=True, timeout=5)
 		assert free.returncode == 0 and free.stdout == "result\n", free
 		text = start(stack, [binary, "--output=text", "--color=always", "hold"], root, "text")
-		structured = start(stack, [binary, "--json", "--color=always", "-f", "Makefile.kmk", "hold"], root, "json")
+		structured = start(stack, [binary, "--json", "--color=always", "-f", "Makefile.km", "hold"], root, "json")
 		watch = start(stack, [binary, "--output=text", "--color=never", "--watch", "hold"], root, "watch")
 		waitFor(lambda: "BLOCKED" in (root / "text.err").read_text(), text)
 		waitFor(lambda: '"type":"lock-waiting"' in (root / "json.out").read_text(), structured)
@@ -165,7 +165,7 @@ def groupedResources(binary: str, root: Path) -> None:
 	"""A grouped producer locks every declared sibling, not just the requested one."""
 	root.mkdir()
 	(root / "input").write_text("seed\n")
-	(root / "Makefile.kmk").write_text("./build/one ./build/two : ./input\n\tmkdir -p ./build\n\tcp @< ./build/one\n\tcp @< ./build/two\n\ttouch grouped\n\tread reply < ./gate\n")
+	(root / "Makefile.km").write_text('rule ./build/one ./build/two : ./input ; {shell: "sh"}\n\tmkdir -p ./build\n\tcp @{inputs.0} ./build/one\n\tcp @{inputs.0} ./build/two\n\ttouch grouped\n\tread reply < ./gate\n')
 	os.mkfifo(root / "gate")
 	with ExitStack() as stack:
 		first = start(stack, [binary, "./build/one"], root, "first")
@@ -192,7 +192,7 @@ def groupedResources(binary: str, root: Path) -> None:
 
 def nativeCache(binary: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached : ; [shell: kash]\n\t(write! ./side "changed")\n\t(out! "cached")\n')
+	(root / "Makefile.km").write_text('task cached cached :\n\t(write! ./side "changed")\n\t(out! "cached")\n')
 	seed = subprocess.run([binary, "cached"], cwd=root, capture_output=True, text=True, timeout=5)
 	assert seed.returncode == 0, seed
 	(root / "side").unlink()
@@ -230,7 +230,7 @@ def nativeCache(binary: str, root: Path) -> None:
 def nativeHardlinks(binary: str, root: Path) -> None:
 	"""Keep hard-linked user files intact during acquisition and release."""
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached : ; [shell: kash]\n\t(out! "cached")\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n')
+	(root / "Makefile.km").write_text('task cached cached :\n\t(out! "cached")\ntask hold : ; {shell: "sh"}\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n')
 	important = root / "important"
 	important.write_bytes(b"keep this file\n")
 	projectLock = root / ".kame/outputs/lock"
@@ -266,7 +266,7 @@ def nativeHardlinks(binary: str, root: Path) -> None:
 
 def nodeLocks(script: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf cached\n')
+	(root / "Makefile.km").write_text('task cached cached : ; {shell: "sh"}\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf cached\n')
 	with ExitStack() as stack:
 		owner = start(stack, ["node", script, "cached"], root, "owner")
 		waitFor(lambda: (root / "ready").exists(), owner)

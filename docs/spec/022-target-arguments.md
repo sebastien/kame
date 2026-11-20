@@ -10,7 +10,7 @@ A task or service may declare standalone argument blocks after its single
 literal target name:
 
 ```kame
-task deploy {environment} {region=us-east} : configure ./config/@{environment}/@{region}.json
+task deploy {environment} {region=us-east} : configure ./config/${environment}/${region}.json
 	ship $environment $region
 
 service dev {port=8080}
@@ -28,7 +28,7 @@ rules use captures. Argument names follow definition identifier rules,
 are unique within the declaration, and cannot collide with target captures or
 reserved selectors.
 
-Defaults are literal text and are not evaluated as expressions; `@{…}` is not
+Defaults are literal text and are not evaluated as expressions; `${…}` is not
 recognized inside an argument block. Empty defaults are allowed; names and
 values cannot contain whitespace or NUL. A declaration without arguments follows
 the ordinary rule grammar of `055` §10.1.
@@ -67,7 +67,7 @@ recipes.
 
 Bound arguments are immutable string bindings in the selected rule's lexical
 scope: `$environment` in a Kash body, `environment` in an expression body or
-metadata record, and `@{environment}` in header interpolation and foreign-shell
+metadata record, `${environment}` in header substitution, and `@{environment}` in foreign-shell
 recipes. They are available while resolving dependencies, rendering inputs and
 outputs, selecting tools, computing cache identity and evaluating the body. A local
 argument shadows a global definition only when the declaration explicitly uses

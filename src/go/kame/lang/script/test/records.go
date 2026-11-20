@@ -32,7 +32,7 @@ func TestKashRecordLoopsRejectAmbiguousHeadersAndCollisions(t *testing.T) {
 	texts := []string{
 		"for x from ./file\n\tbreak", "for x from ./file :bytes\n\tbreak", "for x from ./file $frame\n\tbreak",
 		"for x from ./file ?? ./other :lines\n\tbreak", "for x from cat ./file | head :lines\n\tbreak", "for x from ./file :lines; true\n\tbreak",
-		"for x from ./file :lines\n\tlet x = 1", "for env from ./file :lines\n\tbreak", "for x from ./file :lines\n",
+		"for x from ./file :lines\n\tlet x = 1", "for true from ./file :lines\n\tbreak", "for x from ./file :lines\n",
 	}
 	for i := range texts {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", texts[i])

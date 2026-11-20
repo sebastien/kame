@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-09 Kash explicit merge ordering parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/ordering"
 mkdir -p "$work"
@@ -26,7 +27,7 @@ awk 'BEGIN {for(i=0;i<65535;i++)printf "x";printf "\n"}' >"$work/large-a"
 awk 'BEGIN {for(i=0;i<65535;i++)printf "y";printf "\n"}' >"$work/large-b"
 cat "$work/large-a" "$work/large-b" >"$work/large-expected"
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	output="$work/$backend-result"
 	test-step "$backend: complete-record turns, slow inputs, EOF and unequal producers"
 	run_case "(sh -c \"sleep 0.1; printf 'a1\\na2\\n'\" |(frame :lines), printf \"b1\\nb2\\n\" |(frame :lines)) |(merge :order round-robin) cat > $output"
@@ -93,11 +94,11 @@ import { mkdtempSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from 
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-const { Kame } = await import('./dist/kame.js');
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
 const directory = mkdtempSync(join(tmpdir(), 'kame-ordering-')), output = join(directory, 'output');
 writeFileSync(output, 'preserve');
-const kame = await Kame.create();
-const program = await kame.compile(`SHELL = kash\nprobe :\n\t(printf "a\\n" |(frame :lines), printf "b\\n" |(frame :lines)) |(merge :order round-robin) cat > ${JSON.stringify(output)}\n`);
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
+const program = await kame.compile(`task probe\n\t(printf "a\\n" |(frame :lines), printf "b\\n" |(frame :lines)) |(merge :order round-robin) cat > ${JSON.stringify(output)}\n`);
 const prototype = Object.getPrototypeOf(program.module), dispatch = prototype.dispatch, spawn = childProcess.spawn;
 let mutate, forwarded = 0, launches = 0;
 prototype.dispatch = function (...args) {

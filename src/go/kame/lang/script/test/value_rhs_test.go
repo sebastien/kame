@@ -33,8 +33,8 @@ func TestKashRequiresExplicitBindingsInAllBlockContexts(t *testing.T) {
 func TestDefinitionRHSUsesValueExpressionGrammar(t *testing.T) {
 	const input = "value = f 1 2 +\n    3\n" +
 		"selected = match value\n    3 => true\n    else => false\n" +
-		"next = 4\n"
-	parsed := script.Parse(nil, "definitions.km", input)
+		"next = \\\r\n    4\n"
+	parsed := script.ParseKameFile(nil, "definitions.km", input)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 3 {
 		t.Fatalf("value expressions consumed the wrong definition range: %v", parsed.Diagnostics)
@@ -47,7 +47,7 @@ func TestDefinitionRHSUsesValueExpressionGrammar(t *testing.T) {
 		t.Fatal("definition did not keep its match arms")
 	}
 	if next := parsed.Items[2].Definition; next.Name != "next" || next.Expression.Int != 4 {
-		t.Fatal("match consumed a following definition")
+		t.Fatal("the definition following the match lost its continued value")
 	}
 }
 
@@ -56,7 +56,7 @@ func TestValueBlockDisambiguatesContinuedExpressions(t *testing.T) {
 		"continued =\n\tif true then 3 else 0\n" +
 		"selected = match value\n\t3 => true\n\telse => false\n" +
 		"next = 4\n"
-	s := script.Parse(nil, "blocks.km", text)
+	s := script.ParseKameFile(nil, "blocks.km", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
 		t.Fatalf("value blocks failed to parse: %v", s.Diagnostics)
@@ -67,7 +67,7 @@ func TestValueBlockDisambiguatesContinuedExpressions(t *testing.T) {
 		t.Fatalf("incorrect distinction between blocks and expressions: %+v", d)
 	}
 	formatted := script.Format(nil, s)
-	again := script.Parse(nil, "formatted.km", formatted)
+	again := script.ParseKameFile(nil, "formatted.km", formatted)
 	defer again.Free()
 	if len(again.Diagnostics) != 0 || script.Format(nil, again) != formatted ||
 		again.Items[2].Definition.Expression.Kind != expr.Match {
@@ -136,7 +136,7 @@ func TestFunctionHeadersRequireDefInBothSourceGrammars(t *testing.T) {
 
 func TestLongDefHeaderKeepsParametersOnOneLine(t *testing.T) {
 	header := "def example first " + strings.Repeat("x", 72) + " rest... ="
-	s := script.Parse(nil, "long.km", header+" first\n")
+	s := script.ParseKameFile(nil, "long.km", header+" first\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 {
 		t.Fatalf("function failed to parse: %v", s.Diagnostics)

@@ -33,14 +33,14 @@ func TestKashCommandWordAtSigns(t *testing.T) {
 	}
 	for _, text := range []string{
 		"printf @{name}", "printf prefix@{name}", "printf ./dir/@{name}",
-		"printf > @{name}/file", ":cwd ./@{name} printf value",
+		"printf > @{name}/file", "cwd: ./@{name} printf value",
 		"printf @\\\n{name}", "printf \\@{name}",
 	} {
 		invalid := script.ParseKash(nil, "invalid.kash", text)
 		start, end := strings.IndexByte(text, '@'), strings.IndexByte(text, '{')+1
 		if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "PARSE_ERR" ||
 			invalid.Diagnostics[0].Span.Start != start || invalid.Diagnostics[0].Span.End != end ||
-			!strings.Contains(invalid.Diagnostics[0].Message, "$name") {
+			!strings.Contains(invalid.Diagnostics[0].Message, "${expr}") {
 			t.Errorf("%q reported %v", text, invalid.Diagnostics)
 		}
 		invalid.Free()

@@ -28,30 +28,37 @@ diag() { # EXPR CODE
 }
 
 test-step "let bindings"
-evaluates '(let [name "app" path ./src] (join " " [name path]))' '"app ./src"'
-evaluates '(let [x 1 y 2] (join "-" [(str x) (str y)]))' '"1-2"'
-diag '(let)' 'EXPR_INVALID'
-diag '(let [x] x)' 'EXPR_INVALID'
+cli_run -- do run --lang kash -c $'let name = "app"\nlet path = ./src\n(out! (str name " " path))'
+cli_expect_status 0
+cli_expect_stdout 'app ./src'
+cli_expect_stderr_empty
+cli_run -- do run --lang kash -c $'let x = 1\nlet y = 2\n(out! (str x "-" y))'
+cli_expect_status 0
+cli_expect_stdout '1-2'
+cli_expect_stderr_empty
 
 test-step "def bindings"
-evaluates '(def greeting "hello")' '"hello"'
-diag '(def)' 'DEF_INVALID'
-diag '(def name)' 'DEF_INVALID'
+cli_run -- do run --lang kash -c $'def greeting = "hello"\n(out! greeting)'
+cli_expect_status 0
+cli_expect_stdout 'hello'
+cli_expect_stderr_empty
+diag 'eval "def name = 1"' 'PARSE_ERR'
 
 test-step "eval evaluates expression text"
-evaluates '(eval "(join \"-\" [\"a\" \"b\"])")' '"a-b"'
-evaluates '(eval ":true")' ':true'
+evaluates 'eval "join \"-\" [\"a\", \"b\"]"' '"a-b"'
+evaluates 'eval "true"' 'true'
 diag '(eval 1)' 'EXPR_INVALID'
 
 test-step "optional fallback"
-evaluates '(? missing-name "fallback")' '"fallback"'
-evaluates '(let [x 1] (? x "fallback"))' '1'
+evaluates 'missing-name ?? "fallback"' '"fallback"'
+evaluates '(x => x ?? "fallback") 1' '1'
 
 test-step "pipes"
-evaluates '(1 | str)' '"1"'
-evaluates '("a-b" | replace "-" "+" _)' '"a+b"'
-evaluates '("x" | uppercase)' '"X"'
-evaluates '(1 | str | uppercase)' '"1"'
-evaluates '(("a" | uppercase) | ([v] (join "" [v "!"])))' '"A!"'
+evaluates '1 |> str' '"1"'
+evaluates '"a-b" |> subst "-" "+"' '"a+b"'
+evaluates '"x" |> uppercase' '"X"'
+evaluates '1 |> str |> uppercase' '"1"'
+evaluates '"a" |> uppercase |> str _ "!"' '"A!"'
+evaluates '(add-mark => "a" |> uppercase |> add-mark) (v => str v "!")' '"A!"'
 
 test-end

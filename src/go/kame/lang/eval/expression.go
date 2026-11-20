@@ -14,6 +14,7 @@ const MaxEvaluationDepth = 32
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
 	expression = expr.Ungroup(expression)
+	context.Cwd = context.Unit.Directory(context.Cwd)
 	if context.evaluationDepth >= MaxEvaluationDepth {
 		span := source.Span{}
 		if expression != nil {
@@ -22,13 +23,11 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		return failure(context.Run, "EVAL_DEPTH", span, "evaluation depth limit exceeded")
 	}
 	context.evaluationDepth++
-	previousEnv := context.ReserveEnv
 	previousOrigin := context.SourceOrigin
 	previousSource, previousEntry := context.Source, context.EntrySource
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 	context.Engine = engine
 	if expression != nil {
-		context.ReserveEnv = expression.Kash
 		context.SourceOrigin = expression.SourceOrigin
 		context.EntrySource = expression.EntrySource
 		if expression.EntrySource != nil {
@@ -48,7 +47,6 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		result.Free(context.Run)
 		result = Result{Completed: true}
 	}
-	context.ReserveEnv = previousEnv
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 	context.evaluationDepth--
 	attachSource(&result, context)
@@ -64,11 +62,14 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	if context.pureValueBlock && (expression.ActionPrefix != "" || expression.Kind == expr.CommandList || expression.Kind == expr.CommandGraph || expression.Kind == expr.CommandCapture || expression.Kind == expr.CommandTest) {
 		return failure(context.Run, "PHASE_INVALID", expression.Span, "commands require an action phase")
 	}
-	if expression.ActionPrefix != "" && !(expression.Kind == expr.CommandCapture && expression.ActionPrefix == "$?(") {
+	if expression.ActionPrefix != "" && expression.Kind != expr.CommandCapture &&
+		expression.Kind != expr.CommandList {
 		return failure(context.Run, "EXPR_INVALID", expression.Span, "action form does not yet support evaluation")
 	}
 	context.Engine, context.Scope, context.Requests = engine, scope, p.Requests
 	switch expression.Kind {
+	case expr.RuleValue:
+		return p.constructRule(scope, expression, context)
 	case expr.CommandStream:
 		return Result{Value: core.Value{Kind: core.Nil}}
 	case expr.Nil:
@@ -85,20 +86,11 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		}
 		return p.stringValue(scope, expression, context)
 	case expr.Symbol:
-		return Result{Value: core.NewString(context.Run, expression.Text)}
+		return Result{Value: core.NewSymbol(context.Run, expression.Text)}
 	case expr.Path:
-		if expression.Pattern != nil && len(expression.Parts) == 0 {
-			text := expr.CanonicalPattern(context.Run, expression.Pattern)
-			result := Result{Value: core.NewPattern(context.Run, text)}
-			mem.FreeString(context.Run, text)
-			return result
-		}
 		return p.pathExpression(scope, expression, context)
 	case expr.Name:
-		if expression.Kash && expression.Text == "env" {
-			return failure(context.Run, "REF_MISSING", expression.Span, "environment namespace requires a named variable")
-		}
-		return name(scope, expression.Text, expression.Span, context)
+		return name(scope, expression.Text, expression.LetBinding, expression.Span, context)
 	case expr.InvocationJoin:
 		r := p.joinProcesses(context)
 		if r.Waiting || r.Diagnostic.Code != "" {
@@ -119,16 +111,22 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return result
 	case expr.KashFunction:
 		if expression.Bool {
-			return failure(context.Run, "FEATURE_UNSUP", expression.Span, "generator execution is unavailable")
+			return p.newGenerator(expression, scope, context)
 		}
 		return p.nativeKash(expression, scope, context)
 	case expr.KashSet:
-		if context.pureValueBlock && strings.HasPrefix(expression.Text, "env/") {
-			return failure(context.Run, "PHASE_INVALID", expression.Span, "environment assignment requires an action phase")
-		}
-		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "assignment execution is unavailable")
+		return p.kashSet(scope, expression, context)
 	case expr.KashYield:
-		return failure(context.Run, "FEATURE_UNSUP", expression.Span, "yield requires generator execution")
+		if context.generator == nil {
+			return failure(context.Run, "PHASE_INVALID", expression.Span, "yield requires a generator invocation")
+		}
+		result := p.evaluate(engine, scope, expression.Items[0], context)
+		if result.Value.HasStream() {
+			result.Free(context.Run)
+			return failure(context.Run, "EXPR_INVALID", expression.Span, "yield requires a materialized value")
+		}
+		result.Yielded = !result.Waiting && !result.Completed && result.Diagnostic.Code == ""
+		return result
 	case expr.KashLet:
 		return p.kashLet(scope, expression, context)
 	case expr.KashExit:
@@ -159,9 +157,25 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.application(scope, expression, context)
 	case expr.Conditional:
 		return p.conditional(scope, expression.Items, context, expression.Span)
-	case expr.CommandCapture, expr.CommandGraph, expr.CommandTest:
+	case expr.CommandCapture:
+		if context.captureListMember != expression {
+			return p.withCaptureUnit(expression, context, p.capture)
+		}
 		return p.capture(expression, context)
+	case expr.CommandGraph, expr.CommandTest:
+		return p.capture(expression, context)
+	case expr.CommandWord:
+		return p.commandWord(expression, context, "argument")
 	case expr.CommandList:
+		if expression.ActionPrefix == "$&(" {
+			if context.PurePredicate || context.Phase != EvaluatePhase {
+				return failure(context.Run, "PHASE_INVALID", expression.Span, "async capture requires an action phase")
+			}
+			return p.withCaptureUnit(expression, context, p.startAsyncCapture)
+		}
+		if expression.CommandListCapture {
+			return p.withCaptureUnit(expression, context, p.commandList)
+		}
 		return p.commandList(expression, context)
 	case expr.KashIf, expr.KashMatch, expr.Match:
 		return p.kashControl(scope, expression, context)
@@ -191,12 +205,6 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	case expr.Placeholder:
 		return placeholder(scope, expression, context)
-	case expr.Selector:
-		result := p.selector(expression.Text, expression.Span, context)
-		if expression.Expansion == "selector" {
-			return literalSelectorTip(context.Run, result)
-		}
-		return result
 	}
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "invalid expression")
 }
@@ -217,7 +225,7 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "placeholder outside section")
 }
 
-func name(scope *Scope, name string, span source.Span, context *Context) Result {
+func name(scope *Scope, name string, let *expr.LetBinding, span source.Span, context *Context) Result {
 	if name == pipeInputName {
 		for current := scope; current != nil; current = current.Parent {
 			if current.pipeInput != nil {
@@ -229,25 +237,39 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if len(name) > 2 && name[:2] == "x/" {
 		return context.TrackedTool(name[2:], span)
 	}
-	b := scope.lookup(name)
+	if operationName, explicit := strings.CutPrefix(name, "std/"); explicit {
+		if operation := context.Program.Registry.lookup(operationName); operation != nil {
+			return Result{Value: context.Program.newOperationCallable(operation.Name)}
+		}
+		return failure(context.Run, "REF_MISSING", span, "unknown standard library operation: "+operationName)
+	}
+	if member, explicit := strings.CutPrefix(name, "module/"); explicit {
+		return context.modulePath(member, span)
+	}
+	b := scope.lookupResolved(name, let)
 	if b == nil {
-		if name == "inputs" {
-			return context.Program.selector("@<*", span, context)
+		if context.Program != nil {
+			if imported := context.Program.moduleImport(context.SourceOrigin, name); imported.module != nil {
+				return context.importedModuleMember(imported.module, imported.member, span)
+			}
+			if imp, member := context.Program.findImport(context.SourceOrigin, name); imp != nil {
+				return context.importedValue(imp, member, span)
+			}
 		}
-		if name == "outputs" {
-			return context.Program.selector("@>*", span, context)
+		switch name {
+		case "inputs", "outputs", "args":
+			return context.contextList(name, span)
+		case "changed-inputs":
+			return context.changedInputs(span)
 		}
-		if name == "inputs/changed" {
-			return context.Program.selector("@<?", span, context)
-		}
-		if name == "args" {
-			return context.Program.selector("@*", span, context)
+		if name == "captures" {
+			if len(context.RuleFrames) == 0 {
+				return failure(context.Run, "SEL_NO_CONTEXT", span, "captures requires a rule context")
+			}
+			return Result{Value: core.NewList(context.Run, context.RuleFrames[len(context.RuleFrames)-1].Captures)}
 		}
 		if name == "kash" && context.Program != nil {
 			return Result{Value: context.Program.KashSelector()}
-		}
-		if name == "kame" && context.Program != nil {
-			return Result{Value: context.Program.KameSelector()}
 		}
 		if IsSpecialForm(name) {
 			return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name)
@@ -255,6 +277,14 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		if context.Program != nil {
 			if operation := context.Program.Registry.lookup(name); operation != nil {
 				return Result{Value: context.Program.newOperationCallable(operation.Name)}
+			}
+			if bareEnvironmentName(name) {
+				operand := expr.LiteralString(name, span)
+				result := context.Program.readEnvironment(scope, []*expr.Expr{&operand}, context, span)
+				if !result.Waiting && !result.Completed && result.Diagnostic.Code == "" && result.Value.Kind == core.Nil {
+					return failure(context.Run, "ENV_VAR_MISSING", span, "environment variable is unset: "+name)
+				}
+				return result
 			}
 		}
 		return missingOperation(context, name, span, true)
@@ -276,6 +306,10 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	}
 	if b.Kind == bindingFunction {
 		context.observeDefinitionSource(b.Function.Definition)
+		if b.Function.Owner != nil {
+			return Result{Value: core.Value{Kind: core.Callable, Callable: b.Function,
+				CallableOwner: b.Function.Owner, CallableSignature: &b.Function.Signature}}
+		}
 		// A definition can be returned from its defining let scope. Keep
 		// that scope alive until the returned value is consumed or rejected.
 		wrapper := borrowFunction(context.Run, b.Function)
@@ -325,4 +359,12 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return Result{Waiting: true}
 	}
 	return Result{Value: value.Value.Clone(context.Run)}
+}
+
+// missingOperation reports ordinary unresolved library or lexical names.
+func missingOperation(c *Context, name string, span source.Span, reference bool) Result {
+	if reference {
+		return failure(c.Run, "REF_MISSING", span, "unknown reference: "+name)
+	}
+	return failure(c.Run, "OP_UNKNOWN", span, "unknown operation: "+name)
 }

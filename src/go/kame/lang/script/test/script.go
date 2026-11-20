@@ -6,6 +6,7 @@ import (
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
+	"strings"
 )
 
 func sameSpan(span source.Span, start int, end int) bool {
@@ -13,8 +14,9 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestScriptComposesPositionedLanguageForms(t *testing.T) {
-	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n"
-	s := script.Parse(t.Allocator(), "test.km", text)
+	text := "# setup\nvalue = 42\nrule ./out : value\n\techo $inputs.0\n(name value)\n"
+	authored := source.Source{Name: "test.km", Text: text}
+	s := script.ParseFragment(t.Allocator(), &authored, "km", 0, len(text))
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
 		if len(s.Diagnostics) != 0 {
@@ -27,15 +29,18 @@ func TestScriptComposesPositionedLanguageForms(t *testing.T) {
 	if s.Items[0].Kind != script.Comment || s.Items[1].Definition == nil || s.Items[2].Rule == nil || s.Items[3].Expression == nil {
 		t.Error("script item kind did not retain its delegated AST")
 	}
-	if !sameSpan(s.Items[2].Rule.Span, 19, 41) || !sameSpan(s.Items[2].Rule.Body[0].Span, 34, 41) || !sameSpan(s.Items[3].Expression.Span, 42, 54) {
+	statement := strings.Index(text, "(name value)")
+	if !sameSpan(s.Items[2].Rule.Span, strings.Index(text, "rule "), statement-1) ||
+		!sameSpan(s.Items[2].Rule.Body[0].Span, strings.Index(text, "echo "), statement-1) ||
+		!sameSpan(s.Items[3].Expression.Span, statement, len(text)-1) {
 		t.Error("delegated AST spans were not relative to the script source")
 	}
 }
 
 func TestScriptReportsOrphanedIndent(t *testing.T) {
-	s := script.Parse(t.Allocator(), "test.km", "\techo stray\n")
+	s := script.ParseKameFile(t.Allocator(), "test.km", "\t42\n")
 	defer s.Free()
-	if len(s.Diagnostics) != 1 || s.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(s.Diagnostics[0].Span, 0, 11) {
+	if len(s.Diagnostics) != 1 || s.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(s.Diagnostics[0].Span, 1, 3) {
 		t.Error("orphaned indentation did not produce a positioned parse error")
 	}
 }
@@ -44,15 +49,16 @@ func TestBorrowedParseMatchesOwningParseWithFewerAllocations(t *testing.T) {
 	a := t.Allocator()
 	tracker := a.(*mem.Tracker)
 	name := "borrowed.km"
-	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n"
+	text := "# setup\nvalue = 42\nrule ./out : value\n\techo $inputs.0\n"
 
 	before := tracker.Stats().TotalAlloc
-	owned := script.Parse(a, name, text)
+	owned := script.ParseKameFile(a, name, text)
 	ownedAllocations := tracker.Stats().TotalAlloc - before
 	defer owned.Free()
 
 	before = tracker.Stats().TotalAlloc
-	borrowed := script.ParseBorrowed(a, name, text)
+	authored := source.Source{Name: name, Text: text}
+	borrowed := script.ParseFragment(a, &authored, script.KameFileLanguage, 0, len(text))
 	borrowedAllocations := tracker.Stats().TotalAlloc - before
 	defer borrowed.Free()
 
@@ -88,21 +94,22 @@ func TestBorrowedParseMatchesOwningParseWithFewerAllocations(t *testing.T) {
 }
 
 func TestFormatScriptIsCanonical(t *testing.T) {
-	s := script.Parse(t.Allocator(), "test.km", "# note\nvalue = 42\n./out : ./in\n  echo ok")
+	s := script.ParseKameFile(t.Allocator(), "test.km", "# note\nvalue = 42\nrule ./out : ./in\n  echo ok")
 	defer s.Free()
 	formatted := script.Format(t.Allocator(), s)
-	if formatted != "# note\nvalue = 42\n./out : ./in\n\techo ok\n" {
+	if formatted != "# note\nvalue = 42\nrule ./out : ./in\n\techo ok\n" {
 		t.Errorf("Format() = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
 func TestFormatScriptPreservesBlankLines(t *testing.T) {
-	text := "\nvalue=42\n\n\n# note\n\n./out : ./in\n\techo ok\n\n(name value)\n\n"
-	s := script.Parse(t.Allocator(), "test.km", text)
+	text := "\nvalue=42\n\n\n# note\n\nrule ./out : ./in\n\techo ok\n\n(name value)\n\n"
+	authored := source.Source{Name: "test.km", Text: text}
+	s := script.ParseFragment(t.Allocator(), &authored, "km", 0, len(text))
 	defer s.Free()
 	formatted := script.Format(t.Allocator(), s)
-	want := "\nvalue = 42\n\n\n# note\n\n./out : ./in\n\techo ok\n\n(name value)\n\n"
+	want := "\nvalue = 42\n\n\n# note\n\nrule ./out : ./in\n\techo ok\n\n(name value)\n\n"
 	if formatted != want {
 		t.Errorf("Format() = %q, want %q", formatted, want)
 	}
@@ -110,7 +117,7 @@ func TestFormatScriptPreservesBlankLines(t *testing.T) {
 }
 
 func TestScriptParsesMultilineDefinition(t *testing.T) {
-	s := script.Parse(t.Allocator(), "test.km", "value = {\n  name: \"app\"\n}\n")
+	s := script.ParseKameFile(t.Allocator(), "test.km", "value = {\n  name: \"app\"\n}\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 1 || s.Items[0].Definition == nil {
 		t.Error("multiline definition did not compose")
@@ -119,8 +126,8 @@ func TestScriptParsesMultilineDefinition(t *testing.T) {
 
 func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 	a := t.Allocator()
-	text := "# comment \\\nwords = [\"one\", \\\n  \"two\", \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @{paths}\n\tprintf one \\\n\t two\n"
-	s := script.Parse(a, "continued.kmk", text)
+	text := "# comment \\\nwords = [\"one\", \\\n  \"two\", \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\nrule ./out : ./a \\\n ./b ${paths} ; {shell: \"sh\"}\n\tprintf one \\\n\t two\n"
+	s := script.ParseKameFile(a, "continued.km", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text {
 		t.Error("continuation changed source or item boundaries")
@@ -142,10 +149,10 @@ func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 }
 
 func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
-	text := "include? ./folder/optional\\ file.kmk\ninclude ./required.kmk\n"
-	parsed := script.Parse(t.Allocator(), "test.kmk", text)
+	text := "include? ./folder/optional\\ file.km\ninclude ./required.km\n"
+	parsed := script.ParseKameFile(t.Allocator(), "test.km", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./folder/optional file.kmk" || parsed.Items[1].Include != "./required.kmk" {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./folder/optional file.km" || parsed.Items[1].Include != "./required.km" {
 		t.Error("optional include did not retain its path and required distinction")
 		return
 	}
@@ -156,11 +163,11 @@ func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
 	}
 }
 
-func TestGeneratedDeclarationParsesFormatsAndRetainsName(t *testing.T) {
-	text := "MODULES = [\"core\", \"cli\"]\ngenerate checks = (map (module => {kind: \"task\", target: (join \"\" (list \"check-\" module)), inputs: [], order-only: [], recipe: [\"go test ./...\"]}) MODULES)\n"
-	parsed := script.Parse(t.Allocator(), "generated.kmk", text)
+func TestGenerateFormatsTypedRuleExpression(t *testing.T) {
+	text := "MODULES = [\"core\", \"cli\"]\ndef make-check name =\n\ttask ${name}\n\t\tgo test ./...\ngenerate map make-check MODULES\n"
+	parsed := script.ParseKameFile(t.Allocator(), "generated.km", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 3 {
 		message := ""
 		for i := range parsed.Diagnostics {
 			message += parsed.Diagnostics[i].Message + " "
@@ -168,15 +175,15 @@ func TestGeneratedDeclarationParsesFormatsAndRetainsName(t *testing.T) {
 		t.Errorf("generated declaration parse shape: diagnostics=%d items=%d %s", len(parsed.Diagnostics), len(parsed.Items), message)
 		return
 	}
-	if parsed.Items[1].Kind != script.Generate || parsed.Items[1].GenerateName != "checks" || parsed.Items[1].Expression == nil {
-		t.Errorf("generated declaration item kind=%d name=%q", parsed.Items[1].Kind, parsed.Items[1].GenerateName)
+	if parsed.Items[2].Kind != script.Generate || parsed.Items[2].Expression == nil || parsed.Items[2].Expression.Kind != expr.Application {
+		t.Error("generate lost its typed rule-producing expression")
 		return
 	}
 	formatted := script.Format(t.Allocator(), parsed)
 	defer mem.FreeString(t.Allocator(), formatted)
-	again := script.Parse(t.Allocator(), "generated.kmk", formatted)
+	again := script.ParseKameFile(t.Allocator(), "generated.km", formatted)
 	defer again.Free()
-	if len(again.Diagnostics) != 0 || len(again.Items) != 2 || again.Items[1].Kind != script.Generate || again.Items[1].GenerateName != "checks" {
+	if len(again.Diagnostics) != 0 || len(again.Items) != 3 || again.Items[2].Kind != script.Generate {
 		t.Error("generated declaration formatting changed its structure")
 	}
 }

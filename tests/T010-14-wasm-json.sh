@@ -11,13 +11,14 @@ test-start "T010-14 wasm JSON event stream"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 
 project="$TMPDIR/wasm-json"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF'
-./out.txt :
+cat >"$project/Makefile.km" <<'EOF'
+rule ./out.txt ; {shell: "sh"}
 	printf out > out.txt
 	echo to-stdout
 	echo to-stderr 1>&2
@@ -34,7 +35,7 @@ normalizeProcessDisplay() {
 }
 
 test-step "a successful primary build streams native JSON Lines"
-(cd "$project" && rm -f out.txt && node "$CLI_ROOT/dist/kame.js" --json ./out.txt) >"$project/wasm.jsonl" 2>"$project/wasm.err"
+(cd "$project" && rm -f out.txt && node "$wasm_wrapper" --json ./out.txt) >"$project/wasm.jsonl" 2>"$project/wasm.err"
 (cd "$project" && rm -f out.txt && "$CLI_BIN" --json ./out.txt) >"$project/native.jsonl" 2>"$project/native.err"
 if [ ! -s "$project/wasm.err" ] && normalize <"$project/wasm.jsonl" >"$project/wasm.norm" && normalize <"$project/native.jsonl" >"$project/native.norm" && cmp -s "$project/wasm.norm" "$project/native.norm"; then
 	test-ok "wasm --json matches native and leaves stderr unused"
@@ -53,12 +54,12 @@ else
 fi
 
 test-step "direct-argv pipeline display matches native"
-cat >>"$project/Makefile.kmk" <<'EOF'
+cat >>"$project/Makefile.km" <<'EOF'
 
-task pipeline : ; [shell: kash]
+task pipeline
 	(out! (pipe! (run! "printf" "one") (run! "cat") (run! "cat") (run! "cat") (run! "cat")))
 EOF
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" --json pipeline) >"$project/pipeline.wasm.jsonl" 2>"$project/pipeline.wasm.err"
+(cd "$project" && node "$wasm_wrapper" --json pipeline) >"$project/pipeline.wasm.jsonl" 2>"$project/pipeline.wasm.err"
 (cd "$project" && "$CLI_BIN" --json pipeline) >"$project/pipeline.native.jsonl" 2>"$project/pipeline.native.err"
 if [ ! -s "$project/pipeline.wasm.err" ] && [ ! -s "$project/pipeline.native.err" ] && normalizeProcessDisplay <"$project/pipeline.wasm.jsonl" >"$project/pipeline.wasm.norm" && normalizeProcessDisplay <"$project/pipeline.native.jsonl" >"$project/pipeline.native.norm" && cmp -s "$project/pipeline.wasm.norm" "$project/pipeline.native.norm" && jq -e -s 'any(.[]; .type == "process-started" and .displayTruncated == true and ([.argv[] | select(. == "|")] | length <= 3))' "$project/pipeline.wasm.jsonl" >/dev/null; then
 	test-ok "native and WASM preserve bounded pipeline display"
@@ -67,14 +68,14 @@ else
 fi
 
 test-step "a failing build stays valid JSON Lines with status 1"
-cat >"$project/Makefile.kmk" <<'EOF'
-./fail.txt :
+cat >"$project/Makefile.km" <<'EOF'
+rule ./fail.txt ; {shell: "sh"}
 	echo fail-out
 	echo fail-err 1>&2
 	false
 EOF
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" --json ./fail.txt) >"$project/fail.jsonl" 2>"$project/fail.err"
+(cd "$project" && node "$wasm_wrapper" --json ./fail.txt) >"$project/fail.jsonl" 2>"$project/fail.err"
 status=$?
 set -e
 if [ "$status" = 1 ] && [ ! -s "$project/fail.err" ] && jq -e -s 'map(select(.type == "target-failed")) | length == 1' "$project/fail.jsonl" >/dev/null; then
@@ -95,7 +96,7 @@ fi
 
 test-step "WASM diagnostic causes omit process captures without filtering live streams"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" --json -l kmk -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails) >"$project/secret.jsonl" 2>"$project/secret.err"
+(cd "$project" && node "$wasm_wrapper" --json -l km -c $'task fails ; {shell: "sh"}\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails) >"$project/secret.jsonl" 2>"$project/secret.err"
 status=$?
 set -e
 if [ "$status" = 7 ] && jq -e -s 'map(select(.diagnostic.cause != null)) | length > 0 and all(.[]; .diagnostic.cause | .status == 7 and (has("stdout") | not) and (has("stderr") | not))' "$project/secret.jsonl" >/dev/null && jq -e -s 'map(select(.type == "stdout" or .type == "stderr") | .data) | join("") | contains("diagnostic-secret-output") and contains("diagnostic-secret-error")' "$project/secret.jsonl" >/dev/null; then
@@ -105,7 +106,7 @@ else
 fi
 
 test-step "JSON expressions and generated reads agree across hosts"
-if python3 "$CLI_ROOT/tests/json-operation.py"; then
+if CLI_BIN="$CLI_BIN" KAME_TEST_WASM_WRAPPER="$wasm_wrapper" python3 "$CLI_ROOT/tests/json-operation.py"; then
 	test-ok "parse-json values, failures and template-produced reads match native"
 else
 	test-fail "JSON parity or generated-read regression"

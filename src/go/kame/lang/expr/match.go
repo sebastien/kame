@@ -7,9 +7,9 @@ import (
 )
 
 func (p *parser) match(start int) *Expr {
-	previous := p.delimitedValue
-	p.delimitedValue = false
-	defer func() { p.delimitedValue = previous }()
+	previous := p.valueLayout
+	p.valueLayout = valueLine
+	defer func() { p.valueLayout = previous }()
 	match := p.node(Match, start)
 	p.inlineSpace()
 	subject := p.valueExpression()
@@ -92,6 +92,10 @@ func (p *parser) matchArm(indent string) *Expr {
 	return arm
 }
 
+func (p *parser) invalidMatchPattern(span source.Span, message string) {
+	p.diags = append(p.diags, source.Diagnostic{Code: "PAT_INVALID", Severity: source.Error, Span: span, Message: message})
+}
+
 // ParseMatchPatternPrefix reads one matcher operand under match-arm grammar.
 func ParseMatchPatternPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent}
@@ -110,7 +114,7 @@ func (p *parser) armPattern() *Expr {
 	case strings.HasPrefix(rest, "\"") && !strings.HasPrefix(rest, "\"\"\""):
 		pattern = p.quoted(true)
 	case strings.HasPrefix(rest, "./"), strings.HasPrefix(rest, "../"),
-		strings.HasPrefix(rest, "/"), strings.HasPrefix(rest, "~/"), strings.HasPrefix(rest, "@{"):
+		strings.HasPrefix(rest, "/"), strings.HasPrefix(rest, "~/"), strings.HasPrefix(rest, "${"):
 		pattern = p.pathAtom()
 		p.classifyPathPattern(pattern, true)
 	default:

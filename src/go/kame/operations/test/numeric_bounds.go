@@ -13,7 +13,7 @@ func TestRemediation3NumericBounds(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "bounds.km", "")
+	parsed := script.ParseKameFile(a, "bounds.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"(nth 4294967296 [7])", "(nth 4294967296 \"a\")",

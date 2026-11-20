@@ -44,7 +44,7 @@ func TestKashFunctionsUseNativeIndentedBodies(t *testing.T) {
 func TestKashFunctionsRejectMalformedDefinitionsAndReturns(t *testing.T) {
 	texts := []string{
 		"return 0", "if false\n  return 0", "def", "def probe ()\n", "def probe\n  return 0", "def probe {\n  return 0", "defn probe\n  return 0",
-		"def env ()\n  return 0", "def probe env\n  return 0", "def probe a a\n  return 0",
+		"def probe a a\n  return 0",
 		"def probe rest... other\n  return 0", "def probe; printf no\n  return 0",
 		"def probe ()\n  return 0 ? printf no", "def probe ()\n  defer return 0",
 		"def probe ()\n  return 0\ndef probe = 1", "def probe = 1\ndef probe ()\n  return 0",

@@ -20,49 +20,49 @@ evaluates() { # EXPR EXPECTED
 }
 
 test-step "not and bool use language truth rules"
-evaluates '(not :true)' ':false'
-evaluates '(not :false)' ':true'
-evaluates '(not :nil)' ':true'
-evaluates '(not 0)' ':false'
-evaluates '(not "")' ':false'
-evaluates '(bool :nil)' ':false'
-evaluates '(bool "x")' ':true'
-evaluates '(bool 0)' ':true'
+evaluates '(not true)' 'false'
+evaluates '(not false)' 'true'
+evaluates '(not nil)' 'true'
+evaluates '(not 0)' 'false'
+evaluates '(not "")' 'false'
+evaluates '(bool nil)' 'false'
+evaluates '(bool "x")' 'true'
+evaluates '(bool 0)' 'true'
 
 test-step "str encodes scalars and containers canonically"
 evaluates '(str 42)' '"42"'
 evaluates '(str 1.5)' '"1.5"'
-evaluates '(str :true)' '"true"'
-evaluates '(str :nil)' '"nil"'
+evaluates '(str true)' '"true"'
+evaluates '(str nil)' '"nil"'
 evaluates '(str "text")' '"text"'
 evaluates '(json (list 1 "a"))' '"[1,\"a\"]"'
-evaluates '(json [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
+evaluates 'json {b: 2, a: "x"}' '"{\"a\":\"x\",\"b\":2}"'
 
 test-step "count uses code points, item counts, and field counts"
 evaluates '(count "héllo")' '5'
 evaluates '(count (list 1 2 3))' '3'
-evaluates '(count [a: 1 b: 2])' '2'
+evaluates 'count {a: 1, b: 2}' '2'
 evaluates '(count "")' '0'
 
 test-step "first and nth"
 evaluates '(first (list "a" "b"))' '"a"'
-evaluates '(first [])' ':nil'
+evaluates '(first [])' 'nil'
 evaluates '(nth 1 (list "a" "b" "c"))' '"b"'
 evaluates '(nth -1 (list "a" "b" "c"))' '"c"'
 evaluates '(nth 1 "abc")' '"b"'
 
 test-step "list builds a list from its arguments"
-evaluates '(list 1 "a" :true)' '[1 "a" :true]'
-evaluates '(list)' '[]'
+evaluates '(list 1 "a" true)' '[1, "a", true]'
+evaluates 'list ()' '[]'
 
 test-step "apply calls a function with a list of arguments"
-evaluates '(apply ([x y] (join "-" [x y])) (list "a" "b"))' '"a-b"'
-evaluates '((list "a" "b") | apply ([x y] (join "-" [x y])))' '"a-b"'
+evaluates 'apply (x y => join "-" [x, y]) ["a", "b"]' '"a-b"'
+evaluates '["a", "b"] |> apply (x y => join "-" [x, y])' '"a-b"'
 
-test-step "legacy core-make expressions evaluate against a fixture tree"
-fixture_copy legacy-core legacy-core
+test-step "composed library operations evaluate against a fixture tree"
+fixture_copy source-tree source-tree
 (
-	cd legacy-core
+	cd source-tree
 	cli_run -- default
 	cli_expect_status 0
 	cli_expect_file ./default "2

@@ -13,7 +13,7 @@ cli_require_tools
 cli_build
 
 test-step "missing file reads stdin and reports <stdin>"
-printf ':true\n' >expr.km
+printf 'true\n' >expr.km
 cli_run --stdin expr.km -- do parse --json --lang expr
 cli_expect_status 0
 cli_expect_json_query "$CLI_OUT" '.source' '<stdin>'

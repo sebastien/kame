@@ -45,7 +45,7 @@ func (p *Program) appendOutput(value core.Value, span source.Span, outputs *[]ru
 		}
 		return diagnostic.Diagnostic{}
 	}
-	if (value.Kind != core.String && value.Kind != core.Pattern) || value.Text == "" {
+	if (!value.IsPathText() && value.Kind != core.Pattern && value.Kind != core.PathPattern && value.Kind != core.PathTemplate) || value.Text == "" {
 		return p.outputDiagnostic(span, "EXPR_INVALID", "rule outputs require nonempty strings or patterns")
 	}
 	*outputs = append(*outputs, rule.Target{Text: cloneText(p.Alloc, value.Text), Span: span, Decoded: value.Kind == core.String})
@@ -64,6 +64,11 @@ func appendOutputText(a mem.Allocator, b *strings.Builder, value core.Value, pat
 				return false
 			}
 		}
+		return true
+	}
+	if value.Kind == core.PathPattern || value.Kind == core.PathTemplate {
+		*patterns = append(*patterns, source.Span{Start: b.Len(), End: b.Len() + len(value.Text)})
+		b.WriteString(value.Text)
 		return true
 	}
 	text, ok := eval.Stringify(a, value)
@@ -93,7 +98,7 @@ func (p *Program) renderOutput(output rule.Target, context *eval.Context, patter
 		} else {
 			// Keep the ordinary selector/tool diagnostics and planning restrictions.
 			one := template.String{Parts: output.Expansion.Parts[i : i+1], Span: part.Span}
-			result = p.Eval.Render(p.Alloc, &one, p.Eval.Scope, context)
+			result = p.Eval.Render(p.Alloc, &one, context.Scope, context)
 		}
 		if result.Waiting || result.Completed || result.Stream != nil || result.Diagnostic.Code != "" || context.PhaseInvalid() || len(context.Effects) != 0 {
 			return result
@@ -108,7 +113,7 @@ func (p *Program) renderOutput(output rule.Target, context *eval.Context, patter
 	return eval.Result{Value: core.NewString(p.Alloc, b.String())}
 }
 
-func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
+func (p *Program) resolveOutputs(authored *rule.Rule, scope *eval.Scope) outputResolution {
 	computed := false
 	for i := range authored.Outputs {
 		if authored.Outputs[i].Expansion != nil {
@@ -119,7 +124,7 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 		return outputResolution{Rule: authored}
 	}
 	state := generatedEvaluation{Program: p}
-	context := eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Phase: eval.PlanningPhase, ResolverState: &state, ResolveDefinition: resolveGeneratedDefinition}
+	context := p.declarationContext(scope, &state)
 	var outputs []rule.Target
 	var d diagnostic.Diagnostic
 	for i := range authored.Outputs {
@@ -131,14 +136,14 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 		var result eval.Result
 		var patterns []source.Span
 		if output.Kind == rule.TargetExpression {
-			result = p.Eval.EvaluateWith(output.Expansion.Parts[0].Expr, &context)
+			result = p.Eval.EvaluateWith(output.Expansion.Parts[0].Expr, context)
 		} else {
-			result = p.renderOutput(output, &context, &patterns)
+			result = p.renderOutput(output, context, &patterns)
 		}
-		if result.Waiting || result.Completed || result.Stream != nil || context.PhaseInvalid() || len(context.Effects) != 0 {
-			d = p.outputDiagnostic(output.Span, "PHASE_INVALID", "rule outputs must resolve without host requests or effects")
-		} else if result.Diagnostic.Code != "" {
-			d = p.outputDiagnostic(output.Span, result.Diagnostic.Code, result.Diagnostic.Message)
+		if result.Diagnostic.Code != "" {
+			d = p.declarationDiagnostic(output.Span, authored.SourceOrigin, result.Diagnostic.Code, result.Diagnostic.Message)
+		} else if result.Waiting || result.Completed || result.Stream != nil || context.PhaseInvalid() || len(context.Effects) != 0 {
+			d = p.declarationDiagnostic(output.Span, authored.SourceOrigin, "PHASE_INVALID", "rule output evaluation could not finish during registration")
 		} else {
 			d = p.appendOutput(result.Value, output.Span, &outputs)
 			if d.Code == "" && len(patterns) != 0 {

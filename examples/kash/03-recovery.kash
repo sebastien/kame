@@ -1,29 +1,24 @@
 #!/usr/bin/env -S kame do kash
-# Requires Kame with command and value recovery support.
-
-# An expected non-zero exit is accepted, not confused with a fallback value.
+# Accept the expected nonzero status and continue.
 grep -q needle ./sample.txt ?
 echo "continued after an accepted non-match"
 
-# A failed command can select another command.
-grep -q needle ./sample.txt ? echo "no needle in the sample"
-
-# A failed captured computation can select a value.
-result = $(false) ?? "no result"
+grep -q needle ./sample.txt || echo "no needle in the sample"
+let found = $?(grep -m1 needle ./sample.txt)
+let result = (if found.ok then found.value else nil) ?? "no result"
 echo $result
 
-# Selecting a branch does not demand computations in the other branch.
-mode = "preview"
-if (eq? mode "preview")
+let mode = "preview"
+if mode == "preview"
 	echo "preview only"
-elif (eq? mode "check")
+elif mode == "check"
 	echo "validation only"
 else
 	no-such-publication-command
-if grep -q hello ./sample.txt && test -s ./sample.txt
+if $?(grep -q hello ./sample.txt && test -s ./sample.txt).ok
 	echo "sample validated"
 match ./notes/intro.txt
-	case ./notes/{name:*}.txt
+	./notes/{name:*}.txt =>
 		printf "note=%s\n" $name
-	else
+	else =>
 		echo "not a note"

@@ -13,7 +13,7 @@ func TestListSpreadValuesTypesAndCallableOwnership(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "spread.km", "")
+	parsed := script.ParseKameFile(a, "spread.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	r := evaluate(t, p, `((prefix => [0, ...prefix, ...[], 3, ...[4]]) [1, [2], nil])`)
 	if r.Diagnostic.Code != "" || len(r.Value.List) != 6 || r.Value.List[2].Kind != core.List || r.Value.List[3].Kind != core.Nil || r.Value.List[5].Int != 4 {

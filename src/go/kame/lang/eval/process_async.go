@@ -3,6 +3,7 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"slices"
@@ -25,19 +26,26 @@ type processTask struct {
 	Observed         bool
 	Index            int
 	Handle           *ProcessHandle
+	ProcessRequestID int64
+	Signals          []string
 }
 
 // ProcessHandle is an opaque invocation-owned handle. Pass its pointer, not a
 // struct copy. Once execution is retired, only immutable result data remains;
-// saved handles keep that data alive through Go's GC, not the execution graph.
+// saved handles keep that data alive independently of the execution graph.
 type ProcessHandle struct {
-	owner      *Program
-	task       *processTask
-	done       bool
-	state      core.NodeState
-	value      core.Value
-	diagnostic diagnostic.Diagnostic
-	observed   bool
+	owner             *Program
+	script            int64
+	recipe            int64
+	task              *processTask
+	done              bool
+	state             core.NodeState
+	value             core.Value
+	diagnostic        diagnostic.Diagnostic
+	observed          bool
+	outcome           core.Value
+	outcomeIsTerminal bool
+	cancelled         bool
 }
 
 func (h *ProcessHandle) Root() *core.Root {
@@ -68,6 +76,72 @@ func (task *processTask) observe() {
 	task.Observed, task.Handle.observed = true, true
 }
 
+func (task *processTask) processSubmitted(id int64, c *Context) {
+	task.ProcessRequestID = id
+	for _, signal := range task.Signals {
+		task.queueSignal(c, id, signal)
+	}
+	task.Signals = nil
+}
+
+func (task *processTask) queueSignal(c *Context, id int64, signal string) {
+	payload := host.ProcessSignalPayload(c.Run, id, signal)
+	node := task.Node
+	c.Requests.Submit(node.ID, node.Generation, node.Attempt, host.RequestProcessSignal, payload)
+	payload.Free(c.Run)
+}
+
+func (p *Program) killProcesses(c *Context, handles []*ProcessHandle, signal string) {
+	owned := make(map[int64]bool)
+	for _, handle := range handles {
+		if handle.task != nil {
+			owned[handle.task.Node.ID] = true
+		}
+	}
+	for _, task := range p.Processes {
+		if !owned[task.Node.ID] && !owned[task.LauncherID] {
+			continue
+		}
+		owned[task.Node.ID] = true
+		node := task.Node
+		switch node.State {
+		case core.NodeComplete, core.NodeFailed, core.NodeCancelled:
+			continue
+		}
+		if signal == "" {
+			task.Handle.cancelled = true
+			p.Engine.CancelOwned(node)
+			p.CancelProcess(task.Handle)
+		} else if node.Submitted && node.HostRequestID == task.ProcessRequestID && task.ProcessRequestID != 0 {
+			task.queueSignal(c, task.ProcessRequestID, signal)
+		} else {
+			task.Signals = append(task.Signals, signal)
+		}
+	}
+}
+
+func (p *Program) startAsyncCapture(e *expr.Expr, c *Context) Result {
+	if p.DryRun {
+		return Result{Value: core.Value{Kind: core.Process, Process: p}}
+	}
+	if c.Engine == nil || c.Requests == nil {
+		return failure(c.Run, "HOST_FAIL", e.Span, "async capture requires an execution host")
+	}
+	start, end, path := c.operationStart, c.operationEnd, c.CallPath
+	c.operationStart, c.operationEnd, c.CallPath = e.Span.Start, e.Span.End, path+"/async-capture"
+	defer func() {
+		c.operationStart, c.operationEnd, c.CallPath = start, end, path
+	}()
+	if handle, ok := c.OperationState().(*ProcessHandle); ok {
+		return Result{Value: core.Value{Kind: core.Process, Process: handle}}
+	}
+	r := p.startProcess(e, c, nil)
+	if r.Diagnostic.Code == "" {
+		c.SetOperationState(r.Value.Process, nil)
+	}
+	return r
+}
+
 func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState) Result {
 	task := mem.Alloc[processTask](p.Alloc)
 	task.Program, task.Graph = p, expr.Clone(p.Alloc, e)
@@ -77,9 +151,14 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.Finalizer = c.finalizer
 	task.FinalizerCleanup = c.finalizer != nil && c.finalizer.Stage >= 2
 	task.Graph.Async = false
+	if task.Graph.ActionPrefix == "$&(" {
+		task.Graph.ActionPrefix = ""
+	}
 	task.Context = p.retainExecutionContext(c)
 	task.Context.InputClosed = true
-	task.Prepared = clonePreparedProcess(p.Alloc, prepared)
+	if prepared != nil {
+		task.Prepared = clonePreparedProcess(p.Alloc, prepared)
+	}
 
 	task.Index = p.nextProcess
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(task.Index)+">")
@@ -90,7 +169,7 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 		return failure(c.Run, "HOST_FAIL", e.Span, "cannot schedule async process")
 	}
 	task.Root = p.Engine.RequestRoot(task.Node)
-	task.Handle = &ProcessHandle{owner: p, task: task}
+	task.Handle = &ProcessHandle{owner: p, script: c.ScriptGroup, recipe: c.RecipeNode, task: task}
 	if c.finalizer == nil {
 		task.LauncherRoot = c.Engine.RetainRoot()
 	}
@@ -108,6 +187,7 @@ func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
 	_ = id
 	task := engine.Context().(*processTask)
 	c := task.Context
+	c.asyncHandle = task.Handle
 	c.Engine, c.Run, c.Requests = engine, engine.Allocator(), task.Program.Requests
 	c.Resume(engine)
 	if task.Prepared != nil {
@@ -115,7 +195,15 @@ func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
 		c.SetOperationState(task.Prepared, freeCaptureState)
 		task.Prepared = nil
 	}
-	r := task.Program.capture(task.Graph, &c)
+	var r Result
+	if task.Graph.Kind == expr.CommandList {
+		r = task.Program.commandList(task.Graph, &c)
+	} else {
+		r = task.Program.capture(task.Graph, &c)
+	}
+	if !r.Waiting && c.commandOutput != nil {
+		task.Program.streamControlOutput(&c, 0)
+	}
 	if !r.Waiting && r.Diagnostic.Code == "" && task.Program.DefinitionEffectSink != nil {
 		for i := range c.Effects {
 			task.Program.DefinitionEffectSink(task.Program.DefinitionEffectState, c.Effects[i])
@@ -167,29 +255,111 @@ func (p *Program) awaitProcess(e *expr.Expr, c *Context) Result {
 	}
 	handle, ok := r.Value.Process.(*ProcessHandle)
 	r.Free(c.Run)
-	if !ok || handle == nil || handle.owner != p || (!handle.done && (handle.task == nil || handle.task.Handle != handle)) {
+	if !ok || !p.ownsProcess(handle, c) {
 		return failure(c.Run, "EXPR_INVALID", e.Span, "process handle belongs to another invocation")
 	}
+	return p.waitProcess(handle, e, c, false)
+}
+
+func (p *Program) ownsProcess(handle *ProcessHandle, c *Context) bool {
+	return handle != nil && handle.owner == p && handle.script == c.ScriptGroup && handle.recipe == c.RecipeNode &&
+		(handle.done || (handle.task != nil && handle.task.Handle == handle))
+}
+
+func (p *Program) waitProcess(handle *ProcessHandle, e *expr.Expr, c *Context, outcome bool) Result {
 	if c.Engine == nil {
 		return failure(c.Run, "HOST_FAIL", e.Span, "await requires an execution host")
 	}
+	var d diagnostic.Diagnostic
+	var value core.Value
 	if handle.done {
 		handle.observed = true
-		if handle.diagnostic.Code != "" {
-			return Result{Diagnostic: handle.diagnostic.Clone(c.Run)}
+		d, value = handle.diagnostic, handle.value
+	} else {
+		task := handle.task
+		if !c.Engine.TryDependency(task.Node.Key) {
+			return Result{Waiting: true}
 		}
-		return Result{Value: handle.value.Clone(c.Run)}
+		task.observe()
+		d = c.Engine.DependencyDiagnostic(task.Node.Key)
+		if d.Code == "" {
+			value = c.Engine.Value(task.Node.Key).Value
+		}
 	}
-	task := handle.task
-	if !c.Engine.TryDependency(task.Node.Key) {
-		return Result{Waiting: true}
+	if handle.cancelled && d.Code == core.DiagnosticCancelled && !d.Protected {
+		if !outcome {
+			r := failure(c.Run, "RECIPE_FAIL", e.Span, "async process was cancelled")
+			r.Diagnostic.Cause = diagnostic.Cause{Kind: owned(c.Run, "process"), Status: 130, HasStatus: true}
+			return r
+		}
+		r := captureOutcome(c, e, core.Value{Kind: core.Record}, core.Value{})
+		for i := range r.Value.Record {
+			field := &r.Value.Record[i]
+			switch field.Key {
+			case "state":
+				field.Value.Free(c.Run)
+				field.Value = core.NewSymbol(c.Run, "cancelled")
+			case "status", "effectiveStatus":
+				field.Value.Int = 130
+			case "ok", "stdoutCaptured":
+				field.Value.Bool = false
+			}
+		}
+		return r
 	}
-	task.observe()
-	if d := c.Engine.DependencyDiagnostic(task.Node.Key); d.Code != "" {
+	if outcome && handle.outcome.Kind == core.Record && (d.Code == "" || eligibleCommandExit(d) || handle.outcomeIsTerminal) {
+		return Result{Value: borrowValue(c.Run, handle.outcome)}
+	}
+	if d.Code != "" {
+		if outcome && processFailureCanBeInspected(d) {
+			return processFailureOutcome(c, e, d, core.Value{})
+		}
 		return Result{Diagnostic: d.Clone(c.Run)}
 	}
-	current := c.Engine.Value(task.Node.Key)
-	return Result{Value: current.Value.Clone(c.Run)}
+	if outcome {
+		return captureOutcome(c, e, core.Value{Kind: core.Record}, core.Value{})
+	}
+	return Result{Value: value.Clone(c.Run)}
+}
+
+func (h *ProcessHandle) recordOutcome(c *Context, e *expr.Expr, completion core.Value, stages []core.Value) {
+	var stdout core.Value
+	if e.Kind == expr.CommandCapture {
+		captured := captureValue(c.Run, completion, e.Span, true, false)
+		stdout = captured.Value
+		defer captured.Free(c.Run)
+	}
+	r := captureOutcome(c, e, completion, stdout)
+	defer r.Free(c.Run)
+	if e.Topology && r.Diagnostic.Code == "" {
+		r = processGraphResult(c.Run, r, e, completion, stages)
+	}
+	if e.Kind != expr.CommandCapture {
+		for i := range r.Value.Record {
+			if r.Value.Record[i].Key == "stdoutCaptured" {
+				r.Value.Record[i].Value.Bool = false
+				break
+			}
+		}
+	}
+	h.setOutcome(r.Value, false)
+}
+
+func (h *ProcessHandle) setOutcome(value core.Value, terminal bool) {
+	freeValueWithCallables(mem.System, &h.outcome)
+	h.outcome = value.CloneOwned(mem.System)
+	h.outcomeIsTerminal = h.outcomeIsTerminal || terminal
+	// A closure's lexical frame has explicit ownership. Keep its snapshot
+	// until the script group ends, even if the process node retires earlier.
+	if value.HasTransientCallable() {
+		borrowValueCallables(mem.System, &h.outcome)
+		if h.owner.callableProcessOutcomes == nil {
+			h.owner.callableProcessOutcomes = make(map[*ProcessHandle]struct{})
+		}
+		h.owner.callableProcessOutcomes[h] = struct{}{}
+	} else {
+		delete(h.owner.callableProcessOutcomes, h)
+	}
 }
 
 func (p *Program) joinProcesses(c *Context) Result {
@@ -259,13 +429,19 @@ func freeProcessTask(a mem.Allocator, task *processTask) {
 // Async work and deferred actions must retain the same authority and lexical frame.
 func (p *Program) retainExecutionContext(c *Context) Context {
 	result := *c
+	result.captureListOutcome = nil
 	result.Engine, result.Requests, result.Effects, result.WritePaths = nil, nil, nil, nil
 	result.Run, result.PrepareDeferred = p.Alloc, nil
 	result.Cwd, result.Source, result.CallPath = owned(p.Alloc, c.Cwd), owned(p.Alloc, c.Source), owned(p.Alloc, c.CallPath)
+	result.StageDirectory = owned(p.Alloc, c.StageDirectory)
 	result.Environment, result.Grants, result.Args, result.Inputs, result.Outputs, result.RuleFrames, result.Frames = nil, nil, nil, nil, nil, nil, nil
 	c.Scope.Retain()
 	for i := range c.Environment {
 		result.Environment = append(result.Environment, owned(p.Alloc, c.Environment[i]))
+	}
+	result.StageEnvironment = nil
+	for _, assignment := range c.StageEnvironment {
+		result.StageEnvironment = append(result.StageEnvironment, owned(p.Alloc, assignment))
 	}
 	for i := range c.Grants {
 		grant := Grant{Capability: c.Grants[i].Capability}
@@ -294,6 +470,9 @@ func (p *Program) retainExecutionContext(c *Context) Context {
 		for j := range c.RuleFrames[i].Outputs {
 			frame.Outputs = append(frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc))
 		}
+		for _, capture := range c.RuleFrames[i].Captures {
+			frame.Captures = append(frame.Captures, capture.Clone(p.Alloc))
+		}
 		result.RuleFrames = append(result.RuleFrames, frame)
 	}
 	return result
@@ -302,12 +481,17 @@ func (p *Program) retainExecutionContext(c *Context) Context {
 func freeExecutionContext(a mem.Allocator, context *Context) {
 	context.Scope.Free()
 	mem.FreeString(a, context.Cwd)
+	mem.FreeString(a, context.StageDirectory)
 	mem.FreeString(a, context.Source)
 	mem.FreeString(a, context.CallPath)
 	for i := range context.Environment {
 		mem.FreeString(a, context.Environment[i])
 	}
 	mem.FreeSlice(nil, context.Environment)
+	for _, assignment := range context.StageEnvironment {
+		mem.FreeString(a, assignment)
+	}
+	mem.FreeSlice(nil, context.StageEnvironment)
 	for i := range context.Args {
 		context.Args[i].Free(a)
 	}
@@ -332,6 +516,7 @@ func freeExecutionContext(a mem.Allocator, context *Context) {
 			frame.NewerInputs[j].Free(a)
 		}
 		mem.FreeSlice(nil, frame.NewerInputs)
+		freeValues(a, frame.Captures)
 		mem.FreeSlice(nil, frame.Inputs)
 		mem.FreeSlice(nil, frame.Outputs)
 	}
@@ -353,6 +538,13 @@ func clonePreparedProcess(a mem.Allocator, prepared *captureState) *captureState
 	}
 	for i := range prepared.Setups {
 		s.Setups = append(s.Setups, prepared.Setups[i].Clone(a))
+	}
+	if len(prepared.Callables) != 0 {
+		s.Callables = make(map[int]*preparedCallable, len(prepared.Callables))
+		for i, callable := range prepared.Callables {
+			cloned := callable.clone(a)
+			s.Callables[i] = &cloned
+		}
 	}
 	return s
 }

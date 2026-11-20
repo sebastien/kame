@@ -17,7 +17,7 @@ func TestOperandEvaluationPreservesOperationCallerScope(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "scope.km", "")
+	parsed := script.ParseKameFile(a, "scope.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	registry.Add(eval.Operation{Name: "caller-scope", MinArity: 1, MaxArity: 1, Call: callerScopeOperation, Context: p.Scope})
 	expression := expr.Parse(a, "scope.km", "(caller-scope ((temporary => nil) true))")

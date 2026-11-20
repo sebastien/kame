@@ -44,7 +44,7 @@ const (
 )
 
 var (
-	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "export": "set child environment variables", "unset": "remove child environment variables", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background", "wait": "wait for jobs to finish", "history": "select history scope or clear history", "option": "inspect or change shell options", "explain": "show the full report of the latest failure"}
+	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background", "wait": "wait for jobs to finish", "history": "select history scope or clear history", "option": "inspect or change shell options", "explain": "show the full report of the latest failure"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 

@@ -121,11 +121,7 @@ func TestInvalidFixture(t *testing.T) {
 			t.Errorf("%s: expected diagnostic", path)
 			continue
 		}
-		expected := source.Error
-		if strings.HasPrefix(name, "template-string-malformed-") {
-			expected = source.Warning
-		}
-		if diagnostic.Code != "PARSE_ERR" || diagnostic.Severity != expected {
+		if diagnostic.Code != "PARSE_ERR" || diagnostic.Severity != source.Error {
 			t.Errorf("%s: diagnostic = %s/%d", path, diagnostic.Code, diagnostic.Severity)
 		}
 	}
@@ -159,7 +155,7 @@ func TestFormatIdempotence(t *testing.T) {
 	e2.Free()
 	mem.FreeString(a, formatted)
 	e.Free()
-	template1 := template.ParseString(a, "test.km", "echo @(count files) @<")
+	template1 := template.ParseString(a, "test.km", "echo @{count files} @{inputs.0}")
 	formatted = template.FormatString(a, template1)
 	template2 := template.ParseString(a, "formatted.km", formatted)
 	formatted2 = template.FormatString(a, template2)
@@ -170,9 +166,9 @@ func TestFormatIdempotence(t *testing.T) {
 	template2.Free()
 	mem.FreeString(a, formatted)
 	template1.Free()
-	script1 := script.Parse(a, "test.km", "value = {name: \"app\"}\n./out : ./in\n  echo @<")
+	script1 := script.ParseKameFile(a, "test.km", "value = {name: \"app\"}\nrule ./out : ./in\n  echo $inputs.0")
 	formatted = script.Format(a, script1)
-	script2 := script.Parse(a, "formatted.km", formatted)
+	script2 := script.ParseKameFile(a, "formatted.km", formatted)
 	formatted2 = script.Format(a, script2)
 	if len(script1.Diagnostics) != 0 || len(script2.Diagnostics) != 0 || formatted != formatted2 {
 		t.Error("script format was not idempotent")

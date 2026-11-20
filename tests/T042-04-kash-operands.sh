@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-04 Kash live stream operand parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/operands"
 mkdir -p "$work"
@@ -26,7 +27,7 @@ expect() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	test-step "$backend: live producer arguments and current-input ownership"
 	run_case '$(cat <(printf "abc\n"))' 0
 	expect "anonymous output retains its delimiter" grep -Fq '"abc\n"' "$work/$backend.out"
@@ -100,16 +101,15 @@ stream right
 	build="$work/$backend-build"
 	mkdir -p "$build"
 	printf 'first\n' >"$build/seed"
-	cat >"$build/Makefile.kmk" <<'KMK'
-SHELL = kash
-./generated : ./seed
-	cat < ./seed > @>
-./result :
-	cat <(sh -c "echo run >> runs; cat" < ./generated) > @>
-KMK
+	cat >"$build/Makefile.km" <<'KM'
+rule ./generated : ./seed
+	cat < ./seed > $outputs.0
+rule ./result
+	cat <(sh -c "echo run >> runs; cat" < ./generated) > $outputs.0
+KM
 	for attempt in first cached changed; do
 		if [ "$attempt" = changed ]; then printf 'changed\n' >"$build/seed"; fi
-		if timeout 20 "${command[@]}" -C "$build" -f ./Makefile.kmk ./result >"$work/$backend.out" 2>"$work/$backend.err"; then test-ok "$backend generated input: $attempt"; else test-fail "$backend build: $(cat "$work/$backend.err")"; fi
+		if timeout 20 "${command[@]}" -C "$build" ./result >"$work/$backend.out" 2>"$work/$backend.err"; then test-ok "$backend generated input: $attempt"; else test-fail "$backend build: $(cat "$work/$backend.err")"; fi
 		if [ "$attempt" = changed ]; then expected=2; else expected=1; fi
 		expect "generated input reuse: $attempt" test "$(wc -l <"$build/runs")" -eq "$expected"
 	done
@@ -125,10 +125,10 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, unlinkSy
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const { Kame } = await import('./dist/kame.js');
-const kame = await Kame.create();
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
 // Kash captures resolve tracked tools through a build/source session, not evaluate().
-const program = await kame.compile('SHELL = kash\nwarmup :\n\t(nop $(cat <(printf warmup)))\nprobe :\n\t(nop $(cat <(sleep 30)))\nrecovered :\n\t(nop $(cat <(printf recovered)))\n', { name: 'operands.kmk' });
+const program = await kame.compile('task warmup\n\t(nop $(cat <(printf warmup)))\ntask probe\n\t(nop $(cat <(sleep 30)))\ntask recovered\n\t(nop $(cat <(printf recovered)))\n', { name: 'operands.km' });
 const spawn = childProcess.spawn;
 const spawnSync = childProcess.spawnSync;
 const options = { grants: [{ capability: 'run', names: [] }] };
@@ -166,7 +166,7 @@ try {
     childProcess.spawn = (...args) => { launches++; return spawn(...args); };
     childProcess.spawnSync = () => ({ status: 1 });
     syncBuiltinESMExports();
-    const unsupported = await kame.compile(`SHELL = kash\nprobe :\n\tcat <(printf ignored) > ${JSON.stringify(output)}\n`, { name: 'unsupported.kmk' });
+    const unsupported = await kame.compile(`task probe\n\tcat <(printf ignored) > ${JSON.stringify(output)}\n`, { name: 'unsupported.km' });
     await assert.rejects(unsupported.build('probe', { grants: [...options.grants, { capability: 'write', names: [directory] }] }), (error) => error.code === 'KASH_STREAM_OPERAND_UNSUPPORTED');
     assert.equal(launches, 0, 'unsupported operands launched a graph');
     assert.equal(readFileSync(output, 'utf8'), 'preserve', 'unsupported operands truncated output');

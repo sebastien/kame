@@ -24,19 +24,6 @@ func (p *Program) IsKashSelector(v core.Value) bool {
 	return v.Kind == core.Callable && p.kashSelector != nil && v.Callable == p.kashSelector
 }
 
-// KameSelector selects a value-producing recipe body.
-func (p *Program) KameSelector() core.Value {
-	if p.kameSelector == nil {
-		p.kameSelector = mem.Alloc[Function](p.Alloc)
-		p.kameSelector.Kind, p.kameSelector.Owner = FunctionInterpreter, p
-	}
-	return core.Value{Kind: core.Callable, Callable: p.kameSelector, CallableOwner: p, Text: "kame"}
-}
-
-func (p *Program) IsKameSelector(v core.Value) bool {
-	return v.Kind == core.Callable && p.kameSelector != nil && v.Callable == p.kameSelector
-}
-
 type kashInvocation struct {
 	Program         *Program
 	Parsed          *script.Script
@@ -104,6 +91,17 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 			c.operationStart, c.operationEnd = previousStart, previousEnd
 			return r
 		}
+		if c.SourceOrigin != 0 {
+			// Parse offsets belong to the recipe text. The driver remaps them
+			// to the file after evaluation, which still uses the file origin.
+			entry := &source.Source{Name: parsed.Source.Name}
+			for _, item := range parsed.Items {
+				setExpressionOrigin(item.Expression, c.SourceOrigin, entry)
+				if item.Definition != nil {
+					setExpressionOrigin(item.Definition.Expression, c.SourceOrigin, entry)
+				}
+			}
+		}
 	}
 	r := p.invokeKashBody(parsed, nil, c.Scope, c.Args, c)
 	if state == nil {
@@ -144,6 +142,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		state.Program = p
 		state.TimedIndex, state.TimeoutLimitMS = -1, c.TimeoutMS
 		state.Parsed, state.Scope = parsed, newScope(p.Alloc, scope)
+		state.Scope.assignmentBoundary = native == nil || native.Kind != expr.KashWith
 		p.NextScriptGroup++
 		state.Group = p.NextScriptGroup
 		state.Deferred = p.NewDeferScope(state.Group, c.Engine.NodeID())
@@ -182,7 +181,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 			}
 			d := item.Definition
 			if d.Eager {
-				state.Scope.reserveEager(d.Name)
+				state.Scope.reserveEager(d.Expression, false)
 				continue
 			}
 			if d.Function {
@@ -239,7 +238,7 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	}
 	if !state.Finishing {
 		r := p.advanceKashBody(state, c)
-		if r.Waiting {
+		if r.Waiting || r.Yielded {
 			return r
 		}
 		state.Finishing = true
@@ -250,13 +249,13 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		}
 	}
 	if state.Primary.Exit.Requested {
-		if p.DefinitionEffectSink != nil {
+		if c.hasControlOutputSink() {
 			// Reached public output precedes teardown, and must not be replayed
 			// when an exited invocation suspends in its join or cleanup.
 			p.streamControlOutput(c, 0)
 			kept := 0
 			for i := range state.Effects {
-				if state.Effects[i].Kind == EffectOut || state.Effects[i].Kind == EffectErr {
+				if c.streamsControlOutput(state.Effects[i].Kind) {
 					state.Effects[i].Free(p.Alloc)
 				} else {
 					state.Effects[kept] = state.Effects[i]
@@ -286,11 +285,14 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		return r
 	}
 	r.Free(c.Run)
-	return Result{Value: state.Value.Clone(c.Run), Returned: state.Returned && (state.PropagateReturn || state.Parsed != nil && state.Parsed.RuleBody), LoopTransfer: state.LoopTransfer}
+	return Result{Value: borrowValue(c.Run, state.Value), Returned: state.Returned && (state.PropagateReturn || state.Parsed != nil && state.Parsed.RuleBody), LoopTransfer: state.LoopTransfer}
 }
 
 func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 	for state.Index < len(state.Items) {
+		if stage := c.functionStage; stage != nil && stage.cancelled && stage.node != nil && stage.node.ID == c.Engine.NodeID() {
+			return failure(c.Run, "EXEC_CANCELLED", c.Span, "callable output consumer closed")
+		}
 		item := state.Items[state.Index]
 		if item.Kind == script.Definition && item.Definition.Eager {
 			item.Kind, item.Expression = script.Expression, item.Definition.Expression
@@ -309,17 +311,30 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		r := p.evaluate(c.Engine, state.Scope, item.Expression, c)
 		if r.Waiting || r.Diagnostic.Code != "" {
+			if c.commandOutput != nil && !r.Waiting {
+				p.streamControlOutput(c, before)
+			}
 			if r.Diagnostic.Exit.Requested {
 				p.retainKashEffects(state, c, before, beforePaths)
 			}
 			return r
 		}
 		p.retainKashEffects(state, c, before, beforePaths)
+		if c.commandOutput != nil && c.commandOutput.overflow {
+			r.Free(c.Run)
+			return failure(c.Run, "CAPTURE_LIMIT", item.Span, "command substitution exceeded capture limit")
+		}
 		for i := range state.Scope.Bindings {
 			b := state.Scope.Bindings[i]
 			if b.Kind == bindingLocalDefinition && b.Local.Done {
 				b.Local.EffectsHeld = true
 			}
+		}
+		if r.Yielded {
+			if item.Expression.Kind == expr.KashYield {
+				state.Index++
+			}
+			return r
 		}
 		freeCallables(p.Alloc, &state.Value)
 		state.Value.Free(p.Alloc)
@@ -344,13 +359,16 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 	}
 	joined.Free(c.Run)
 	p.cancelScriptGroup(state.Group)
-	if state.Value.HasTransientCallable() {
+	if !state.Native && state.Value.HasTransientCallable() {
 		return failure(c.Run, "EXPR_INVALID", c.Span, "script result cannot retain a temporary callable")
 	}
-	return Result{Value: state.Value.Clone(c.Run)}
+	return Result{}
 }
 
 func (p *Program) retainKashEffects(state *kashInvocation, c *Context, before int, beforePaths int) {
+	if c.commandOutput != nil || c.functionStage != nil || c.RecipeOutput != nil || (c.generator != nil && p.DefinitionEffectSink != nil) {
+		p.streamControlOutput(c, before)
+	}
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
 		effect.Data = slices.Clone(effect.Data)
@@ -363,6 +381,14 @@ func (p *Program) retainKashEffects(state *kashInvocation, c *Context, before in
 
 func (p *Program) kashBudget(state *kashInvocation, c *Context) Result {
 	_ = p
+	if stage := c.functionStage; stage != nil && c.Engine.NodeID() == stage.node.ID {
+		if r := stage.flush(c); r.Waiting || r.Diagnostic.Code != "" {
+			return r
+		}
+		if stage.cancelled && !c.Finalizing {
+			return failure(c.Run, "EXEC_CANCELLED", c.Span, "callable stage output closed")
+		}
+	}
 	if state.TimedIndex == state.Index {
 		return Result{}
 	}
@@ -395,6 +421,12 @@ func (p *Program) kashBudget(state *kashInvocation, c *Context) Result {
 }
 
 func (p *Program) cancelScriptGroup(group int64) {
+	for handle := range p.callableProcessOutcomes {
+		if handle.script == group {
+			freeValueWithCallables(mem.System, &handle.outcome)
+			delete(p.callableProcessOutcomes, handle)
+		}
+	}
 	for i := range p.Processes {
 		task := p.Processes[i]
 		if task.Context.ScriptGroup != group {

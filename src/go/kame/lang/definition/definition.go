@@ -471,13 +471,8 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 		b.WriteByte(' ')
 		b.WriteString(v.String())
 	} else {
-		indent := "  "
-		if d.ExplicitDef {
-			indent = "\t"
-		}
-		b.WriteByte('\n')
-		b.WriteString(indent)
-		formatted := expr.FormatAt(a, d.Expression, expr.Columns(indent, 0))
+		b.WriteString("\n\t")
+		formatted := expr.FormatAt(a, d.Expression, expr.Columns("\t", 0))
 		b.WriteString(formatted)
 		mem.FreeString(a, formatted)
 	}

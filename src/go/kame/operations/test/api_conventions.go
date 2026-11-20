@@ -14,14 +14,14 @@ func TestCanonicalTransformationPipes(t *testing.T) {
 	engine := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	source := script.Parse(a, "conventions.km", "")
+	source := script.ParseKameFile(a, "conventions.km", "")
 	p := eval.Compile(a, engine, source, r)
 	checks := []string{
-		`(eq ((nop {x: 1}) |> put "x" 2) {x: 2})`,
-		`((r => (eq (list (r |> put "x" 2) r) [{x: 2}, {x: 1}])) {x: 1})`,
-		`(eq ("./src/demo.c" |> resub ./src/{name:~[a-z]+}.c ./out/{name}.o) "./out/demo.o")`,
-		`(eq ("./src/demo.c" |> regex-match ./src/{name:~[a-z]+}.c |> capture "name") "demo")`,
-		`(eq ("abc" |> digest "sha256") (digest "sha256" "abc"))`,
+		`(eq? ((nop {x: 1}) |> put "x" 2) {x: 2})`,
+		`((r => (eq? (list (r |> put "x" 2) r) [{x: 2}, {x: 1}])) {x: 1})`,
+		`(eq? ("./src/demo.c" |> resub ./src/{name:~[a-z]+}.c ./out/{name}.o) ./out/demo.o)`,
+		`(eq? ("./src/demo.c" |> regex-match ./src/{name:~[a-z]+}.c |> regex-group "name") "demo")`,
+		`(eq? ("abc" |> digest "sha256") (digest "sha256" "abc"))`,
 	}
 	for i := range checks {
 		result := evaluate(t, p, checks[i])
@@ -41,7 +41,7 @@ func TestLiteralSubSignatureErrors(t *testing.T) {
 	engine := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	source := script.Parse(a, "sub.km", "")
+	source := script.ParseKameFile(a, "sub.km", "")
 	p := eval.Compile(a, engine, source, r)
 	result := evaluate(t, p, `subst "a" "x" "a-b-a"`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "x-b-x" {
@@ -67,7 +67,7 @@ func TestShRejectsUnsupportedOptionsBeforeDryRun(t *testing.T) {
 	engine := core.NewEngine(a)
 	r := eval.NewRegistry(a)
 	operations.Register(r)
-	source := script.Parse(a, "sh.km", "")
+	source := script.ParseKameFile(a, "sh.km", "")
 	p := eval.Compile(a, engine, source, r)
 	p.DryRun = true
 	checks := []string{

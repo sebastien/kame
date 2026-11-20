@@ -87,6 +87,11 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 			return cloneText(p.Alloc, "unavailable")
 		}
 		value := result.Value
+		if host.DiscoveryScan(key.Name) != key.Name {
+			signature := core.ValueSignature(value)
+			value.Free(p.Alloc)
+			return cacheHex(p.Alloc, signature.Digest[:])
+		}
 		b := strings.Builder{}
 		for i := range value.List {
 			b.WriteString(value.List[i].Text)
@@ -140,6 +145,11 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 // one conservative first scan when no combined accepted baseline is available.
 func (p *Program) ResourceAcceptedFingerprint(key core.ResourceKey) string {
 	if key.Kind != core.ResourceFile {
+		if key.Kind == core.ResourceGlob && host.DiscoveryScan(key.Name) != key.Name {
+			if node := p.Engine.Lookup(key); node != nil && node.Current {
+				return cacheHex(p.Alloc, node.Signature.Digest[:])
+			}
+		}
 		return p.ResourceFingerprint(key)
 	}
 	if p.ResourceMetadataObserved(key) {

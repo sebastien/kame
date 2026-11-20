@@ -7,34 +7,34 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+ if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
  printf source > "$project/input"
  printf ordered > "$project/ordered-source"
- cat > "$project/Makefile.kmk" <<'KMK'
-./out : ./input | prepare ./ordered
-	cat @<* > @>; printf x >> runs
-prepare :
+ cat > "$project/Makefile.km" <<'KMK'
+rule ./out : ./input | prepare ./ordered
+	cat $...inputs > $outputs.0; printf x >> runs
+task prepare
 	printf p >> prepares
-./ordered : ./ordered-source
-	cat @< > @>
-task cached : ./input | prepare ./ordered
+rule ./ordered : ./ordered-source
+	cat $inputs.0 > $outputs.0
+task cached cached-output : ./input | prepare ./ordered
 	printf c >> cache-runs
-./read-out : ./input | ./ordered
-	printf '%s' @(text (read ./ordered)) > @>; printf r >> read-runs
+rule ./read-out : ./input | ./ordered
+	printf '%s' (text (read ./ordered)) > $outputs.0; printf r >> read-runs
 task read-cached : ./input | ./ordered
-	printf %s @(text (read ./ordered)) > cached-read; printf q >> cached-read-runs
-./duplicate : ./ordered | ./ordered
-	cat @<* > @>; printf d >> duplicate-runs
-broken :
+	printf %s (text (read ./ordered)) > cached-read; printf q >> cached-read-runs
+rule ./duplicate : ./ordered | ./ordered
+	cat $...inputs > $outputs.0; printf d >> duplicate-runs
+task broken
 	false
-./blocked : ./input | broken
+rule ./blocked : ./input | broken
 	touch forbidden
-./computed : ./input | @(nop [./ordered])
-	cat @<* > @>; printf e >> computed-runs
+rule ./computed : ./input | ${[./ordered]}
+	cat $...inputs > $outputs.0; printf e >> computed-runs
 KMK
  test-step "$backend schedules order-only producers and omits them from selectors"
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
@@ -45,9 +45,9 @@ KMK
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend order-only changes leave file fresh"; else test-fail "$backend order-only timestamp rebuilt artifact"; fi
  test-step "$backend excludes order-only values and bare tasks from cache identity"
- "${runner[@]}" -C "$project" cached > "$project/log" 2> "$project/err"
+ "${runner[@]}" -C "$project" cached-output > "$project/log" 2> "$project/err"
  printf another > "$project/ordered-source"
- "${runner[@]}" -C "$project" cached > "$project/log" 2> "$project/err"
+ "${runner[@]}" -C "$project" cached-output > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/cache-runs")" = c ]; then test-ok "$backend order-only tasks and content preserve cache"; else test-fail "$backend order-only cache identity"; fi
  test-step "$backend upgrades explicit reads to content dependencies"
  "${runner[@]}" -C "$project" ./read-out > "$project/log" 2> "$project/err"
@@ -76,8 +76,8 @@ KMK
  if [ "$(cat "$project/computed-runs")" = e ] && cmp -s "$project/input" "$project/computed"; then test-ok "$backend computed order-only edges preserve freshness"; else test-fail "$backend computed order-only inputs"; fi
  test-step "$backend reports and formats ordering metadata"
  "${runner[@]}" do plan --json -C "$project" ./out > "$project/plan" 2> "$project/err"
-  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
- "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
- if jq -e '. as $doc | [.dependencies[] | select(.producer == 1 and .orderOnly) | .resource as $id | $doc.resources[] | select(.id == $id) | .display] == ["prepare", "./ordered"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.orderOnly? == true)' "$project/ast" >/dev/null && rg -q '^./out : ./input \| prepare ./ordered$' "$project/fmt"; then test-ok "$backend ordering metadata preserved"; else test-fail "$backend ordering inspection"; fi
+  "${runner[@]}" do parse --json --lang km "$project/Makefile.km" > "$project/ast" 2> "$project/err"
+ "${runner[@]}" do fmt --lang km "$project/Makefile.km" > "$project/fmt" 2> "$project/err"
+ if jq -e '. as $doc | [.dependencies[] | select(.producer == 1 and .orderOnly) | .resource as $id | $doc.resources[] | select(.id == $id) | .display] == ["prepare", "./ordered"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.orderOnly? == true)' "$project/ast" >/dev/null && rg -q '^rule ./out : ./input \| prepare ./ordered$' "$project/fmt"; then test-ok "$backend ordering metadata preserved"; else test-fail "$backend ordering inspection"; fi
 done
 test-end

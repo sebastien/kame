@@ -13,14 +13,14 @@ A path atom containing authored, unescaped `*`, `**`, `?` or a bracket
 character class is a `PathPattern` value (`055` §9.1). Valid capture groups
 (`{name}`, `{name:**}` and the other group forms of `014`/`029`/`041`) also make
 a `PathPattern`, but never initiate filesystem enumeration. Wildcard bytes
-contributed by `@{…}` interpolation and wildcard characters inside quoted
+contributed by `${…}` interpolation and wildcard characters inside quoted
 strings remain literal data. A `PathPattern` never converts implicitly into a
 list of paths: membership is observed through a wildcard source, either as a
 rule input or through an explicit discovery operation.
 
 ```kame
 sources-journal = files ./journal/*
-product-by-name = subst ./journal/{name:*} "@{name}" sources-journal
+product-by-name = subst ./journal/{name:*} "${name}" sources-journal
 ```
 
 `files`, `dirs` and `wildcard` (`007-library.md`) are the discovery

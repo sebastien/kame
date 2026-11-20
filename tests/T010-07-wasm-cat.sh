@@ -10,24 +10,25 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-07 wasm cat and primary materialization"
 cd "$CLI_ROOT"
 
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 
 project="$TMPDIR/wasm-cat"
 mkdir -p "$project/out"
-cat >"$project/Makefile.kmk" <<'EOF'
+cat >"$project/Makefile.km" <<'EOF'
 GREETING = "hello"
 SHELLVAL = (sh! "printf hi")
-./out/greeting.txt :
-	printf hello > out/greeting.txt
-run :
+rule ./out/greeting.txt
+	printf hello > $outputs.0
+task run
 	true
 EOF
 printf 'plain bytes' >"$project/plain.txt"
 
 wasm() {
 	set +e
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" "$@") >"$project/out.txt" 2>"$project/err.txt"
+	(cd "$project" && node "$wasm_wrapper" "$@") >"$project/out.txt" 2>"$project/err.txt"
 	status=$?
 	set -e
 }
@@ -107,7 +108,7 @@ if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '7' ]; then
 else
 	test-fail "cat -c: status=$status out=$(cat "$project/out.txt")"
 fi
-wasm do cat -c 'value = ["alpha" "beta"]' value
+wasm do cat -c 'value = ["alpha", "beta"]' value
 if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '["alpha","beta"]' ]; then
 	test-ok "cat prints lists as JSON"
 else

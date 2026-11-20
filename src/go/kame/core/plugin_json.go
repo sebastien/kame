@@ -54,8 +54,11 @@ func encodePluginValue(a mem.Allocator, e *json.Encoder, value Value) bool {
 		e.Str("float")
 		e.Str("data")
 		e.Float(value.Float)
-	case String:
-		e.Str("string")
+	case String, Symbol:
+		if value.Kind == Symbol && !validSymbolName(value.Text) {
+			return false
+		}
+		e.Str(KindName(value.Kind))
 		e.Str("data")
 		e.Str(value.Text)
 	case Pattern:
@@ -132,7 +135,7 @@ func decodePluginValue(a mem.Allocator, raw Value, out *Value, depth int) bool {
 		*out = Value{Kind: Nil}
 		return true
 	}
-	if kind == "bool" || kind == "int" || kind == "float" || kind == "string" || kind == "pattern" || kind == "bytes" {
+	if kind == "bool" || kind == "int" || kind == "float" || kind == "string" || kind == "symbol" || kind == "pattern" || kind == "bytes" {
 		if len(raw.Record) != 2 {
 			return false
 		}
@@ -159,6 +162,10 @@ func decodePluginValue(a mem.Allocator, raw Value, out *Value, depth int) bool {
 		}
 		if kind == "string" && value.Kind == String {
 			*out = NewString(a, value.Text)
+			return true
+		}
+		if kind == "symbol" && value.Kind == String && validSymbolName(value.Text) {
+			*out = NewSymbol(a, value.Text)
 			return true
 		}
 		if kind == "pattern" && value.Kind == String {
@@ -237,6 +244,31 @@ func decodePluginValue(a mem.Allocator, raw Value, out *Value, depth int) bool {
 		return true
 	}
 	return false
+}
+
+func validSymbolName(text string) bool {
+	if text != "" && (text[0] == '+' || text[0] == '-') {
+		text = text[1:]
+	}
+	if text == "" {
+		return false
+	}
+	if end := len(text) - 1; text[end] == '?' || text[end] == '!' {
+		text = text[:end]
+	}
+	if text == "" {
+		return false
+	}
+	for i := range len(text) {
+		ch := text[i]
+		if ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' {
+			continue
+		}
+		if i == 0 || (ch != '-' && (ch < '0' || ch > '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func pluginField(value Value, name string) pluginFieldResult {

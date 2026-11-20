@@ -21,7 +21,7 @@ This specification defines:
 
 - Kash sources: action blocks holding bindings, functions and command
   statements.
-- Command words, `$` references and `(EXPR)` value fragments.
+- Command words, `$` references, `${EXPR}` substitutions, and `(EXPR)` value fragments.
 - `$(…)` capture and `$?(…)` outcome inspection.
 - Block-bodied functions with value `return`, `yield` and `exit`.
 - Block control statements with expression conditions.
@@ -152,7 +152,7 @@ line.
 
 ```kash
 let name = "John Smith"
-def banner who = "Hello, @{who}!"
+def banner who = "Hello, ${who}!"
 
 git status --short
 build | tee ./build.log
@@ -179,7 +179,7 @@ form. `echo revision=$revision` and `echo a = b` are commands.
 
 The right-hand side of `let`, `set` and `return` is one expression in value
 context (`055` §4), including `$(…)` and `$?(…)` atoms. `$REFERENCE` forms are
-command-word syntax and are not expressions: write `let greeting = "Hello, @{who}"`
+command-word syntax and are not expressions: write `let greeting = "Hello, ${who}"`
 or `let n = count + 1`, not `let n = $count + 1`.
 
 `def` statements in a block are registered before the block runs, without
@@ -322,8 +322,8 @@ if check.state == :failed
 ### `yield`
 
 A `def` whose body contains `yield EXPR` returns a lazy `Stream` when called
-(`055` §8.3). The body runs as the consumer pulls elements and is `:suspended`
-while waiting. Inside a generator a bare `return` ends the stream and
+(`055` §8.3). The body runs as the consumer pulls elements and its internal state
+while waiting is `:suspended`. Inside a generator a bare `return` ends the stream and
 `return EXPR` is `PARSE_ERR`. When a consumer stops early, the generator becomes
 `:cancelled` and its deferred cleanup runs. A function's stdout bytes and its
 yielded values are separate channels and never convert into each other.
@@ -352,7 +352,7 @@ $...command "typed argv"
 let workspace = line $(mktemp -d ./kash-example.XXXXXX)
 defer rm -rf $workspace
 let config = {name: "example", enabled: true}
-let config-path = @{workspace}/config.json
+let config-path = ${workspace}/config.json
 std/write! $config-path (json config)
 
 # || runs the fallback after an ordinary unsuccessful process exit.
@@ -361,7 +361,7 @@ false || printf "fallback\n"
 
 `...EXPR` is list spread from `055` §4.2; `$...command` is argv spread.
 `line TEXT` removes one terminal LF under `007-library.md` without changing
-capture. `@{workspace}/config.json` is an interpolated path atom in value
+capture. `${workspace}/config.json` is an interpolated path atom in value
 context. `std/write!` is an explicit head: command position never consults the
 standard library (`055` §6). Use `joinpath` when computed path joining and
 normalization are required, not merely to append an authored literal suffix.
@@ -373,7 +373,7 @@ Kash has these explicit value and process boundaries:
 | Form | Parser | Meaning |
 | --- | --- | --- |
 | `$REFERENCE` | Reference | Resolve a value and insert it into a word. |
-| `${REFERENCE}` | Reference | Braced `$REFERENCE`; required for qualified names. |
+| `${EXPR}` | Expression | Evaluate one expression and insert the result into the word. |
 | `$...REFERENCE`, `$...{REFERENCE}` | Reference | Spread a flat list into argv entries, including at command position. |
 | `(EXPR)` | Expression | Evaluate an expression in value context, standalone or as a word fragment. |
 | `$(COMMAND)` | Kash | Run one process graph or command list and capture its stdout. |
@@ -381,7 +381,7 @@ Kash has these explicit value and process boundaries:
 
 The right-hand sides of `let`, `set` and `return`, conditions, `match` subjects
 and `for` sources are expressions. Path atoms there keep the expression grammar,
-including a leading interpolation `@{root}/suffix`. A standalone `@{root}`
+including a leading interpolation `${root}/suffix`. A standalone `${root}`
 without a following path separator is not a path atom. Command words keep their
 own substitution rules. Parse, format and parse preserve this distinction
 without evaluating code.
@@ -393,9 +393,9 @@ field accesses: `$name`, `$project.name`, `$files.0`, `$record."key"`. Names
 resolve as in expression position (`055` §6): lexical bindings, then the
 standard library, then, for an `ENV-NAME` only, the environment store.
 
-`${REFERENCE}` has the same evaluation semantics. It ends a reference where
-literal text follows and is required for qualified names: `${env/HOME}`,
-`${x/git}`, `${c/default-flags}`. It is not a general expression form.
+`${EXPR}` accepts any Kame expression, including qualified names such as
+`${env/HOME}` and calls such as `${(dirs REPOS)}`. The closing brace ends the
+substitution before adjacent literal text.
 
 The unbraced form consumes the complete reference, including dot components and
 name suffixes, and stops at `/`. `$name.c` looks up component `c`; `${name}.c`
@@ -441,10 +441,10 @@ handling of `--flag=` syntax. A fragment may begin a mixed word, as in
 `emit (name).json`.
 
 The same scalar-word composition applies to command heads and arguments,
-redirection paths, `:cwd`, `:timeout` and individual environment setup values.
+redirection paths, `cwd:`, `timeout:` and individual environment setup values.
 It also applies to path-shaped words: `./out/(name).txt` contains a value
-fragment. Inside the fragment, path atoms keep their own `@{EXPR}`
-interpolation; word fragments do not change the path grammar. Typed `:env`
+fragment. Inside the fragment, path atoms keep their own `${EXPR}`
+interpolation; word fragments do not change the path grammar. Typed `env:`
 records and `let` right-hand sides keep the expression grammar rather than
 becoming word concatenation.
 
@@ -454,7 +454,7 @@ ordinary character in command words, so `tar --mtime=@0` passes the literal
 argument `--mtime=@0`. The one exception is an unquoted `@{`, which is
 `PARSE_ERR` because it is almost always a misplaced template interpolation.
 Quote it (`'@{x}'`) to pass it literally. Interpolate in words with `$`
-references and `(EXPR)` fragments.
+references, `${EXPR}` substitutions, and `(EXPR)` fragments.
 
 Values carry their dependencies, capabilities, failures and authored source
 spans. A statement-leading `(EXPR)` is an expression statement and never becomes
@@ -479,7 +479,7 @@ programs and string interpolation.
 
 ```kame
 revision = $(git rev-parse --short HEAD)
-banner = "Revision: @{$(git rev-parse --short HEAD)}"
+banner = "Revision: ${$(git rev-parse --short HEAD)}"
 ```
 
 The expression parser keeps a capture node and delegates its content to the
@@ -488,7 +488,7 @@ captures; each parser keeps its authored spans. Parsing never depends on grants,
 host availability or execution phase. Evaluation requires a context that permits
 process execution (Execution context, below).
 
-`"$(git status)"` in a Kame expression string is literal text; only `@{EXPR}`
+`"$(git status)"` in a Kame expression string is literal text. Only `${EXPR}`
 interpolates there. Kash double-quoted words allow captures, as specified below.
 In a foreign-shell body, `$(…)` belongs to that shell.
 
@@ -627,12 +627,12 @@ until argv conversion:
 | `nil` | No argument, like an unset shell variable. A `nil` executable is an error. |
 | Bytes, record, callable, resource, process handle, outcome or nested list | `EXPR_INVALID`. |
 
-Quoted substitutions and words combining literal and substitution fragments
-require scalar values from the first three rows, or `nil`, and produce exactly
-one argument; a `nil` fragment contributes empty text. They never splice lists:
-`$files` splices a flat list, while `"$files"` fails when `files` is a list. A
-standalone `(modules ())` may splice its flat list result, but
-`--modules=(modules ())` rejects that result rather than joining or splicing it.
+Quoted and mixed words produce exactly one argument. In those words,
+`${EXPR}` renders a value using the Kame string rules. For example,
+`"Repos ${(dirs REPOS)}"` joins the directories with spaces within one
+argument. Other substitution fragments accept scalars and `nil`. A `nil`
+fragment contributes empty text. A standalone unquoted `$files` or
+`${files}` supplies one argument per scalar list item.
 An empty scalar in a mixed word contributes empty text; whitespace in a scalar
 stays inside the one argument. A `files` result supplies explicit argv items
 without shell globbing. In double quotes, `$` is literal only when escaped or
@@ -678,45 +678,46 @@ execute argv directly; no shell interprets it.
 
 Executable lookup for a name without a path separator uses the `PATH` of the
 unit's environment store, as updated by `set env/PATH`, and the tool overrides
-of `038`. It ignores per-stage `:PATH` overrides and lexical bindings named
+of `038`. It ignores per-stage `PATH:` overrides and lexical bindings named
 `PATH`. Choosing a child environment is distinct from reading an environment
 variable into a value.
 
 ### Stage setup
 
-A command may carry setup keys before its executable, as `:KEY VALUE` pairs:
+A command may carry setup keys before its executable, as `KEY: VALUE` pairs:
 
 ```kash
-:cwd $build-dir :timeout 10 :NODE_ENV production npm test
+cwd: $build-dir timeout: 10 NODE_ENV: production npm test
 ```
 
-The expression-level equivalent passes the same keys to `run!`:
+The expression-level equivalent passes the keys as symbol arguments to `run!`:
 
 ```kame
 run! :cwd build-dir :timeout 10 :NODE_ENV "production" "npm" "test"
 ```
 
-Except for `:env`, each setup value is one scalar word, never a list splice. It
+Except for `env:`, each setup value is one scalar word, never a list splice. It
 may combine fragments under the same rules as argv words:
 
 ```kash
-:cwd ./build/(variant) :MODE release-(variant) deploy
+cwd: ./build/(variant) MODE: release-(variant) deploy
 ```
 
-`:cwd` is a directory relative to the unit's working directory; in a
+`cwd:` is a directory relative to the unit's working directory; in a
 [`with` scope](048-kash-practical-scripting.md), relative stage overrides compose
-with that scope's directory. `:timeout` is a positive number of seconds: a
-literal word such as `10` is read as a number. Boolean settings (`:tty`,
-`:foreground`, `051`) read the literal words `true` and `false`; any other word
+with that scope's directory. `timeout:` is a positive number of seconds: a
+literal word such as `10` is read as a number. Boolean settings (`tty:`,
+`foreground:`, `051`) read the literal words `true` and `false`; any other word
 is an error. Other
 keys matching `[A-Za-z_][A-Za-z0-9_]*` are environment overrides. Duplicate keys
 are errors. The child environment otherwise inherits the unit's environment
-store. Quoted or escaped leading colons are literal. After the executable,
-colon-prefixed words are ordinary arguments. Each pipeline stage has independent
+store. The colon ends the unquoted key word. Quoting the word or escaping the
+colon makes it literal. After the executable, `KEY:` is an ordinary argument.
+Each pipeline stage has independent
 setup keys. Reserved setup keys are not environment overrides. Invalid paths,
 keys, values and missing executables are errors. The final scalar must satisfy
-the setting's contract: a computed `:timeout` must be a positive number of
-seconds and `:cwd` a valid directory path. No list splicing or implicit record
+the setting's contract: a computed `timeout:` must be a positive number of
+seconds and `cwd:` a valid directory path. No list splicing or implicit record
 conversion occurs.
 
 Setup keys configure one stage only. They never change the environment store,
@@ -725,11 +726,11 @@ the working directory, later statements or executable lookup. `set env/NAME` and
 
 ### Computed stage environments
 
-`:env VALUE` accepts a typed record of environment assignments:
+`env: VALUE` accepts a typed record of environment assignments:
 
 ```kash
 let exports = {TOKEN: env/DEPLOY_TOKEN, MODE: "release"}
-:env $exports :MODE preview deploy
+env: $exports MODE: preview deploy
 ```
 
 Expression-level process applications share the contract, for example
@@ -746,9 +747,9 @@ child environment. The whole record is validated before any assignment is used
 or the graph launches. Invalid values report `EXPR_INVALID` at the authored
 setup boundary, never with evaluated record data.
 
-The child starts with the unit's environment store. `:env` record entries and
-ordinary `:KEY` overrides apply in authored setup order; the last assignment to
-a name wins. Duplicate authored setup keys, including two `:env` keys in one
+The child starts with the unit's environment store. `env:` record entries and
+ordinary `KEY:` overrides apply in authored setup order; the last assignment to
+a name wins. Duplicate authored setup keys, including two `env:` keys in one
 stage, are syntax errors. Record keys such as `cwd` and `timeout` are
 environment names, not process settings. Overrides belong to that stage only:
 they do not change later statements, other stages, the environment store,
@@ -1323,10 +1324,10 @@ Words and fragments:
   results, records and other invalid values fail before the containing graph
   launches.
 - Mixed fragments work consistently in path-shaped words, redirection paths,
-  `:cwd`, `:timeout` and individual environment setup values, including words
+  `cwd:`, `timeout:` and individual environment setup values, including words
   that start with a fragment. Per-setting validation, stage-relative redirection
   paths, dependency tracking, no-splice rules and prelaunch checks hold; invalid
-  values cannot start stages or truncate files. Typed `:env` records and `let`
+  values cannot start stages or truncate files. Typed `env:` records and `let`
   values keep the expression grammar.
 - Quoted and escaped literal parentheses stay literal; references and captures
   inside double quotes keep their semantics; bare braces and `@` are literal in
@@ -1359,7 +1360,7 @@ Captures and outcomes:
   process or function failures, while capability denial, phase violations and
   cancellation propagate.
 - `$(…)` and `$?(…)` parse as expression atoms in applications, lists, records,
-  lambdas, definitions and `@{…}` interpolation; their contents always parse as
+  lambdas, definitions and `${…}` interpolation; their contents always parse as
   Kash. Kame strings containing `$(…)` stay literal, and foreign-shell bodies
   keep `$(…)` for their shell.
 - The same capture parses with or without grants and host services; demanded

@@ -15,55 +15,48 @@ func contractNoop(c *eval.Context, state any, values []core.Value) eval.Result {
 	return eval.Result{Value: core.Value{Kind: core.Nil}}
 }
 
-func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
+func TestUnknownLibraryNamesPreserveLexicalBindings(t *testing.T) {
 	a := t.Allocator()
 	r := eval.NewRegistry(a)
 	operations.Register(r)
 	engine := core.NewEngine(a)
-	source := script.Parse(a, "migration.km", "")
+	source := script.ParseKameFile(a, "library-names.km", "")
 	p := eval.Compile(a, engine, source, r)
-	names := []string{"write", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail", "shell!", "shellrun!", "regex-replace"}
+	names := []string{"write", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail", "shell!", "shellrun!", "regex-replace", "replace", "cat", "eq", "is", "ne", "lt", "gt", "lte", "gte", "has?"}
 	for i := range names {
 		name := names[i]
-		replacement := name + "!"
-		if name == "shell" || name == "shellrun" || name == "shell!" || name == "shellrun!" {
-			replacement = "sh!"
-		}
-		if name == "regex-replace" {
-			replacement = "resub"
-		}
 		texts := []string{name, "(" + name + " (fail! \"must not evaluate operands\"))"}
 		for j := range texts {
-			parsed := expr.Parse(a, "migration.km", texts[j])
+			parsed := expr.Parse(a, "library-names.km", texts[j])
 			context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 			result := p.EvaluateWith(parsed.Expr, &context)
-			code := "REF_MISSING"
+			code, message := "REF_MISSING", "unknown reference: "+name
 			if j == 1 {
-				code = "OP_UNKNOWN"
+				code, message = "OP_UNKNOWN", "unknown operation: "+name
 			}
-			if result.Diagnostic.Code != code || !strings.Contains(result.Diagnostic.Message, "`"+replacement+"`") || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
-				t.Error("missing action migration diagnostic: " + texts[j])
+			if result.Diagnostic.Code != code || result.Diagnostic.Message != message || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
+				t.Error("unexpected diagnostic for unknown library name: " + texts[j])
 			}
 			result.Free(a)
 			parsed.Free()
 		}
-		parsed := expr.Parse(a, "migration.km", "(("+name+" => "+name+" 42) (x => x))")
+		parsed := expr.Parse(a, "library-names.km", "(("+name+" => "+name+" 42) (x => x))")
 		context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 		result := p.EvaluateWith(parsed.Expr, &context)
 		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
-			t.Error("migration reserved a lexical binding: " + name)
+			t.Error("unknown operation name was reserved as a lexical binding: " + name)
 		}
 		result.Free(a)
 		parsed.Free()
 	}
 	if !r.Add(eval.Operation{Name: "out", Call: contractNoop}) {
-		t.Error("custom legacy-named operation rejected")
+		t.Error("custom operation registration rejected")
 	}
-	parsed := expr.Parse(a, "migration.km", "(out ())")
+	parsed := expr.Parse(a, "library-names.km", "(out ())")
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 	result := p.EvaluateWith(parsed.Expr, &context)
 	if result.Diagnostic.Code != "" {
-		t.Error("migration replaced custom registration")
+		t.Error("custom registration was not called")
 	}
 	result.Free(a)
 	parsed.Free()
@@ -78,7 +71,7 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	if !operations.Register(r) {
 		t.Error("standard operation registration failed")
 	}
-	if len(r.Items) != 127 {
+	if len(r.Items) != 125 {
 		t.Error("standard operation count changed")
 	}
 	for i := range r.Items {
@@ -138,8 +131,8 @@ func TestSubstitutionOperationMetadata(t *testing.T) {
 		t.Error("subst is missing")
 		return
 	}
-	if replacement.Category != eval.PureOperation || replacement.Phases != eval.AllPhases || replacement.Behavior != eval.CallsCallable || !replacement.DeferredReplacement || len(replacement.Capabilities) != 0 || len(replacement.ConditionalCapabilities) != 0 {
-		t.Error("replacement propagation metadata must not grant effects")
+	if replacement.Category != eval.PureOperation || replacement.Phases != eval.AllPhases || replacement.Behavior != eval.CallsCallable || !replacement.DeferredReplacement || len(replacement.Capabilities) != 0 || len(replacement.ConditionalCapabilities) != 1 || replacement.ConditionalCapabilities[0] != eval.Read {
+		t.Error("subst must require read access only for subject discovery")
 	}
 }
 
@@ -148,7 +141,7 @@ func TestPatternReplacementEffectsAreDemandedOnlyOnMatch(t *testing.T) {
 	r := eval.NewRegistry(a)
 	operations.Register(r)
 	engine := core.NewEngine(a)
-	source := script.Parse(a, "contracts.km", "")
+	source := script.ParseKameFile(a, "contracts.km", "")
 	p := eval.Compile(a, engine, source, r)
 	names := []string{"subst"}
 	phases := []eval.Phase{eval.EvaluatePhase, eval.PlanningPhase, eval.ResolvingPhase, eval.RenderingPhase}
@@ -233,7 +226,7 @@ func TestContractMetadataDoesNotAuthorizeNestedEffects(t *testing.T) {
 	r := eval.NewRegistry(a)
 	operations.Register(r)
 	engine := core.NewEngine(a)
-	source := script.Parse(a, "contracts.km", "")
+	source := script.ParseKameFile(a, "contracts.km", "")
 	p := eval.Compile(a, engine, source, r)
 	phases := []eval.Phase{eval.EvaluatePhase, eval.PlanningPhase, eval.ResolvingPhase, eval.RenderingPhase}
 	for i := range phases {
@@ -245,7 +238,7 @@ func TestContractMetadataDoesNotAuthorizeNestedEffects(t *testing.T) {
 		}
 		result.Free(a)
 		parsed.Free()
-		parsed = expr.Parse(a, "contracts.km", `(if false then (fail! "unreached") else (render "plain" """@(str "ok")"""))`)
+		parsed = expr.Parse(a, "contracts.km", `(if false then (fail! "unreached") else (render "plain" """@{str "ok"}"""))`)
 		context = eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: phases[i]}
 		result = p.EvaluateWith(parsed.Expr, &context)
 		if result.Diagnostic.Code != "" || result.Value.Text != "ok" || context.PhaseInvalid() {

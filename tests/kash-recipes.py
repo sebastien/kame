@@ -1,4 +1,4 @@
-"""Kash recipe and script ownership checks shared by native and WASM hosts."""
+"""Kash recipe and function ownership checks shared by native and WASM hosts."""
 import json
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ part = sys.argv[4] if len(sys.argv) > 4 else 'all'
 if part not in ('all', 'values', 'lifecycle'):
     raise SystemExit('expected all, values or lifecycle')
 root = Path(root)
-command = [binary] if backend == 'native' else ['node', str(root / 'dist/kame.js')]
+command = [binary] if backend == 'native' else ['node', str(root / ('src/js/kame.js' if os.environ.get('KAME_WASM') else 'dist/kame.js'))]
 cases = 0
 with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
@@ -29,86 +29,86 @@ with tempfile.TemporaryDirectory() as temporary:
         cases += 1
         return result
     def recipe(text, args=None, expected=None, code=None):
-        (project / 'Makefile.kmk').write_text(text)
+        (project / 'Makefile.km').write_text(text)
         return invoke(args or ['chosen'], expected, code)
-    def expression(text, expected=None, code=None, args=None):
-        return invoke(['do', 'run', '--print-result', '--allow-run', '--allow-read', '--allow-write', '-c', text] + (args or []), expected, code)
+    def script(text, expected=None, code=None):
+        return invoke(['do', 'run', '--allow-run', '--allow-read', '--allow-write', '-l', 'kash', '-c', text], expected, code)
 
     def check_deadline():
-        recipe('SHELL = kash\nchosen :\n\tsleep .08\n\tsleep .08\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
+        recipe('task chosen\n\tsleep .08\n\tsleep .08\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
     if part == 'lifecycle':
         check_deadline()
         print(f'{backend}: {cases} Kash deadline cases passed')
         raise SystemExit(0)
 
-    # Authored recipes are direct Kash; constructing source is explicit.
-    recipe('SHELL = kash\ncommand = (kash "printf generated")\nchosen :\n\t(command)\n', expected='generated')
-    recipe('SHELL = kash\nname = "build value"\nchosen :\n\tprintf %s "$name"\n', expected='build value')
-    recipe('SHELL = kash\nchosen :\n\tprintf %s $(printf captured)\n', expected='captured')
-    recipe('SHELL = kash\nchosen :\n\tprintf %s $(printf value)\n\tprintf %s $(printf value)\n', expected='valuevalue')
-    recipe('SHELL = kash\nchosen :\n\tprintf first\n\tprintf second | cat\n', expected='firstsecond')
-    recipe('chosen : ; [shell: kash]\n\tprintf forbidden\n\tif true\n', code='PARSE_ERR')
-    recipe('chosen : ; [shell: kash]\n\tprintf forbidden\n\tif true\n', ['--dry-run', 'chosen'], code='PARSE_ERR')
+    # Recipes use the direct Kash grammar by default.
+    recipe('def command ()\n\tprintf generated\ntask chosen\n\t(command ())\n', expected='generated')
+    recipe('name = "build value"\ntask chosen\n\tprintf %s "$name"\n', expected='build value')
+    recipe('task chosen\n\tprintf %s $(printf captured)\n', expected='captured')
+    recipe('task chosen\n\tprintf %s $(printf value)\n\tprintf %s $(printf value)\n', expected='valuevalue')
+    recipe('task chosen\n\tprintf first\n\tprintf second | cat\n', expected='firstsecond')
+    recipe('task chosen\n\tprintf forbidden\n\tif true\n', code='PARSE_ERR')
+    recipe('task chosen\n\tprintf forbidden\n\tif true\n', ['--dry-run', 'chosen'], code='PARSE_ERR')
     assert not (project / 'forbidden').exists()
 
     # File rules prepare directories, wait for async commands, and verify outputs.
-    recipe('SHELL = kash\n./nested/result :\n\tprintf artifact > @>\n', ['./nested/result'])
+    recipe('rule ./nested/result\n\tprintf artifact > $outputs.0\n', ['./nested/result'])
     assert (project / 'nested/result').read_text() == 'artifact'
-    recipe('SHELL = kash\n./async-result :\n\tsh -c "sleep .03; printf async > async-result" &\n', ['./async-result'])
+    recipe('rule ./async-result\n\tsh -c "sleep .03; printf async > async-result" &\n', ['./async-result'])
     assert (project / 'async-result').read_text() == 'async'
     if part == 'all':
         check_deadline()
-    recipe('SHELL = kash\nchosen :\n\tsh -c "if test -f retried; then printf success; else touch retried; exit 1; fi"\n', ['--retry', '1', 'chosen'], expected='success')
+    recipe('task chosen\n\tsh -c "if test -f retried; then printf success; else touch retried; exit 1; fi"\n', ['--retry', '1', 'chosen'], expected='success')
 
     (project / 'fresh-input').write_text('input')
-    file_recipe = 'SHELL = kash\n./fresh-output : ./fresh-input\n\tsh -c "printf x >> file-runs; printf result > fresh-output"\n'
+    file_recipe = 'rule ./fresh-output : ./fresh-input\n\tsh -c "printf x >> file-runs; printf result > fresh-output"\n'
     recipe(file_recipe, ['./fresh-output'])
     recipe(file_recipe, ['./fresh-output'])
     assert (project / 'file-runs').read_text() == 'x'
-    recipe(file_recipe.replace('SHELL = kash', 'SHELL = "/bin/sh"'), ['./fresh-output'])
+    recipe('SHELL = "/bin/sh"\n' + file_recipe, ['./fresh-output'])
     assert (project / 'file-runs').read_text() == 'xx'
-    unbound = 'SHELL = kash\n./unbound :\n\tsh -c "printf x >> unbound-runs; printf result > unbound"\n'
+    unbound = 'rule ./unbound\n\tsh -c "printf x >> unbound-runs; printf result > unbound"\n'
     recipe(unbound, ['./unbound'])
     recipe(unbound, ['./unbound'])
     assert (project / 'unbound-runs').read_text() == 'xx'
 
     # Environments inherit through prerequisites; shell overrides are local.
-    recipe('SHELL = kash\nchosen : child ; [env: [MODE: "parent"]]\n\tprintenv MODE\nchild : ; [shell: "/bin/sh"]\n\tprintf %s "$MODE"\n', expected='parentparent\n')
-    recipe('chosen : child ; [shell: kash]\n\tprintf parent\nchild :\n\tprintf child; :\n', expected='childparent')
-    recipe('SHELL = (sh! "touch forbidden")\nchosen :\n\ttrue\n', code='PHASE_INVALID')
+    recipe('task chosen : child ; {env: {MODE: "parent"}}\n\tprintenv MODE\ntask child ; {shell: "/bin/sh"}\n\tprintf %s "$MODE"\n', expected='parentparent\n')
+    recipe('task chosen : child\n\tprintf parent\ntask child\n\tprintf child\n', expected='childparent')
+    recipe('SHELL = $(touch forbidden)\ntask chosen\n\ttrue\n', code='PHASE_INVALID')
     assert not (project / 'forbidden').exists()
-    recipe('chosen : ; [shell: kash env: [MODE: "rule"]]\n\tprintenv MODE\n\t:MODE command printenv MODE\n', expected='rule\ncommand\n')
+    recipe('task chosen ; {env: {MODE: "rule"}}\n\tprintenv MODE\n\tMODE: command printenv MODE\n', expected='rule\ncommand\n')
 
-    # Construction is pure; calls have lexical scope, arguments and stable progress.
-    expression('(let [script (kash "touch forbidden")] (out! "constructed"))', expected='constructed"constructed"')
+    # Declarations are inert, and calls retain their lexical scope and arguments.
+    script('def unused ()\n\ttouch forbidden\nprintf constructed', expected='constructed')
     assert not (project / 'forbidden').exists()
-    expression('(let [name "lexical" script (kash "printf %s $name")] (let [name "caller"] (script)) (out! "done"))', expected='lexicaldone"done"')
-    expression('(let [script (kash """printf %s (join "-" @*)""")] (script "one" "two") (out! "done"))', expected='one-twodone"done"')
-    expression('(let [script (kash "printf x; sleep .01; printf y")] (script) (script) (out! "done"))', expected='xyxydone"done"')
-    expression('(let [script (kash "value = 42; printf %s $value")] (script) (script) (out! "done"))', expected='4242done"done"')
-    expression('(let [script (kash "printf x &; printf y")] (script) (out! "done"))')
-    expression('(let [script (kash "false; touch forbidden")] (script))', code='RECIPE_FAIL')
-    expression('(kash "printf x; if true")', code='PARSE_ERR')
+    script('let name = "lexical"\ndef show ()\n\tprintf %s $name\nif true\n\tlet name = "caller"\n\t(show ())\nprintf done', expected='lexicaldone')
+    script('def show words...\n\tprintf %s (join "-" words)\nshow one two\nprintf done', expected='one-twodone')
+    script('def show ()\n\tprintf x\n\tsleep .01\n\tprintf y\nshow\nshow\nprintf done', expected='xyxydone')
+    script('def show ()\n\tlet value = 42\n\tprintf %s $value\nshow\nshow\nprintf done', expected='4242done')
+    script('def show ()\n\tprintf x &\n\tprintf y\nshow\nprintf done')
+    script('def stop ()\n\tfalse\n\ttouch forbidden\nstop', code='RECIPE_FAIL')
+    script('def bad ()\n\tprintf x\n\tif true', code='PARSE_ERR')
     assert not (project / 'forbidden').exists()
-    expression('(kash 42)', code='EXPR_INVALID')
-    expression('(let [script (kash "printf %s $missing")] (script))', code='REF_MISSING')
-    expression('script = (kash "printf named")\nresult = (script)\n(out! result.status)', expected='named0"0"')
-    expression('script = (let [name "retained"] (kash "printf %s $name"))\nresult = (script)\n(out! result.status)', expected='retained0"0"')
+    script('let value = 42\n(value ())', code='EXPR_INVALID')
+    script('def show ()\n\tprintf %s $missing\nshow', code='REF_MISSING')
+    script('def show ()\n\treturn "named"\nlet result = $?(show)\nout! $result.value (fmt result.status)', expected='named0')
+    script('def make ()\n\tlet name = "retained"\n\tdef show ()\n\t\treturn name\n\treturn show\nlet show = make ()\nlet result = $?(show)\nout! $result.value (fmt result.status)', expected='retained0')
 
-    recipe('chosen : ; [shell: kash]\n\t/usr/bin/printf permitted\n', expected='permitted')
-    invoke(['do', 'run', '--allow-run=/usr/bin/printf', str(project / 'Makefile.kmk'), 'chosen'], expected='permitted')
+    recipe('task chosen\n\t/usr/bin/printf permitted\n', expected='permitted')
+    invoke(['do', 'run', '--allow-run=/usr/bin/printf', str(project / 'Makefile.km'), 'chosen'], expected='permitted')
 
-    expression('name = "outer"\nscript = (kash (let [unused "temporary"] "printf %s $name"))\nresult = (script)\n(out! result.status)', expected='outer0"0"')
+    script('let name = "outer"\ndef make ()\n\tlet unused = "temporary"\n\tdef show ()\n\t\treturn name\n\treturn show\nlet show = make ()\nlet result = $?(show)\nout! $result.value (fmt result.status)', expected='outer0')
 
     # Rule stream attribution and caches cover the aggregate process output.
-    text = 'SHELL = kash\ntask chosen :\n\tprintf first\n\tprintf second\n\tsh -c "printf x >> executions"\n'
+    text = 'task cached chosen\n\tprintf first\n\tprintf second\n\tsh -c "printf x >> executions"\n'
     recipe(text, expected='firstsecond')
     recipe(text, expected='firstsecond')
     assert (project / 'executions').read_text() == 'x'
-    text = text.replace('SHELL = kash', 'SHELL = "/bin/sh"')
+    text = 'SHELL = "/bin/sh"\n' + text
     recipe(text, expected='firstsecond')
     assert (project / 'executions').read_text() == 'xx'
-    result = recipe('SHELL = kash\nchosen :\n\tsh -c "printf hello"\n', ['--json', 'chosen'])
+    result = recipe('task chosen\n\tsh -c "printf hello"\n', ['--json', 'chosen'])
     events = [json.loads(line) for line in result.stdout.splitlines()]
     streams = [event for event in events if event['type'] == 'stdout']
     assert ''.join(event['data'] for event in streams) == 'hello'
@@ -117,4 +117,4 @@ with tempfile.TemporaryDirectory() as temporary:
     exited = [event for event in events if event['type'] == 'process-exited']
     assert len(started) == len(exited) == 1, events
     assert started[0]['request'] == exited[0]['request'], events
-print(f'{backend}: {cases} Kash recipe and reusable script cases passed')
+print(f'{backend}: {cases} Kash recipe and lexical function cases passed')

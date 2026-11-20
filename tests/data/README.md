@@ -20,20 +20,20 @@ by the `expr/section-*.km`, `expr/pattern-*.km`, `expr/placeholder-*.km`, and
 
 | Fixture | Used by | Contents |
 | --- | --- | --- |
-| `basic/` | plan, cat, targets | Definition, bare task, cached task, and a file rule with an `out` effect |
-| `discovery/` | source discovery | `Makefile.kmk`, `make.kmk`, and `src/kmk/main.kmk` with distinguishable output |
+| `basic/` | plan, cat, targets | Definition, bare task, cached task, and a value-producing file rule |
+| `discovery/` | source discovery | `Makefile.km`, `make.km`, and `src/km/main.km` with distinguishable output |
 | `project/` | runtime, cache, streams, meta | Real multi-rule build driven by hermetic `sh` scripts under `tools/` |
 | `fresh/` | runtime | `out <- in` recipe appending to `runs.log` for freshness counts |
 | `cache/` | cache | Cached task with a declared input and an environment-dependent task |
 | `json/` | JSON events, dry-run, host | Text, binary, and failing recipes plus an `out`/`err` task |
-| `errors/` | diagnostics, runtime | Missing output, failing recipe, yield conflict, definition cycle, ambiguity, service, timeout, bare task |
+| `errors/` | diagnostics, runtime | Missing output, failing recipe, read-only recipe expansion, definition cycle, ambiguity, service, timeout, bare task |
 | `signals/` | signals | Recipe writing its shell and child pids, then waiting on a background sleep |
-| `legacy-runtime/` | runtime | Equivalent legacy `Makefile.kmk` file build with a fresh-output skip |
-| `legacy-core/` | library | Legacy core-make expression block against a small TypeScript tree |
+| `runtime-copy/` | runtime | Copies a runtime artifact and skips fresh outputs |
+| `source-tree/` | library | Composed library operations over a small TypeScript tree |
 | `plan/` | plan, graph | Captures, dynamic body, body-less static rule for freshness, multi-target task |
 | `operations/lib-fs/` | library filesystem | Small text tree with a subdirectory for `read`, `stat`, and `wildcard` |
 | `operations/lib-grants/` | library capabilities | Read fixture plus a target for rooted write checks |
-| `host/retry.kmk` | host process | Retry recipe that fails until a marker exists |
+| `host/retry.km` | host process | Retry recipe that fails until a marker exists |
 | `fmt/` | formatter | Unformatted source and its canonical form |
 | `cases/` | T009-12 table-driven CLI matrix | Populated cases with one argv element per `args` line, optional stdin/output assertions, and expected status |
 

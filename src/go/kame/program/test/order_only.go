@@ -23,7 +23,7 @@ func TestOrderOnlyBareTaskRerunsWithoutRebuildingFile(t *testing.T) {
 		t.Fatal("input creation failed")
 		return
 	}
-	parsed := script.Parse(a, "order.kmk", "./out : ./input | prepare\n\tcp @< @>; printf x >> runs\nprepare :\n\tprintf p >> prepares\n")
+	parsed := script.ParseKameFile(a, "order.km", "SHELL = \"/bin/sh\"\nrule ./out : ./input | prepare\n\tcp @{inputs.0} @{outputs.0}; printf x >> runs\ntask prepare :\n\tprintf p >> prepares\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin"}})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {

@@ -170,7 +170,7 @@ func encodeValue(a mem.Allocator, e *json.Encoder, value core.Value) {
 		e.Str("data")
 		e.Float(value.Float)
 	}
-	if value.Kind == core.String || value.Kind == core.Pattern {
+	if value.IsPathText() || value.Kind == core.Symbol || value.Kind == core.Pattern || value.Kind == core.PathPattern || value.Kind == core.PathTemplate {
 		e.Str("data")
 		e.Str(value.Text)
 	}
@@ -220,6 +220,12 @@ func valueKind(kind core.Kind) string {
 	}
 	if kind == core.String {
 		return "string"
+	}
+	if kind == core.Symbol {
+		return "symbol"
+	}
+	if kind == core.Stream {
+		return "stream"
 	}
 	if kind == core.Bytes {
 		return "bytes"

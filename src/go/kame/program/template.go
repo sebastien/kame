@@ -3,6 +3,7 @@ package program
 import (
 	"kame/internal/mem"
 	"kame/lang/expr"
+	"kame/lang/source"
 
 	"strings"
 )
@@ -27,7 +28,7 @@ func templateBindings(a mem.Allocator, root *expr.Expr, defines []string) *expr.
 		name := mem.Alloc[expr.Expr](a)
 		name.Kind, name.Text, name.TextOwned = expr.Name, cloneText(a, defines[i][:equal]), true
 		value := mem.Alloc[expr.Expr](a)
-		value.Kind, value.Text, value.TextOwned = expr.Symbol, cloneText(a, defines[i][equal+1:]), true
+		*value = expr.LiteralString(cloneText(a, defines[i][equal+1:]), source.Span{})
 		bindings.Items = append(bindings.Items, name, value)
 	}
 	application.Items = append(application.Items, head, bindings, root)

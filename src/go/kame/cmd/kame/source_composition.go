@@ -8,6 +8,7 @@ import (
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/internal/mem"
+	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
@@ -38,7 +39,15 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 		directory = path.Join(cwd, directory)
 		ownedDirectory = true
 	}
-	result := program.CompositionConditionSources(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory)
+	grants := s.SelectionGrants
+	if len(grants) == 0 && !s.SelectionNoDefault {
+		grants = []eval.Grant{{Capability: eval.Read, Names: []string{directory}}}
+	}
+	discovery := program.Options{Host: posix.New(mem.System), Grants: grants}
+	result := program.TrackedCompositionCondition(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
+	s.Discoveries = append(s.Discoveries, result.Discoveries...)
+	mem.FreeSlice(nil, result.Discoveries)
+	result.Discoveries = nil
 	if ownedDirectory {
 		mem.FreeString(mem.System, directory)
 	}
@@ -69,11 +78,14 @@ func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Sign
 				if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, out, authored, lang) {
 					return false
 				}
-			case script.Composition:
-				if !s.expandSourceComposition(fileIndex, signature, item.Branches, out, authored, lang) {
-					return false
+			case script.Composition, script.Rule, script.DeclarationFor, script.Generate:
+				if item.Kind == script.Composition && script.CompositionLoadsSources(item.Branches) {
+					if !s.expandSourceComposition(fileIndex, signature, item.Branches, out, authored, lang) {
+						return false
+					}
+					continue
 				}
-			case script.Rule, script.DeclarationFor, script.Generate:
+				s.RuleWork = s.RuleWork || declaresRuleWork(item)
 				file := s.Files[fileIndex]
 				s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[item.Span.Start:item.Span.End], Lang: "km", Signature: signature, SourceDirectory: file.SourceDirectory, Offset: item.Span.Start, Includes: file.Includes})
 			case script.DeclarationLet:
@@ -87,15 +99,37 @@ func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Sign
 	return true
 }
 
+func declaresRuleWork(item script.ScriptItem) bool {
+	switch item.Kind {
+	case script.Rule, script.Generate:
+		return true
+	case script.DeclarationFor:
+		for _, child := range item.Loop.Items {
+			if declaresRuleWork(child) {
+				return true
+			}
+		}
+	case script.Composition:
+		for _, branch := range item.Branches {
+			for _, child := range branch.Items {
+				if declaresRuleWork(child) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional bool, span source.Span, out io.Writer, authored *source.Source, lang string) bool {
 	file := s.Files[fileIndex]
-	if !file.FileBacked {
-		message := "include requires a file-backed source; this fragment was supplied inline"
+	if !file.FileBacked && !path.IsAbs(name) && !strings.HasPrefix(name, "~/") {
+		message := "relative include requires a file-backed source; this fragment was supplied inline"
 		if file.Name == "<stdin>" {
-			message = "include requires a file-backed source; this fragment was supplied on stdin"
+			message = "relative include requires a file-backed source; this fragment was supplied on stdin"
 		}
 		tips := []string{"save this fragment as a .km or .kash file and run that file"}
-		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}, Tips: tips}, s.JSON, authored)
+		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "RES_INVALID", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}, Tips: tips}, s.JSON, authored)
 		return false
 	}
 	kash := script.IsKashSource(name)
@@ -149,8 +183,12 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)
 }
 
-func inlineRunSource(name string, text string, lang string, json bool, defines []string, environment []string, out io.Writer, prefix []program.CompileSource, directory string) buildSource {
-	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
+func newCompositionSource(inv cli.Invocation, defines []string, prefix []program.CompileSource) buildSource {
+	return buildSource{JSON: inv.JSON, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), inv.Environment), SelectionDirectory: inv.Directory, SelectionGrants: inv.Grants, SelectionNoDefault: inv.NoDefaultGrants}
+}
+
+func inlineRunSource(name string, text string, lang string, inv cli.Invocation, defines []string, out io.Writer, prefix []program.CompileSource) buildSource {
+	result := newCompositionSource(inv, defines, prefix)
 	result.Files = append(result.Files, sourceFile{Name: name, Text: text, Parent: -1})
 	if !expandIncludesLanguage(&result, 0, out, lang) {
 		result.Status = 1
@@ -187,15 +225,15 @@ func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []prog
 	prefix := selectionPrefix(fragments)
 	defer mem.FreeSlice(nil, prefix)
 	if input.Kind == "discover" {
-		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment}, out, true, prefix)
+		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment, Grants: inv.Grants, NoDefaultGrants: inv.NoDefaultGrants}, out, true, prefix)
 	}
 	name := input.Value
 	if path.IsAbs(name) {
-		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
+		return readRunSourceConfigured(name, out, input.Lang, inv, defines, prefix)
 	}
 	resolved := path.Join(inv.Directory, name)
 	defer mem.FreeString(mem.System, resolved)
-	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
+	return readRunSourceConfigured(resolved, out, input.Lang, inv, defines, prefix)
 }
 
 func inlineRunSourceInput(inv cli.Invocation, name string, text string, lang string, fragments []program.Fragment, out io.Writer) buildSource {
@@ -203,7 +241,7 @@ func inlineRunSourceInput(inv cli.Invocation, name string, text string, lang str
 	defer mem.FreeSlice(nil, defines)
 	prefix := selectionPrefix(fragments)
 	defer mem.FreeSlice(nil, prefix)
-	return inlineRunSource(name, text, lang, inv.JSON, defines, inv.Environment, out, prefix, inv.Directory)
+	return inlineRunSource(name, text, lang, inv, defines, out, prefix)
 }
 
 // Predicate configuration consists only of declarations. Value statements and

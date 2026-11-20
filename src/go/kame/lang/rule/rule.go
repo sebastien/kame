@@ -32,13 +32,14 @@ const (
 )
 
 type Target struct {
-	Kind       TargetKind
-	Text       string
-	Span       source.Span
-	Path       bool
-	Template   bool
-	TargetForm *template.Target
-	Expansion  *template.String
+	Kind         TargetKind
+	Text         string
+	Span         source.Span
+	SourceOrigin int
+	Path         bool
+	Template     bool
+	TargetForm   *template.Target
+	Expansion    *template.String
 	// Decoded distinguishes resolved string data from authored target escapes.
 	Decoded bool
 }
@@ -66,13 +67,6 @@ const (
 	ServiceRule
 )
 
-// EnvironmentAssignment retains authored spelling and a decoded literal value.
-type EnvironmentAssignment struct {
-	Text  string
-	Value string
-	Span  source.Span
-}
-
 type TargetArgument struct {
 	Name     string
 	Default  string
@@ -81,11 +75,10 @@ type TargetArgument struct {
 }
 
 type Rule struct {
-	Declaration    bool
+	SourceOrigin   int // File origin retained when the chosen interpreter parses the body.
 	HeaderComment  string
 	BodyExpression *expr.Expr
 	Metadata       *expr.Expr
-	Environment    []EnvironmentAssignment
 	Arguments      []TargetArgument
 	// Always bypasses freshness while preserving file-output semantics.
 	Always  bool
@@ -152,39 +145,6 @@ func ParseRule(a mem.Allocator, name string, text string) *Result {
 	return p.result(r)
 }
 
-func ParseRuleRange(a mem.Allocator, s *source.Source, start int, end int) Part {
-	p := parser{a: a, s: s, start: start, end: end}
-	return Part{Rule: p.rule(), Diagnostics: p.diags}
-}
-
-func ParseRuleRangeDeferred(a mem.Allocator, s *source.Source, start int, end int) Part {
-	p := parser{a: a, s: s, start: start, end: end, deferRecipeDiagnostics: true}
-	return Part{Rule: p.rule(), Diagnostics: p.diags}
-}
-
-// HasRuleSeparator reports whether text has a top-level rule separator.
-func HasRuleSeparator(text string) bool {
-	return source.TopLevelByte(text, ':') >= 0 || topLevelArrow(text) >= 0 || misplacedSettings(text)
-}
-
-func misplacedSettings(text string) bool {
-	brace := strings.IndexByte(text, '{')
-	if brace < 0 || !strings.HasPrefix(strings.TrimSpace(text[brace+1:]), "shell:") || source.TopLevelByte(text[:brace], ':') >= 0 {
-		return false
-	}
-	head := strings.TrimSpace(text[:brace])
-	if strings.HasSuffix(head, ";") {
-		head = strings.TrimSpace(head[:len(head)-1])
-	}
-	if strings.HasPrefix(head, "task ") {
-		head = strings.TrimSpace(head[5:])
-	}
-	if strings.HasPrefix(head, "service ") {
-		head = strings.TrimSpace(head[8:])
-	}
-	return validName(head) || explicitPath(head)
-}
-
 func FreeRule(a mem.Allocator, r *Rule) {
 	if r == nil {
 		return
@@ -201,10 +161,6 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Inputs[i].TargetForm.Free()
 	}
 	mem.FreeSlice(nil, r.Inputs)
-	for i := range r.Environment {
-		mem.FreeString(a, r.Environment[i].Value)
-	}
-	mem.FreeSlice(nil, r.Environment)
 	for i := range r.Arguments {
 		mem.FreeString(a, r.Arguments[i].Name)
 		mem.FreeString(a, r.Arguments[i].Default)
@@ -250,43 +206,6 @@ func (p *parser) takeTargetDiagnostics(diags []source.Diagnostic, offset int) {
 	}
 }
 
-func (p *parser) rule() *Rule {
-	lineEnd := source.LogicalLineEnd(p.s.Text[:p.end], p.start)
-	headerStart, headerEnd := trim(p.s.Text, p.start, lineEnd)
-	r := mem.Alloc[Rule](p.a)
-	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
-	header := p.s.Text[headerStart:headerEnd]
-	if misplacedSettings(header) {
-		p.error(headerStart, headerEnd, "rule settings belong after the colon and inputs: target : inputs ; {shell: kash}, or target : ; {shell: kash} with no inputs")
-		return r
-	}
-	colon := source.TopLevelByte(header, ':')
-	arrow := topLevelArrow(header)
-	separator, separatorWidth := colon, 1
-	if arrow >= 0 && (separator < 0 || arrow < separator) {
-		separator, separatorWidth = arrow, 2
-	}
-	if separator < 0 {
-		p.error(headerStart, headerEnd, "expected rule separator ':' or '<-'")
-		return r
-	}
-	separator += headerStart
-	leftStart, leftEnd := trim(p.s.Text, headerStart, separator)
-	rightStart, rightEnd := trim(p.s.Text, separator+separatorWidth, headerEnd)
-	p.ruleTargets(r, leftStart, leftEnd)
-	metadata := source.TopLevelByte(p.s.Text[rightStart:rightEnd], ';')
-	if metadata >= 0 {
-		metadata += rightStart
-		p.ruleMetadata(r, metadata+1, rightEnd)
-		rightEnd = metadata
-	}
-	p.ruleInputs(r, rightStart, rightEnd)
-	p.classify(r)
-	p.validateArguments(r)
-	p.recipe(r, lineEnd, "")
-	return r
-}
-
 func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	allItems := ranges(p.a, p.s.Text, start, end)
 	defer mem.FreeSlice(nil, allItems)
@@ -297,23 +216,10 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	}
 	var words []source.Span
 	argumentBlocks := false
-	if !r.Declaration && len(items) >= 2 && p.s.Text[items[0].Start:items[0].End] == "always" {
-		r.Always = true
-		items = items[1:]
-	}
-	if !r.Declaration && len(items) >= 2 && (p.s.Text[items[0].Start:items[0].End] == "task" || p.s.Text[items[0].Start:items[0].End] == "service") {
-		if p.s.Text[items[0].Start:items[0].End] == "task" {
-			r.Kind = CachedTaskRule
-		} else {
-			r.Kind = ServiceRule
-		}
-		items = items[1:]
-	}
-	// Standalone brace blocks after a literal target name declare arguments.
-	// A leading brace block (for example `task {name}`) is a target template.
-	if len(items) >= 2 && (!r.Declaration || r.Kind != FileRule) {
-		first := targetValue(p.s.Text[items[0].Start:items[0].End])
-		argumentBlocks = validName(first) && !explicitPath(first) && !hasTemplate(first)
+	// Standalone brace blocks after a target name declare arguments. The
+	// first operand can itself be a target template.
+	if len(items) >= 2 && r.Kind != FileRule {
+		argumentBlocks = true
 		for i := 1; argumentBlocks && i < len(items); i++ {
 			text := p.s.Text[items[i].Start:items[i].End]
 			if len(text) < 3 || text[0] != '{' || text[len(text)-1] != '}' {
@@ -324,14 +230,14 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	for i := range items {
 		span := items[i]
 		text := p.s.Text[span.Start:span.End]
-		if argumentBlocks && len(text) != 0 && text[0] == '{' {
+		if argumentBlocks && i > 0 {
 			p.targetArgument(r, span, text)
 			continue
 		}
 		words = append(words, span)
 	}
 	defer mem.FreeSlice(nil, words)
-	if (r.Declaration && r.Kind == TaskRule) || r.Kind == CachedTaskRule || r.Kind == ServiceRule {
+	if r.Kind != FileRule {
 		computed := false
 		for i := range words {
 			if hasExpansion(p.s.Text[words[i].Start:words[i].End]) {
@@ -345,6 +251,19 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	for i := range words {
 		span := words[i]
 		text := p.s.Text[span.Start:span.End]
+		if r.Kind == FileRule && text[0] == '(' {
+			if len(text) < 2 || text[len(text)-1] != ')' {
+				p.error(span.Start, span.End, "expected a parenthesized rule output expression")
+				continue
+			}
+			parsed := expr.ParseRange(p.a, p.s, span.Start+1, span.End-1, "")
+			expansion := mem.Alloc[template.String](p.a)
+			expansion.Alloc, expansion.Span, expansion.Diagnostics = p.a, span, parsed.Diagnostics
+			expansion.Parts = append(expansion.Parts, template.Part{Kind: template.Expression, Span: span, Expr: parsed.Expr})
+			p.takeDiagnostics(expansion.Diagnostics)
+			r.Outputs = append(r.Outputs, Target{Kind: TargetExpression, Text: text, Span: span, Expansion: expansion})
+			continue
+		}
 		value := targetValue(text)
 		var expansion *template.String
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
@@ -357,7 +276,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		if (expansion != nil && !literal) || (expansion == nil && hasExpansion(value)) {
 			start, end := span.Start, span.End
 			if expansion == nil {
-				expansion = template.ParseStringRange(p.a, p.s, start, end)
+				expansion = template.ParseSubstitutionRange(p.a, p.s, start, end)
 				p.takeDiagnostics(expansion.Diagnostics)
 			}
 			kind := TargetString
@@ -368,7 +287,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			continue
 		}
 		path, templated := explicitPath(value), hasTemplate(value)
-		if expansion != nil && !path && (!r.Declaration || r.Kind == FileRule) {
+		if expansion != nil && !path && r.Kind == FileRule {
 			p.error(span.Start, span.End, "quoted literal output requires an explicit file path; use ./ for a file path")
 		}
 		if !path && !templated && !validName(value) {
@@ -438,7 +357,7 @@ func (p *parser) validateArguments(r *Rule) {
 }
 
 func hasExpansion(text string) bool {
-	return strings.Contains(text, "@(") || strings.Contains(text, "@{")
+	return strings.Contains(text, "${")
 }
 
 // Quoted header operands share expression-string decoding, but retain their
@@ -457,7 +376,7 @@ func (p *parser) quotedTemplate(span source.Span) *template.String {
 			kind := template.Literal
 			if part.Expr != nil {
 				kind = template.Expression
-				if part.Form == "@{" {
+				if part.Form == "${" {
 					kind = template.Reference
 				}
 			}
@@ -539,7 +458,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			input.Template = p.quotedTemplate(span)
 		} else if hasExpansion(text) {
 			input.Kind = InputString
-			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
+			input.Template = template.ParseSubstitutionRange(p.a, p.s, span.Start, span.End)
 			if len(input.Template.Parts) == 1 && (input.Template.Parts[0].Kind == template.Expression || input.Template.Parts[0].Kind == template.Reference) {
 				input.Kind = InputExpression
 			}
@@ -547,7 +466,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			// authored {name} references, rather than a string-only template.
 			first := input.Template.Parts[0]
 			if input.Kind == InputString && (explicitPath(text) || (first.Expr != nil && first.Span.End < span.End && p.s.Text[first.Span.End] == '/')) {
-				parsed := expr.ParseRange(p.a, p.s, span.Start, span.End, "")
+				parsed := expr.ParseRuleInputPath(p.a, p.s, span.Start, span.End)
 				input.Template.Free()
 				input.Template = mem.Alloc[template.String](p.a)
 				input.Template.Alloc, input.Template.Span, input.Template.Diagnostics = p.a, span, parsed.Diagnostics
@@ -608,18 +527,8 @@ func (p *parser) classify(r *Rule) {
 		}
 		return
 	}
-	if r.Declaration {
-		if (r.Kind == FileRule) != paths {
-			p.error(r.Header.Start, r.Header.End, "rule outputs must be paths and task or service targets must be names")
-		}
-		return
-	}
-	if paths {
-		r.Kind = FileRule
-	} else if len(r.Outputs) == 1 {
-		r.Kind = TaskRule
-	} else {
-		p.error(r.Header.Start, r.Header.End, "named rules have one output")
+	if (r.Kind == FileRule) != paths {
+		p.error(r.Header.Start, r.Header.End, "rule outputs must be paths and task or service targets must be names")
 	}
 }
 
@@ -632,6 +541,7 @@ func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs [
 	p := parser{a: a, s: s}
 	for i := range outputs {
 		output := outputs[i]
+		output.SourceOrigin = authored.SourceOrigin
 		value := output.Text
 		output.Path, output.Template = explicitPath(value), hasTemplate(value)
 		output.Kind = TargetName
@@ -662,7 +572,7 @@ func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs [
 		}
 		r.Outputs = append(r.Outputs, output)
 	}
-	if (r.Kind == CachedTaskRule || r.Kind == ServiceRule || r.Declaration && r.Kind == TaskRule) && len(r.Outputs) != 1 {
+	if r.Kind != FileRule && len(r.Outputs) != 1 {
 		p.error(r.Header.Start, r.Header.End, "prefixed rule needs one target")
 	}
 	p.classify(r)
@@ -678,6 +588,8 @@ func (p *parser) recipe(r *Rule, lineEnd int, headerIndent string) {
 		pos++
 	}
 	indent := ""
+	var pendingBlank []RecipeLine
+	defer func() { mem.FreeSlice(nil, pendingBlank) }()
 	for pos < p.end {
 		lineStart, end := pos, pos
 		for end < p.end && p.s.Text[end] != '\n' {
@@ -692,17 +604,16 @@ func (p *parser) recipe(r *Rule, lineEnd int, headerIndent string) {
 			blankEnd++
 		}
 		if blankEnd == contentEnd {
-			next := end + 1
-			look := next
-			for look < p.end && p.s.Text[look] == '\n' {
-				look++
+			if len(r.Body) != 0 {
+				bodyStart := lineStart
+				var text string
+				if strings.HasPrefix(p.s.Text[lineStart:contentEnd], indent) {
+					bodyStart += len(indent)
+					text = p.s.Text[bodyStart:contentEnd]
+				}
+				pendingBlank = append(pendingBlank, RecipeLine{Text: text, Span: source.Span{Start: bodyStart, End: contentEnd}})
 			}
-			if len(r.Body) != 0 && look+len(headerIndent) < p.end && strings.HasPrefix(p.s.Text[look:], headerIndent) &&
-				(p.s.Text[look+len(headerIndent)] == ' ' || p.s.Text[look+len(headerIndent)] == '\t') {
-				r.Body = append(r.Body, RecipeLine{Span: source.Span{Start: lineStart, End: contentEnd}})
-				r.Span.End = end
-			}
-			pos = next
+			pos = end + 1
 			continue
 		}
 		if p.s.Text[lineStart] != ' ' && p.s.Text[lineStart] != '\t' {
@@ -723,30 +634,29 @@ func (p *parser) recipe(r *Rule, lineEnd int, headerIndent string) {
 			break
 		}
 		bodyStart := lineStart + len(indent)
-		line := template.ParseStringRange(p.a, p.s, bodyStart, contentEnd)
-		r.Body = append(r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}, Template: line})
+		r.Body = append(r.Body, pendingBlank...)
+		pendingBlank = pendingBlank[:0]
+		r.Body = append(r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}})
 		r.Span.End = contentEnd
 		pos = end + 1
 	}
 	p.recipeDocument(r, indent)
-	// Only the selected template grammar owns recipe diagnostics. Per-line
-	// probes must not diagnose literal contents of a document's raw blocks.
+	if r.BodyDoc != nil {
+		return
+	}
 	for i := range r.Body {
-		line := r.Body[i].Template
-		if line == nil {
+		line := &r.Body[i]
+		if strings.Trim(line.Text, " \t") == "" {
 			continue
 		}
-		if r.BodyDoc == nil {
-			for j := range line.Diagnostics {
-				if p.deferRecipeDiagnostics {
-					r.RecipeDiagnostics = append(r.RecipeDiagnostics, line.Diagnostics[j])
-				} else {
-					p.diags = append(p.diags, line.Diagnostics[j])
-				}
-			}
+		line.Template = template.ParseStringRange(p.a, p.s, line.Span.Start, line.Span.End)
+		if p.deferRecipeDiagnostics {
+			r.RecipeDiagnostics = append(r.RecipeDiagnostics, line.Template.Diagnostics...)
+		} else {
+			p.diags = append(p.diags, line.Template.Diagnostics...)
 		}
-		mem.FreeSlice(nil, line.Diagnostics)
-		line.Diagnostics = nil
+		mem.FreeSlice(nil, line.Template.Diagnostics)
+		line.Template.Diagnostics = nil
 	}
 }
 
@@ -761,10 +671,10 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 		firstStart = r.Body[0].Span.Start
 	}
 	lastEnd := r.Body[len(r.Body)-1].Span.End
-	if !template.HasDocumentDirectivesRange(p.a, p.s, firstStart, lastEnd) {
+	if !template.NeedsDocumentRange(p.a, p.s, firstStart, lastEnd) {
 		return
 	}
-	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
+	doc := template.ParseRecipeDocumentRange(p.a, p.s, firstStart, lastEnd, indent)
 	for i := range doc.Diagnostics {
 		if p.deferRecipeDiagnostics {
 			r.RecipeDiagnostics = append(r.RecipeDiagnostics, doc.Diagnostics[i])
@@ -773,30 +683,6 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 		}
 	}
 	r.BodyDoc = doc
-}
-
-func topLevelArrow(text string) int {
-	depth, quote := 0, false
-	for i := 0; i+1 < len(text); i++ {
-		if quote {
-			if text[i] == '\\' {
-				i++
-			} else if text[i] == '"' {
-				quote = false
-			}
-			continue
-		}
-		if text[i] == '"' {
-			quote = true
-		} else if text[i] == '(' || text[i] == '[' || text[i] == '{' {
-			depth++
-		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
-			depth--
-		} else if text[i] == '<' && text[i+1] == '-' && depth == 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 func space(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
@@ -912,15 +798,15 @@ func FormatRule(a mem.Allocator, r *Rule) string {
 // FormatRuleWithIndent returns allocator-owned canonical rule text without a terminal newline.
 func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 	b := strings.Builder{}
-	if r.Declaration && r.Kind == FileRule {
+	if r.Kind == FileRule {
 		b.WriteString("rule ")
 	}
 	if r.Always {
 		b.WriteString("always ")
 	}
-	if r.Kind == CachedTaskRule || (r.Declaration && r.Kind == TaskRule) {
+	if r.Kind == CachedTaskRule || r.Kind == TaskRule {
 		b.WriteString("task ")
-		if r.Declaration && r.Kind == CachedTaskRule {
+		if r.Kind == CachedTaskRule {
 			b.WriteString("cached ")
 		}
 	}
@@ -943,7 +829,7 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		}
 		b.WriteByte('}')
 	}
-	if len(r.Inputs) != 0 || !r.Declaration {
+	if len(r.Inputs) != 0 {
 		b.WriteString(" :")
 	}
 	for i := range r.Inputs {
@@ -956,21 +842,9 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 			b.WriteByte(',')
 		}
 	}
-	for i := range r.Environment {
-		if i == 0 {
-			b.WriteString(" ; env")
-		}
-		b.WriteByte(' ')
-		b.WriteString(r.Environment[i].Text)
-	}
 	if r.Metadata != nil {
 		b.WriteString(" ; ")
-		var metadata string
-		if r.Declaration {
-			metadata = expr.FormatAtIndent(a, r.Metadata, expr.Columns(b.String(), 0), 0)
-		} else {
-			metadata = expr.Compact(a, r.Metadata)
-		}
+		metadata := expr.FormatAtIndent(a, r.Metadata, expr.Columns(b.String(), 0), 0)
 		b.WriteString(metadata)
 		mem.FreeString(a, metadata)
 	}
@@ -1014,7 +888,7 @@ func wildcardInput(a mem.Allocator, text string, span source.Span) *template.Str
 	name := mem.Alloc[expr.Expr](a)
 	name.Kind, name.Text, name.Span = expr.Name, "wildcard", span
 	pattern := mem.Alloc[expr.Expr](a)
-	pattern.Kind, pattern.Text, pattern.Span = expr.Symbol, text, span
+	pattern.Kind, pattern.Text, pattern.Span, pattern.PathGlob = expr.Path, text, span, true
 	call.Items = append(call.Items, name, pattern)
 	value := mem.Alloc[template.String](a)
 	value.Alloc, value.Span = a, span

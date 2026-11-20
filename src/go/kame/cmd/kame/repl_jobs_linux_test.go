@@ -187,7 +187,7 @@ func TestNativeInteractiveKashBackgroundEntryReadsTerminal(t *testing.T) {
 }
 
 // A one-line `cmd &` entry is a running job; kill %N cancels a job, kill
-// with a signal delivers it, and kill without a job runs the external
+// with a signal delivers it, and x/kill runs the external
 // command.
 func TestNativeInteractiveKashKill(t *testing.T) {
 	directory := t.TempDir()
@@ -205,7 +205,7 @@ func TestNativeInteractiveKashKill(t *testing.T) {
 	s.waitFor("got-usr1")
 	s.send("kill %1\r")
 	waitProcessState(t, async, "")
-	s.send("kill 2147483646\r")
+	s.send("x/kill 2147483646\r")
 	s.waitFor("No such process")
 	s.send("sh -c 'echo end-$((40+2))'\r")
 	s.waitFor("end-42")
@@ -343,6 +343,15 @@ func TestNativeInteractiveKashNestedAsyncAttribution(t *testing.T) {
 	// was consumed by wait, and must not be raised again by the invocation join.
 	s.send("let result = (await job)\r")
 	s.waitFor("let result = (await job)\r\r\nS0J0> ")
+	s.send("let owned = $&(true)\r")
+	s.send("wait $owned\r")
+	s.send("printf 'wait-finished-%s\\n' 42\r")
+	s.waitFor("wait-finished-42\r\n")
+	_, afterWait, _ := strings.Cut(s.text(), "wait $owned\r\r\n")
+	beforeNext, _, _ := strings.Cut(afterWait, "printf 'wait-finished-")
+	if !strings.Contains(beforeNext, "S0J0> ") {
+		t.Fatalf("waiting on an owned handle returned an unexpected status: %q", beforeNext)
+	}
 	if status := s.finish(); status != 0 {
 		t.Fatalf("nested async outcome was lost or repeated: status=%d out=%q", status, s.text())
 	}

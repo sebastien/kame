@@ -14,13 +14,13 @@ func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T)
 	predicates := []string{"nil", "false", "true", "0", "0.0", `""`, "[]", "{key: 1}", "(if false then 1 elif 0 then 2 else 3)", "(selected ())", "mode"}
 	prefix := "mode ?= \"debug\"\ndef selected () = mode\nunused = (read \"never read\")\n"
 	for i := range predicates {
-		result := program.CompositionCondition(a, "condition.kmk", prefix, predicates[i], []string{"mode=release", "future=later"}, []string{"KAME_mode=environment"}, "")
+		result := program.CompositionCondition(a, "condition.km", prefix, predicates[i], []string{"mode=release", "future=later"}, []string{"KAME_mode=environment"}, "")
 		if result.Diagnostic.Code != "" || result.Selected != (i >= 2) {
 			t.Error("condition " + predicates[i] + ": " + result.Diagnostic.Code + " " + result.Diagnostic.Message)
 		}
 		result.Diagnostic.Free(a)
 	}
-	result := program.CompositionCondition(a, "condition.kmk", prefix, `(eq mode "environment")`, nil, []string{"KAME_mode=environment"}, "")
+	result := program.CompositionCondition(a, "condition.km", prefix, `(eq? mode "environment")`, nil, []string{"KAME_mode=environment"}, "")
 	if result.Diagnostic.Code != "" || !result.Selected {
 		t.Error("condition lost environment override")
 	}
@@ -30,15 +30,15 @@ func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T)
 func TestCompositionConditionUsesEvaluationDirectory(t *testing.T) {
 	a := t.Allocator()
 	prefix := "root = (abspath ./)\ndef helper () = (abspath ./child/..)\n"
-	predicates := []string{`(eq (abspath ./) "/workspace/project")`, `(eq root "/workspace/project")`, `(eq (helper ()) "/workspace/project")`}
+	predicates := []string{`(eq? (abspath ./) /workspace/project)`, `(eq? root /workspace/project)`, `(eq? (helper ()) /workspace/project)`}
 	for i := range predicates {
-		result := program.CompositionConditionSources(a, []program.CompileSource{{Name: "/sdk/config.kmk", Text: prefix}}, program.CompileSource{Name: "/sdk/main.kmk", Text: predicates[i]}, nil, nil, "/workspace/project")
+		result := program.CompositionConditionSources(a, []program.CompileSource{{Name: "/sdk/config.km", Text: prefix}}, program.CompileSource{Name: "/sdk/main.km", Text: predicates[i]}, nil, nil, "/workspace/project")
 		if result.Diagnostic.Code != "" || !result.Selected {
 			t.Error("condition lost evaluation directory: " + predicates[i] + " " + result.Diagnostic.Code)
 		}
 		result.Diagnostic.Free(a)
 	}
-	result := program.DeclarationPredicate(a, "config.kmk", prefix, predicates[1], nil, nil, "/workspace/project")
+	result := program.DeclarationPredicate(a, "config.km", prefix, predicates[1], nil, nil, "/workspace/project")
 	if result.Diagnostic.Code != "" || !result.Selected {
 		t.Error("declaration predicate lost evaluation directory")
 	}
@@ -120,9 +120,9 @@ func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T
 	a := t.Allocator()
 	prefixes := []string{"a = b\nb = a\n", "", "", "", "", "include ./never.km\n", "if true\n  include ./never.km\n"}
 	predicates := []string{"a", `(sh! "never execute")`, `(out! "never publish")`, `(read "never read")`, "missing", "true", "true"}
-	codes := []string{"DEP_CYCLE", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING", "FEATURE_UNSUP", "FEATURE_UNSUP"}
+	codes := []string{"DEP_CYCLE", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING", "FEATURE_UNSUP", "RES_INVALID"}
 	for i := range prefixes {
-		result := program.CompositionCondition(a, "condition.kmk", prefixes[i], predicates[i], nil, nil, "")
+		result := program.CompositionCondition(a, "condition.km", prefixes[i], predicates[i], nil, nil, "")
 		if result.Diagnostic.Code != codes[i] {
 			t.Error("condition " + predicates[i] + ": expected " + codes[i] + " got " + result.Diagnostic.Code)
 		}
@@ -140,7 +140,7 @@ func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T
 			compiled.Session.Free()
 			t.Error("session accepted residual source composition")
 		}
-		if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "FEATURE_UNSUP" {
+		if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != codes[i] {
 			t.Error("session lost residual composition diagnostic")
 		}
 		compiled.Free(a)

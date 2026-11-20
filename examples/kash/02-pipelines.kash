@@ -1,19 +1,16 @@
 #!/usr/bin/env -S kame do kash
-# Requires Kame with streaming pipelines and redirection support.
-names = ["world" "hello" "hello"]
+let names = ["world", "hello", "hello"]
 
-# The outer pipe streams process output.
-printf "%s\n" $names | sort | uniq
+# The process pipe streams output. The value pipe transforms the list.
+printf "%s\n" $...names | sort | uniq
+let unique_names = names |> unique |> sorted
+printf "%s\n" $...unique_names
 
-# The inner pipe transforms a Kame value before starting a process.
-printf "%s\n" (names | unique | sorted)
-
-# The result is captured as one string, with its trailing newlines preserved.
-listing = $(printf "%s\n" $names | sort | uniq)
+# Capture keeps the trailing newline.
+let listing = $(printf "%s\n" $...names | sort | uniq)
 echo (count listing)
 
-# Writing the report is explicit, not an effect of computing its path.
-report = ./report.txt
+let report = ./report.txt
 printf %s $listing > $report
 cat < $report
 printf "report complete\n" >> $report

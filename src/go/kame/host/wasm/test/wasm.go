@@ -131,7 +131,7 @@ func TestRuntimeWithoutEngineDiscardsCompletionsWithRuntimeAllocator(t *testing.
 
 func TestToolChecksRetainPathsAndAllowRepeatedComputedPlans(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "task root : @{nop \"leaf\"}\ntask leaf ; {shell: \"sh\"}\n\t@{x/test-tool}\n")
+	started := wasm.NewRuntime(a, "task root : ${nop \"leaf\"}\ntask leaf ; {shell: \"sh\"}\n\t@{x/test-tool}\n")
 	if started.Runtime == nil {
 		t.Error("runtime did not compile")
 		started.Result.Free(a)
@@ -164,7 +164,7 @@ func TestToolChecksRetainPathsAndAllowRepeatedComputedPlans(t *testing.T) {
 
 func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "task root : @{if (env \"TOOL_INPUTS\") then (wildcard ./input/*.txt) else []} ; {shell: \"sh\"}\n\ttouch forbidden\nrule ./input/needs.txt ; {shell: \"sh\"}\n\t@{x/test-tool}\n")
+	started := wasm.NewRuntime(a, "task root : ${if (env \"TOOL_INPUTS\") then (wildcard ./input/*.txt) else []} ; {shell: \"sh\"}\n\ttouch forbidden\nrule ./input/needs.txt ; {shell: \"sh\"}\n\t@{x/test-tool}\n")
 	if started.Runtime == nil {
 		t.Error("runtime did not compile")
 		started.Result.Free(a)
@@ -248,7 +248,7 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 
 func TestPlanInspectionUsesSchemaTwoAndStableReadOnlyQueries(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "task default : build\ntask build : ./output\nrule ./output : @{wildcard ./src/*.txt} ; {shell: \"sh\"}\n\ttouch forbidden\n")
+	started := wasm.NewRuntime(a, "task default : build\ntask build : ./output\nrule ./output : ${wildcard ./src/*.txt} ; {shell: \"sh\"}\n\ttouch forbidden\n")
 	if started.Runtime == nil {
 		t.Error("compile failed")
 		started.Result.Free(a)
@@ -360,7 +360,7 @@ func TestInspectionDisposalReclaimsRetainedRootsAndHostRequests(t *testing.T) {
 	// Dispose with a queued request, a host-owned request, and a nested read
 	// after completing the first request. The test allocator checks all owners.
 	for phase := 0; phase < 3; phase++ {
-		started := wasm.NewRuntime(a, "inputs = (read (read \"./inputs.txt\"))\ntask root : @{split \"\\n\" inputs} ; {shell: \"sh\"}\n\ttouch forbidden\n")
+		started := wasm.NewRuntime(a, "inputs = (read (read \"./inputs.txt\"))\ntask root : ${split \"\\n\" inputs} ; {shell: \"sh\"}\n\ttouch forbidden\n")
 		if started.Runtime == nil {
 			t.Error("runtime did not compile")
 			started.Result.Free(a)
@@ -462,7 +462,7 @@ func TestInspectionReplacementCancelsAndRecovers(t *testing.T) {
 	for mode := 0; mode < 3; mode++ {
 		for replacement := 0; replacement < 7; replacement++ {
 			for exposed := 0; exposed < 2; exposed++ {
-				started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask root : @{split \"\\n\" inputs}\ntask quiet\nrule ./result : ./seed ; {shell: \"sh\"}\n\ttouch forbidden\n")
+				started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask root : ${split \"\\n\" inputs}\ntask quiet\nrule ./result : ./seed ; {shell: \"sh\"}\n\ttouch forbidden\n")
 				if started.Runtime == nil {
 					t.Error("compile failed")
 					started.Result.Free(a)
@@ -578,7 +578,7 @@ func TestInspectionReplacementCancelsAndRecovers(t *testing.T) {
 func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 	a := t.Allocator()
 	for span := 0; span < 2; span++ {
-		started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask a : @{split \"\\n\" inputs}\ntask b : @{split \"\\n\" inputs}\ntask quiet\n")
+		started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask a : ${split \"\\n\" inputs}\ntask b : ${split \"\\n\" inputs}\ntask quiet\n")
 		if started.Runtime == nil {
 			t.Error("compile failed")
 			started.Result.Free(a)
@@ -824,7 +824,7 @@ func TestInspectionStatusInvalidationRestartsPendingRead(t *testing.T) {
 
 func TestInspectionTraversalResumesAndRefreshesEarlierProducers(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "task root : first second\ntask first : @{split \"\\n\" (text (read \"./first.txt\"))}\ntask second : @{split \"\\n\" (text (read \"./second.txt\"))}\ntask old\ntask new\ntask quiet\n")
+	started := wasm.NewRuntime(a, "task root : first second\ntask first : ${split \"\\n\" (text (read \"./first.txt\"))}\ntask second : ${split \"\\n\" (text (read \"./second.txt\"))}\ntask old\ntask new\ntask quiet\n")
 	if started.Runtime == nil {
 		t.Error("compile failed")
 		started.Result.Free(a)
@@ -877,7 +877,7 @@ func TestInspectionTraversalResumesAndRefreshesEarlierProducers(t *testing.T) {
 func TestInspectionPendingReadDoesNotRebuildCompletedGraph(t *testing.T) {
 	tracker := mem.Tracker{Allocator: t.Allocator()}
 	a := &tracker
-	started := wasm.NewRuntime(a, "task root : first second\ntask first : @{split \"\\n\" (text (read \"./first.txt\"))}\ntask second : @{split \"\\n\" (text (read \"./second.txt\"))}\n")
+	started := wasm.NewRuntime(a, "task root : first second\ntask first : ${split \"\\n\" (text (read \"./first.txt\"))}\ntask second : ${split \"\\n\" (text (read \"./second.txt\"))}\n")
 	if started.Runtime == nil {
 		t.Error("compile failed")
 		started.Result.Free(a)
@@ -935,7 +935,7 @@ func TestInspectionPendingReadDoesNotRebuildCompletedGraph(t *testing.T) {
 
 func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask root : @{split \"\\n\" inputs}\ntask quiet\n")
+	started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\ntask root : ${split \"\\n\" inputs}\ntask quiet\n")
 	if started.Runtime == nil {
 		t.Error("compile failed")
 		started.Result.Free(a)
@@ -998,7 +998,7 @@ func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 func TestConsumerInspectionResumesAndDisposesRetainedCatalogue(t *testing.T) {
 	a := t.Allocator()
 	for phase := 0; phase < 3; phase++ {
-		started := wasm.NewRuntime(a, "SOURCES = (wildcard ./src/*.txt)\nrule ./first : @{SOURCES}\nrule ./second : ./first\n")
+		started := wasm.NewRuntime(a, "SOURCES = (wildcard ./src/*.txt)\nrule ./first : ${SOURCES}\nrule ./second : ./first\n")
 		if started.Runtime == nil {
 			t.Error("runtime did not compile")
 			started.Result.Free(a)

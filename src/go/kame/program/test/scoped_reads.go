@@ -28,7 +28,7 @@ func checkScopedDefinitionReads(t *testing.T, defines []string, expected string)
 		return
 	}
 	defer os.Remove(directory)
-	parsed := script.Parse(a, "scoped.kmk", "SETTING = \"authored\"\nNEXT = (env \"NEXT\")\nMODE = (env \"MODE\")\ndef mode () = (str MODE)\nVALUE = (mode ())\ndebug : @{NEXT} ; env \"NEXT=cached\" \"MODE=debug\" \"KAME_SETTING=d\"\nrelease : @{NEXT} ; env \"NEXT=cached\" \"MODE=release\" \"KAME_SETTING=release\"\ntask cached :\n\tprintf '%s|%s' @{VALUE} @{SETTING} >> runs\n")
+	parsed := script.ParseKameFile(a, "scoped.km", "SHELL = \"/bin/sh\"\nSETTING = \"authored\"\nNEXT = (env \"NEXT\")\nMODE = (env \"MODE\")\ndef mode () = (str MODE)\nVALUE = (mode ())\ntask debug : ${NEXT} ; {env: {NEXT: \"leaf\", MODE: \"debug\", KAME_SETTING: \"d\"}}\ntask release : ${NEXT} ; {env: {NEXT: \"leaf\", MODE: \"release\", KAME_SETTING: \"release\"}}\ntask cached leaf :\n\tprintf '%s|%s' @{VALUE} @{SETTING} >> runs\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()

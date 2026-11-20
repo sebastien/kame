@@ -20,6 +20,10 @@ def invoke(host: list[str], args: list[str], cwd: Path, text: str = "", status: 
 
 
 def checkHost(host: list[str], project: Path) -> None:
+	unknown = invoke(host, ["do", "expr", "-c", "42"], project, status=2)
+	assert not unknown.stdout and "CMD_UNKNOWN" in unknown.stderr and "kame do run --lang expr -c TEXT" in unknown.stderr, unknown
+	unknown = invoke(host, ["do", "run", "--define-value=flag=false", "-c", "42"], project, status=2)
+	assert not unknown.stdout and "OPT_UNKNOWN" in unknown.stderr and "--set NAME=LITERAL" in unknown.stderr, unknown
 	for command in COMMANDS:
 		result = invoke(host, ["do", command, "--help"], project)
 		assert ("Usage:" in result.stdout or "Commands:" in result.stdout) and not result.stderr, result
@@ -37,6 +41,10 @@ def checkHost(host: list[str], project: Path) -> None:
 			result = invoke(host, ["do", command, *language, *source, "-C", "nested"] if "--" not in source else ["do", command, *language, "-C", "nested", *source], project)
 			assert result.stdout, result
 		invoke(host, ["do", command, *language, "-C", "nested", "--", "-value.km"], project)
+	for command in ["parse", "fmt"]:
+		for language in ["script", "rule"]:
+			result = invoke(host, ["do", command, "--lang", language, "-c", "task default"], project, status=2)
+			assert "OPT_VALUE_INVALID" in result.stderr and not result.stdout, result
 	assert not invoke(host, ["do", "parse", "--lang", "expr", "--check", "-c", "42"], project).stdout
 	kash = '$x/cp -pL -- $inputs.0 $outputs.0'
 	inline = json.loads(invoke(host, ["do", "parse", "--lang", "kash", "--json", "-c", kash], project).stdout)
@@ -47,7 +55,7 @@ def checkHost(host: list[str], project: Path) -> None:
 	invoke(host, ["do", "fmt", "--lang", "expr", "--check", "-c", "[1   2]"], project, status=1)
 	invoke(host, ["do", "fmt", "--lang", "template", "--comment", "HTML", "-c", "hello"], project)
 	for command in ["plan", "inputs", "outputs", "span", "tools"]:
-		for tail in [["--retry", "2"], ["--shell", "sh"], ["--watch"], ["-j", "2"], ["-c", "default :", "-c", "default :"], ["-f", "a", "-f", "b"]]:
+		for tail in [["--retry", "2"], ["--shell", "sh"], ["--watch"], ["-j", "2"], ["-c", "task default", "-c", "task default"], ["-f", "a", "-f", "b"]]:
 			invoke(host, ["do", command, *tail], project, status=2)
 	for command in ["cat", "tools"]:
 		invoke(host, ["do", command, "--watch"], project, status=2)
@@ -83,19 +91,19 @@ def checkHost(host: list[str], project: Path) -> None:
 			for value in [[option, ""], [option + "="]]:
 				result = invoke(host, ["do", command, *prefix, *value], project, status=2)
 				assert "OPT_VALUE_INVALID" in result.stderr, result
-	for language in ["expr", "template", "km"]:
+	for language in ["expr", "template"]:
 		for option in [["--indent", "spaces"], ["--indent-width", "2", "--indent", "spaces"]]:
 			result = invoke(host, ["do", "fmt", "--lang", language, *option, "-c", "42"], project, status=2)
 			assert "OPT_CONFLICT" in result.stderr, result
-	invoke(host, ["do", "fmt", "--lang", "script", "--indent-width", "2", "-c", "default :"], project, status=2)
+	invoke(host, ["do", "fmt", "--lang", "km", "--indent-width", "2", "-c", "task default"], project, status=2)
 	invoke(host, ["do", "fmt", "--lang", "expr", "--comment", "plain", "-c", "42"], project, status=2)
 	invoke(host, ["do", "run", "--lang", "expr", "--print-result", "-c", "42"], project, status=2)
 	for command, tail in [
 		("parse", ["--lang", "expr", "-c", "42"]), ("fmt", ["--lang", "expr", "-c", "42"]),
 		("render", ["-c", "hello"]), ("run", ["-c", '(out! "BAD")']),
-		("plan", ["-c", "default :"]), ("inputs", ["-c", "default :"]),
-		("outputs", ["-c", "default :"]), ("span", ["-c", "default :"]),
-		("tools", ["-c", "default :"]), ("cat", ["-c", 'default = "BAD"']),
+		("plan", ["-c", "task default"]), ("inputs", ["-c", "task default"]),
+		("outputs", ["-c", "task default"]), ("span", ["-c", "task default"]),
+		("tools", ["-c", "task default"]), ("cat", ["-c", 'default = "BAD"']),
 		("cache", ["clean"]), ("clean", []), ("pick", []),
 	]:
 		for directory in ["absent-directory", "nested/value.km"]:
@@ -118,7 +126,7 @@ def main() -> None:
 		(project / "nested").mkdir()
 		for name in ["value.km", "-value.km"]:
 			(project / "nested" / name).write_text("42")
-		(project / "Makefile.kmk").write_text("default :\n")
+		(project / "Makefile.km").write_text("task default\n")
 		for host in [[native], ["node", wasm]]:
 			checkHost(host, project)
 		result = invoke([str(root / "bin/kame")], ["init", "--help"], project, status=1)

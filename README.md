@@ -18,50 +18,27 @@ for builds, tests, provisioning, and deployment, with familiar dependency rules
 and fewer shell/expression clashes. It combines file artifacts, always-run and
 cached tasks, and managed services on one incremental engine.
 
-`kame` uses a Lisp-like expression language that embeds nicely into shell. Its
-rule language is close to `make` with fewer annoyances (no shell-clashing `$`,
-nor forcing tabs).
-
-`kash` is an improve non-interactive shell that can be used for rules. Kash
-is optimised for safety and process coordination, an ideal replacement for bash
-glueing and coordinating processes.
+Kame expressions compute typed values. Kash uses those values to pass arguments
+directly to functions and executables and to compose process pipelines. Build
+recipes use Kash by default. Standalone `.kash` scripts use the same action syntax.
 
 ## Quick start
 
-`kame` is available in WASM through NPM, which is the easiest way to run
-it on all platforms:
+Use a matching native Linux or macOS binary, the Windows launcher bundle, or
+the Node.js/WebAssembly package. The Windows bundle and npm package require
+Node.js 18 or later. The [installation guide](docs/ref-installation.md) covers
+release verification and [building from source](docs/ref-contributing.md).
 
-```sh
-bun x @ssebastien/kame@0.3.1 --version
-# or, with npm
-npm x --yes @ssebastien/kame@0.3.1 -- --version
-```
+### Makefile.km
 
-But for everyday use (on Windows/MacOS/Linux/BSD), you will want to get the
-standalone APE from the
-[v0.3.1 release](https://github.com/sebastien/kame/releases/tag/v0.3.1):
-
-```sh
-curl -fLO https://github.com/sebastien/kame/releases/download/v0.3.1/kame.com
-chmod +x kame.com
-./kame.com --version
-```
-
-Neither route needs a compiler toolchain. The npm package runs on Node.js 18+;
-the APE covers Linux, macOS, FreeBSD, NetBSD, and Windows (rename it to
-`kame.exe`).
-
-### Makefile.kmk
-
-`kame` offers a [bootstrap Makefile](Makefile) for Make users. It automatically
-discovers `Makefile.kmk`, `make.kmk`, or `src/kmk/main.kmk`. A `Makefile.kmk`
-looks like this:
+Kame searches for `Kamefile`, `Makefile.km`, `make.km`, and `src/km/main.km`
+in that order. Put this in `Makefile.km`. The [bootstrap Makefile](Makefile)
+can forward GNU Make goals to Kame.
 
 ```kame
-default : ./greeting.txt
+task default : ./greeting.txt
 
-./greeting.txt : ./name.txt ; [shell: kame]
-	(str "Hello, " (strip (text (read @<))) "!\n")
+rule ./greeting.txt : ./name.txt = str "Hello, " (strip (text (read inputs.0))) "!\n"
 ```
 
 ```sh
@@ -74,28 +51,29 @@ printf 'Lin\n' > name.txt
 kame                       # rebuild: greeting.txt now contains Hello, Lin!
 ```
 
-`./greeting.txt` is a file target, `default` is a bare task, and `@<` selects
-the first input. A Kame body returns text or bytes; the rule atomically publishes
-that content to its single file output, without an external command.
-File freshness compares content, not timestamps; the bare task is always reached,
-but its unchanged file prerequisite can be reused.
+`inputs.0` selects the first prerequisite. The `= EXPR` body returns text or
+bytes for Kame to publish atomically to the file output. The `default` task
+runs whenever reached, and its file prerequisite is reused while its inputs
+and output have the same content.
 
 ## Syntax at a glance
 
 | Syntax | Meaning |
 | --- | --- |
 | `name = EXPR` | Lazy definition; a bare `name` reads its value. |
-| `"text"`, `42`, `:true`, `:false`, `:nil` | Literal values; only false and nil are false in conditions. |
-| `["a" "b"]`, `[name: "app"]` | List and record; items are whitespace-separated, not comma-separated. |
-| `(f x)`, `([x] (uppercase x))` | Function call and anonymous function. |
-| `(files \| map f)` | Value pipe: equivalent to `(map f files)`, not a process stream. |
-| `./out : ./in`, `build : ./out` | File rule and always-run bare task; indent the body below the header. |
-| `task build : ./in`, `service server :` | Cached task and managed service. |
-| `@{name}`, `@(f x)` | Read a value or evaluate a call in a string/template, including shell recipes. |
-| `@<`, `@<*`, `@>` | First normal input, all normal inputs, first output in rule context. |
+| `"text"`, `42`, `true`, `false`, `nil` | Literal values. Only `false` and `nil` are false in conditions. |
+| `["a", "b"]`, `{name: "app"}` | List and record. A comma or newline separates items. |
+| `f x`, `(x => uppercase x)` | Function call and anonymous function. |
+| `paths \|> map f` | Value pipe, equivalent to `map f paths`. |
+| `rule ./out : ./in`, `rule (output-path) : ./in` | File rules with a literal or computed output. |
+| `task build`, `task cached check`, `service server` | Always-run task, cached task, and managed service. |
+| `${name}`, `${f x}` | Substitute a value in a Kame string, path, rule header, or Kash command word. |
+| `@{name}`, `@{f x}` | Interpolate a value in a document template or foreign-shell recipe. |
+| `inputs.0`, `inputs`, `outputs.0` | First normal input, all normal inputs, and first output in rule context. |
 | `{name}`, `{path:**}` | Rule captures: one path segment or a path spanning directories; reuse captures in inputs. |
-| `@{x/cc}` | Resolve and track the `cc` executable in a shell recipe. |
-| `; [shell: kame]`, `; [shell: kash]` | Header metadata: compute artifact content or run typed Kash commands instead of shell text. |
+| `x/cc` | Resolve and track the external `cc` executable in a Kash recipe. |
+| `; {shell: "sh"}`, `= EXPR` | Use a foreign shell for the indented recipe, or publish the result of an expression body. |
+| `cwd: ./build MODE: release ./app` | Set the directory and environment for one Kash stage. |
 | Kash `$name`, `$(command)`, `a \| b` | Pass a typed value, capture stdout, or connect process streams. |
 
 Expressions compute values; templates render text; Kash connects processes.
@@ -105,10 +83,9 @@ See the [language reference](docs/skills/kame/ref/language.md) for details.
 
 - **Familiar, not Make-compatible.** Keep targets, prerequisites, and recipes;
   distinguish file artifacts, bare tasks, cached tasks, and services explicitly.
-- **Clear language boundaries.** Expressions compute values; external-shell
-  recipes use `@{ref}` / `@(call)` expansions and run as one script. Direct Kash
-  recipes pass typed argv without generating shell text. Kame bodies compute
-  artifact content directly. Template expansion is read-only. No `.PHONY` or `.ONESHELL`.
+- **Clear language boundaries.** Expression bodies compute artifact content.
+  Kash recipes pass typed arguments directly to processes. Foreign-shell
+  recipes use `@{EXPR}` interpolation and run as a single script.
 - **Demand-driven computation.** Lazy definitions, dynamic dependencies, streaming,
   and watch invalidation share one engine, informed by
   [Build Systems à La Carte](https://dl.acm.org/doi/10.1145/3236774).
@@ -122,21 +99,20 @@ Compile C sources under `src/`, tracking headers in both `src/` and `lib/h/`:
 
 ```kame
 # Lazy definitions compute the source, header, and output sets.
-sources = ./src/**/*.c
-headers = (concat ./src/**/*.h ./lib/h/**/*.h)
-objects = (sub ./src/{path:**}.c ./build/{path}.o sources)
+sources = files ./src/**/*.c
+headers = concat (files ./src/**/*.h) (files ./lib/h/**/*.h)
+objects = subst ./src/{path:**}.c ./build/{path}.o sources
 
-default : @{objects}
+task default : ${objects}
 
 # Captures connect each output to its source; all headers are prerequisites.
-./build/{path:**}.o : ./src/{path}.c @{headers}
-	mkdir -p @(dirname @>)
-	@{x/cc} -I ./lib/h -c @< -o @>
+rule ./build/{path:**}.o : ./src/{path}.c ${headers}
+	x/cc -I ./lib/h -c $inputs.0 -o $outputs.0
 ```
 
-Glob paths track discovery, `sub` remaps path lists, and `@{x/cc}` tracks the
-compiler. The recipe creates the output directory and compiles one source;
-changing a declared header invalidates dependent objects.
+`files` tracks discovery, `subst` maps source paths to object paths, and `x/cc`
+tracks the compiler. Kame creates the output directory before running the
+recipe. Changing a declared header invalidates the dependent objects.
 
 ## Find your way
 
@@ -146,7 +122,7 @@ changing a declared header invalidates dependent objects.
   [idioms and gotchas](docs/idioms-and-gotchas.md).
 - [Contributing](docs/ref-contributing.md) and [embedding APIs](docs/ref-embedding.md).
 - [Remaining work](TODO.md) and
-  [release publication](docs/spec/015-distribution.md#manual-publication).
+  [release publication](docs/spec/015-distribution.md#publication).
 
 The name `kame` is *verlan* for `make`: start from the desired result—a makefile
 without the quirks—and build the language/system to support it.

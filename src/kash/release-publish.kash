@@ -8,28 +8,32 @@
 # lends npm the terminal. This entry stages assets already built in dist/.
 # See `release-publish` in release.kash.
 
-(include ./release.kash)
+include ./release.kash
 
-USAGE = "Publish a signed Kame release to GitHub and npm (manual operator step).\n\nUsage:\n  kame release [repo=OWNER/REPO] [notes=FILE]\n  src/kash/release-publish.kash [--repo OWNER/REPO] [--notes-file FILE]\n\n  Key paths may be supplied with KAME_RELEASE_PUBLIC_KEY and\n  KAME_RELEASE_SIGNING_KEY; otherwise they are fetched from littlesecrets.\n  A missing release commit is published to release-vVERSION before staging.\n  Reruns of a published GitHub release retry only missing npm publication.\n\n  --repo OWNER/REPO   publish to another repository (default: current)\n  --notes-file FILE   use FILE instead of generated changes; usage is always added\n  -h, --help          show this help\n"
+def USAGE = "Publish a signed Kame release to GitHub and npm (manual operator step).\n\nUsage:\n  kame release [repo=OWNER/REPO] [notes=FILE]\n  src/kash/release-publish.kash [--repo OWNER/REPO] [--notes-file FILE]\n\n  Key paths may be supplied with KAME_RELEASE_PUBLIC_KEY and\n  KAME_RELEASE_SIGNING_KEY; otherwise they are fetched from littlesecrets.\n  A missing release commit is published to release-vVERSION before staging.\n  Reruns of a published GitHub release retry only missing npm publication.\n\n  --repo OWNER/REPO   publish to another repository (default: current)\n  --notes-file FILE   use FILE instead of generated changes; usage is always added\n  -h, --help          show this help\n"
 
-SCHEMA = [repo: [names: ["--repo"] arity: :one repeat: :replace] notes: [names: ["--notes-file"] arity: :one repeat: :replace] help: [names: ["-h" "--help"] arity: :flag repeat: :replace]]
+def SCHEMA = {
+	repo: {names: ["--repo"], arity: :one, repeat: :replace},
+	notes: {names: ["--notes-file"], arity: :one, repeat: :replace},
+	help: {names: ["-h", "--help"], arity: :flag, repeat: :replace},
+}
 
 def usage-error message
 	printf "release: %s\n" $message >&err
 	exit 2
 # Report malformed arguments as the release contract's usage errors.
 for argument in args
-	if (and (starts? "-" argument) (not (in? argument ["--repo" "--notes-file" "-h" "--help"])))
-		(usage-error "unknown argument: @{argument}")
-if (in? (last args) ["--repo" "--notes-file"])
-	(usage-error "@(last args) requires a value")
+	if ((starts? "-" argument) and (not (in? argument ["--repo", "--notes-file", "-h", "--help"])))
+		(usage-error "unknown argument: ${argument}")
+if (in? (last args) ["--repo", "--notes-file"])
+	(usage-error "${last args} requires a value")
 let parsed = (parse-args SCHEMA args)
 if (nop parsed.options.help)
 	printf %s $USAGE
 	exit 0
-let repo = (if (empty? parsed.options.repo) "" (first parsed.options.repo))
-let notes = (if (empty? parsed.options.notes) "" (abspath (first parsed.options.notes)))
-if (and (not (blank? notes)) (not (exists? notes)))
+let repo = (if (empty? parsed.options.repo) then "" else (first parsed.options.repo))
+let notes = (if (empty? parsed.options.notes) then "" else (abspath (first parsed.options.notes)))
+if ((not (blank? notes)) and (not (exists? notes)))
 	(usage-error "--notes-file requires an existing file")
-let root = (abspath (joinpath (source-dir) "../.."))
+let root = (abspath (joinpath module/dir "../.."))
 (release-publish root repo notes (release-path (env "KAME_RELEASE_PUBLIC_KEY")) (release-path (env "KAME_RELEASE_SIGNING_KEY")))

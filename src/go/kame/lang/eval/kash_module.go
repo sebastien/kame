@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/definition"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"path"
@@ -12,11 +13,13 @@ import (
 )
 
 type moduleSource struct {
-	Path      string
-	Parsed    *script.Script
-	Frames    []diagnostic.Frame
-	Signature core.Signature
-	Origin    int
+	Path       string
+	Parsed     *script.Script
+	Frames     []diagnostic.Frame
+	Signature  core.Signature
+	Origin     int
+	namespaces map[string]*kashModule
+	imports    map[string]moduleBinding
 }
 
 type kashModule struct {
@@ -53,17 +56,30 @@ func (m *kashModule) Free() {
 type moduleFrame struct {
 	Path      string
 	Origin    int
-	Index     int
-	RequestID int64
+	Blocks    []moduleBlock
 	IncludeAt source.Span
 	Optional  bool
 }
 
+type moduleBlock struct {
+	Items []script.ScriptItem
+	Next  int
+}
+
 type moduleLoad struct {
-	Module      *kashModule
-	Completed   *kashModule // Program owns this after a successful load.
-	Stack       []moduleFrame
-	Definitions []*definition.Definition
+	Module       *kashModule
+	Completed    *kashModule // Program owns this after a successful load.
+	Stack        []moduleFrame
+	Definitions  []*definition.Definition
+	Exports      []moduleExport
+	ImportSource int
+	ImportItem   int
+	Dependencies []core.Signature
+}
+
+type moduleExport struct {
+	Source string
+	Name   script.ModuleName
 }
 
 func freeModuleLoad(a mem.Allocator, value any) {
@@ -74,6 +90,9 @@ func freeModuleLoad(a mem.Allocator, value any) {
 	for i := range state.Stack {
 		mem.FreeString(a, state.Stack[i].Path)
 	}
+	for _, export := range state.Exports {
+		mem.FreeString(a, export.Source)
+	}
 	mem.FreeSlice(nil, state.Stack)
 	mem.FreeSlice(nil, state.Definitions)
 	mem.Free(a, state)
@@ -83,16 +102,7 @@ func restoreModuleOperation(c *Context, start int, end int) {
 	c.operationStart, c.operationEnd = start, end
 }
 
-func (c *Context) clearFailedModuleLoad(state *moduleLoad) {
-	// Failed loads must keep their containing files observable for watch recovery.
-	for i := range state.Module.Sources {
-		s := state.Module.Sources[i]
-		c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: s.Path}, core.ObservationContent, s.Signature)
-	}
-	c.ClearOperationState()
-}
-
-func (p *Program) loadKashModule(name string, c *Context, span source.Span) Result {
+func (p *Program) loadModule(name string, c *Context, span source.Span) Result {
 	start, end := c.operationStart, c.operationEnd
 	c.operationStart, c.operationEnd = span.Start, span.End
 	defer restoreModuleOperation(c, start, end)
@@ -106,19 +116,9 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 	if state == nil {
 		state = mem.Alloc[moduleLoad](p.Alloc)
 		state.Module = mem.Alloc[kashModule](p.Alloc)
-		state.Module.Program, state.Module.Scope = p, newScope(p.Alloc, c.Scope)
+		state.Module.Program, state.Module.Scope = p, newScope(p.Alloc, nil)
 		state.Stack = append(state.Stack, moduleFrame{Path: owned(p.Alloc, name)})
 		c.SetOperationState(state, freeModuleLoad)
-	}
-	module := state.Module
-	if state.Completed != nil {
-		module = state.Completed
-	}
-	// Resumption recreates temporary caller scopes; retain the current lexical parent.
-	if module.Scope.Parent != c.Scope {
-		c.Scope.Retain()
-		module.Scope.Parent.Free()
-		module.Scope.Parent = c.Scope
 	}
 	if state.Completed != nil {
 		return Result{Value: state.Completed.Value()}
@@ -126,26 +126,16 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 	for len(state.Stack) != 0 {
 		frame := &state.Stack[len(state.Stack)-1]
 		if frame.Origin == 0 {
-			if frame.RequestID == 0 {
-				frame.RequestID = c.submitSource(frame.Path)
-				if frame.RequestID == 0 {
-					c.clearFailedModuleLoad(state)
-					return failure(c.Run, "FEATURE_UNSUP", span, "source-loading host is unavailable")
-				}
-				return Result{Waiting: true}
+			loadedSource := p.moduleSource(c, frame.Path, true)
+			if loadedSource.Waiting {
+				return loadedSource
 			}
-			if c.Completion().RequestID != frame.RequestID {
-				return Result{Waiting: true}
+			if loadedSource.Diagnostic.Code != "" {
+				loadedSource.Value.Free(c.Run)
+				c.ClearOperationState()
+				return Result{Diagnostic: loadedSource.Diagnostic}
 			}
-			completion := c.TakeCompletion()
-			if completion.Diagnostic.Code != "" {
-				d := completion.Diagnostic.Clone(c.Run)
-				c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: frame.Path}, core.ObservationContent, core.Signature{Mode: core.SignatureMissing})
-				c.clearFailedModuleLoad(state)
-				return Result{Diagnostic: d}
-			}
-			if completion.HasValue && completion.Value.Kind == core.Nil {
-				c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: frame.Path}, core.ObservationContent, core.Signature{Mode: core.SignatureMissing})
+			if loadedSource.Value.Kind == core.Nil {
 				if frame.Optional {
 					mem.FreeString(p.Alloc, frame.Path)
 					state.Stack = state.Stack[:len(state.Stack)-1]
@@ -155,18 +145,23 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 				if len(state.Stack) > 1 {
 					result.Diagnostic.Source = owned(c.Run, state.Stack[len(state.Stack)-2].Path)
 				}
-				c.clearFailedModuleLoad(state)
+				c.ClearOperationState()
 				return result
 			}
-			if completion.Value.Kind != core.Bytes {
-				completion.Value.Free(c.Run)
-				c.clearFailedModuleLoad(state)
+			if loadedSource.Value.Kind != core.Bytes {
+				loadedSource.Value.Free(c.Run)
+				c.ClearOperationState()
 				return failure(c.Run, "HOST_FAIL", span, "source host did not return bytes")
 			}
-			parsed := script.ParseKash(p.Alloc, frame.Path, string(completion.Value.Bytes))
-			bytesSignature := core.ContentSignature(completion.Value.Bytes)
-			completion.Value.Free(c.Run)
-			script.ValidateKashLibrary(parsed)
+			var parsed *script.Script
+			if script.IsKashSource(frame.Path) {
+				parsed = script.ParseKash(p.Alloc, frame.Path, string(loadedSource.Value.Bytes))
+				script.ValidateKashModule(parsed)
+			} else {
+				parsed = script.ParseKameFile(p.Alloc, frame.Path, string(loadedSource.Value.Bytes))
+			}
+			bytesSignature := core.ContentSignature(loadedSource.Value.Bytes)
+			loadedSource.Value.Free(c.Run)
 			if len(parsed.Diagnostics) != 0 {
 				d := parsed.Diagnostics[0]
 				result := failure(c.Run, d.Code, d.Span, d.Message)
@@ -176,8 +171,7 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 					result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: owned(c.Run, "include"), Label: owned(c.Run, state.Stack[i].Path), Source: owned(c.Run, parent.Path), Span: diagnostic.Span{Start: state.Stack[i].IncludeAt.Start, End: state.Stack[i].IncludeAt.End}})
 				}
 				parsed.Free()
-				c.Observe(core.ResourceKey{Kind: core.ResourceFile, Name: frame.Path}, core.ObservationContent, bytesSignature)
-				c.clearFailedModuleLoad(state)
+				c.ClearOperationState()
 				return result
 			}
 			module := state.Module
@@ -187,35 +181,51 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 				parent := state.Stack[i-1]
 				loaded.Frames = append(loaded.Frames, diagnostic.Frame{Kind: "include", Label: owned(p.Alloc, entry.Path), Source: owned(p.Alloc, parent.Path), Span: diagnostic.Span{Start: entry.IncludeAt.Start, End: entry.IncludeAt.End}})
 			}
+			p.addModuleSourcePart(&loaded)
 			module.Sources = append(module.Sources, loaded)
 			frame.Origin = len(module.Sources)
+			frame.Blocks = append(frame.Blocks, moduleBlock{Items: parsed.Items})
 			continue
 		}
-		item := state.Module.Sources[frame.Origin-1].Parsed.Items
-		if frame.Index == len(item) {
+		if len(frame.Blocks) == 0 {
 			mem.FreeString(p.Alloc, frame.Path)
 			state.Stack = state.Stack[:len(state.Stack)-1]
 			continue
 		}
-		current := item[frame.Index]
-		frame.Index++
+		block := &frame.Blocks[len(frame.Blocks)-1]
+		if block.Next == len(block.Items) {
+			frame.Blocks = frame.Blocks[:len(frame.Blocks)-1]
+			continue
+		}
+		current := block.Items[block.Next]
+		block.Next++
+		if current.Kind == script.Composition {
+			items, r := state.selectModuleBranch(p, c, current.Branches)
+			if r.Diagnostic.Code != "" {
+				c.ClearOperationState()
+				return r
+			}
+			if len(items) != 0 {
+				frame.Blocks = append(frame.Blocks, moduleBlock{Items: items})
+			}
+			continue
+		}
 		if current.Kind == script.Definition && current.Definition != nil {
 			state.Definitions = append(state.Definitions, current.Definition)
-			if len(state.Stack) == 1 {
-				state.Module.Fields = append(state.Module.Fields, owned(p.Alloc, current.Definition.Name))
-			}
 		}
 		if current.Module != nil {
-			result := failure(c.Run, "FEATURE_UNSUP", current.Span, "module declarations must be resolved before registration")
-			result.Diagnostic.Source = owned(c.Run, frame.Path)
-			c.clearFailedModuleLoad(state)
-			return result
+			if current.Kind == script.ModuleExport {
+				for _, export := range current.Module.Names {
+					state.Exports = append(state.Exports, moduleExport{Source: owned(p.Alloc, frame.Path), Name: export})
+				}
+			}
+			continue
 		}
 		if current.Kind == script.Include {
-			if !script.IsKashSource(current.Include) {
+			if script.IsKashSource(frame.Path) && !script.IsKashSource(current.Include) {
 				result := failure(c.Run, "RES_INVALID", current.Span, "Kash includes require a .kash or .ksh source")
 				result.Diagnostic.Source = owned(c.Run, frame.Path)
-				c.clearFailedModuleLoad(state)
+				c.ClearOperationState()
 				return result
 			}
 			base := ""
@@ -230,7 +240,7 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 				if !path.IsAbs(home) {
 					result := failure(c.Run, "FS_ERR", current.Span, "cannot resolve the home directory for include")
 					result.Diagnostic.Source = owned(c.Run, frame.Path)
-					c.clearFailedModuleLoad(state)
+					c.ClearOperationState()
 					return result
 				}
 				base, current.Include = home, current.Include[2:]
@@ -242,14 +252,19 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 			mem.FreeString(p.Alloc, sourceDirectory)
 			for i := range state.Stack {
 				if state.Stack[i].Path == child {
+					var sources []string
+					for _, entry := range state.Stack[i:] {
+						sources = append(sources, entry.Path)
+					}
+					cycle := strings.Join(append(sources, child), " -> ")
 					mem.FreeString(p.Alloc, child)
-					result := failure(c.Run, "DEP_CYCLE", current.Span, "Kash library include cycle")
+					result := failure(c.Run, "DEP_CYCLE", current.Span, "include cycle: "+cycle)
 					result.Diagnostic.Source = owned(c.Run, frame.Path)
 					for j := range state.Module.Sources[frame.Origin-1].Frames {
 						f := state.Module.Sources[frame.Origin-1].Frames[j]
 						result.Diagnostic.Frames = append(result.Diagnostic.Frames, diagnostic.Frame{Kind: owned(c.Run, f.Kind), Label: owned(c.Run, f.Label), Source: owned(c.Run, f.Source), Span: f.Span})
 					}
-					c.clearFailedModuleLoad(state)
+					c.ClearOperationState()
 					return result
 				}
 			}
@@ -257,6 +272,58 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 		}
 	}
 	m := state.Module
+	defined := make(map[string]bool, len(state.Definitions))
+	for _, definition := range state.Definitions {
+		defined[definition.Name] = true
+	}
+	r := state.bindImports(p, c, defined, p.authoredModuleNode(name))
+	if r.Waiting {
+		return r
+	}
+	if r.Diagnostic.Code != "" {
+		c.ClearOperationState()
+		return r
+	}
+	exported := make(map[string]bool, len(state.Exports))
+	for _, export := range state.Exports {
+		name := export.Name.Name
+		if !defined[name] {
+			result := failure(c.Run, "DEF_INVALID", export.Name.Span, "cannot export unknown definition: "+name)
+			result.Diagnostic.Source = owned(c.Run, export.Source)
+			c.ClearOperationState()
+			return result
+		}
+		if !exported[name] {
+			exported[name] = true
+			m.Fields = append(m.Fields, owned(p.Alloc, name))
+		}
+	}
+	digest := core.NewDigest()
+	digest.Text("kash-module-v1")
+	// Watch reloads use the fingerprint to replace linked scopes.
+	if len(m.Sources) != 0 {
+		digest.Text(m.Sources[0].Path)
+		digest.Write(m.Sources[0].Signature.Digest[:])
+	}
+	digest.Text("authored")
+	digest.Uint64(uint64(len(m.Sources) - 1))
+	for _, included := range m.Sources[1:] {
+		digest.Text(included.Path)
+		digest.Write(included.Signature.Digest[:])
+	}
+	digest.Uint64(uint64(len(state.Dependencies)))
+	for _, linked := range state.Dependencies {
+		digest.Write(linked.Digest[:])
+	}
+	m.Signature.Mode = core.SignatureContent
+	digest.Sum(m.Signature.Digest[:])
+	for _, loaded := range p.Modules {
+		if loaded.Signature.Equal(m.Signature) {
+			m.Free()
+			state.Module, state.Completed = nil, loaded
+			return Result{Value: loaded.Value()}
+		}
+	}
 	for i := range state.Definitions {
 		d := state.Definitions[i]
 		duplicate := false
@@ -285,50 +352,191 @@ func (p *Program) loadKashModule(name string, c *Context, span source.Span) Resu
 					break
 				}
 			}
-			c.clearFailedModuleLoad(state)
+			c.ClearOperationState()
 			return result
 		}
-		if d.Function {
-			f := mem.Alloc[Function](p.Alloc)
-			f.Kind, f.Parameters, f.Expression, f.Scope, f.ParametersOwned, f.Definition = FunctionDefinition, convertParameters(p.Alloc, d.Parameters), d.Expression, m.Scope, true, d
-			m.Scope.setFunction(d.Name, f)
-		} else {
-			local := mem.Alloc[localDefinition](p.Alloc)
-			local.Expression, local.Scope = d.Expression, m.Scope
-			m.Scope.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Name), Local: local})
-		}
+		addModuleDefinition(m.Scope, d)
 	}
 	for i := range m.Sources {
 		s := &m.Sources[i]
-		p.AddSourcePart(s.Path, 0, len(s.Parsed.Source.Text), 0)
-		parent := path.Dir(s.Path)
-		p.SetSourcePartDirectory(parent)
-		mem.FreeString(p.Alloc, parent)
-		p.SourceParts[len(p.SourceParts)-1].Signature = s.Signature
-		p.SourceParts[len(p.SourceParts)-1].Module = true
-		p.SetSourcePartIncludes(s.Frames)
-		s.Origin = len(p.SourceParts)
-		SetScriptSourceOrigin(s.Parsed, 0, len(s.Parsed.Source.Text), s.Origin)
-	}
-	digest := core.NewDigest()
-	digest.Text("kash-module-v1")
-	// Helpers are observed only when reached; their bytes cannot define the
-	// module's identity or an unused nested edit would rebuild its callers.
-	if len(m.Sources) != 0 {
-		digest.Text(m.Sources[0].Path)
-		digest.Write(m.Sources[0].Signature.Digest[:])
-	}
-	if m.Scope.Parent == p.Scope {
-		m.Signature.Mode = core.SignatureContent
-		digest.Sum(m.Signature.Digest[:])
+		p.SourceParts[s.Origin-1].moduleSource = s
+		for _, item := range s.Parsed.Items {
+			if d := item.Definition; d != nil && d.Function {
+				function := m.Scope.lookup(d.Name).Function
+				digest := core.NewDigest()
+				digest.Text("module-function-v1")
+				digest.Text(s.Path)
+				digest.Write(s.Signature.Digest[:])
+				digest.Text(d.Name)
+				function.Owner = p
+				function.Signature.Mode = core.SignatureContent
+				digest.Sum(function.Signature.Digest[:])
+			}
+		}
 	}
 	p.Modules = append(p.Modules, m)
 	state.Module, state.Completed = nil, m
 	return Result{Value: m.Value()}
 }
 
+func (p *Program) addModuleSourcePart(s *moduleSource) {
+	p.AddSourcePart(s.Path, 0, len(s.Parsed.Source.Text), 0)
+	parent := path.Dir(s.Path)
+	p.SetSourcePartDirectory(parent)
+	mem.FreeString(p.Alloc, parent)
+	part := &p.SourceParts[len(p.SourceParts)-1]
+	part.Signature, part.Module = s.Signature, true
+	p.SetSourcePartIncludes(s.Frames)
+	s.Origin = len(p.SourceParts)
+	SetScriptSourceOrigin(s.Parsed, 0, len(s.Parsed.Source.Text), s.Origin)
+}
+
+func addModuleDefinition(scope *Scope, d *definition.Definition) {
+	a := scope.Alloc
+	if d.Function {
+		f := mem.Alloc[Function](a)
+		f.Kind, f.Parameters, f.Expression, f.Scope, f.ParametersOwned, f.Definition = FunctionDefinition, convertParameters(a, d.Parameters), d.Expression, scope, true, d
+		scope.setFunction(d.Name, f)
+		return
+	}
+	scope.setLocalDefinition(d.Name, d.Expression)
+}
+
+func (state *moduleLoad) selectModuleBranch(p *Program, c *Context, branches []script.DeclarationBranch) ([]script.ScriptItem, Result) {
+	if !moduleBranchesIncludeSource(branches) {
+		return nil, Result{}
+	}
+	scope := newScope(c.Run, nil)
+	defer scope.Free()
+	for _, d := range state.Definitions {
+		// Report duplicate definitions during module registration, even when
+		// the selector never reads a conflicting name.
+		if scope.lookup(d.Name) == nil {
+			addModuleDefinition(scope, d)
+		}
+	}
+	for _, branch := range branches {
+		if branch.Condition == nil {
+			return branch.Items, Result{}
+		}
+		selected, r := p.moduleCondition(c, scope, branch.Condition)
+		if r.Diagnostic.Code != "" {
+			return nil, r
+		}
+		if selected {
+			return branch.Items, Result{}
+		}
+	}
+	return nil, Result{}
+}
+
+func moduleBranchesIncludeSource(branches []script.DeclarationBranch) bool {
+	for _, branch := range branches {
+		for _, item := range branch.Items {
+			if item.Kind == script.Include || item.Kind == script.Composition && moduleBranchesIncludeSource(item.Branches) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (p *Program) moduleCondition(c *Context, scope *Scope, condition *expr.Expr) (bool, Result) {
+	// Configuration predicates use the invocation directory and have no host grants.
+	context := &Context{Program: p, Run: c.Run, Cwd: p.DefinitionCwd,
+		Source: p.Script.Source.Name, Scope: scope, Phase: PlanningPhase, pureValueBlock: true}
+	r := p.EvaluateWith(condition, context)
+	if r.Diagnostic.Code != "" {
+		return false, r
+	}
+	defer r.Free(c.Run)
+	if r.Waiting || r.Stream != nil || context.PhaseInvalid() {
+		failed := failure(c.Run, "PHASE_INVALID", condition.Span, "configuration conditions cannot execute runtime work")
+		context.SourceOrigin = condition.SourceOrigin
+		attachSource(&failed, context)
+		return false, failed
+	}
+	return truthValue(r.Value), Result{}
+}
+
+func (state *moduleLoad) bindImports(p *Program, c *Context, defined map[string]bool, parent *core.Node) Result {
+	for state.ImportSource < len(state.Module.Sources) {
+		src := &state.Module.Sources[state.ImportSource]
+		for state.ImportItem < len(src.Parsed.Items) {
+			item := src.Parsed.Items[state.ImportItem]
+			if item.Kind != script.ModuleImport && item.Kind != script.ModuleFrom {
+				state.ImportItem++
+				continue
+			}
+			r := p.loadImport(item.Module, c, src.Path, parent)
+			if r.Waiting {
+				return r
+			}
+			if r.Diagnostic.Code == "" {
+				module := r.Value.Module.(*kashModule)
+				r = src.bindImport(c, item, module, defined)
+				if r.Diagnostic.Code == "" {
+					state.Dependencies = append(state.Dependencies, module.Signature)
+				}
+			}
+			if r.Diagnostic.Code != "" {
+				if r.Diagnostic.Source == "" {
+					r.Diagnostic.Source = owned(c.Run, src.Path)
+				}
+				for _, frame := range src.Frames {
+					r.Diagnostic.Frames = append(r.Diagnostic.Frames, diagnostic.Frame{
+						Kind: frame.Kind, Label: owned(c.Run, frame.Label), Source: owned(c.Run, frame.Source), Span: frame.Span,
+					})
+				}
+				return r
+			}
+			state.ImportItem++
+		}
+		state.ImportSource++
+		state.ImportItem = 0
+	}
+	return Result{}
+}
+
+func (src *moduleSource) bindImport(c *Context, item script.ScriptItem, module *kashModule, defined map[string]bool) Result {
+	if item.Kind == script.ModuleImport {
+		alias := item.Module.Namespace()
+		if src.namespaces[alias] != nil {
+			return failure(c.Run, "DEF_INVALID", item.Span, "duplicate module namespace: "+alias)
+		}
+		if src.namespaces == nil {
+			src.namespaces = make(map[string]*kashModule)
+		}
+		src.namespaces[alias] = module
+		return Result{}
+	}
+	if src.imports == nil {
+		src.imports = make(map[string]moduleBinding)
+	}
+	for _, selected := range item.Module.Names {
+		name, span := selected.Name, selected.Span
+		if selected.Alias != "" {
+			name, span = selected.Alias, selected.AliasSpan
+		}
+		if defined[name] || src.imports[name].module != nil {
+			return failure(c.Run, "DEF_INVALID", span, "duplicate imported binding: "+name)
+		}
+		src.imports[name] = moduleBinding{module: module, member: selected.Name}
+	}
+	return Result{}
+}
+
 func (m *kashModule) Value() core.Value {
 	return core.Value{Kind: core.Module, Module: m, ModuleOwner: m.Program, ModuleSignature: &m.Signature}
+}
+
+func (m *kashModule) exports(name string) bool {
+	for _, field := range m.Fields {
+		if field == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ModuleField is shared by dotted references and get. Missing fields are
@@ -343,21 +551,37 @@ func (c *Context) ModuleField(value core.Value, key string, span source.Span) Mo
 		return ModuleFieldResult{Result: failure(c.Run, "EXPR_INVALID", span, "module belongs to another invocation"), Found: true}
 	}
 	m := value.Module.(*kashModule)
-	found := false
-	for i := range m.Fields {
-		if m.Fields[i] == key {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !m.exports(key) {
 		return ModuleFieldResult{}
 	}
 	previous := c.Source
 	c.Source = c.Program.Script.Source.Name
-	r := name(m.Scope, key, span, c)
+	r := name(m.Scope, key, nil, span, c)
 	c.Source = previous
 	return ModuleFieldResult{Result: r, Found: true}
+}
+
+// UsesChangedInputs checks authored source, including helpers reached through modules.
+func (p *Program) UsesChangedInputs() bool {
+	uses := func(text string) bool {
+		return strings.Contains(text, "changed-inputs")
+	}
+	if uses(p.Script.Source.Text) {
+		return true
+	}
+	for _, part := range p.SourceParts {
+		if part.Included != nil && uses(part.Included.Text) {
+			return true
+		}
+	}
+	for _, module := range p.Modules {
+		for _, src := range module.Sources {
+			if uses(src.Parsed.Source.Text) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RevalidateModuleSource reloads retained module definitions when watch reports

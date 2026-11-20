@@ -17,7 +17,7 @@ func TestKashWithSetupRetainsCompletedWorkAcrossSuspension(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.ParseKash(a, "with.kash", "def probe ()\n\twith :cwd ((unused => \"./scope\") (once ())) :env ((unused => {MODE: \"new\"}) (list (once ()) (async ())))\n\t\t(once ())\n\treturn 0\ndef result = (probe ())\n")
+	parsed := script.ParseKash(a, "with.kash", "def probe ()\n\twith cwd: ((unused => \"./scope\") (once ())) env: ((unused => {MODE: \"new\"}) (list (once ()) (async ())))\n\t\t(once ())\n\treturn 0\ndef result = (probe ())\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")

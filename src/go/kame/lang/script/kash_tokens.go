@@ -1,6 +1,9 @@
 package script
 
-import "strings"
+import (
+	"kame/lang/expr"
+	"strings"
+)
 
 // KashTokenKind classifies Kash source text for presentation.
 type KashTokenKind uint8
@@ -94,13 +97,15 @@ func (l *kashLexer) commands(i int, closing byte) int {
 		case l.redirection(i) > i:
 			i = l.emit(KashTokenOperator, i, l.redirection(i))
 			i = l.word(i, KashTokenText)
-		case c == '(':
-			i, command = l.expression(i, command), false
 		case setup:
 			i, setup = l.word(i, KashTokenText), false
-		case command && c == ':':
-			i, setup = l.word(i, KashTokenConstant), true
+		case c == '(':
+			i, command = l.expression(i, command), false
 		case command:
+			if _, end := expr.CommandSetupKeyPrefix(text, i); end != i {
+				i, setup = l.emit(KashTokenConstant, i, end), true
+				continue
+			}
 			start := i
 			end := l.wordEnd(i)
 			word := text[start:end]
@@ -320,11 +325,15 @@ func (l *kashLexer) substitution(i int) int {
 		l.emit(KashTokenOperator, i, j+1)
 		return l.commands(j+1, ')')
 	case j < len(text) && text[j] == '{':
-		end := strings.IndexByte(text[j:], '}')
-		if end < 0 {
-			return l.emit(KashTokenVariable, i, len(text))
+		end := j + 1
+		for end < len(text) && (kashNameStart(text[end]) || strings.IndexByte("0123456789-./?!", text[end]) >= 0) {
+			end++
 		}
-		return l.emit(KashTokenVariable, i, j+end+1)
+		if end < len(text) && text[end] == '}' {
+			return l.emit(KashTokenVariable, i, end+1)
+		}
+		l.emit(KashTokenOperator, i, j+1)
+		return l.expressionItems(j+1, '}', false)
 	}
 	for j < len(text) && (kashNameStart(text[j]) || text[j] >= '0' && text[j] <= '9' || text[j] == '-' || text[j] == '.') {
 		j++

@@ -158,7 +158,7 @@ prerequisites or turn source-loading observations into executable stages.
 ## Plan and stages
 
 `plan` combines these inventories with the selected producer details: source
-location and rule, captures, arguments, relevant configuration and tools,
+location and rule, captures, arguments, relevant configuration,
 declared outputs, resolved prerequisites, freshness, and known reuse policy.
 A definition producer is a symbol: human output shows one compact definition
 line (`NAME = expression`, or the function form), not a freshness, capture, or
@@ -174,6 +174,11 @@ Show numbered **stages** of dependency-ordered producer work. External file
 leaves are inputs, not executable stages. Shared and multi-output producers
 appear once. Identify work that may proceed in parallel, subject to existing
 job limits, service readiness, and other execution constraints.
+
+Show statically identifiable tool requirements after the stages. List each tool
+name once with its earliest stage in the selected plan and the path, when known.
+Tool discovery reads authored expressions and Kash command heads. Computed
+commands and opaque foreign-shell commands may only be known at execution.
 
 Stages preserve normal and order-only prerequisite ordering and make authored
 comma-sequencing barriers explicit. Sequence groups belong to their consumer:
@@ -304,6 +309,7 @@ Each successful invocation publishes one complete JSON document with:
 | `producers` | Selected producer records with document-local `id`, `kind`, target identity, output resource IDs, and established plan/source/binding details |
 | `dependencies` | Consumer producer ID, input resource ID, origin, `orderOnly`, and one-based sequence `group` where applicable |
 | `stages` | Records with one-based `number` and `producers` (producer IDs), reflecting the known ordering |
+| `tools` | For plans, tool records with `name`, resolved `path` (empty when unknown), and their first one-based `stage` |
 | `deferred` | Discovery boundaries with a stable reason and affected producer/resource identity; source location when available |
 | `items` | For `inputs`/`outputs`, resource IDs in the requested inventory; empty at depth `0`. Other reachable records retain provenance and supplementary classification. |
 
@@ -318,10 +324,11 @@ Resource `key` records contain `kind` and canonical `name`. Producer records use
 ID, and `outputs` for declared file-output IDs (empty for logical/value producers).
 Resources selected as changed/requested roots include `root: true`.
 Their `kind` is `file`, `target`, `task`, `service`, or `definition`. Retain
-`source`, `rule`, `captures`, `arguments`, `configuration`, `tools`, `metadata`,
+`source`, `rule`, `captures`, `arguments`, `configuration`, `metadata`,
 `environment`, `generator`, and `always` when established, with the existing
 plan-data meanings. File producers include `freshness`, using `unknown` when
 unverified. A resource's optional `producer` field references its producer ID.
+Input and output inventories retain their producer tool mappings.
 
 Dependency records use `producer`, `resource`, `origin`, `orderOnly`, and optional
 `group`. Potential inferred glob membership additionally uses `potential: true`,

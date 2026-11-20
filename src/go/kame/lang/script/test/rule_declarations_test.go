@@ -10,7 +10,7 @@ import (
 )
 
 func TestKeywordRuleDeclarations(t *testing.T) {
-	const text = "task clean\n\tprintf clean\ntask cached lint : ./a ./b, ./c | ./ready ; {env: {MODE: mode}}\nservice dev {port=8080}\n\tserve $port\nrule always ./out =\n\tvalue + 1 # result\nversion = 2\n"
+	const text = "task clean :\n\tprintf clean\ntask cached lint : ./a ./b, ./c | ./ready ; {env: {MODE: mode}}\nservice dev {port=8080}\n\tserve $port\nrule always ./out =\n\tvalue + 1 # result\nversion = 2\n"
 	authored := source.New(nil, "declarations.km", text)
 	defer authored.Free(nil)
 	parsed := script.ParseFragment(nil, authored, "km", 0, len(text))
@@ -32,7 +32,8 @@ func TestKeywordRuleDeclarations(t *testing.T) {
 		t.Errorf("wrong expression body: %+v", file)
 	}
 	formatted := script.Format(nil, parsed)
-	want := strings.Replace(text, " =\n\tvalue", " = value", 1)
+	want := strings.Replace(text, "task clean :", "task clean", 1)
+	want = strings.Replace(want, " =\n\tvalue", " = value", 1)
 	if formatted != want {
 		t.Fatalf("formatted\n%s\nwant\n%s", formatted, want)
 	}
@@ -70,7 +71,7 @@ func TestKeywordRuleDeclarationRejectsMalformedHeaders(t *testing.T) {
 	for _, text := range []string{
 		"rule artifact",
 		"task ./artifact",
-		"task fresh :",
+		"task fresh : ,",
 		"task fresh ; env \"NAME=value\"",
 		"service dev {port=1} {port=2}",
 		"rule ./artifact =\nvalue = 42\n",

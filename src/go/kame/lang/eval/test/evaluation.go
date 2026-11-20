@@ -159,7 +159,7 @@ func TestMapCallbacksReceiveKeyAndMissingParametersAreNil(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(map (value key => (list value key)) [10, 20])")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].List[0].Int != 20 || result.Value.List[1].List[1].Int != 1 {
@@ -191,7 +191,7 @@ func TestEvaluatesContainersReferencesAndSpecialForms(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((item => item.name) {name: \"kame\", count: 2})")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "kame" {
@@ -231,7 +231,7 @@ func TestEvaluatesContainersReferencesAndSpecialForms(t *testing.T) {
 		t.Error("if/elif/else evaluated an unselected arm or treated zero as false")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `"mode: @{if true then "debug" else missing}"`)
+	result = evaluate(t, program, `"mode: ${if true then "debug" else missing}"`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "mode: debug" {
 		t.Error("string interpolation did not evaluate its conditional expression")
 	}
@@ -273,9 +273,9 @@ func TestBindingNamesUseDefinitionGrammar(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def value-name! = 42\ndef identity? value-name! = value-name!")
+	parsed := script.ParseKameFile(a, "test", "def value-name! = 42\ndef identity? value-name! = value-name!")
 	program := eval.Compile(a, engine, parsed, registry)
-	for _, input := range []string{"(module/value => module/value)", "(inputs/changed => inputs/changed)"} {
+	for _, input := range []string{"(module/value => module/value)", "(build/changed => build/changed)"} {
 		invalid := expr.Parse(a, "test", input)
 		if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Errorf("qualified lambda parameter accepted: %s", input)
@@ -289,7 +289,7 @@ func TestBindingNamesUseDefinitionGrammar(t *testing.T) {
 		"def invalid valid module/value = 1",
 	}
 	for i := range invalid {
-		result := script.Parse(a, "test", invalid[i])
+		result := script.ParseKameFile(a, "test", invalid[i])
 		if len(result.Diagnostics) == 0 || result.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Error("namespaced reference was accepted as a binding name or parameter")
 		}
@@ -320,7 +320,7 @@ func TestIfAndOrWithMatchFormsAreLazy(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(if false then missing else \"fallback\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "fallback" {
@@ -389,19 +389,19 @@ func TestComparisonsCatAndText(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "1 == 1.0")
 	if result.Diagnostic.Code != "" || !result.Value.Bool {
 		t.Error("numeric equality across int and float failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(ne nil false)")
+	result = evaluate(t, program, "(ne? nil false)")
 	if result.Diagnostic.Code != "" || !result.Value.Bool {
 		t.Error("nil and false were not distinct")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(lt 1 \"a\")")
+	result = evaluate(t, program, "(lt? 1 \"a\")")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("mixed ordering was not rejected")
 	}
@@ -434,13 +434,32 @@ func TestRenderContentTemplate(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(render \"hash\" \"# @if(true)\nhi\n# @end\n\")")
+	result := evaluate(t, program, "(render \"hash\" \"# @if true\nhi\n# @end\n\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "hi\n" {
 		t.Error("content render did not remove directive lines")
 	}
 	result.Free(a)
+	for _, test := range []struct {
+		source string
+		code   string
+	}{
+		{`render """@match 0
+@case 1
+${missing}
+@end match"""`, ""},
+		{`render """@{missing}"""`, "REF_MISSING"},
+		{`render """@if true
+unterminated"""`, "TPL_BLOCK"},
+		{`render """@{[1]}"""`, "EXPR_INVALID"},
+	} {
+		result := evaluate(t, program, test.source)
+		if result.Diagnostic.Code != test.code || (test.code == "" && (result.Value.Kind != core.String || result.Value.Text != "")) {
+			t.Errorf("render %q: kind=%s text=%q diagnostic=%s", test.source, core.KindName(result.Value.Kind), result.Value.Text, result.Diagnostic.Code)
+		}
+		result.Free(a)
+	}
 	engine.Free()
 	program.Free()
 	parsed.Free()
@@ -451,7 +470,7 @@ func TestLexicalFunctionAndOperationShadowing(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((x => x) \"ok\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "ok" {
@@ -469,7 +488,7 @@ func TestWideAndDeepScopeLookupHasOnlyEvaluatorOverhead(t *testing.T) {
 	tracker := a.(*mem.Tracker)
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "scope-index", "")
+	parsed := script.ParseKameFile(a, "scope-index", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	defer engine.Free()
 	defer program.Free()
@@ -478,11 +497,20 @@ func TestWideAndDeepScopeLookupHasOnlyEvaluatorOverhead(t *testing.T) {
 
 	// Go allocates the evaluator frame on its heap. Scope lookup should add
 	// no allocation beyond evaluating a literal through the same entry point.
+	// Take the smallest of several measurements because the counter is shared
+	// with the Go runtime, whose occasional allocations are unrelated to lookup.
+	evaluationBytes := func(value *expr.Expr, scope *eval.Scope) uint64 {
+		best := ^uint64(0)
+		for range 8 {
+			before := tracker.Stats().TotalAlloc
+			result := program.Evaluate(a, value, scope)
+			best = min(best, tracker.Stats().TotalAlloc-before)
+			result.Free(a)
+		}
+		return best
+	}
 	baselineExpr := expr.Parse(a, "literal", "0")
-	baselineStart := tracker.Stats().TotalAlloc
-	baselineResult := program.Evaluate(a, baselineExpr.Expr, program.Scope)
-	evaluatorBytes := tracker.Stats().TotalAlloc - baselineStart
-	baselineResult.Free(a)
+	evaluatorBytes := evaluationBytes(baselineExpr.Expr, program.Scope)
 	baselineExpr.Free()
 
 	wideFields := make([]core.RecordField, 512)
@@ -504,9 +532,8 @@ func TestWideAndDeepScopeLookupHasOnlyEvaluatorOverhead(t *testing.T) {
 		t.Fatal("failed to parse wide-scope lookup")
 		return
 	}
-	before := tracker.Stats().TotalAlloc
+	wideAllocations := evaluationBytes(wideExpr.Expr, wide)
 	wideResult := program.Evaluate(a, wideExpr.Expr, wide)
-	wideAllocations := tracker.Stats().TotalAlloc - before
 	if wideResult.Diagnostic.Code != "" || wideResult.Value.Kind != core.Int || wideResult.Value.Int != 511 {
 		t.Error("wide-scope lookup returned the wrong binding")
 	}
@@ -536,9 +563,8 @@ func TestWideAndDeepScopeLookupHasOnlyEvaluatorOverhead(t *testing.T) {
 		t.Fatal("failed to parse deep-scope lookup")
 		return
 	}
-	before = tracker.Stats().TotalAlloc
+	deepAllocations := evaluationBytes(deepExpr.Expr, deep)
 	deepResult := program.Evaluate(a, deepExpr.Expr, deep)
-	deepAllocations := tracker.Stats().TotalAlloc - before
 	if deepResult.Diagnostic.Code != "" || deepResult.Value.Kind != core.Int || deepResult.Value.Int != 42 {
 		t.Error("deep-scope lookup returned the wrong binding")
 	}
@@ -554,7 +580,7 @@ func TestUnusedLambdaArgumentReleasesItsScope(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((f => \"x\") (x => x))")
 	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
@@ -571,7 +597,7 @@ func TestReturnedLambdaArgumentReleasesItsScope(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((f => f) (x => x))")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
@@ -588,7 +614,7 @@ func TestNestedLambdaArgumentsReleaseTheirScopes(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((f => ((g => \"x\") f)) (x => x))")
 	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
@@ -612,7 +638,7 @@ func TestSectionArgumentReleasesItsScope(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((s => \"x\") (list _0 _1))")
 	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
@@ -651,7 +677,7 @@ func TestNamedCallableReleasesItsScope(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def f x = x")
+	parsed := script.ParseKameFile(a, "test", "def f x = x")
 	program := eval.Compile(a, engine, parsed, registry)
 	reference := evaluate(t, program, "f")
 	if reference.Diagnostic.Code != "" || reference.Value.Kind != core.Callable {
@@ -669,12 +695,18 @@ func TestNamedCallableReleasesItsScope(t *testing.T) {
 	registry.Free()
 }
 
-func TestKashLetRejectsBindingsWithEscapingCallables(t *testing.T) {
-	for _, value := range []string{"(x => captured)", "[(x => captured)]", "{value: (x => captured)}"} {
+func TestKashBindingsKeepReturnedClosuresAlive(t *testing.T) {
+	for _, body := range []string{
+		"let bound = ((captured => (x => captured)) 42)\n\treturn bound",
+		"let bound = ((captured => [(x => captured)]) 42)\n\treturn bound.0",
+		"let bound = ((captured => {callback: (x => captured)}) 42)\n\treturn bound.callback",
+		"let bound = nil\n\tif true\n\t\tlet captured = 42\n\t\tset bound = (x => captured)\n\treturn bound",
+		"let bound = ((captured => (x => captured)) 42)\n\tlet saved = bound\n\tset bound = nil\n\treturn saved",
+	} {
 		a := t.Allocator()
 		engine := core.NewEngine(a)
 		registry := eval.NewRegistry(a)
-		parsed := script.ParseKash(a, "test.kash", "def probe ()\n\tlet bound = ((captured => "+value+") 42)\n\treturn 0\ndef result = (probe ())\n")
+		parsed := script.ParseKash(a, "test.kash", "def probe ()\n\t"+body+"\ndef result = ((probe ()) nil)\n")
 		if len(parsed.Diagnostics) != 0 {
 			t.Errorf("eager binding did not parse: %v", parsed.Diagnostics)
 		}
@@ -684,8 +716,8 @@ func TestKashLetRejectsBindingsWithEscapingCallables(t *testing.T) {
 			engine.Request(result)
 			stepUntilCurrent(engine, result)
 		}
-		if result == nil || result.Diagnostic.Code != "DEF_ESCAPE" {
-			t.Errorf("eager binding did not report DEF_ESCAPE for %s: %+v", value, result)
+		if result == nil || result.Diagnostic.Code != "" || result.Latest.Kind != core.Int || result.Latest.Int != 42 {
+			t.Errorf("binding failed to retain its returned closure for %s: %+v", body, result)
 		}
 		engine.Free()
 		program.Free()
@@ -698,7 +730,7 @@ func TestReturnedDefinitionFunctionKeepsItsScopeAlive(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def factory captured = (x => captured)")
+	parsed := script.ParseKameFile(a, "test", "def factory captured = (x => captured)")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(factory \"alive\") nil")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "alive" {
@@ -720,7 +752,7 @@ func TestDescendantStoreAllowed(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((a => ((b => (b 42)) a)) (x => x))")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
@@ -737,7 +769,7 @@ func TestCallArgDescendantAllowed(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((f => (f 42)) (x => x))")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
@@ -754,7 +786,7 @@ func TestDefValueIsLazy(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def answer = 42")
+	parsed := script.ParseKameFile(a, "test", "def answer = 42")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := program.Definition("answer")
 	if result == nil || result.Current {
@@ -779,7 +811,7 @@ func TestInvalidOperationArgsReleaseCallables(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(count (x => x))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -809,7 +841,7 @@ func TestFilterCallbackReturningLambdaReleases(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(filter (x => (y => y)) [1, 2])")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 {
@@ -829,7 +861,7 @@ func TestFlatmapCallbackReturningLambdaIsInvalid(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(flatmap (x => (y => y)) [1])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -849,7 +881,7 @@ func TestApplyFormsReleaseCallables(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	// All functions receive the list's positional arguments.
 	result := evaluate(t, program, "(apply (x => x) [1])")
@@ -878,7 +910,7 @@ func TestSectionDefBodyCloneReleases(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def foo () = (_0)")
+	parsed := script.ParseKameFile(a, "test", "def foo () = (_0)")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(foo ()) \"x\"")
 	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
@@ -898,7 +930,7 @@ func TestNativeReplaceSectionArgumentReleasesItsState(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((r => \"x\") (subst ./src/{n:*}.c ./build/{n}.o))")
 	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
@@ -915,7 +947,7 @@ func TestListErrorDiscardsCallableScopes(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "[(x => x), missing]")
 	if result.Diagnostic.Code != "REF_MISSING" {
@@ -932,7 +964,7 @@ func TestRecordErrorDiscardsCallableScopes(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "{f: (x => x), bad: missing}")
 	if result.Diagnostic.Code != "REF_MISSING" {
@@ -949,7 +981,7 @@ func TestCallErrorDiscardsCallableArgs(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((f => f) (x => x) missing)")
 	if result.Diagnostic.Code != "REF_MISSING" {
@@ -966,7 +998,7 @@ func TestDefinitionIsLazyAndPublishesTemplateValue(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "name = \"kame\"")
+	parsed := script.ParseKameFile(a, "test", "name = \"kame\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("name")
 	if node == nil || node.Current {
@@ -987,7 +1019,7 @@ func TestDefinitionDependenciesAreSharedByTheEngine(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "first = \"ka\"\nsecond = \"@{first}me\"")
+	parsed := script.ParseKameFile(a, "test", "first = \"ka\"\nsecond = \"${first}me\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	engine.Request(program.Definition("second"))
 	engine.Step()
@@ -1011,7 +1043,7 @@ func TestCapabilitiesBlockOperationsBeforeInvocation(t *testing.T) {
 	if !registry.Add(eval.Operation{Name: "read-one", Call: readOperation, Context: state, MinArity: 0, MaxArity: 0, Capabilities: []eval.Capability{eval.Read}}) {
 		t.Error("operation registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(read-one ())")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
@@ -1031,14 +1063,14 @@ func TestFieldAccessAndRuleSelectors(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "((items => items.-1) [\"a\", \"b\", \"c\"])")
 	if result.Diagnostic.Code != "" || result.Value.Text != "c" {
 		t.Error("negative list index failed")
 	}
 	result.Free(a)
-	expression := expr.Parse(a, "test", "@>")
+	expression := expr.Parse(a, "test", "outputs.0")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Outputs: []core.Value{core.NewString(a, "out")}}
 	result = program.EvaluateWith(expression.Expr, &context)
 	if result.Diagnostic.Code != "" || result.Value.Text != "out" {
@@ -1047,7 +1079,7 @@ func TestFieldAccessAndRuleSelectors(t *testing.T) {
 	result.Free(a)
 	context.Outputs[0].Free(a)
 	expression.Free()
-	expression = expr.Parse(a, "test", "@>1")
+	expression = expr.Parse(a, "test", "outputs.1")
 	context.Outputs = []core.Value{core.NewString(a, "first"), core.NewString(a, "second")}
 	result = program.EvaluateWith(expression.Expr, &context)
 	if result.Diagnostic.Code != "" || result.Value.Text != "second" {
@@ -1074,7 +1106,7 @@ func TestLiftedDefinitionReevaluatesAfterDependencyInvalidation(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	state := &operationState{}
 	registry.Add(eval.Operation{Name: "count-op", Call: countOperation, Context: state, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "first = \"input\"\nalias = first\nsecond = (count-op alias)")
+	parsed := script.ParseKameFile(a, "test", "first = \"input\"\nalias = first\nsecond = (count-op alias)")
 	program := eval.Compile(a, engine, parsed, registry)
 	first, second := program.Definition("first"), program.Definition("second")
 	engine.Request(second)
@@ -1102,7 +1134,7 @@ func TestOperationCanSubmitAndResumeFromHostCompletion(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "result = (async ())")
+	parsed := script.ParseKameFile(a, "test", "result = (async ())")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1134,7 +1166,7 @@ func TestOperationCanPublishAStream(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "emit-values", Call: streamOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "result = emit-values ()")
+	parsed := script.ParseKameFile(a, "test", "result = emit-values ()")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1155,7 +1187,7 @@ func TestOperationCanCompleteWithoutAValue(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "complete", Call: completeOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "result = (complete ())")
+	parsed := script.ParseKameFile(a, "test", "result = (complete ())")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1174,7 +1206,7 @@ func TestDependencyUpdateCancelsStaleOperationAndRestarts(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "input = \"first\"\nresult = (async input)")
+	parsed := script.ParseKameFile(a, "test", "input = \"first\"\nresult = (async input)")
 	program := eval.Compile(a, engine, parsed, registry)
 	input, result := program.Definition("input"), program.Definition("result")
 	engine.Request(result)
@@ -1215,7 +1247,7 @@ func TestNestedOperationResumesThroughFunctionCall(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "def wrap value = (async ())\nresult = (wrap \"value\")")
+	parsed := script.ParseKameFile(a, "test", "def wrap value = (async ())\nresult = (wrap \"value\")")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1270,7 +1302,7 @@ func TestRestrictedHostRequestIsDeniedBeforeQueueing(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "read-file", Call: readFileOperation, MinArity: 0, MaxArity: 0, Capabilities: []eval.Capability{eval.Read}})
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(read-file ())")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"./allowed"}}}}
@@ -1291,7 +1323,7 @@ func TestSourceLoadingIsNotAnOperationCapability(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "load-source", Call: loadSourceOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(load-source ())")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read}}}
@@ -1311,7 +1343,7 @@ func TestCommandCaptureExecutionPolicy(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	forms := []string{"$(printf hello)", "(run! \"printf\" \"hello\")", "(pipe! (run! \"printf\" \"hello\") (run! \"cat\"))"}
 	for i := range forms {
@@ -1358,7 +1390,7 @@ func TestRestrictedRecordHostRequestUsesPayloadPath(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "read-file", Call: recordReadFileOperation, MinArity: 0, MaxArity: 0, Capabilities: []eval.Capability{eval.Read}})
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(read-file ())")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"./allowed"}}}}
@@ -1379,7 +1411,7 @@ func TestRestrictedCustomRequestIsDeniedBeforeQueueing(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "custom-read", Call: customReadOperation, MinArity: 0, MaxArity: 0, Capabilities: []eval.Capability{eval.Read}})
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(custom-read ())")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"./allowed"}}}}
@@ -1399,7 +1431,8 @@ func TestEvalRetainsParserDiagnostic(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	operations.Register(registry)
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(eval \"(\")")
 	if result.Diagnostic.Code != "PARSE_ERR" || result.Diagnostic.Span.End == 0 || result.Diagnostic.Message == "invalid eval expression" {
@@ -1416,7 +1449,7 @@ func TestEvaluationContextAttachesDiagnosticSource(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "input", "missing")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Source: "input"}
@@ -1448,9 +1481,9 @@ func TestSelectorsUseNearestRuleFrame(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	expression := expr.Parse(a, "test", "@>")
+	expression := expr.Parse(a, "test", "outputs.0")
 	outer := core.NewString(a, "outer")
 	inner := core.NewString(a, "inner")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, RuleFrames: []eval.RuleFrame{{Outputs: []core.Value{outer}}, {Outputs: []core.Value{inner}}}}
@@ -1472,7 +1505,7 @@ func TestResultFreeReleasesReturnedLambda(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(value => value)")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
@@ -1489,9 +1522,12 @@ func TestTemplateRejectsRecordInterpolation(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "((value => \"@{value}\") {name: \"kame\"})")
+	result := evaluate(t, program, `render {value: {name: "kame"}} "@{value}"`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("record interpolation did not fail")
 	}
@@ -1506,7 +1542,7 @@ func TestDuplicateDefinitionsAreDiagnosedWithoutReplacingFirst(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "name = \"first\"\nname = \"second\"")
+	parsed := script.ParseKameFile(a, "test", "name = \"first\"\nname = \"second\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	if program.Valid || len(program.Diagnostics) != 1 || program.Diagnostics[0].Code != "DEF_INVALID" {
 		t.Error("duplicate definition was not diagnosed")
@@ -1524,7 +1560,7 @@ func TestCheckedCompileRejectsInvalidProgramBeforeRegistration(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "name = \"first\"\nname = \"second\"")
+	parsed := script.ParseKameFile(a, "test", "name = \"first\"\nname = \"second\"")
 	result := eval.CompileChecked(a, engine, parsed, registry)
 	if result.Program != nil || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "DEF_INVALID" {
 		t.Error("checked compile returned an executable invalid program")
@@ -1539,7 +1575,7 @@ func TestDefinitionCycleFailsThroughEngine(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "a = b\nb = a")
+	parsed := script.ParseKameFile(a, "test", "a = b\nb = a")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("a")
 	engine.Request(node)
@@ -1559,7 +1595,7 @@ func TestDefinitionCannotPublishCallable(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "callable = (value => value)")
+	parsed := script.ParseKameFile(a, "test", "callable = (value => value)")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("callable")
 	engine.Request(node)
@@ -1577,7 +1613,7 @@ func TestFunctionDefinitionsEvaluateExpressionStrings(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def prefix value = \"pre-@{value}\"\ndef quoted value = \"@{value}!\"")
+	parsed := script.ParseKameFile(a, "test", "def prefix value = \"pre-${value}\"\ndef quoted value = \"${value}!\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(prefix \"fix\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "pre-fix" {
@@ -1600,7 +1636,7 @@ func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "depth.km", `def walk TEXT = (if (count TEXT == 0) then 0 else (character TEXT))
+	parsed := script.ParseKameFile(a, "depth.km", `def walk TEXT = (if (count TEXT == 0) then 0 else (character TEXT))
 def character TEXT = (walk (slice 1 TEXT))`)
 	program := eval.Compile(a, engine, parsed, registry)
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
@@ -1631,7 +1667,7 @@ func TestZeroArgumentScriptFunctionIsCallable(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def constant () = \"value\"")
+	parsed := script.ParseKameFile(a, "test", "def constant () = \"value\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(constant ())")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "value" {
@@ -1648,7 +1684,7 @@ func TestDefFunctionSupportsRestAndRejectsDuplicates(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test.km", "def collect first rest... = rest")
+	parsed := script.ParseKameFile(a, "test.km", "def collect first rest... = rest")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(collect \"first\" \"second\" \"third\")")
 	if result.Diagnostic.Code != "" {
@@ -1661,7 +1697,7 @@ func TestDefFunctionSupportsRestAndRejectsDuplicates(t *testing.T) {
 		t.Error("def rest parameter had wrong values")
 	}
 	result.Free(a)
-	duplicate := script.Parse(a, "test", "def duplicate value value = value")
+	duplicate := script.ParseKameFile(a, "test", "def duplicate value value = value")
 	if len(duplicate.Diagnostics) == 0 || duplicate.Diagnostics[0].Code != "PARSE_ERR" {
 		t.Error("duplicate def parameters were accepted")
 	}
@@ -1676,7 +1712,7 @@ func TestReturnedClosureRetainsCallScopeAndNestedCallRestoresScope(t *testing.T)
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(((outer => (inner => outer)) \"captured\") \"ignored\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "captured" {
@@ -1698,7 +1734,7 @@ func TestEvaluationContextFramesAndDefinitionCycleFrames(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "missing")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Frames: []diagnostic.Frame{{Label: "rule", Span: diagnostic.Span{Start: 11, End: 15}}}}
@@ -1715,7 +1751,7 @@ func TestEvaluationContextFramesAndDefinitionCycleFrames(t *testing.T) {
 
 	engine = core.NewEngine(a)
 	registry = eval.NewRegistry(a)
-	parsed = script.Parse(a, "test", "a = \"@{b}\"\nb = \"@{a}\"")
+	parsed = script.ParseKameFile(a, "test", "a = \"${b}\"\nb = \"${a}\"")
 	program = eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("a")
 	engine.Request(node)
@@ -1731,15 +1767,15 @@ func TestEvaluationContextFramesAndDefinitionCycleFrames(t *testing.T) {
 	registry.Free()
 }
 
-func TestNestedFunctionSelectorsUseNearestArguments(t *testing.T) {
+func TestNestedFunctionsUseNearestParameters(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "def inner value = @_\ndef outer value = (inner \"inner\")")
+	parsed := script.ParseKameFile(a, "test", "def inner value = value\ndef outer value = (inner \"inner\")")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(outer \"outer\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "inner" {
-		t.Error("nested function selector did not use nearest arguments")
+		t.Error("nested function did not bind its own parameter")
 	}
 	result.Free(a)
 	engine.Free()
@@ -1756,7 +1792,7 @@ func TestOperationRegistersAndReadsDynamicFileDependency(t *testing.T) {
 	engine.AddOwned(core.ResourceKey{Kind: core.ResourceFile, Name: "./input.txt"}, fileProducer, file, freeFileState)
 	registry := eval.NewRegistry(a)
 	registry.Add(eval.Operation{Name: "read-file", Call: dependencyOperation, Context: file, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "test", "result = (read-file ())")
+	parsed := script.ParseKameFile(a, "test", "result = (read-file ())")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -1781,7 +1817,7 @@ func TestPlaceholderSectionsEvaluateAsLambdas(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "def helper x = (nop x)")
+	parsed := script.ParseKameFile(a, "test", "def helper x = (nop x)")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `(_0) 7`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 7 {
@@ -1853,10 +1889,10 @@ func TestPatternValuesMaterializeAsText(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "./{**}/{*}.c")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern || result.Value.Text != "./{**}/{*}.c" {
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.PathPattern || result.Value.Text != "./{**}/{*}.c" {
 		t.Error("path pattern did not materialize")
 	}
 	result.Free(a)
@@ -1870,7 +1906,7 @@ func TestQuotedBraceValuesStayText(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "\"./{name:*}.c\"")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./{name:*}.c" {
@@ -1887,11 +1923,11 @@ func TestPlainPathValuesMaterializeAsText(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "./src/main.c")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String {
-		t.Error("plain path stopped materializing as a string")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Path || result.Value.Text != "./src/main.c" {
+		t.Error("plain path lost its kind or relative form")
 	}
 	result.Free(a)
 	engine.Free()
@@ -1905,7 +1941,7 @@ func TestOperationWrappedDefinitionCycleOwnsDiagnosticFrames(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "cycle.km", "value = (str value)")
+	parsed := script.ParseKameFile(a, "cycle.km", "value = (str value)")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("value")
 	engine.Request(node)

@@ -28,6 +28,7 @@ const (
 	// the stopping signal; ProcessContinued that it runs again (003).
 	ProcessStopped
 	ProcessContinued
+	ProcessStageIOCompleted
 )
 
 // ProcessDiagnostic carries a stable host diagnostic code and its owned message.
@@ -67,6 +68,7 @@ type ProcessRequest struct {
 	InputMode       string // empty/closed or invocation; file and edge inputs override defaults.
 	InputRoot       int
 	InputFD         int // Borrowed host descriptor, never owned by the request.
+	StageParent     ProcessStageParent
 	Output          string
 	Append          bool
 	Script          []byte
@@ -92,6 +94,16 @@ type ProcessRequest struct {
 	Passthrough bool
 }
 
+// ProcessStageParent selects default ports from an enclosing callable stage.
+// Redirections and graph connections still take precedence.
+type ProcessStageParent struct {
+	Graph  int64
+	Index  int
+	Input  bool
+	Stdout bool
+	Stderr bool
+}
+
 // ExecutorDescriptor binds a stable remote executor name to its implementation
 // version for selection and cache identity.
 type ExecutorDescriptor struct {
@@ -100,20 +112,23 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
-	Accepted    [256]bool
-	Order       int    // 0 ready, 1 strict framed round-robin (merge only)
-	BufferBytes int    // zero selects the host's bounded default; native muxes only
-	Overflow    int    // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
-	BufferItems int    // pending records per destination; excludes one in-flight record
-	Framed      bool   // output uses the private framed-line transport
-	Kind        string // empty for an executable; otherwise a native stream operator row (see OperatorKind)
-	Argv        []string
-	Directory   string
-	Environment []string
-	TimeoutMS   int64
-	Input       string
-	Output      string
-	Append      bool
+	EnvironmentExact bool
+	Accepted         [256]bool
+	Order            int    // 0 ready, 1 strict framed round-robin (merge only)
+	BufferBytes      int    // zero selects the host's bounded default; native muxes only
+	Overflow         int    // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
+	BufferItems      int    // pending records per destination; excludes one in-flight record
+	Framed           bool   // output uses the private framed-line transport
+	Kind             string // empty for an executable; otherwise a native stream operator row (see OperatorKind)
+	Argv             []string
+	Emit             []byte
+	EmitError        bool
+	Directory        string
+	Environment      []string
+	TimeoutMS        int64
+	Input            string
+	Output           string
+	Append           bool
 	// ErrorMode: 0 live stderr, 1 file, 2 dup this stage's stdout, 3 dup the
 	// presentation stdout that a later stdout disposition replaced.
 	Error       string
@@ -160,6 +175,7 @@ type ProcessEdgeMetrics struct {
 // ProcessEvent owns Data, Stdout, Stderr, and Diagnostic and must be released
 // with Free after its receiver has consumed or transferred them.
 type ProcessEvent struct {
+	StageIO            StageIOCompletion
 	HasEffectiveStatus bool
 	EffectiveStatus    int
 	EffectiveSignal    int
@@ -248,6 +264,11 @@ type ProcessControl interface {
 	Suspend(id int64) bool
 	Resume(id int64, foreground bool) bool
 	Signal(id int64, signal int) bool
+}
+
+// NamedProcessSignal delivers a signal to an active process request.
+type NamedProcessSignal interface {
+	SignalNamed(id int64, signal string) bool
 }
 
 // ProcessHost is the portable runtime contract for executing complete recipe

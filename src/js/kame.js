@@ -8,13 +8,14 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { link, lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat, unlink } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, createWriteStream, existsSync, fstatSync, ftruncateSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, watch as fsWatch, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, createReadStream, createWriteStream, existsSync, fstatSync, ftruncateSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { constants as osConstants, tmpdir } from 'node:os';
+import { constants as osConstants, homedir, tmpdir } from 'node:os';
 import { Socket } from 'node:net';
+import { Writable } from 'node:stream';
 import { isatty } from 'node:tty';
 import { createRequire } from 'node:module';
 import process, { argv, env, stderr, stdout } from 'node:process';
@@ -59,11 +60,18 @@ function installSignals() {
 function track(child, group = undefined, finalizing = false) {
   activeChildren.add(child);
   if (finalizing) cleanupChildren.add(child);
-  group?.add(child);
+  trackProcessGroup(child, group);
   child.once('close', () => {
     activeChildren.delete(child);
-    group?.delete(child);
   });
+}
+
+function trackProcessGroup(child, group) {
+  if (!group) return;
+  group.children.add(child);
+  child.once('close', () => group.children.delete(child));
+  // A pipeline can start several children on the same turn.
+  queueMicrotask(group.markReady);
 }
 
 function signalProcessTree(child, signal = 'SIGKILL') {
@@ -80,12 +88,15 @@ function signalProcessTree(child, signal = 'SIGKILL') {
 }
 
 async function cancelProcessGroup(group, graceMS = 5000) {
-  const children = [...(group ?? [])];
+  if (!group) return;
+  await group.ready;
+  for (const stage of group.stages.values()) stage.close({ status: 0, signal: 0, outcome: 2 });
+  const children = [...group.children];
   const reaped = children.map((child) => new Promise((resolve) => child.once('close', resolve)));
   let timer;
   try {
     await Promise.all(children.map((child) => signalProcessTree(child, process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')));
-    timer = setTimeout(() => { for (const child of children) if (group.has(child)) void signalProcessTree(child, 'SIGKILL'); }, graceMS);
+    timer = setTimeout(() => { for (const child of children) if (group.children.has(child)) void signalProcessTree(child, 'SIGKILL'); }, graceMS);
     timer.unref();
     await Promise.all(reaped);
   } finally { clearTimeout(timer); }
@@ -282,7 +293,7 @@ function writeReport(heading, document, verbose = false) {
       return;
     }
     const plain = ['', 'source', 'path', 'target', 'name', 'kind', 'freshness', 'backend', 'key'].includes(label) && value !== '' && !/[\s\x00-\x1f\x7f]/u.test(value);
-    let text = value === null ? ':nil' : typeof value === 'boolean' ? value ? ':true' : ':false' : typeof value === 'string' ? plain ? value : JSON.stringify(value) : String(value);
+    let text = value === null ? 'nil' : typeof value === 'string' ? plain ? value : JSON.stringify(value).replaceAll('${', '\\${') : String(value);
     if (label === 'path' && value === '') text = 'unavailable';
     stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
   };
@@ -313,7 +324,7 @@ function writeInspectionReport(doc, write, verbose) {
   const inlineField = (key, value) => {
     const label = key === 'reusePolicy' ? 'reuse' : key;
     const plain = ['', 'source', 'path', 'target', 'name', 'kind', 'freshness', 'backend', 'key', 'reuse'].includes(label) && typeof value === 'string' && value !== '' && !/[\s\x00-\x1f\x7f]/u.test(value);
-    const rendered = value === null ? ':nil' : typeof value === 'boolean' ? value ? ':true' : ':false' : typeof value === 'string' ? plain ? value : JSON.stringify(value) : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const rendered = value === null ? 'nil' : typeof value === 'string' ? plain ? value : JSON.stringify(value).replaceAll('${', '\\${') : typeof value === 'object' ? JSON.stringify(value) : String(value);
     const token = ['source', 'path', 'target'].includes(label) ? 'value.path' : 'value.literal';
     return `${styled('value.symbol', label, outputColor)}: ${styled(token, rendered, outputColor)}`;
   };
@@ -365,6 +376,12 @@ function writeInspectionReport(doc, write, verbose) {
       stdout.write(`    stage ${stage.number}${stage.producers.length > 1 ? ' · parallel eligible' : ''}${stage.producers.map((id) => ` · ${text(producer(id).target, 'value.target')}`).join('')}\n`);
     }
     for (const d of doc.dependencies.filter((d) => d.group > 1)) stdout.write(`    sequence barrier: ${text(producer(d.producer).target, 'value.target')} · group ${d.group} follows earlier groups\n`);
+    if (doc.tools?.length) {
+      stdout.write('  tools · first required stage\n');
+      for (const { name, path, stage } of doc.tools) {
+        stdout.write(`    stage ${stage} · ${text(name, 'worker.tool')}${path ? ` → ${text(path)}` : ''}\n`);
+      }
+    }
   }
   if (doc.truncated) stdout.write(`  truncated: deeper ${downstream ? 'consumers' : 'producer inputs'} omitted\n`);
   if (doc.deferred.length) {
@@ -891,7 +908,7 @@ function humanEvent(bytes, scope) {
   if (!['target-reason', 'process-started', 'process-exited', 'target-started', 'target-completed', 'target-failed', 'target-cancelled', 'service-state', 'cache-warning', 'input-warning'].includes(event.type)) return;
   clearDashboard();
   if (event.type === 'target-reason') {
-    stderr.write(`${styled('message.info', 'info')} [${event.target}] ${event.decision}: ${event.message}${event.dependency?.resource?.name ? `: ${event.dependency.resource.name}` : ''}\n`);
+    stderr.write(`${styled('message.info', 'info ')}[${event.target}] ${event.decision}: ${event.message}${event.dependency?.resource?.name ? `: ${event.dependency.resource.name}` : ''}\n`);
     return;
   }
   if (event.type === 'process-started') {
@@ -996,16 +1013,22 @@ function matchSegment(pattern, name) {
       mark = ni;
       continue;
     }
-    if (pi < pattern.length && (pattern[pi] === '?' || (pattern[pi] !== '[' && pattern[pi] === name[ni]))) {
+    if (pattern[pi] === '?') {
+      pi++;
+      ni += name.codePointAt(ni) > 0xffff ? 2 : 1;
+      continue;
+    }
+    if (pi < pattern.length && pattern[pi] !== '[' && pattern[pi] === name[ni]) {
       pi++;
       ni++;
       continue;
     }
     if (pi < pattern.length && pattern[pi] === '[') {
-      const result = matchClass(pattern, pi, name[ni]);
+      const point = name.codePointAt(ni);
+      const result = matchClass(pattern, pi, point);
       if (result.ok) {
         pi = result.next;
-        ni++;
+        ni += point > 0xffff ? 2 : 1;
         continue;
       }
       if (star >= 0) {
@@ -1028,33 +1051,31 @@ function matchSegment(pattern, name) {
 
 function matchClass(pattern, pi, ch) {
   let i = pi + 1;
-  let negate = false;
-  if (pattern[i] === '^' || pattern[i] === '!') {
-    negate = true;
-    i++;
-  }
+  const negate = pattern[i] === '^';
+  if (negate) i++;
   let matched = false;
-  let first = true;
-  while (i < pattern.length && (pattern[i] !== ']' || first)) {
-    first = false;
-    let start = pattern[i++];
-    if (start === '\\') {
-      if (i >= pattern.length) return { ok: false, next: pi + 1 };
-      start = pattern[i++];
-    }
-    if (pattern[i] === '-' && i + 1 < pattern.length && pattern[i + 1] !== ']') {
+  let hasRange = false;
+  const readRune = () => {
+    if (i === pattern.length || pattern[i] === ']' || pattern[i] === '-') return undefined;
+    if (pattern[i] === '\\') i++;
+    const value = pattern.codePointAt(i);
+    i += value > 0xffff ? 2 : 1;
+    return value;
+  };
+  while (i < pattern.length && pattern[i] !== ']') {
+    hasRange = true;
+    const start = readRune();
+    if (start === undefined) return { ok: false, next: pi + 1 };
+    if (pattern[i] === '-') {
       i++;
-      let end = pattern[i++];
-      if (end === '\\') {
-        if (i >= pattern.length) return { ok: false, next: pi + 1 };
-        end = pattern[i++];
-      }
+      const end = readRune();
+      if (end === undefined) return { ok: false, next: pi + 1 };
       if (ch >= start && ch <= end) matched = true;
     } else {
       if (start === ch) matched = true;
     }
   }
-  if (i >= pattern.length || pattern[i] !== ']') return { ok: false, next: pi + 1 };
+  if (!hasRange || pattern[i] !== ']') return { ok: false, next: pi + 1 };
   return { ok: matched !== negate, next: i + 1 };
 }
 
@@ -1190,12 +1211,47 @@ function resourceExists(name) {
 
 function resourceWildcard(pattern) {
   if (isMemoryResource(pattern)) {
-    return [...new Set([...memoryResourceFiles.keys(), ...memoryResourceDirectories])].filter((name) => matchSegments(pattern, 0, name, 0)).sort();
+    const matches = [...new Set([...memoryResourceFiles.keys(), ...memoryResourceDirectories])]
+      .filter((name) => matchSegments(pattern, 0, name, 0));
+    return matches.sort(comparePathBytes);
   }
   if (isFileResource(pattern)) {
-    return wildcardPaths(filesystemPath(pattern)).map((name) => pathToFileURL(name).href);
+    return wildcardPaths(filesystemPath(pattern)).map((name) => pathToFileURL(name).href).sort(comparePathBytes);
   }
-  return wildcardPaths(pattern);
+  const portable = (name) => process.platform === 'win32' ? name.replaceAll('\\', '/') : name;
+  const prefix = portable(process.cwd()).replace(/\/$/, '') + '/';
+  return wildcardPaths(pattern).map((name) => {
+    const absolute = portable(resolve(name));
+    return absolute.startsWith(prefix) && absolute.length > prefix.length
+      ? './' + absolute.slice(prefix.length)
+      : absolute;
+  }).sort(comparePathBytes);
+}
+
+function comparePathBytes(left, right) {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right));
+}
+
+function declarationScan(payload) {
+  return payload[0] === '\0' && payload[2] === '\0'
+    ? { pattern: payload.slice(3), kinds: Number.parseInt(payload[1], 16) }
+    : { pattern: payload, kinds: 1 };
+}
+
+async function declarationFiles(pattern, kinds) {
+  const candidates = resourceWildcard(pattern);
+  if (kinds === 15) return candidates;
+  const files = [];
+  for (const name of candidates) {
+    try {
+      const info = await statResource(name, undefined, true);
+      const kind = info.isSymbolicLink() ? 4 : info.isDirectory() ? 2 : info.isFile() ? 1 : 8;
+      if (kinds & kind) files.push(name);
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    }
+  }
+  return files;
 }
 
 function writeResource(name, data) {
@@ -1226,7 +1282,6 @@ function wildcardPaths(pattern) {
   for (const name of names) {
     if (matchSegments(pattern, 0, name, 0)) matches.push(name.startsWith('/') ? name : `./${name}`);
   }
-  matches.sort();
   return matches;
 }
 
@@ -1351,6 +1406,9 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_watch_begin',
   'kame_wasm_watch_invalidate',
   'kame_wasm_watch_state',
+  'kame_wasm_watch_glob_fingerprint',
+  'kame_wasm_declaration_state',
+  'kame_wasm_declaration_fingerprint',
   'kame_wasm_watch_cancel_message',
   'kame_wasm_watch_cancel',
 ];
@@ -1538,25 +1596,44 @@ class Module {
     return this.configurationCondition(descriptor, this.exports.kame_wasm_declaration_predicate);
   }
 
-  async compositionCondition(descriptor) {
-    return this.configurationCondition(descriptor, this.exports.kame_wasm_composition_condition);
+  async compositionCondition(descriptor, context, observe) {
+    return this.configurationCondition(descriptor, this.exports.kame_wasm_composition_condition, context, observe);
   }
 
-  async configurationCondition(descriptor, query) {
+  async configurationCondition(descriptor, query, context, observe) {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
+      if (context) {
+        if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+        const directory = this.write(descriptor.directory, 'conditionDirectory');
+        if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw this.compileFailure(instance, 'HOST_FAIL');
+        this.inspectionGrant(instance, '', '');
+        for (const grant of context.portableGrants ?? []) {
+          if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+          else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+        }
+      }
       const bytes = this.write(JSON.stringify(descriptor), 'conditionDescriptor');
-      const result = this.copyQuery((handle, dst, capacity, length) => query(handle, bytes.pointer, bytes.length, dst, capacity, length), instance);
+      const read = (handle, dst, capacity, length) => query(handle, bytes.pointer, bytes.length, dst, capacity, length);
+      const result = context ? await this.copyInspectionQuery(read, instance, { ...context, registeringDeclarations: true }) : this.copyQuery(read, instance);
       return new TextDecoder().decode(result) === 'true';
     } catch (error) {
       const text = this.instanceDiagnostic(instance);
       if (text?.trimStart().startsWith('{')) {
         const detail = JSON.parse(text).diagnostic;
-        if (detail) throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, 'EXPR_INVALID'), { span: detail.span, diagnostics: [detail] });
+        if (detail) throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span: detail.span, diagnostics: [detail] });
       }
       throw error;
-    } finally { this.exports.kame_wasm_instance_free(instance); }
+    } finally {
+      try {
+        if (observe) {
+          const snapshots = this.copyQuery((handle, dst, capacity, length) =>
+            this.exports.kame_wasm_declaration_state(handle, dst, capacity, length), instance);
+          observe(JSON.parse(this.decode0(snapshots)));
+        }
+      } finally { this.exports.kame_wasm_instance_free(instance); }
+    }
   }
 
   present(snapshot) {
@@ -1609,6 +1686,7 @@ class Module {
     // Raw engine identity is distinct from the opaque ABI completion handle.
     // Read it while pinned; handle slots may be retired/reused after detach.
     const rawRequest = this.exports.kame_wasm_next_request_id(instance);
+    const isProcess = [3, 13, 14, 15, 16, 32, 33, 34, 35, 36, 37, 38].includes(kind);
     const finalizationActive = this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 0) === 1;
     const cleanupMS = Number(this.exports.kame_wasm_finalization_budget?.(instance, 0) ?? 0n);
     let data = null;
@@ -1636,6 +1714,13 @@ class Module {
     if (this.exports.kame_wasm_event_payload_copy(instance, payloadPointer, payloadLength) !== 0) throw Object.assign(new Error('request payload copy failed'), { code: 'HOST_FAIL' });
     const payload = this.decode(payloadPointer, payloadLength);
     if (context.concurrent && this.exports.kame_wasm_request_detach(instance, request) !== 0) throw Object.assign(new Error('cannot unpin host request'), { code: 'HOST_FAIL' });
+    const owner = `${instance}:${rawRequest}`;
+    const group = isProcess ? { children: new Set(), stages: new Map() } : undefined;
+    if (group) {
+      group.ready = new Promise((resolve) => { group.markReady = resolve; });
+      group.stageReady = new Promise((resolve) => { group.markStageReady = resolve; });
+      this.processGroups.set(owner, group);
+    }
     let cleanupTimer;
     let notifyCancellation;
     const bodySignal = context.signal;
@@ -1656,7 +1741,7 @@ class Module {
     // Copy and detach before yielding: another completion can change the ABI's
     // current request while public output waits for its reader.
     try {
-      if (kind !== 23 && kind !== 41) await waitOutputReady(context.signal);
+      if (kind !== 23 && kind !== 41 && kind !== 44) await waitOutputReady(context.signal);
       return await this.dispatch(instance, request, kind, payload, data, context, key, record, rawRequest);
     } catch (error) {
       const expired = cleanupMS !== 0 && context.signal?.aborted;
@@ -1664,12 +1749,35 @@ class Module {
     } finally {
       clearTimeout(cleanupTimer);
       if (notifyCancellation) bodySignal.removeEventListener('abort', notifyCancellation);
-      if ([3, 13, 14, 15, 16, 32, 33, 34, 35, 36, 37, 38].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
+      if (group) {
+        group.markReady();
+        group.markStageReady();
+        this.processGroups.delete(owner);
+      }
     }
   }
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
+    if (kind === 42 && context.api && !pathGranted(payload, context.sourceRoots)) {
+      return this.completeFailure(instance, request, 'CAP_DENIED', 'read access denied for authored source');
+    }
+    if (kind === 46) {
+      let operation;
+      try { operation = parseStageExchange(payload); }
+      catch { return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid process stage exchange'); }
+      const owner = `${instance}:${operation.process}`;
+      const group = this.processGroups.get(owner);
+      if (group) await group.stageReady;
+      if (!this.processGroups.has(owner)) return this.exports.kame_wasm_complete_nil(instance, request);
+      const stage = group.stages.get(operation.stage);
+      if (!stage) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process stage endpoint');
+      const result = await stage.exchange(operation);
+      if (result === null) return this.exports.kame_wasm_complete_nil(instance, request);
+      if (result === true) return this.completeJSON(instance, request, true);
+      const encoded = this.write(result, 'stageBytes');
+      return this.exports.kame_wasm_complete_bytes(instance, request, encoded.pointer, encoded.length);
+    }
     if (kind === 40 || kind === 41) {
       let input;
       try { input = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid record reader'); }
@@ -1734,7 +1842,7 @@ class Module {
       }
     }
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39, 42].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39, 42, 45].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1778,6 +1886,19 @@ class Module {
       await cancelProcessGroup(this.processGroups.get(`${instance}:${processRequest}`), graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
+    if (kind === 44) {
+      const match = /^(\d+):(SIG[A-Z][A-Z0-9]*|[1-9]\d?)$/.exec(payload);
+      if (!match) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process signal request');
+      const [, processRequest, selector] = match;
+      const signal = selector.startsWith('SIG') ? osConstants.signals[selector] : Number(selector);
+      if (!signal || signal > 64) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'process signal unavailable');
+      const group = this.processGroups.get(`${instance}:${BigInt(processRequest)}`);
+      if (group) {
+        await group.ready;
+        await Promise.all([...group.children].map((child) => signalProcessTree(child, signal)));
+      }
+      return this.exports.kame_wasm_complete_nil(instance, request);
+    }
     if (kind === 27 || kind === 28 || kind === 29) {
       if (kind === 27 && !grants.read) return this.deny(instance, request, 'read');
       if (kind === 29) {
@@ -1819,11 +1940,18 @@ class Module {
     if (kind === 1 || kind === 42) {
       if (kind === 1 && !grants.read) return this.deny(instance, request, 'read');
       try {
-        const bytes = await readResource(payload);
+        const sources = kind === 42 && context.registeringDeclarations ? context.declarationSources : undefined;
+        let read = sources?.get(payload);
+        if (!read) {
+          read = readResource(payload);
+          sources?.set(payload, read);
+        }
+        const bytes = await read;
         const pointer = this.scratch('fileRead', bytes.length || 1);
         new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
         return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
       } catch (error) {
+        if (kind === 42 && error.code === 'ENOENT') return this.exports.kame_wasm_complete_nil(instance, request);
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot read file' : `cannot read file: ${error.message}`);
       }
     }
@@ -1837,6 +1965,11 @@ class Module {
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
       }
+    }
+    if (kind === 43) {
+      let directory = false;
+      try { directory = (await statResource(payload)).isDirectory(); } catch {}
+      return this.completeJSON(instance, request, directory);
     }
     if (kind === 31) {
       if (!grants.read) return this.deny(instance, request, 'read');
@@ -1873,6 +2006,19 @@ class Module {
       if (!grants.read) return this.deny(instance, request, 'read');
       try { return this.completeJSON(instance, request, resourceWildcard(payload)); }
       catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot traverse wildcard path'); }
+    }
+    if (kind === 45) {
+      if (!grants.read) return this.deny(instance, request, 'read');
+      try {
+        let snapshot = context.declarationScans?.get(payload);
+        if (!snapshot) {
+          const { pattern, kinds } = declarationScan(payload);
+          snapshot = declarationFiles(pattern, kinds);
+          context.declarationScans?.set(payload, snapshot);
+        }
+        return this.completeJSON(instance, request, await snapshot);
+      }
+      catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot inspect declaration discovery'); }
     }
     if (kind === 39) {
       if (!grants.read || !grants.write) return this.deny(instance, request);
@@ -1921,12 +2067,36 @@ class Module {
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
     if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38) {
-      if (!grants.run) return this.deny(instance, request);
       const decoded = JSON.parse(payload);
+      const outputOnly = Array.isArray(decoded.kinds) && decoded.kinds.some(kind => kind === 'emit' || kind === 'callable') && decoded.kinds.every(kind => kind && kind !== 'each');
+      if (!grants.run && !outputOnly) return this.deny(instance, request);
+      if (decoded.terminalRequired === true) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'this host cannot hand off a controlling terminal');
       const serviceReadyProbe = kind === 15 && decoded.serviceReady === true;
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38 ? decoded : { input: '', output: '', append: false };
       redirections.wireKind = kind;
+      const graph = this.processGroups.get(`${instance}:${rawRequest}`);
+      if (graph && decoded.kinds?.includes('callable')) {
+        redirections.callableStages = graph.stages;
+        redirections.graphReady = () => { graph.markStageReady(); graph.markReady(); };
+      }
+      if (decoded.stageParent !== undefined) {
+        const route = decoded.stageParent;
+        if (!route || !Number.isSafeInteger(route.graph) || route.graph <= 0 || !Number.isSafeInteger(route.index) || route.index < 0 ||
+            ['input', 'stdout', 'stderr'].some((name) => typeof route[name] !== 'boolean') ||
+            (route.input && (!Number.isSafeInteger(decoded.inputRoot) || decoded.inputRoot < 0 || decoded.inputRoot >= stages.length || decoded.inputMode === 'invocation'))) {
+          return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid callable stage ports');
+        }
+        const parent = this.processGroups.get(`${instance}:${route.graph}`);
+        if (!parent || parent === graph) return this.completeFailure(instance, request, 'HOST_FAIL', 'callable stage graph is unavailable');
+        await parent.stageReady;
+        const ports = parent.stages.get(route.index);
+        if (!ports || ports.ended) return this.completeFailure(instance, request, 'HOST_FAIL', 'callable stage ports are unavailable');
+        redirections.inheritedInput = route.input ? ports.input : undefined;
+        redirections.stdoutRoute = route.stdout ? ports.stdoutRoute : undefined;
+        redirections.stderrRoute = route.stderr ? ports.stderrRoute : undefined;
+        redirections.signal = context.signal ? AbortSignal.any([context.signal, ports.signal]) : ports.signal;
+      }
       if (redirections.capture && !this.exports.kame_wasm_complete_capture) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'host has no binary capture completion');
       // Every declared destination must be a well-formed path covered by the
       // matching grant. The helper returns the terminal result to propagate, or
@@ -1981,7 +2151,7 @@ class Module {
           const error = this.write(stderr ?? Buffer.alloc(0), 'captureError');
           return this.exports.kame_wasm_complete_capture(instance, request, data.pointer, data.length, output.pointer, output.length, error.pointer, error.length);
         }
-        if (!redirections.capture && !redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
+        if ((kind === 13 || kind === 14) && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout, 'captureStdout');
           const status = this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
           if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -2009,6 +2179,10 @@ class Module {
         try { for (const name of recipe.outputs) await mkdir(dirname(name), { recursive: true }); }
         catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot create output directory'); }
         payload = recipe.script;
+        if (recipe.cwd !== undefined) {
+          if (typeof recipe.cwd !== 'string' || recipe.cwd.includes('\0') || !isAbsolute(recipe.cwd)) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe cwd');
+          context = { ...context, cwd: recipe.cwd };
+        }
         if (recipe.shell !== undefined) {
           if (!Array.isArray(recipe.shell) || recipe.shell.length === 0 || recipe.shell.some((argument) => typeof argument !== 'string' || argument.includes('\0')) || recipe.shell[0] === '') return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe shell argv');
           const defaultPosixShell = recipe.shell.length === 2 && recipe.shell[0] === '/bin/sh' && recipe.shell[1] === '-c';
@@ -2197,15 +2371,17 @@ class Module {
   }
 
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
-    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
+    const discovery = kind === 45 ? declarationScan(payload) : null;
+    const capability = [1, 5, 6, 7, 20, 27, 30, 31, 45].includes(kind) ? 'read'
       : kind === 2 || kind === 39 ? 'write'
         : kind === 4 ? 'env'
           : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
-    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
+    if ([1, 2, 5, 6, 7, 20, 27, 30, 31, 45].includes(kind) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
       const roots = context[`${grantKind}Roots`];
-      let names = [kind === 6 ? payload.replace(/\\(.)/gs, '$1') : payload];
+      const pathPayload = discovery?.pattern ?? payload;
+      let names = [(kind === 6 || kind === 45) ? pathPayload.replace(/\\(.)/gs, '$1') : pathPayload];
       if (kind === 20) {
         try { names = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths'); }
         if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths');
@@ -2227,7 +2403,8 @@ class Module {
     const descriptor = Object.freeze({
       id: request,
       kind,
-      payload,
+      payload: discovery?.pattern ?? payload,
+      ...(discovery ? { kindMask: discovery.kinds } : {}),
       data: data?.slice() ?? new Uint8Array(0),
       key: key?.slice() ?? null,
       record: record?.slice() ?? null,
@@ -2418,10 +2595,7 @@ class Module {
   startedProcessGroup(instance, context, rawRequest) {
     this.drainEvents(instance, context);
     if (rawRequest === undefined) return undefined;
-    const owner = `${instance}:${rawRequest}`;
-    let group = this.processGroups.get(owner);
-    if (!group) this.processGroups.set(owner, group = new Set());
-    return group;
+    return this.processGroups.get(`${instance}:${rawRequest}`);
   }
 
   deny(instance, request, capability) {
@@ -2447,7 +2621,10 @@ class Module {
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       }
       const encoded = this.write(expression, 'expression');
-      if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
+      if (Array.isArray(source) && this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw this.compileFailure(instance, 'HOST_FAIL');
+      const start = () => this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length);
+      if (await this.registerDeclarations(instance, context, start) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (!context.captureLimit) this.recordCaptureLimit(instance, context);
       for (;;) {
         await this.waitReady(instance, context);
         if (context.signal?.aborted) {
@@ -2521,17 +2698,17 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      this.compileBuild(instance, source, name);
+      this.compileBuild(instance, source, name, context);
       if (context) {
-        const directory = this.write(process.cwd(), 'inspectionDirectory');
+        const directory = this.write(context.cwd ?? process.cwd(), 'inspectionDirectory');
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('inspection host forwarding unavailable'), { code: 'HOST_FAIL' });
         this.inspectionGrant(instance, '', '');
-        for (const grant of context.inspectionGrants) {
+        for (const grant of context.inspectionGrants ?? context.portableGrants ?? []) {
           if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
           else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
         }
       }
-      if (this.exports.kame_wasm_prepare(instance) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (await this.registerDeclarations(instance, context, () => this.exports.kame_wasm_prepare(instance)) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       if (context) this.recordCaptureLimit(instance, context);
       if (resolveTools) {
         const names = JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_tools(handle, dst, capacity, length), instance)));
@@ -2544,13 +2721,34 @@ class Module {
     }
   }
 
+  async registerDeclarations(instance, context, start) {
+    for (;;) {
+      const status = start();
+      if (status !== 6) {
+        if (context?.declarationState) {
+          const resources = this.copyQuery((handle, dst, capacity, length) =>
+            this.exports.kame_wasm_declaration_state(handle, dst, capacity, length), instance);
+          context.declarationState(JSON.parse(this.decode0(resources)), status === 0);
+        }
+        return status;
+      }
+      if (!context || this.exports.kame_wasm_step(instance) !== 1 || await this.service(instance, { ...context, registeringDeclarations: true }) !== 0) {
+        throw Object.assign(new Error('declaration host request could not be serviced'), { code: 'HOST_FAIL' });
+      }
+    }
+  }
+
   compileBuild(instance, source, name, context = {}) {
+    if (Array.isArray(source) && source.declarationScans) {
+      context.declarationScans = source.declarationScans;
+      context.declarationSources = source.declarationSources;
+    }
     if (name) this.setSourceName(instance, name);
     const compiled = this.write(Array.isArray(source) ? '' : source, 'buildSource');
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, trackTimings: context.api === true ? 0 : 1, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0, captureLimit: context.captureLimit ?? 0 }), 'buildDescriptor');
+      const descriptor = this.write(JSON.stringify({ sources: source, compositionDiscoveries: source.compositionDiscoveries, defines: source.defines, parameters: source.parameters, environment: source.environment ?? context.environment, toolOverrides: source.toolOverrides, force: source.force, trackTimings: context.api === true ? 0 : 1, jobs: context.jobs ?? 1, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0, captureLimit: context.captureLimit ?? 0 }), 'buildDescriptor');
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
     this.recordCaptureLimit(instance, context);
@@ -2566,11 +2764,11 @@ class Module {
     if (this.exports.kame_wasm_set_source_name(instance, bytes.pointer, bytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
-  async targetOperands(source, targets, name) {
+  async targetOperands(source, targets, name, context) {
     const bytes = await this.prepared(source, () => {
       const operands = this.write(JSON.stringify(targets), 'operands');
       return (handle, dst, capacity, length) => this.exports.kame_wasm_target_operands(handle, operands.pointer, operands.length, dst, capacity, length);
-    }, name, undefined, false);
+    }, name, context, false);
     return JSON.parse(this.decode0(bytes));
   }
 
@@ -2591,10 +2789,10 @@ class Module {
     }, name, context, kind !== graphKinds.list);
   }
 
-  async toolNames(source, name) {
+  async toolNames(source, name, context) {
     const bytes = await this.prepared(source, () => {
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools(handle, dst, dstLen, lengthPointer);
-    }, name, undefined, false);
+    }, name, context, false);
     return JSON.parse(this.decode0(bytes));
   }
 
@@ -2690,7 +2888,6 @@ class Module {
   }
 
   async materialize(source, target, context, name) {
-    const tools = await this.toolNames(source, name);
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
@@ -2711,7 +2908,6 @@ class Module {
     try {
       this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
-      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directoryBytes = this.write(context.cwd ?? process.cwd(), 'buildDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
@@ -2724,7 +2920,8 @@ class Module {
       }
       context.streaming = true;
       const encoded = this.write(target, 'buildTarget');
-      if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
+      if (await this.registerDeclarations(instance, context, () => this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length)) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
+      this.resolveDeclaredTools(instance, source, context);
       this.recordCaptureLimit(instance, context);
       targetStarted = true;
       for (;;) {
@@ -2809,7 +3006,6 @@ class Module {
     for (const method of ['kame_wasm_watch_begin', 'kame_wasm_watch_state', 'kame_wasm_watch_invalidate', 'kame_wasm_watch_cancel_message', 'kame_wasm_watch_cancel']) {
       if (!this.exports[method]) throw Object.assign(new Error(`watch ABI is missing ${method}`), { code: 'FEATURE_UNSUP' });
     }
-    const tools = await this.toolNames(source, name);
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM watch instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
@@ -2826,7 +3022,6 @@ class Module {
     try {
       this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
-      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directory = this.write(context.cwd ?? process.cwd(), 'watchDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
@@ -2838,7 +3033,8 @@ class Module {
         }
       }
       const targetsBytes = this.write(JSON.stringify(targets), 'watchTargets');
-      if (this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (await this.registerDeclarations(instance, context, () => this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length)) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.resolveDeclaredTools(instance, source, context);
       this.recordCaptureLimit(instance, context);
       return { instance, pending, cancellation, context, targets, hostError, live: true, externalSignal, cancel };
     } catch (error) {
@@ -2851,8 +3047,40 @@ class Module {
     }
   }
 
+  resolveDeclaredTools(instance, source, context) {
+    const names = JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_tools(handle, dst, capacity, length), instance)));
+    for (const tool of names) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context?.toolCache));
+  }
+
   watchSnapshot(watch) {
-    return JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_watch_state(handle, dst, capacity, length), watch.instance)));
+    const snapshot = JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_watch_state(handle, dst, capacity, length), watch.instance)));
+    if (watch.context.api === true) {
+      const declarations = this.copyQuery((handle, dst, capacity, length) =>
+        this.exports.kame_wasm_declaration_state(handle, dst, capacity, length), watch.instance);
+      snapshot.declarations = JSON.parse(this.decode0(declarations));
+    }
+    return snapshot;
+  }
+
+  watchGlobFingerprint(watch, name, candidates) {
+    const key = this.write(name, 'watchGlobKey');
+    const paths = this.write(JSON.stringify(candidates), 'watchGlobCandidates');
+    return this.decode0(this.copyQuery((handle, dst, capacity, length) =>
+      this.exports.kame_wasm_watch_glob_fingerprint(handle, key.pointer, key.length, paths.pointer, paths.length, dst, capacity, length), watch.instance));
+  }
+
+  async declarationFingerprint(watch, record) {
+    const scan = isMemoryResource(record.scan) || isFileResource(record.scan) ? record.scan : resolve(record.directory, record.scan);
+    const candidates = await declarationFiles(scan, record.kindMask);
+    const instance = watch?.instance ?? this.exports.kame_wasm_instance_create();
+    if (instance === 0n) throw new Error('cannot allocate declaration fingerprint instance');
+    try {
+      const input = this.write(JSON.stringify({ name: record.name, directory: record.directory, candidates }), 'declarationFingerprint');
+      return this.decode0(this.copyQuery((handle, dst, capacity, length) =>
+        this.exports.kame_wasm_declaration_fingerprint(handle, input.pointer, input.length, dst, capacity, length), instance));
+    } finally {
+      if (!watch) this.exports.kame_wasm_instance_free(instance);
+    }
   }
 
   invalidateWatch(watch, resources) {
@@ -2923,8 +3151,8 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, jobs: inv.jobs, shell: inv.shell, requireRuleWork: inv.requireRuleWork ? 1 : 0, requireProcessWork: inv.requireProcessWork ? 1 : 0, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit ?? context.captureLimit ?? 0, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
-      if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
+      const descriptor = this.write(JSON.stringify({ fragments, compositionDiscoveries: context.compositionDiscoveries, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, jobs: inv.jobs, shell: inv.shell, requireRuleWork: inv.requireRuleWork ? 1 : 0, requireProcessWork: inv.requireProcessWork ? 1 : 0, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit ?? context.captureLimit ?? 0, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
+      if (await this.registerDeclarations(instance, context, () => this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length)) !== 0) {
         if (inv.json) {
           const failure = diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
           this.drainEvents(instance, context);
@@ -3091,12 +3319,14 @@ function apiContext(options, signal) {
   }
   const grantRoots = (capability) => !grants[capability] || portableGrants.some((grant) => grant.capability === capability && grant.names.length === 0)
     ? null : roots[capability];
+  const readRoots = grantRoots('read');
   return {
     api: true,
     cwd,
     grants,
     portableGrants,
-    readRoots: grantRoots('read'),
+    readRoots,
+    sourceRoots: grants.read ? readRoots : [],
     writeRoots: grantRoots('write'),
     runRoots: grantRoots('run'),
     environment: [...(options.environment ?? [])],
@@ -3179,19 +3409,34 @@ export class Kame {
     if (!['km', 'expr', 'kash', 'template'].includes(language)) {
       throw diagnosticError('unsupported compilation language', 'OPT_VALUE_INVALID');
     }
-    return this.operation(null, options, async () => {
+    return this.operation(null, options, async (context) => {
       const module = await Module.load(this.module.path);
       const bytes = await module.parse(language === 'km' ? 'km-file' : language, name, source);
       const ast = JSON.parse(module.decode0(bytes));
       const error = ast.diagnostics?.find((diagnostic) => diagnostic.severity === 'error');
       if (error) throw Object.assign(new Error(error.message), { code: error.code, diagnostics: ast.diagnostics });
-      const program = new KameProgram(this, module, source, name, language, ast);
+      let buildSource = source;
+      if (language === 'km') {
+        const hasModuleDeclaration = ast.ast.items.some((item) => ['import', 'from', 'export'].includes(item.kind));
+        if (ast.ast.items.some(itemLoadsSources)) {
+          context.declarationScans = new Map();
+          const selection = { defines: [], environment: context.environment, parts: [], context, discoveries: [] };
+          buildSource = await expandSessionIncludes(module, context.cwd, name, source, 'km', [], isAbsolute(name), true, selection);
+          buildSource.compositionDiscoveries = selection.discoveries;
+        } else if (hasModuleDeclaration || isAbsolute(name)) {
+          buildSource = [{ name, text: source, lang: 'km', ...(isAbsolute(name) ? { sourceDirectory: dirname(name) } : {}) }];
+        }
+      }
+      const program = new KameProgram(this, module, buildSource, name, language, ast, context.sourceRoots);
       if (language === 'km') {
         const instance = module.exports.kame_wasm_instance_create();
         if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
         try {
-          module.compileBuild(instance, program.source, name);
-          if (module.exports.kame_wasm_prepare(instance) !== 0) throw module.compileFailure(instance, 'PARSE_ERR');
+          module.compileBuild(instance, program.source, name, context);
+          if (module.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw module.compileFailure(instance, 'HOST_FAIL');
+          // Opening validates until a declaration needs an invocation's host.
+          const status = module.exports.kame_wasm_prepare(instance);
+          if (status !== 0 && status !== 6) throw module.compileFailure(instance, 'PARSE_ERR');
         } finally {
           module.exports.kame_wasm_instance_free(instance);
         }
@@ -3223,13 +3468,16 @@ export class Kame {
 }
 
 export class KameProgram {
-  constructor(owner, module, source, name, language, ast) {
+  #sourceRoots;
+
+  constructor(owner, module, source, name, language, ast, sourceRoots = []) {
     this.owner = owner;
     this.module = module;
-    this.source = `${source}`;
+    this.source = Array.isArray(source) ? source : `${source}`;
     this.name = `${name}`;
     this.language = language;
     this._ast = structuredClone(ast);
+    this.#sourceRoots = sourceRoots;
     this.disposed = false;
     this.tail = Promise.resolve();
   }
@@ -3255,6 +3503,7 @@ export class KameProgram {
       // or another owner can still use. Long-lived watches reuse their buffers.
       const module = await Module.load(this.module.path);
       this.module = module;
+      context.sourceRoots = this.#sourceRoots;
       const result = await module.evaluate(this.source, expression, context, this.name);
       return module.decode0(result);
     }));
@@ -3266,6 +3515,7 @@ export class KameProgram {
     return this.owner.operation(this, options, async (base) => this.serialized(async () => {
       const module = await Module.load(this.module.path);
       this.module = module;
+      base.sourceRoots = this.#sourceRoots;
       const results = await module.materializeMany(this.source, requested, base, this.name);
       return { results: results.map((result, index) => ({ target: requested[index], kind: result.kind, value: module.decode0(result.bytes) })), events: structuredClone(base.events) };
     }));
@@ -3283,6 +3533,7 @@ export class KameProgram {
     external?.addEventListener('abort', abort, { once: true });
     if (external?.aborted) controller.abort();
     const context = apiContext(options, controller.signal);
+    context.sourceRoots = this.#sourceRoots;
     this.watchPending = true;
     const token = { program: this, controller, promise: null };
     token.promise = this.serialized(async () => {
@@ -3336,6 +3587,7 @@ export class KameWatch {
     this.abort = abort;
     this.closed = false;
     this.started = false;
+    this.registrationInvalidated = false;
   }
 
   assertLive() {
@@ -3349,13 +3601,37 @@ export class KameWatch {
 
   invalidate(resources) {
     this.assertLive();
-    this.module.invalidateWatch(this.watch, structuredClone(resources));
+    const changes = structuredClone(resources);
+    if (!Array.isArray(changes) || !changes.some((item) => isDeclarationWatchResource(item?.kind))) {
+      this.module.invalidateWatch(this.watch, changes);
+      return;
+    }
+    const declarations = new Set(this.snapshot().declarations.map((item) => watchKey(item.kind, item.name)));
+    if (changes.some((item) => isDeclarationWatchResource(item?.kind) && !declarations.has(watchKey(item.kind, item.name)))) {
+      throw Object.assign(new Error('unknown declaration discovery resource'), { code: 'PARSE_ERR' });
+    }
+    const runtime = changes.filter((item) => !isDeclarationWatchResource(item?.kind));
+    if (runtime.length) this.module.invalidateWatch(this.watch, runtime);
+    this.registrationInvalidated = true;
   }
 
   async next() {
     this.assertLive();
     const module = this.module;
     while (!this.closed && !this.controller.signal.aborted) {
+      if (this.registrationInvalidated) {
+        this.registrationInvalidated = false;
+        const previous = this.watch;
+        const context = { ...previous.context, signal: this.controller.signal, events: [] };
+        const next = await module.beginWatch(this.program.source, previous.targets, this.program.name, context);
+        if (this.closed || this.controller.signal.aborted) {
+          await module.disposeWatch(next);
+          break;
+        }
+        this.watch = next;
+        this.started = false;
+        await module.disposeWatch(previous);
+      }
       const state = module.drainWatch(this.watch);
       if (state === 1) module.serviceWatchRequest(this.watch);
       if (this.watch.hostError) throw this.watch.hostError;
@@ -3393,6 +3669,9 @@ export class KameWatch {
 // expression evaluation, which has no target program to emit events for.
 function runProcessDirect(script, context) {
   if (context.signal?.aborted) return Promise.resolve({ ok: false, code: 'EXEC_CANCELLED', message: 'invocation cancelled' });
+  const cwd = context.cwd ?? process.cwd();
+  const directoryFailure = processDirectoryFailure(cwd);
+  if (directoryFailure) return Promise.resolve({ ok: false, code: 'HOST_FAIL', message: directoryFailure });
   return new Promise((resolveRun) => {
     const shell = context.shell.length !== 0 ? context.shell : defaultShell();
     const childEnv = context.environmentExact ? {} : { ...process.env };
@@ -3400,7 +3679,7 @@ function runProcessDirect(script, context) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
-    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
+    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd, detached: true });
     track(child, undefined, context.finalizing);
     const out = [];
     let failure = null;
@@ -3428,6 +3707,19 @@ function defaultShell() {
     : ['/bin/sh', '-c'];
 }
 
+function processDirectoryFailure(directory) {
+  try {
+    if (statSync(directory).isDirectory()) return '';
+    return `cannot start process: working directory ${JSON.stringify(directory)} is not a directory`;
+  } catch (error) {
+    const prefix = `cannot start process: working directory ${JSON.stringify(directory)}`;
+    if (error.code === 'ENOENT') return `${prefix} does not exist`;
+    if (error.code === 'ENOTDIR') return `${prefix} is not a directory`;
+    if (error.code === 'EACCES' || error.code === 'EPERM') return `${prefix} is not accessible: permission denied`;
+    return `${prefix} could not be inspected: ${error.message}`;
+  }
+}
+
 // Structured requests never cross a shell-text boundary. Captured stdout is
 // bounded and private; stderr is forwarded while the child is still running.
 function processDeadline(milliseconds, callback) {
@@ -3440,6 +3732,153 @@ function processDeadline(milliseconds, callback) {
   };
   arm();
   return () => clearTimeout(timer);
+}
+
+const stageChunkLimit = 32 * 1024;
+
+function parseStageExchange(payload) {
+  const exchange = JSON.parse(payload);
+  const { process, stage, op, bytes, status, signal, cancelled, frame } = exchange;
+  if (!Number.isSafeInteger(process) || process <= 0 || !Number.isSafeInteger(stage) || stage < 0 ||
+      !['read', 'watch', 'stdout', 'stderr', 'finish'].includes(op) || typeof bytes !== 'string' ||
+      (frame !== undefined && (op !== 'read' || ![':lines', ':nul'].includes(frame))) ||
+      bytes.length > Math.ceil(stageChunkLimit / 3) * 4 || typeof cancelled !== 'boolean' ||
+      !Number.isInteger(status) || status < 0 || status > 255 || !Number.isInteger(signal) || signal < 0 || signal >= 128) {
+    throw new Error('invalid stage exchange');
+  }
+  const chunk = Buffer.from(bytes, 'base64');
+  if (chunk.toString('base64') !== bytes ||
+      (op === 'stdout' || op === 'stderr' ? chunk.length === 0 || chunk.length > stageChunkLimit : chunk.length !== 0) ||
+      (op === 'finish' ? (signal && status !== 128 + signal) || (cancelled && status !== 0) : status || signal || cancelled)) {
+    throw new Error('invalid stage exchange');
+  }
+  return { ...exchange, chunk };
+}
+
+async function readStageChunk(input, frame, signal) {
+  if (!input) return null;
+  const chunk = Buffer.allocUnsafe(stageChunkLimit);
+  const delimiter = frame === ':lines' ? 10 : 0;
+  let size = 0;
+  // A framed read shares the descriptor with nested subprocesses. Read
+  // through one delimiter so the next consumer sees the remaining bytes.
+  while (!signal.aborted) {
+    try {
+      const count = readSync(input.recordFD, chunk, size, frame ? 1 : chunk.length, null);
+      size += count;
+      if (!count || !frame || size === chunk.length || chunk[size - 1] === delimiter) {
+        return size ? chunk.subarray(0, size) : null;
+      }
+      if (size % 4096 === 0) await new Promise((resolve) => setImmediate(resolve));
+    } catch (error) {
+      if (!['EAGAIN', 'EWOULDBLOCK', 'EINTR'].includes(error.code)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+  }
+  return null;
+}
+
+function callableStagePorts(input, ownsInput, output, errorOutput, outputPath, complete, measure) {
+  const streams = new Set([output, errorOutput]);
+  const controller = new AbortController();
+  const inputController = new AbortController();
+  let resolveOutput, rejectOutput, watchTimer;
+  const watchedOutput = new Promise((resolve, reject) => { resolveOutput = resolve; rejectOutput = reject; });
+  let busy = false;
+  let ended = false;
+  let outputClosed = false;
+  const errors = new Map();
+  for (const stream of streams) stream.on('error', (error) => { if (!errors.has(stream)) errors.set(stream, error); });
+  const close = (result) => {
+    if (ended) return;
+    ended = true;
+    controller.abort();
+    inputController.abort();
+    clearInterval(watchTimer);
+    resolveOutput(outputClosed || result.outcome === 2 ? null : true);
+    if (input && ownsInput) {
+      closeSync(input.fd);
+      if (input.recordFD !== input.fd) closeSync(input.recordFD);
+    }
+    void Promise.all(Array.from(streams, (stream) => stream.closed ? undefined : new Promise((resolve) => {
+      stream.once('close', resolve);
+      stream.destroy();
+    }))).then(() => complete(result));
+  };
+  const retireOutput = () => {
+    if (ended || outputClosed) return;
+    outputClosed = true;
+    clearInterval(watchTimer);
+    resolveOutput(null);
+    inputController.abort();
+  };
+  const checkOutput = () => {
+    // A nonblocking writer open fails with ENXIO when a FIFO has no readers.
+    // It does not write a probe byte or change either endpoint's flags.
+    try { closeSync(openSync(outputPath, fsConstants.O_WRONLY | fsConstants.O_NONBLOCK)); }
+    catch (error) {
+      if (error.code === 'ENXIO') retireOutput();
+      else {
+        clearInterval(watchTimer);
+        rejectOutput(new Error('cannot check callable output FIFO', { cause: error }));
+      }
+    }
+  };
+  const writer = (port, op) => (chunk, next) => {
+    if (ended || port.destroyed) {
+      if (port === output) retireOutput();
+      next(Object.assign(new Error('callable output is closed'), { code: 'EPIPE' }));
+      return;
+    }
+    port.write(chunk, (error) => {
+      if (!error) measure(op, chunk.length);
+      else if (port === output && ['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED'].includes(error.code)) retireOutput();
+      next(error);
+    });
+  };
+  return {
+    close,
+    input,
+    stdoutRoute: writer(output, 'stdout'),
+    stderrRoute: writer(errorOutput, errorOutput === output ? 'stdout' : 'stderr'),
+    signal: controller.signal,
+    get ended() { return ended; },
+    async exchange({ op, chunk, status, signal, cancelled, frame }) {
+      if (op === 'watch') {
+        if (outputPath && !watchTimer && !ended && !outputClosed) {
+          watchTimer = setInterval(checkOutput, 10);
+          checkOutput();
+        }
+        return watchedOutput;
+      }
+      if (ended) return null;
+      if (busy) throw new Error('process stage exchange already active');
+      busy = true;
+      try {
+        if (op === 'finish') {
+          close(cancelled || outputClosed ? { status: 0, signal: 0, outcome: 2 } : { status, signal, outcome: 0 });
+          return true;
+        }
+        if (op === 'read') {
+          const result = await readStageChunk(input, frame, inputController.signal);
+          if (outputClosed && !ended) throw Object.assign(new Error('callable output consumer closed'), { code: 'EXEC_CANCELLED' });
+          if (result) input.measure?.(result.length);
+          return result;
+        }
+        const port = op === 'stdout' ? output : errorOutput;
+        if (errors.has(port)) throw errors.get(port);
+        if (port.destroyed) return null;
+        await new Promise((resolve, reject) => port.write(chunk, (error) => error ? reject(error) : resolve()));
+        measure(port === output ? 'stdout' : op, chunk.length);
+        return true;
+      } catch (error) {
+        if (ended || ['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED'].includes(error.code)) return null;
+        throw error;
+      } finally {
+        busy = false;
+      }
+    },
+  };
 }
 
 // Validate the wire graph before opening files or launching any stage. The
@@ -3469,10 +3908,17 @@ function prepareByteTopology(stages, context) {
     outputs[edge[0]].push(i); inputs[edge[1]].push(i);
   }
   for (let i = 0; i < stages.length; i++) {
-    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy', 'each', 'out', 'err'].includes(kinds[i])) invalid();
-    if (!kinds[i] || kinds[i] === 'each') {
+    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy', 'each', 'out', 'err', 'emit', 'callable'].includes(kinds[i])) invalid();
+    if (!kinds[i] || ['each', 'emit', 'callable'].includes(kinds[i])) {
       const stdin = inputs[i].filter((edge) => !(edges[edge][2] ?? 0));
-      if (!stages[i].length || stdin.length > 1 || outputs[i].length > 1) invalid();
+      if (kinds[i] === 'emit') {
+        if (stages[i].length || typeof setup[i].emit !== 'string' || typeof setup[i].emitError !== 'boolean' ||
+            Buffer.from(setup[i].emit, 'base64').toString('base64') !== setup[i].emit) invalid();
+      } else if (kinds[i] === 'callable') {
+        if (stages[i].length) invalid();
+        if (setup[i].terminalAttach || setup[i].terminalForeground) invalid('KASH_TERMINAL_UNSUPPORTED');
+      } else if (!stages[i].length) invalid();
+      if (stdin.length > 1 || outputs[i].length > 1) invalid();
       if (kinds[i] === 'each' && stdin.length !== 1) invalid();
       if ((stdin.length && setup[i].input) || (outputs[i].length && setup[i].output)) invalid('KASH_DOUBLE_CONSUME');
     } else {
@@ -3496,8 +3942,8 @@ function prepareByteTopology(stages, context) {
     const kind = kinds[node], input = inputKinds[0] ?? false;
     if ((kind === 'balance' || kind === 'each') && !input) invalid('KASH_FRAME_REQUIRED');
     if (framed[node] && !outputs[node].length) invalid('KASH_FRAME_MISMATCH');
-    const expected = kind === 'frame' || kind === 'filter' ? true : kind === 'encode' || kind === '' || kind === 'each' ? false : input;
-    if (framed[node] !== expected || (kind === 'frame' && input) || (['filter', 'encode'].includes(kind) && !input) || (!kind && input)) invalid('KASH_FRAME_MISMATCH');
+    const expected = kind === 'frame' || kind === 'filter' ? true : ['encode', '', 'each', 'emit', 'callable'].includes(kind) ? false : input;
+    if (framed[node] !== expected || (kind === 'frame' && input) || (['filter', 'encode'].includes(kind) && !input) || (['', 'emit', 'callable'].includes(kind) && input)) invalid('KASH_FRAME_MISMATCH');
   }
   const buffers = context.buffers === undefined ? stages.map(() => 0) : context.buffers;
   if (!Array.isArray(buffers) || buffers.length !== stages.length || buffers.some((budget, node) => !Number.isSafeInteger(budget) || budget < 0 || budget > 65536 || (budget && !['merge', 'broadcast', 'balance'].includes(kinds[node])))) invalid();
@@ -3752,20 +4198,29 @@ function runArgvCapture(stages, context) {
     }
     const configurations = stages.map((_, i) => {
       const setup = setups[i];
-      const env = { ...childEnv };
+      const env = Object.assign(Object.create(null), setup?.environmentExact === true ? undefined : childEnv);
       for (const entry of setup?.environment ?? []) { const at = entry.indexOf('='); env[entry.slice(0, at)] = entry.slice(at + 1); }
       return { env, cwd: setup?.cwd || context.cwd || process.cwd(), timeoutMS: setup?.timeoutMS ?? 0 };
     });
+    for (const { cwd } of configurations) {
+      const message = processDirectoryFailure(cwd);
+      if (message) { resolveRun({ ok: false, code: 'HOST_FAIL', message }); return; }
+    }
     let executables;
     try {
-      for (const configuration of configurations) if (!statSync(configuration.cwd).isDirectory()) throw new Error('invalid stage cwd');
       executables = stages.map((args, i) => topology?.kinds[i] && topology.kinds[i] !== 'each' ? null : argvExecutable(args[0], configurations[i].env, configurations[i].cwd));
     }
     catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot start process' }); return; }
     const argumentEdges = topology ? topology.edges.map((edge, index) => edge[2] > 0 ? index : -1).filter((edge) => edge >= 0) : [];
+    const callableInputs = new Set(), callableOutputs = new Set();
+    if (topology) for (let i = 0; i < topology.edges.length; i++) {
+      const [from, to] = topology.edges[i];
+      if (topology.kinds[to] === 'callable') callableInputs.add(i);
+      if (topology.kinds[from] === 'callable') callableOutputs.add(i);
+    }
     let pipes;
-    const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !topology.outputs[node].length && (!setups[node].output || kind === 'copy') ? node : -1).filter((node) => node >= 0) : [];
-    try { pipes = pipelinePipes(topology ? topology.edges.length + terminalOperators.length : stages.length - 1); }
+    const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !['emit', 'callable'].includes(kind) && !topology.outputs[node].length && (!setups[node].output || kind === 'copy') ? node : -1).filter((node) => node >= 0) : [];
+    try { pipes = pipelinePipes(topology ? topology.edges.length + terminalOperators.length : stages.length - 1, callableInputs, callableOutputs); }
     catch { resolveRun({ ok: false, code: argumentEdges.length ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
     let operandFiles, relayExecutable, relayShell;
     try {
@@ -3775,16 +4230,29 @@ function runArgvCapture(stages, context) {
         operandFiles = streamOperandFifos(argumentEdges.length);
       }
     } catch {
-      for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+      for (const pipe of pipes) for (const fd of [pipe.read, pipe.write, pipe.record]) if (fd !== undefined) closeSync(fd);
+      disposePipelineWatches(pipes);
       resolveRun({ ok: false, code: 'KASH_STREAM_OPERAND_UNSUPPORTED', message: 'live stream operands require POSIX FIFO rendezvous support (mkfifo, sh, and dd)' });
       return;
     }
     let input, output;
-    const stageInputs = [], stageOutputs = [], stageErrors = [];
+    const stageInputs = [], stageRecordInputs = [], stageOutputs = [], stageErrors = [];
     try {
       // Input opens first: missing sources must not truncate destinations.
       if (context.input) input = openSync(context.input, 'r');
-      if (topology) for (let i = 0; i < stages.length; i++) if (setups[i].input) stageInputs[i] = openSync(setups[i].input, 'r');
+      if (topology) for (let i = 0; i < stages.length; i++) if (setups[i].input) {
+        const fd = openSync(setups[i].input, 'r');
+        stageInputs[i] = fd;
+        if (topology.kinds[i] === 'callable') {
+          const stats = fstatSync(fd);
+          if (!stats.isFile()) {
+            const recordFD = openSync(setups[i].input, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+            stageRecordInputs[i] = recordFD;
+            const recordStats = fstatSync(recordFD);
+            if (stats.dev !== recordStats.dev || stats.ino !== recordStats.ino) throw new Error('callable input changed while opening its record reader');
+          }
+        }
+      }
       if (context.output) output = openSync(context.output, context.append ? 'a' : 'w');
       if (topology) {
         for (let i = 0; i < stages.length; i++) if (setups[i].output) stageOutputs[i] = openSync(setups[i].output, fsConstants.O_WRONLY | fsConstants.O_CREAT | (setups[i].append ? fsConstants.O_APPEND : 0), 0o666);
@@ -3797,8 +4265,9 @@ function runArgvCapture(stages, context) {
     } catch {
       if (input !== undefined) closeSync(input);
       if (output !== undefined) closeSync(output);
-      for (const fd of [...stageInputs, ...stageOutputs, ...stageErrors]) if (fd !== undefined) closeSync(fd);
-      for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+      for (const fd of [...stageInputs, ...stageRecordInputs, ...stageOutputs, ...stageErrors]) if (fd !== undefined) closeSync(fd);
+      for (const pipe of pipes) for (const fd of [pipe.read, pipe.write, pipe.record]) if (fd !== undefined) closeSync(fd);
+      disposePipelineWatches(pipes);
       operandFiles?.dispose();
       resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot open process redirection' });
       return;
@@ -3847,8 +4316,26 @@ function runArgvCapture(stages, context) {
       if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
       else if (failure === null) chunks.push(chunk);
     };
+    const receiveStderr = (chunk) => publish(context.onStderr ?? ((bytes) => stderr.write(bytes)), chunk);
+    const writeStdout = (chunk, _encoding, next) => {
+      if (context.stdoutRoute) context.stdoutRoute(chunk, next);
+      else { receiveOutput(chunk); next(); }
+    };
+    const writeStderr = (chunk, _encoding, next) => {
+      if (context.stderrRoute) context.stderrRoute(chunk, next);
+      else { receiveStderr(chunk); next(); }
+    };
+    const relayPort = (source, route) => {
+      const relay = new Writable({ write(chunk, _encoding, next) { route(chunk, next); } });
+      operatorStreams.push(relay);
+      remaining++;
+      relay.once('error', (error) => stop('HOST_FAIL', `cannot relay callable output: ${error.message}`));
+      relay.once('close', () => { source.unpipe(relay); remaining--; finish(); });
+      source.pipe(relay);
+    };
     const cancelled = () => stop('EXEC_CANCELLED', 'invocation cancelled');
     context.signal?.addEventListener('abort', cancelled, { once: true });
+    if (context.signal?.aborted) cancelled();
     if (context.timeoutMS > 0) timers.push(processDeadline(context.timeoutMS, () => stop('RECIPE_TIMEOUT', 'process timed out')));
     const finish = () => {
       if (!launched || remaining !== 0 || finishing) return;
@@ -3860,6 +4347,7 @@ function runArgvCapture(stages, context) {
       if (topology && context.onSnapshot) publish(context.onSnapshot, { states: liveStates, edgeMetrics: topology.edgeMetrics });
       context.signal?.removeEventListener('abort', cancelled);
       try { operandFiles?.dispose(); } catch (error) { failure ??= { ok: false, code: 'HOST_FAIL', message: `cannot release stream operand: ${error.message}` }; }
+      try { disposePipelineWatches(pipes); } catch (error) { failure ??= { ok: false, code: 'HOST_FAIL', message: `cannot release pipeline watches: ${error.message}` }; }
       if (publicationFailure !== null) { rejectRun(publicationFailure); return; }
       if (failure !== null) { resolveRun(failure); return; }
       let status = 0, signal = 0;
@@ -3894,7 +4382,7 @@ function runArgvCapture(stages, context) {
         const inputEdge = topology?.inputs[i].find((edge) => !(topology.edges[edge][2] ?? 0)), outputEdge = topology?.outputs[i][0];
         const operands = topology ? topology.inputs[i].filter((edge) => topology.edges[edge][2] > 0) : [];
         for (const edge of operands) args[topology.edges[edge][2]] = operandFiles.names[argumentEdges.indexOf(edge)];
-        const defaultInput = inputMode === 'invocation' && i === inputRoot ? context.inputFD : 'ignore';
+        const defaultInput = i === inputRoot ? inputMode === 'invocation' ? context.inputFD : context.inheritedInput?.fd ?? 'ignore' : 'ignore';
         const childInput = topology ? inputEdge === undefined ? stageInputs[i] ?? defaultInput : pipes[inputEdge].read : i === 0 ? input ?? defaultInput : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read;
         let childOutput = topology ? outputEdge === undefined ? stageOutputs[i] ?? 'pipe' : pipes[outputEdge].write : i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write;
         const outputTarget = outputEdge === undefined ? undefined : topology.edges[outputEdge][1];
@@ -3956,8 +4444,11 @@ function runArgvCapture(stages, context) {
         timers.push(cancel);
         child.once('exit', cancel);
         const liveStderr = mode === 0;
-        if (child.stderr !== null && liveStderr) publishReader(child.stderr, (chunk) => { if (capture?.stderr) retainCaptured('stderr', chunk); else publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
-        child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
+        if (child.stderr !== null && liveStderr) {
+          if (!capture?.stderr && context.stderrRoute) relayPort(child.stderr, context.stderrRoute);
+          else publishReader(child.stderr, (chunk) => { if (capture?.stderr) retainCaptured('stderr', chunk); else receiveStderr(chunk); }, () => failure !== null || context.signal?.aborted);
+        }
+        child.once('error', () => stop('HOST_FAIL', processDirectoryFailure(configuration.cwd) || 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
           results[i].effectiveStatus = effectiveStatus(results[i], i);
@@ -3979,15 +4470,18 @@ function runArgvCapture(stages, context) {
           else if (failure === null) chunks.push(chunk);
         };
         if (stdoutStream !== null) {
-          if (context.stream) publishReader(stdoutStream, receive, () => failure !== null || context.signal?.aborted);
+          if (!capture?.stdout && context.stdoutRoute) relayPort(stdoutStream, context.stdoutRoute);
+          else if (context.stream) publishReader(stdoutStream, receive, () => failure !== null || context.signal?.aborted);
           else stdoutStream.on('data', receive);
         }
         if (readErrorAsStdout && child.stderr !== null) {
-          if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
+          if (!capture?.stdout && context.stdoutRoute) relayPort(child.stderr, context.stdoutRoute);
+          else if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
           else child.stderr.on('data', receive);
         }
         if (mode === 2 && childError === 'pipe' && child.stderr !== null) {
-          if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
+          if (!capture?.stdout && context.stdoutRoute) relayPort(child.stderr, context.stdoutRoute);
+          else if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
           else child.stderr.on('data', receive);
         }
       }
@@ -4038,7 +4532,8 @@ function runArgvCapture(stages, context) {
               else { metricWrite(topology.edgeMetrics[topology.outputs[i][0]], chunk.length); liveStates[i] = 1; child.stdout.resume(); advance(); }
             });
           });
-          publishReader(child.stderr, (chunk) => publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk), () => failure !== null || context.signal?.aborted);
+          if (context.stderrRoute) relayPort(child.stderr, context.stderrRoute);
+          else publishReader(child.stderr, receiveStderr, () => failure !== null || context.signal?.aborted);
           child.stdin.on('error', () => stop('HOST_FAIL', 'per-record worker input failed'));
           child.stdout.on('error', () => stop('HOST_FAIL', 'per-record worker output failed'));
           child.once('error', () => stop('HOST_FAIL', 'cannot start per-record worker'));
@@ -4068,7 +4563,7 @@ function runArgvCapture(stages, context) {
           } else stop(code, message);
         };
         const outputEdges = [...topology.outputs[i]];
-        if (!outputEdges.length && (!setups[i].output || topology.kinds[i] === 'copy')) {
+        if (terminalOperators.includes(i)) {
           const edge = topology.edges.length + terminalOperators.indexOf(i);
           outputEdges.push(edge);
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
@@ -4080,18 +4575,22 @@ function runArgvCapture(stages, context) {
           remaining++;
           reader.on('error', (error) => failMux('HOST_FAIL', error.message));
           reader.once('close', () => { remaining--; finish(); });
-          const receive = topology.kinds[i] === 'err' ? (chunk) => publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk) : receiveOutput;
-          if (context.stream) publishReader(reader, receive, () => failure !== null || context.signal?.aborted);
+          const errorPort = topology.kinds[i] === 'err';
+          const receive = errorPort ? receiveStderr : receiveOutput;
+          const route = errorPort ? context.stderrRoute : context.stdoutRoute;
+          if (route) relayPort(reader, route);
+          else if (context.stream) publishReader(reader, receive, () => failure !== null || context.signal?.aborted);
           else reader.on('data', receive);
         }
-        operators.push(startByteMux(topology.inputs[i].map((edge) => {
+        const readers = ['emit', 'callable'].includes(topology.kinds[i]) ? [] : topology.inputs[i].map((edge) => {
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
           pipes[edge].read = undefined;
           reader.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(reader);
           reader.on('error', (error) => failMux(['EPIPE', 'ECONNRESET'].includes(error.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', error.message));
           return reader;
-        }), [...(setups[i].output ? [(() => {
+        });
+        const writers = [...(setups[i].output ? [(() => {
           const writer = createWriteStream('', { fd: stageOutputs[i], autoClose: true });
           stageOutputs[i] = undefined;
           writer.retainOnFailure = topology.kinds[i] === 'copy';
@@ -4102,28 +4601,113 @@ function runArgvCapture(stages, context) {
           pipes[edge].write = undefined;
           writer.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(writer);
-          writer.on('error', (error) => failMux(['EPIPE', 'ECONNRESET'].includes(error.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', error.message));
           return writer;
-        })], failMux, () => {
+        })];
+        const done = () => {
           results[i] ??= workerResult;
-          if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null ? 6 : 4;
+          if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null || results[i].outcome === 2 ? 6 : 4;
           if (effectiveStatus(results[i], i)) liveStates[i] = 5;
           remaining--;
           finish();
-        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }, topology.orders[i], worker));
+        };
+        if (topology.kinds[i] === 'emit') {
+          if (!writers.length) {
+            const sink = new Writable({ write: writeStdout });
+            operatorStreams.push(sink);
+            writers.push(sink);
+          }
+          for (const edge of topology.inputs[i]) {
+            closeSync(pipes[edge].read);
+            pipes[edge].read = undefined;
+          }
+          if (children.length === 0 && topology.kinds.findIndex(kind => ['emit', 'callable'].includes(kind)) === i && context.onStarted) publish(context.onStarted);
+          const setup = setups[i];
+          const edge = topology.outputs[i][0];
+          const outputTarget = edge === undefined ? undefined : topology.edges[edge][1];
+          const pipesToCommand = outputTarget !== undefined && !['out', 'err'].includes(topology.kinds[outputTarget]);
+          let sink = writers[0];
+          if (setup.emitError && setup.errorMode !== 2 && !(setup.errorMode === 3 && (pipesToCommand || !setup.output))) {
+            if (setup.errorMode === 1) {
+              sink = createWriteStream('', { fd: stageErrors[i], autoClose: true });
+              stageErrors[i] = undefined;
+            } else {
+              sink = new Writable({ write: setup.errorMode === 3 ? writeStdout : writeStderr });
+            }
+            operatorStreams.push(sink);
+            writers.push(sink);
+          }
+          const data = Buffer.from(setup.emit, 'base64');
+          let pendingWriters = writers.length;
+          for (const writer of writers) {
+            writer.on('error', (error) => {
+              if (!['EPIPE', 'ECONNRESET'].includes(error.code)) failMux('HOST_FAIL', error.message);
+            });
+            writer.once('close', () => { if (--pendingWriters === 0) done(); });
+            writer.end(writer === sink ? data : undefined, (error) => {
+              if (!error && edge !== undefined && writer === sink && writer === writers[0]) metricWrite(topology.edgeMetrics[edge], data.length);
+              writer.destroy();
+            });
+          }
+        } else if (topology.kinds[i] === 'callable') {
+          if (!context.callableStages) throw new Error('callable stage host is unavailable');
+          const sink = writers[0] ?? new Writable({ write: writeStdout });
+          const setup = setups[i];
+          const edge = topology.outputs[i][0];
+          const target = edge === undefined ? undefined : topology.edges[edge][1];
+          const pipesToCommand = target !== undefined && !['out', 'err'].includes(topology.kinds[target]);
+          let stderrSink = sink;
+          if (setup.errorMode === 1) {
+            stderrSink = createWriteStream('', { fd: stageErrors[i], autoClose: true });
+            stageErrors[i] = undefined;
+          } else if (setup.errorMode !== 2 && !(setup.errorMode === 3 && (pipesToCommand || !setup.output))) {
+            stderrSink = new Writable({ write: setup.errorMode === 3 ? writeStdout : writeStderr });
+          }
+          const inputEdge = pipes[topology.inputs[i][0]];
+          const fileInput = stageInputs[i] !== undefined;
+          let input = i === inputRoot ? context.inheritedInput : undefined;
+          const ownsInput = fileInput || Boolean(inputEdge);
+          if (fileInput) {
+            const fd = stageInputs[i];
+            input = { fd, recordFD: stageRecordInputs[i] ?? fd };
+            stageInputs[i] = stageRecordInputs[i] = undefined;
+          } else if (inputEdge) {
+            const metric = topology.edgeMetrics[topology.inputs[i][0]];
+            input = { fd: inputEdge.read, recordFD: inputEdge.record, measure: (bytes) => {
+              if (metric?.[0] === 2) metricAdd(metric, 1, bytes);
+            } };
+            inputEdge.read = inputEdge.record = undefined;
+          }
+          const ports = callableStagePorts(input, ownsInput, sink, stderrSink, pipes[edge]?.watchPath, (result) => {
+            results[i] = result;
+            if (result.outcome === 2) liveStates[i] = 6;
+            if (effectiveStatus(result, i) && (!topology.failurePolicy || result.signal)) stopGraph(result);
+            done();
+          }, (op, bytes) => {
+            if (op === 'stdout') metricWrite(topology.edgeMetrics[edge], bytes);
+          });
+          context.callableStages.set(i, ports);
+          operators.push(() => ports.close({ status: 0, signal: 0, outcome: 2 }));
+          if (configurations[i].timeoutMS > 0) timers.push(processDeadline(configurations[i].timeoutMS, () => {
+            if (!ports.ended) stop('RECIPE_TIMEOUT', 'callable stage timed out');
+          }));
+          if (children.length === 0 && topology.kinds.findIndex(kind => ['emit', 'callable'].includes(kind)) === i && context.onStarted) publish(context.onStarted);
+        } else {
+          operators.push(startByteMux(readers, writers, failMux, done, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }, topology.orders[i], worker));
+        }
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }
     finally {
-      for (const fd of [input, output, ...stageInputs, ...stageOutputs, ...stageErrors]) {
+      for (const fd of [input, output, ...stageInputs, ...stageRecordInputs, ...stageOutputs, ...stageErrors]) {
         if (fd !== undefined) { try { closeSync(fd); } catch { stop('HOST_FAIL', 'cannot close redirection'); } }
       }
-      for (const pipe of pipes) for (const fd of [pipe.read, pipe.write]) {
+      for (const pipe of pipes) for (const fd of [pipe.read, pipe.write, pipe.record]) {
         if (fd === undefined) continue;
         try { closeSync(fd); } catch { stop('HOST_FAIL', 'cannot close pipeline pipe'); }
       }
     }
     launched = true;
+    context.graphReady?.();
     if (topology && context.onSnapshot && failure === null) {
       const snapshot = () => publish(context.onSnapshot, { states: [...liveStates], edgeMetrics: topology.edgeMetrics });
       snapshot();
@@ -4152,42 +4736,47 @@ function streamOperandFifos(count) {
   } catch (error) { dispose(); throw error; }
 }
 
-function pipelinePipes(count) {
+function pipelinePipes(count, callableInputs, callableOutputs) {
   if (count === 0) return [];
   if (process.platform === 'win32') return [];
   const directory = mkdtempSync(join(tmpdir(), 'kame-pipes-'));
   const names = Array.from({ length: count }, (_, index) => join(directory, String(index)));
   const pipes = [];
-  let failure = null;
   try {
     const utility = existsSync('/usr/bin/mkfifo') ? '/usr/bin/mkfifo' : '/bin/mkfifo';
     const result = spawnSync(utility, names, { shell: false, stdio: 'ignore', timeout: 1000, killSignal: 'SIGKILL' });
     if (result.error || result.status !== 0) throw new Error('mkfifo unavailable');
-    for (const name of names) {
+    for (const [index, name] of names.entries()) {
       // The temporary RDWR anchor lets both blocking endpoints open without
       // deadlock. It is closed before launch so only actual writers govern EOF.
       const anchor = openSync(name, fsConstants.O_RDWR);
-      let read, write;
+      let read, write, record;
       try {
         read = openSync(name, fsConstants.O_RDONLY);
         write = openSync(name, fsConstants.O_WRONLY);
-        pipes.push({ read, write });
-      } catch (error) { if (read !== undefined) closeSync(read); throw error; }
+        if (callableInputs?.has(index)) record = openSync(name, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+        pipes.push({ read, write, record, watchPath: callableOutputs?.has(index) ? name : undefined });
+      } catch (error) {
+        for (const fd of [read, write, record]) if (fd !== undefined) closeSync(fd);
+        throw error;
+      }
       finally { closeSync(anchor); }
     }
+    // Open descriptors survive unlinking. Only paths used by callable output
+    // watches stay named until the graph joins.
+    for (const [index, name] of names.entries()) if (!callableOutputs?.has(index)) unlinkSync(name);
+    if (!callableOutputs?.size) rmdirSync(directory);
   } catch (error) {
-    failure = error;
-  } finally {
-    // Open descriptors remain valid after unlinking. No temporary paths survive
-    // to graph execution, including failure, interruption and cancellation.
-    for (const name of names) { try { unlinkSync(name); } catch (error) { if (error.code !== 'ENOENT') failure ??= error; } }
-    try { rmdirSync(directory); } catch (error) { if (error.code !== 'ENOENT') failure ??= error; }
-  }
-  if (failure) {
-    for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
-    throw failure;
+    for (const pipe of pipes) for (const fd of [pipe.read, pipe.write, pipe.record]) if (fd !== undefined) closeSync(fd);
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
   }
   return pipes;
+}
+
+function disposePipelineWatches(pipes) {
+  const watched = pipes.find((pipe) => pipe.watchPath);
+  if (watched) rmSync(dirname(watched.watchPath), { recursive: true, force: true });
 }
 
 // Node/libuv can silently invoke /bin/sh for ENOEXEC even with shell:false.
@@ -4241,6 +4830,9 @@ async function runProcess(module, instance, script, context, request, rawRequest
 function runProcessAttempt(module, instance, script, context, request, rawRequest) {
   const retain = module.exports.kame_wasm_process_retain_limit(instance, request ?? 0n);
   if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
+  const cwd = context.cwd ?? process.cwd();
+  const directoryFailure = processDirectoryFailure(cwd);
+  if (directoryFailure) return Promise.resolve({ ok: false, outcome: 3, status: 0, signal: 0, code: 'HOST_FAIL', message: directoryFailure, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), retryable: false });
   return new Promise((resolveAttempt, rejectAttempt) => {
     const shell = context.shell.length !== 0 ? context.shell : defaultShell();
     const childEnv = context.environmentExact ? {} : { ...process.env };
@@ -4248,7 +4840,7 @@ function runProcessAttempt(module, instance, script, context, request, rawReques
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
-    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
+    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd, detached: true });
     track(child, undefined, context.finalizing);
     const out = [];
     const err = [];
@@ -4304,10 +4896,7 @@ function runProcessAttempt(module, instance, script, context, request, rawReques
     publish(() => {
       module.processStarted(instance, request);
       const group = module.startedProcessGroup(instance, context, rawRequest);
-      if (group) {
-        group.add(child);
-        child.once('close', () => group.delete(child));
-      }
+      trackProcessGroup(child, group);
     });
   });
 }
@@ -4341,6 +4930,7 @@ function contextFor(inv) {
     shell: inv.shell ?? [],
     environment: inv.environment ?? [],
     json: inv.json === true,
+    jobs: inv.jobs ?? 1,
     timeoutMS: inv.timeoutMS ?? 0,
     // Requested input to the portable program; recordCaptureLimit replaces it
     // with the effective value once compilation succeeds.
@@ -4433,9 +5023,11 @@ async function runParse(module, inv) {
 
 async function runSession(module, inv, sourceDirectory) {
   const fragments = [];
-  const selection = { defines: [...inv.defines, ...inv.parameters], environment: [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment], parts: [] };
+  const selection = { defines: [...inv.defines, ...inv.parameters], environment: [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment], parts: [], discoveries: [] };
+  const declarationScans = new Map();
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
+    selection.hostContext = { ...contextFor(inv), declarationScans };
     let name = `<command:${i + 1}>`, text = input.value;
     let sourceBytes = null;
     const fileBacked = input.kind === 'file' || input.kind === 'discover';
@@ -4453,15 +5045,16 @@ async function runSession(module, inv, sourceDirectory) {
     sourceTexts.set(name, text);
     if (input.lang === 'km' || input.lang === 'kash') {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection, [], sourceBytes);
+      if (i === 0 && input.lang === 'km' && selection.ruleWork) inv.noDefaultGrants = false;
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, ...(fileBacked ? { sourceDirectory: dirname(resolve(sourceDirectory, name)) } : {}), lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
   resetProgress();
   buildStartedAt = performance.now();
-  return module.runSession(fragments, inv, contextFor(inv));
+  return module.runSession(fragments, inv, { ...contextFor(inv), declarationScans, compositionDiscoveries: selection.discoveries });
 }
 
-async function discoverBuildSource(module, inv, sourceDirectory, watchedSources = null) {
+async function discoverBuildSource(module, inv, sourceDirectory, watchedSources = null, declarationState = undefined) {
   if (watchedSources && inv.file) watchedSources.add(resolve(inv.file));
   if (watchedSources && !inv.file && !inv.command) {
     const candidates = BUILD_SOURCE_CANDIDATES;
@@ -4476,32 +5069,50 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
   watchedSources?.add(resolve(sourceDirectory, name));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
-  const selection = { defines: [...inv.defines, ...inv.parameters], environment, parts: [], watchedSources };
+  const hostContext = { ...contextFor(inv), declarationScans: new Map() };
+  const selection = { defines: [...inv.defines, ...inv.parameters], environment, parts: [], watchedSources, hostContext, discoveries: [], declarationState };
   const compiled = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'km', [], !inv.command, true, selection, [], source.bytes ?? null);
   compiled.defines = inv.defines;
   compiled.parameters = inv.parameters;
   compiled.toolOverrides = inv.toolOverrides;
   compiled.force = inv.force ? 1 : 0;
   compiled.environment = environment;
+  compiled.compositionDiscoveries = selection.discoveries;
+  compiled.declarationScans = hostContext.declarationScans;
+  compiled.declarationSources = new Map();
   // Tools has a command operand; list has a search query, not a build root.
   // Neither should normalize operands or implicitly select default.
   const catalogue = inv.name === 'tools' || inv.name === 'list';
-  const targets = catalogue ? inv.targets : await module.targetOperands(compiled, inv.targets, name);
+  const targets = catalogue ? inv.targets : await module.targetOperands(compiled, inv.targets, name, { ...contextFor(inv), declarationState });
   if (!catalogue && targets.length === 0) throw Object.assign(new Error('no target was requested and no default target is defined'), { code: 'TGT_NO_DEFAULT' });
   return { name, text: source.text, compiled, targets };
+}
+
+function declaresRuleWork(item) {
+  switch (item.kind) {
+    case 'rule':
+    case 'generate': return true;
+    case 'for': return item.items.some(declaresRuleWork);
+    case 'composition': return item.branches.some((branch) => branch.items.some(declaresRuleWork));
+    default: return false;
+  }
+}
+
+function itemLoadsSources(item) {
+  return item.kind === 'include' || (item.kind === 'composition' && item.branches.some((branch) => branch.items.some(itemLoadsSources)));
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
 async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }, includes = [], sourceBytes = null) {
   const identity = resolve(sourceDirectory, name);
   selection.watchedSources?.add(identity);
-  sourceTexts.set(name, text);
+  if (!selection.context) sourceTexts.set(name, text);
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
-  const parseLang = lang === 'km' ? fileBacked ? 'composition:km-file' : 'composition:km' : lang;
+  const parseLang = lang === 'km' && fileBacked ? 'composition:km-file' : `composition:${lang}`;
   const document = JSON.parse(new TextDecoder().decode(await module.parse(parseLang, name, text)));
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
   if (invalid) {
-    primarySource = { name, text };
+    if (!selection.context) primarySource = { name, text };
     throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name, ...(includes.length ? { frames: includes.map((frame) => ({ kind: 'include', source: frame.source, label: frame.label, span: { start: frame.start, end: frame.end } })) } : {}) })) });
   }
   const bytes = new TextEncoder().encode(text);
@@ -4513,30 +5124,49 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   };
   const append = (end) => {
     appendPart(start, end, lang);
-    selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), lang, offset: item.span.start, ...(includes.length ? { includes } : {}) })));
+    for (const item of document.ast.items) {
+      if (item.span.start < start || item.span.end > end) continue;
+      if (!selection.ruleWork && declaresRuleWork(item)) selection.ruleWork = true;
+      if (item.kind === 'definition') selection.parts.push({ name, text: slice(item.span), lang, offset: item.span.start, ...(includes.length ? { includes } : {}) });
+    }
   };
   const include = async (path, optional, span) => {
-    if (!fileBacked) {
-      primarySource = { name, text };
-      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km or .kash file and run that file'] };
+    const rejectInclude = (code, message, tips) => {
+      if (!selection.context) primarySource = { name, text };
+      const detail = { code, severity: 'error', message, source: name, span, tips };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
+    };
+    const homeRelative = path.startsWith('~/');
+    const childIsKash = /\.(?:kash|ksh)$/.test(path);
+    if (!fileBacked && !isAbsolute(path) && !homeRelative) {
+      rejectInclude('RES_INVALID', `relative include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, ['save this fragment as a .km or .kash file and run that file']);
     }
+    if (lang === 'kash' && !childIsKash) {
+      rejectInclude('RES_INVALID', 'Kash includes require a .kash or .ksh source');
+    }
+    if (homeRelative) path = join(homedir(), path.slice(2));
     const included = normalize(isAbsolute(path) ? path : join(dirname(name), path));
     selection.watchedSources?.add(resolve(sourceDirectory, included));
     if ([...active, identity].includes(resolve(sourceDirectory, included))) {
-      primarySource = { name, text };
+      if (!selection.context) primarySource = { name, text };
       const detail = { code: 'DEP_CYCLE', severity: 'error', message: `include cycle: ${included}`, source: name, span };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
     let child;
-    try { child = await readFile(resolve(sourceDirectory, included)); }
+    const filename = resolve(sourceDirectory, included);
+    const context = selection.context;
+    if (context && (!context.grants.read || !pathGranted(filename, context.readRoots))) {
+      rejectInclude('CAP_DENIED', 'read access denied for included source');
+    }
+    try { child = await readFile(filename, { signal: context?.signal }); }
     catch (error) {
+      if (context?.signal.aborted) throw diagnosticError('invocation cancelled', 'EXEC_CANCELLED');
       if (optional && error.code === 'ENOENT') return;
-      primarySource = { name, text };
+      if (!selection.context) primarySource = { name, text };
       const detail = { code: 'FS_ERR', severity: 'error', message: `cannot read included source: ${included}`, source: name, span };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
-    const childLang = lang === 'kash' || /\.(?:kash|ksh)$/.test(included) ? 'kash' : lang;
+    const childLang = childIsKash ? 'kash' : lang;
     parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child.toString('utf8'), childLang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }], child));
   };
   // The portable parser validates every branch before the host selects one.
@@ -4546,9 +5176,12 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       if (condition) {
         let selected;
         try {
-          selected = await module.compositionCondition({ sources: selection.parts, condition: { name, text: slice(condition.span), offset: condition.span.start, ...(includes.length ? { includes } : {}) }, defines: selection.defines, environment: selection.environment, directory: process.cwd() });
+          selected = await module.compositionCondition({ sources: selection.parts, condition: { name, text: slice(condition.span), offset: condition.span.start, ...(includes.length ? { includes } : {}) }, defines: selection.defines, environment: selection.environment, directory: selection.context?.cwd ?? process.cwd() }, selection.context ?? selection.hostContext, selection.discoveries && ((observed) => {
+            selection.discoveries.push(...observed);
+            selection.declarationState?.(observed);
+          }));
         } catch (error) {
-          primarySource = { name, text };
+          if (!selection.context) primarySource = { name, text };
           error.span ??= condition.span;
           const details = error.diagnostics ?? [{ code: error.code ?? 'EXPR_INVALID', severity: 'error', message: error.message }];
           error.diagnostics = details.map((detail) => detail.source ? detail : { ...detail, source: name, span: condition.span });
@@ -4558,10 +5191,13 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       }
       for (const item of branch.items) {
         if (item.kind === 'include') await include(item.path, item.optional, item.span);
-        else if (item.kind === 'composition') await compose(item.branches);
-        else if (item.kind === 'rule' || item.kind === 'for' || item.kind === 'generate') appendPart(item.span.start, item.span.end, 'km');
+        else if (item.kind === 'composition' && itemLoadsSources(item)) await compose(item.branches);
+        else if (item.kind === 'rule' || item.kind === 'for' || item.kind === 'generate' || item.kind === 'composition') {
+          if (!selection.ruleWork && declaresRuleWork(item)) selection.ruleWork = true;
+          appendPart(item.span.start, item.span.end, 'km');
+        }
         else if (item.kind === 'let') {
-          primarySource = { name, text };
+          if (!selection.context) primarySource = { name, text };
           const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: 'execution of declaration-time let is not available', source: name, span: item.span };
           if (includes.length) detail.frames = includes.map((frame) => ({ kind: 'include', source: frame.source, label: frame.label, span: { start: frame.start, end: frame.end } }));
           throw Object.assign(diagnosticError(detail.message, detail.code), { span: item.span, diagnostics: [detail] });
@@ -4570,9 +5206,11 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       break;
     }
   };
+  const bindsLocals = (branches) => branches.some((branch) => branch.items.some((item) =>
+    item.kind === 'let' || (item.kind === 'composition' && bindsLocals(item.branches))));
   let start = 0;
   for (const item of document.ast.items) {
-    if (item.kind !== 'include' && item.kind !== 'composition') continue;
+    if (!itemLoadsSources(item) || (item.kind === 'composition' && bindsLocals(item.branches))) continue;
     append(item.span.start);
     if (item.kind === 'include') await include(item.path, item.optional, item.span);
     else await compose(item.branches);
@@ -4637,14 +5275,10 @@ async function runList(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
-  let context;
-  if (!jsonMode) {
-    context = contextFor(inv);
-    context.inspection = true;
-    context.grants.write = false;
-    context.grants.run = false;
-    context.inspectionGrants = context.portableGrants;
-  }
+  const context = contextFor(inv);
+  context.inspection = true;
+  context.grants.write = false;
+  context.grants.run = false;
   const bytes = await module.graphJSON(source.compiled, inv.targets[0] || '', 0, jsonMode ? graphKinds.list : graphKinds.listReport, false, source.name, context);
   writeReport('list', JSON.parse(Buffer.from(bytes).toString('utf8')));
   return 0;
@@ -4657,16 +5291,10 @@ async function runGraph(module, inv, sourceDirectory) {
   const targets = source.targets;
   if (inv.name !== 'plan' && targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
   const kind = inv.name === 'plan' ? graphKinds.planRoots : graphKinds[inv.name];
-  let context;
-  if (inv.expand || inv.name !== 'span') {
-    context = contextFor(inv);
-    context.inspection = true;
-    context.grants.write = false;
-    context.grants.run = false;
-    // Match the build context's proof identity. Resolving-phase evaluation and
-    // the host's inspection policy still prohibit writes and process execution.
-    context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
-  }
+  const context = contextFor(inv);
+  context.inspection = true;
+  context.grants.write = false;
+  context.grants.run = false;
   const queryTarget = inv.name === 'plan' ? JSON.stringify(targets) : targets[0];
   const bytes = await module.graphJSON(source.compiled, queryTarget, inv.depth, kind, inv.name === 'plan' ? inv.affected : inv.expand, source.name, context);
   const result = JSON.parse(Buffer.from(bytes).toString('utf8'));
@@ -4692,7 +5320,7 @@ async function runTools(module, inv, sourceDirectory) {
   if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
   if (check) {
-    targets = await module.targetOperands(source.compiled, targets, source.name);
+    targets = await module.targetOperands(source.compiled, targets, source.name, contextFor(inv));
     if (targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
     let failed = false;
     for (const target of targets) {
@@ -4717,7 +5345,7 @@ async function runTools(module, inv, sourceDirectory) {
     }
     return failed ? 1 : 0;
   }
-  const names = await module.toolNames(source.compiled, source.name);
+  const names = await module.toolNames(source.compiled, source.name, contextFor(inv));
   writeReport('tools', names.map((name) => ({ name, path: resolveTool(name, inv.toolOverrides) })));
   return 0;
 }
@@ -4865,6 +5493,8 @@ async function watchFingerprint(kind, name, metadata = false) {
 
 function watchKey(kind, name) { return `${kind}\0${name}`; }
 
+function isDeclarationWatchResource(kind) { return kind === 'discovery' || kind === 'declaration-source'; }
+
 async function watchProbe(name) {
   // Windows ctime is creation time, not a reliable change timestamp.
   if (process.platform === 'win32' || isMemoryResource(name)) return null;
@@ -4881,7 +5511,19 @@ async function watchProbe(name) {
   return JSON.stringify(views);
 }
 
-async function scanWatchFingerprint(record) {
+async function scanWatchFingerprint(record, module, watch) {
+  if (record.kind === 'declaration-source') {
+    const stamp = await watchFingerprint('file', record.name);
+    return stamp === 'not-file' || stamp.startsWith('error:') ? 'unavailable' : stamp;
+  }
+  if (record.kind === 'discovery') {
+    try { return await module.declarationFingerprint(watch, record); }
+    catch { return 'unavailable'; }
+  }
+  if (record.scan !== undefined) {
+    try { return module.watchGlobFingerprint(watch, record.name, resourceWildcard(record.scan)); }
+    catch { return 'unavailable'; }
+  }
   if (record.source || record.kind !== 'file') return watchFingerprint(record.kind, record.name, record.metadata);
   const probe = await watchProbe(record.name);
   if (probe !== null && probe === record.probe && record.probeMetadata === !!record.metadata) return record.stamp;
@@ -4947,10 +5589,12 @@ class WatchNotifications {
       } catch { complete = false; }
     };
     for (const record of records) {
-      if (isMemoryResource(record.name)) { complete = false; continue; }
-      const rawName = filesystemPath(record.name);
+      let subject = record.scan ?? record.name;
+      if (isMemoryResource(subject)) { complete = false; continue; }
+      if (record.kind === 'discovery' && !isFileResource(subject)) subject = resolve(record.directory, subject);
+      const rawName = filesystemPath(subject);
       const name = process.platform === 'win32' ? rawName.replaceAll('\\', '/') : rawName;
-      if (record.kind === 'glob') {
+      if (record.kind === 'glob' || record.kind === 'discovery') {
         const root = globRoot(name);
         add(root === name ? dirname(name) : root, true);
       } else {
@@ -5049,11 +5693,23 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
     }
   };
+  const seedDiscoveries = (resources, replace = false) => {
+    const retained = new Set();
+    for (const resource of resources) {
+      const key = watchKey(resource.kind, resource.name);
+      retained.add(key);
+      if (!fingerprints.has(key)) notifications.changed();
+      fingerprints.set(key, { ...resource, stamp: resource.signature });
+    }
+    if (replace) for (const [key, record] of fingerprints) {
+      if (isDeclarationWatchResource(record.kind) && !retained.has(key)) { fingerprints.delete(key); notifications.changed(); }
+    }
+  };
   const compile = async () => {
     watchedSources.clear();
     startCycle();
     try {
-      source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources);
+      source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources, (resources) => seedDiscoveries(resources));
       if (source === null) {
         cycleFailed = true;
         if (!noArguments) reportWatchError(Object.assign(new Error(BUILD_NO_SOURCE_MESSAGE), { code: 'BUILD_NO_SOURCE' }), null);
@@ -5063,7 +5719,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       primarySource = source;
       lastDiagnostic = null;
       const targets = source.targets;
-      watch = await module.beginWatch(source.compiled, targets, source.name, { ...context, signal: cancellation.signal });
+      watch = await module.beginWatch(source.compiled, targets, source.name, { ...context, signal: cancellation.signal, declarationState: seedDiscoveries });
       cancellation.signal.addEventListener('abort', () => watch?.cancellation.abort(), { once: true });
       invocationCancellations.add(watch.cancellation);
       const snapshot = module.watchSnapshot(watch);
@@ -5092,13 +5748,13 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
       if (!tracked || tracked.stamp === null) {
         notifications.changed();
-        const stamp = resource.metadata ? 'unobserved' : resource.missing === true ? 'missing' : resource.signature ?? await watchFingerprint(resource.kind, resource.name);
+        const stamp = resource.metadata ? 'unobserved' : resource.missing === true ? 'missing' : resource.signature ?? await scanWatchFingerprint(resource, module, watch);
         if (!tracked) fingerprints.set(key, { ...resource, stamp, source: false });
         else tracked.stamp = stamp;
       }
     }
     for (const [key, record] of fingerprints) {
-      if (!record.source && !active.has(key)) { fingerprints.delete(key); notifications.changed(); }
+      if (!record.source && !isDeclarationWatchResource(record.kind) && !active.has(key)) { fingerprints.delete(key); notifications.changed(); }
     }
   };
 
@@ -5141,16 +5797,16 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         notifications.dirty = false;
         notifications.sync(fingerprints.values());
         for (const [key, record] of fingerprints) {
-          const stamp = await scanWatchFingerprint(record);
+          const stamp = await scanWatchFingerprint(record, module, watch);
           if (record.stamp === null) { record.stamp = stamp; continue; }
           if (stamp !== record.stamp) {
             if (active && busy && !record.source && record.kind === 'file') {
               module.invalidateWatch(watch, [{ kind: record.kind, name: record.name, observedOnly: true }]);
             }
             clearDashboard();
-            if (!jsonMode) stderr.write(`info watch: change queued: ${record.name}\n`);
+            if (!jsonMode) stderr.write(`info watch: change queued: ${record.pattern ?? record.name}\n`);
             record.stamp = stamp;
-            pending.set(key, { kind: record.kind, name: record.name });
+            pending.set(key, { kind: record.kind, name: record.name, pattern: record.pattern });
             if (record.source) pending.set(`source\0${record.name}`, { kind: 'source', name: record.name });
             lastChange = now;
           }
@@ -5160,7 +5816,8 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
 
       if (inv.cancelOnChange && active && busy && pending.size && !cancelledForChange) {
         const changed = [...pending.values()].filter((item) => item.kind === 'file' || item.kind === 'glob');
-        const message = module.watchCancellationMessage(watch, changed);
+        const declarations = [...pending.values()].filter((item) => isDeclarationWatchResource(item.kind));
+        const message = module.watchCancellationMessage(watch, changed) + declarations.map((item) => `\n  ${item.pattern}`).join('');
         const diagnostic = { code: 'INPUT_CHANGE_CANCELLED', severity: 'warning', message };
         clearDashboard();
         if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'input-warning', target: '', node: 0, generation: 0, attempt: 0, diagnostic })}\n`);
@@ -5175,7 +5832,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
 
       if (pending.size && now - lastChange >= debounceMS && (!active || !module.watchSnapshot(watch).busy)) {
-        const sourceChanged = [...pending.values()].some((item) => item.kind === 'source');
+        const sourceChanged = [...pending.values()].some((item) => item.kind === 'source' || isDeclarationWatchResource(item.kind));
         if (sourceChanged && active) {
           invocationCancellations.delete(watch.cancellation);
           await module.disposeWatch(watch);
@@ -5183,7 +5840,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           active = false;
         }
         if (sourceChanged || !active) {
-          if (sourceChanged) fingerprints = new Map([...fingerprints].filter(([, record]) => record.source));
+          if (sourceChanged) fingerprints = new Map([...fingerprints].filter(([, record]) => record.source || isDeclarationWatchResource(record.kind)));
           reported = new Set();
           pending.clear();
           active = await compile();
@@ -5240,6 +5897,9 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   const targets = source.targets;
   if (inv.dryRun) {
     const sourceParts = source.compiled;
+    context.compositionDiscoveries = sourceParts.compositionDiscoveries;
+    context.declarationScans = sourceParts.declarationScans;
+    context.declarationSources = sourceParts.declarationSources;
     const fragments = sourceParts.map((part, index) => ({
       ...part,
       name: part.name ?? source.name,

@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 	"unicode/utf8"
 )
 
@@ -57,21 +56,26 @@ func processExit(err error, cmd *exec.Cmd, stage host.ProcessStage) host.Process
 func stageCommand(r host.ProcessRequest, s host.ProcessStage) *exec.Cmd {
 	cmd := exec.Command(s.Argv[0], s.Argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 100 * time.Millisecond
+	// Output pipes are owned by the host. This only bounds os/exec's stdin copier.
+	cmd.WaitDelay = commandPipeIdle
 	cmd.Dir = s.Directory
 	if cmd.Dir == "" {
 		cmd.Dir = r.Directory
 	}
-	cmd.Env = append([]string{}, r.Environment...)
-	for _, replacement := range s.Environment {
-		key, _, _ := strings.Cut(replacement, "=")
-		for j := len(cmd.Env) - 1; j >= 0; j-- {
-			name, _, _ := strings.Cut(cmd.Env[j], "=")
-			if EnvironmentNameEqual(key, name) {
-				cmd.Env = append(cmd.Env[:j], cmd.Env[j+1:]...)
+	if s.EnvironmentExact {
+		cmd.Env = append([]string{}, s.Environment...)
+	} else {
+		cmd.Env = append([]string{}, r.Environment...)
+		for _, replacement := range s.Environment {
+			key, _, _ := strings.Cut(replacement, "=")
+			for j := len(cmd.Env) - 1; j >= 0; j-- {
+				name, _, _ := strings.Cut(cmd.Env[j], "=")
+				if EnvironmentNameEqual(key, name) {
+					cmd.Env = append(cmd.Env[:j], cmd.Env[j+1:]...)
+				}
 			}
+			cmd.Env = append(cmd.Env, replacement)
 		}
-		cmd.Env = append(cmd.Env, replacement)
 	}
 	// Resolve with the child's cwd and merged environment. exec.Command's
 	// default lookup consults the parent PATH before Cmd.Env is assigned.
@@ -101,7 +105,7 @@ func stageCommand(r host.ProcessRequest, s host.ProcessStage) *exec.Cmd {
 	}
 	return cmd
 }
-func (h *Host) startTopology(r host.ProcessRequest) bool {
+func (h *Host) startTopology(r host.ProcessRequest, parent *running, parentStage *callableStage) bool {
 	run := &running{done: make(chan struct{}), stopped: make(chan struct{}), host: h, id: r.ID}
 	h.native.mu.Lock()
 	if h.native.processes[r.ID] != nil {
@@ -133,9 +137,16 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 	workerTemplates := make([]*exec.Cmd, count)
 	readers := make([][]io.Reader, count)
 	writers := make([][]io.Writer, count)
-	sinks := make([]io.Writer, count)
+	sinks, errorSinks := make([]io.Writer, count), make([]io.Writer, count)
 	out := &streamWriter{h: h, id: r.ID, kind: host.ProcessStdout, limit: r.RetainBytes, stopped: run.stopped, onTruncate: func() { h.Stop(r.ID, 100) }}
 	errout := &streamWriter{h: h, id: r.ID, kind: host.ProcessStderr, limit: r.RetainBytes, stopped: run.stopped}
+	var stdout, stderr io.Writer = out, errout
+	if r.StageParent.Stdout {
+		stdout = inheritedStageWriter{parentStage, parentStage.stdout, true}
+	}
+	if r.StageParent.Stderr {
+		stderr = inheritedStageWriter{parentStage, parentStage.stderr, parentStage.stderr == parentStage.stdout}
+	}
 	var handoff *terminalHandoff
 	fail := func(message string) bool {
 		run.stopIO()
@@ -214,9 +225,9 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			}
 		}
 		if len(writers[i]) == 0 {
-			sinks[i] = out
+			sinks[i] = stdout
 			if s.Kind == "err" {
-				sinks[i] = errout
+				sinks[i] = stderr
 			}
 		} else if len(writers[i]) == 1 {
 			sinks[i] = writers[i][0]
@@ -243,6 +254,13 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			files = append(files, f)
 			readers[i] = []io.Reader{f}
 		}
+		if r.StageParent.Input && i == r.InputRoot && len(readers[i]) == 0 {
+			if s.Kind == "callable" && parentStage.stdin != nil {
+				readers[i] = []io.Reader{parentStage.stdin}
+			} else if f := parentStage.inputFile(); f != nil {
+				readers[i] = []io.Reader{f}
+			}
+		}
 		path, app := s.Output, s.Append
 		if len(outputs[i]) == 0 && path == "" && s.Kind != "err" {
 			path, app = r.Output, r.Append
@@ -258,7 +276,44 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 				sinks[i] = f
 			}
 		}
-		if s.Kind != "" && s.Kind != "each" {
+		if s.Kind != "" && s.Kind != "each" && s.Kind != "emit" && s.Kind != "callable" {
+			continue
+		}
+		errorSinks[i] = stderr
+		switch s.ErrorMode {
+		case host.StderrStdout:
+			errorSinks[i] = sinks[i]
+		case host.StderrPresentation:
+			errorSinks[i] = stdout
+			for _, edge := range outputs[i] {
+				kind := r.Stages[r.Edges[edge].To].Kind
+				if kind != "out" && kind != "err" {
+					errorSinks[i] = sinks[i]
+					break
+				}
+			}
+		case host.StderrFile:
+			f, e := openFile(s.Error, dir, true, s.ErrorAppend)
+			if e != nil {
+				return fail("cannot open graph stderr")
+			}
+			errorSinks[i] = f
+		}
+		if s.Kind == "emit" {
+			continue
+		}
+		if s.Kind == "callable" {
+			if run.callables == nil {
+				run.callables = make(map[int]*callableStage)
+			}
+			stage := &callableStage{stdout: sinks[i], stderr: errorSinks[i], result: make(chan host.ProcessStageResult, 1), accept: s.Accepted}
+			if len(outputs[i]) != 0 {
+				stage.outputPipe = pipes[outputs[i][0]].write
+			}
+			if len(readers[i]) != 0 {
+				stage.stdin = readers[i][0]
+			}
+			run.callables[i] = stage
 			continue
 		}
 		cmd := stageCommand(r, s)
@@ -273,37 +328,15 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			commands[i] = cmd
 		}
 		cmd.Stdout = sinks[i]
-		cmd.Stderr = errout
+		cmd.Stderr = errorSinks[i]
 		if len(readers[i]) == 1 {
 			cmd.Stdin = readers[i][0]
 		}
-		switch s.ErrorMode {
-		case host.StderrStdout:
-			cmd.Stderr = cmd.Stdout
-		case host.StderrPresentation:
-			cmd.Stderr = out
-			for _, edge := range outputs[i] {
-				kind := r.Stages[r.Edges[edge].To].Kind
-				if kind != "out" && kind != "err" {
-					cmd.Stderr = cmd.Stdout
-					break
-				}
-			}
-		case host.StderrFile:
-			f, e := openFile(s.Error, dir, true, s.ErrorAppend)
-			if e != nil {
-				return fail("cannot open graph stderr")
-			}
-			cmd.Stderr = f
+		if message := processDirectoryFailure(cmd.Dir); message != "" {
+			return fail(message)
 		}
 		if cmd.Err != nil {
 			return fail("cannot resolve graph stage")
-		}
-		if cmd.Dir != "" {
-			info, e := os.Stat(cmd.Dir)
-			if e != nil || !info.IsDir() {
-				return fail("cannot open graph stage directory")
-			}
 		}
 		if s.Kind == "each" {
 			continue
@@ -342,6 +375,9 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			continue
 		}
 		if run.startCommand(cmd) != nil {
+			if message := processDirectoryFailure(cmd.Dir); message != "" {
+				return fail(message)
+			}
 			return fail("cannot start graph stage")
 		}
 		run.stageTimeout(cmd, r.Stages[i].TimeoutMS)
@@ -383,7 +419,7 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 	var fatalKind string
 	fatal := false
 	retireFailure := func(kind string, result host.ProcessStageResult) {
-		if result.EffectiveStatus == 0 || (r.CollectFailures && result.Signal == 0 && kind == "") {
+		if result.EffectiveStatus == 0 || (r.CollectFailures && result.Outcome == host.ProcessExited && result.Signal == 0 && kind == "") {
 			return
 		}
 		fatalOnce.Do(func() {
@@ -397,6 +433,7 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		})
 	}
 	var workers sync.WaitGroup
+	run.followStageParent(parent)
 	workers.Add(count)
 	for i, s := range r.Stages {
 		go func(i int, s host.ProcessStage) {
@@ -418,8 +455,27 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 			}()
 			var e error
 			var result host.ProcessStageResult
-			if s.Kind == "each" {
-				result = runEach(r, s, workerTemplates[i], run, readers[i][0], sinks[i])
+			kind := s.Kind
+			if s.Kind == "emit" {
+				sink := sinks[i]
+				if s.EmitError {
+					sink = errorSinks[i]
+				}
+				if len(s.Emit) != 0 {
+					_, e = sink.Write(s.Emit)
+				}
+				// An evaluator stage ends normally when its consumer closes.
+				if !errors.Is(e, syscall.EPIPE) {
+					result = operatorResult(e, run)
+				}
+			} else if s.Kind == "callable" {
+				result = run.callables[i].wait(run, s.TimeoutMS)
+			} else if s.Kind == "each" {
+				var reachedEOF bool
+				result, reachedEOF = runEach(r, s, workerTemplates[i], run, readers[i][0], sinks[i])
+				if reachedEOF {
+					kind = ""
+				}
 			} else if s.Overflow != 0 {
 				var failureMu sync.Mutex
 				var first *host.ProcessStageResult
@@ -453,7 +509,10 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 
 			results[i] = result
 			nodes[i].complete(result)
-			retireFailure(s.Kind, result)
+			if kind == "callable" {
+				kind = ""
+			}
+			retireFailure(kind, result)
 		}(i, s)
 	}
 	go func() {
@@ -480,7 +539,8 @@ func (h *Host) startTopology(r host.ProcessRequest) bool {
 		// Preserve an operator's causal framing/predicate error over SIGPIPE
 		// induced upstream while retiring the graph.
 		for i, stage := range results {
-			if !(fatal && fatalKind != "" && fatalKind != "each") && r.Stages[i].Kind != "" && r.Stages[i].Kind != "each" && ((stage.Status >= 120 && stage.Status <= 124) || stage.Status == 126) {
+			kind := r.Stages[i].Kind
+			if !(fatal && fatalKind != "" && fatalKind != "each") && kind != "" && kind != "each" && kind != "callable" && ((stage.Status >= 120 && stage.Status <= 124) || stage.Status == 126) {
 				e.Status, e.Signal = stage.Status, 0
 				e.EffectiveStatus, e.EffectiveSignal = stage.EffectiveStatus, 0
 			}

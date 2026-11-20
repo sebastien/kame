@@ -5,13 +5,11 @@ import (
 	"kame/lang/expr"
 )
 
-func TestNewerInputSelectorIsCompleteAndInputOnly(t *testing.T) {
-	if !expr.ValidSelector("@<?") || expr.ValidSelector("@>?") || expr.ValidSelector("@?") || expr.ValidSelector("@<?1") {
-		t.Error("newer selector validation")
+func TestChangedInputsParsesAsNamedList(t *testing.T) {
+	parsed := expr.Parse(t.Allocator(), "newer.km", "count changed-inputs")
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || parsed.Expr.Kind != expr.Application ||
+		len(parsed.Expr.Items) != 2 || parsed.Expr.Items[1].Kind != expr.Name || parsed.Expr.Items[1].Text != "changed-inputs" {
+		t.Error("changed-inputs did not parse as a named list argument")
 	}
-	parsed := expr.Parse(t.Allocator(), "newer.km", "(count @<?)")
-	if len(parsed.Diagnostics) != 0 {
-		t.Error("newer selector application failed to parse")
-	}
-	parsed.Free()
 }

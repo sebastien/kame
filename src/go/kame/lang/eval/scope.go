@@ -24,6 +24,8 @@ type binding struct {
 	Definition  core.ResourceKey
 	Local       *localDefinition
 	Initialized bool
+	Captured    bool // A compiled source or session entry closes over this let.
+	LetBinding  *expr.LetBinding
 }
 
 type bindingIndexEntry struct {
@@ -36,9 +38,12 @@ type Scope struct {
 	Parent       *Scope
 	Bindings     []binding
 	bindingIndex []bindingIndexEntry
+	letSlots     map[*expr.LetBinding]int
 	References   int
 	// Interactive rebinding replaces slots; other scopes keep authored shadowing.
 	replaceBindings bool
+	// Assignment can reach enclosing blocks, up to the current invocation.
+	assignmentBoundary bool
 	// Call scopes pin their code while suspended bodies or cleanup borrow it.
 	sourceStorage *FunctionStorage
 	// Section holds the positional arguments of an enclosing placeholder
@@ -47,7 +52,8 @@ type Scope struct {
 	pipeInput *pipeInput
 	// breakingCycles prevents recursive scope releases from trying to
 	// discover the same unreachable callable cycle while it is dismantled.
-	breakingCycles bool
+	breakingCycles       bool
+	hasDescendantCapture bool
 }
 
 func newScope(a mem.Allocator, parent *Scope) *Scope {
@@ -82,6 +88,11 @@ func (s *Scope) setValue(name string, value core.Value) {
 }
 
 func (s *Scope) appendBinding(value binding) {
+	s.storeBinding(value, s.replaceBindings)
+}
+
+func (s *Scope) storeBinding(value binding, replace bool) {
+	index := len(s.Bindings)
 	lo, hi := 0, len(s.bindingIndex)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
@@ -92,22 +103,29 @@ func (s *Scope) appendBinding(value binding) {
 		}
 	}
 	if lo < len(s.bindingIndex) && s.bindingIndex[lo].name == value.Name {
-		if s.replaceBindings {
-			index := s.bindingIndex[lo].index
+		if replace {
+			index = s.bindingIndex[lo].index
 			old := s.Bindings[index]
+			delete(s.letSlots, old.LetBinding)
 			s.Bindings[index] = value
 			s.bindingIndex[lo].name = value.Name
 			s.freeBinding(&old)
-			return
+		} else {
+			s.Bindings = append(s.Bindings, value)
+			s.bindingIndex[lo].index = index
 		}
+	} else {
 		s.Bindings = append(s.Bindings, value)
-		s.bindingIndex[lo].index = len(s.Bindings) - 1
-		return
+		s.bindingIndex = append(s.bindingIndex, bindingIndexEntry{})
+		copy(s.bindingIndex[lo+1:], s.bindingIndex[lo:])
+		s.bindingIndex[lo] = bindingIndexEntry{name: value.Name, index: index}
 	}
-	s.Bindings = append(s.Bindings, value)
-	s.bindingIndex = append(s.bindingIndex, bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1})
-	copy(s.bindingIndex[lo+1:], s.bindingIndex[lo:])
-	s.bindingIndex[lo] = bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1}
+	if value.LetBinding != nil {
+		if s.letSlots == nil {
+			s.letSlots = make(map[*expr.LetBinding]int)
+		}
+		s.letSlots[value.LetBinding] = index
+	}
 }
 
 // trySetValue stores value under name unless it would strand its capture.
@@ -143,29 +161,70 @@ func RenderChildScope(c *Context, parent *Scope, record core.Value) *Scope {
 	return child
 }
 
+// DeclarationChildScope takes ownership of the value on success.
+func DeclarationChildScope(a mem.Allocator, parent *Scope, bindingName string, value *core.Value) *Scope {
+	child := newScope(a, parent)
+	if !child.trySetValue(bindingName, *value) {
+		child.Free()
+		return nil
+	}
+	value.Free(a)
+	return child
+}
+
 func (s *Scope) setDefinition(name string) {
 	key := core.NewResourceKey(s.Alloc, core.ResourceDefinition, name)
 	s.appendBinding(binding{Kind: bindingDefinition, Name: owned(s.Alloc, name), Definition: key})
 }
 
-func (s *Scope) reserveEager(name string) {
-	s.appendBinding(binding{Kind: bindingEager, Name: owned(s.Alloc, name)})
+func (s *Scope) setLocalDefinition(name string, expression *expr.Expr) *localDefinition {
+	local := mem.Alloc[localDefinition](s.Alloc)
+	local.Expression, local.Scope = expression, s
+	s.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(s.Alloc, name), Local: local})
+	return local
+}
+
+func (s *Scope) reserveEager(e *expr.Expr, shadow bool) {
+	s.storeBinding(binding{Kind: bindingEager, Name: owned(s.Alloc, e.Text), LetBinding: e.LetBinding}, s.replaceBindings && !shadow)
 }
 
 func (s *Scope) lookup(name string) *binding {
+	return s.lookupResolved(name, nil)
+}
+
+func (s *Scope) lookupResolved(name string, let *expr.LetBinding) *binding {
 	for current := s; current != nil; current = current.Parent {
-		lo, hi := 0, len(current.bindingIndex)
-		for lo < hi {
-			mid := lo + (hi-lo)/2
-			if current.bindingIndex[mid].name < name {
-				lo = mid + 1
-			} else {
-				hi = mid
-			}
+		if b := current.localResolved(name, let); b != nil {
+			return b
 		}
-		if lo < len(current.bindingIndex) && current.bindingIndex[lo].name == name {
-			return &current.Bindings[current.bindingIndex[lo].index]
+	}
+	return nil
+}
+
+func (s *Scope) localResolved(name string, let *expr.LetBinding) *binding {
+	if let != nil {
+		if slot, ok := s.letSlots[let]; ok {
+			return &s.Bindings[slot]
 		}
+		if !s.replaceBindings {
+			return nil
+		}
+	}
+	return s.localBinding(name)
+}
+
+func (s *Scope) localBinding(name string) *binding {
+	lo, hi := 0, len(s.bindingIndex)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if s.bindingIndex[mid].name < name {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(s.bindingIndex) && s.bindingIndex[lo].name == name {
+		return &s.Bindings[s.bindingIndex[lo].index]
 	}
 	return nil
 }
@@ -176,8 +235,13 @@ func (s *Scope) Free() {
 	}
 	s.References--
 	if s.References != 0 {
-		if !s.breakingCycles && s.breakCallableCycle() {
-			return
+		if !s.breakingCycles && !s.breakCallableCycle() {
+			for owner := s; owner != nil; owner = owner.Parent {
+				if owner.hasDescendantCapture {
+					s.collectCaptureCycles()
+					break
+				}
+			}
 		}
 		return
 	}
@@ -225,6 +289,11 @@ func (s *Scope) freeBinding(b *binding) {
 			mem.FreeString(s.Alloc, local.WritePaths[j])
 		}
 		mem.FreeSlice(nil, local.WritePaths)
+		if local.Aggregate != nil {
+			mem.FreeSlice(nil, local.Aggregate.Expressions)
+			mem.FreeSlice(nil, local.Aggregate.Scopes)
+		}
+		expr.Free(s.Alloc, local.Configured)
 		mem.Free(s.Alloc, local)
 	}
 	if b.Kind == bindingFunction && b.Function.Kind == FunctionDefinition {

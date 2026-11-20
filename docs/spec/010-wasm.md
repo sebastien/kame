@@ -189,13 +189,49 @@ Host request kinds include:
 - Run process-like operation.
 - Read wall or monotonic time when needed.
 
-Kind 42 loads an evaluator-validated authored Kash module source. Its payload is
-one absolute lexical path string; success completes with the file's raw bytes,
-and failure with a diagnostic. This is source-loading authority, not a read
+Kind 42 loads an evaluator-validated authored Kame or Kash module source. Its
+payload is one absolute lexical path string. A present file completes with its
+raw bytes, a missing file completes with nil, and other failures complete with a
+diagnostic. This is source-loading authority, not a read
 grant: ordinary operations cannot submit kind 42, and a host must not treat a
 kind-1 read request as a substitute. Embedders that do not support source loads
 must complete kind 42 with an explicit unsupported diagnostic. The node,
 generation, attempt, and request ID follow the ordinary completion contract.
+
+Kind 43 checks the directory named by Kash's `cd`. The payload is one
+absolute lexical path string. The host completes the request with the JSON
+Boolean `true` for an existing directory and `false` otherwise. The probe
+confers no file access and returns no other metadata.
+
+Kind 44 delivers a signal requested by `kill -SIGNAL`. The payload joins the
+decimal process request ID and the signal selector with `:`. The selector is
+a name such as `SIGTERM` or a decimal signal number. The ID identifies a process
+request in the same instance. The host delivers the signal to that request's
+process groups and completes the control request independently of the process's
+terminal result. A request that already ended needs no delivery.
+
+Kind 46 exchanges bytes with an evaluator-owned `callable` stage in a process
+graph. Its JSON fields are `process`, `stage`, `op`, `bytes`, `status`,
+`signal`, and `cancelled`. The process ID identifies a live graph in the same
+instance and the stage index is zero-based. Only one data exchange and one
+independent output watch per stage may be outstanding at a time.
+
+- `read` completes with at most 32 KiB of raw stdin bytes or nil at EOF.
+  An optional `frame` of `:lines` or `:nul` stops the read after the first
+  newline or NUL, respectively, and includes that delimiter in the result.
+  Hosts leave all later bytes on the shared input for the next consumer.
+- `watch` waits for stdout to close. It completes with nil when the consumer
+  closes the port or the graph cancels the stage, or with JSON `true` when the
+  stage finishes first. It transfers no bytes and can complete while a data
+  exchange is pending.
+- `stdout` and `stderr` carry one nonempty base64 chunk of at most 32 KiB
+  decoded bytes. The host acknowledges after writing to the selected port.
+- `finish` closes the stage's ports and reports its status and signal to the
+  graph. A cancelled stage has zero status and signal.
+
+Write and finish acknowledgements are JSON `true`. A closed endpoint returns
+nil. Errors report a diagnostic. Reads, watches, and finish carry an empty
+byte string.
 
 A browser host may map these to an in-memory filesystem, server API, sandbox,
 or reject them with a capability diagnostic. A process request is semantic, not
@@ -297,8 +333,8 @@ Freshness also requests the opaque file-context cache record through the existin
 cache-get protocol. A missing record is nil. Scoped successful builds publish
 updated records through cache-put.
 
-After successful process completion, or a recipe containing no shell/yield,
-the engine verifies every declared output through a separate kind-20 request.
+After a recipe completes successfully, the engine verifies every declared
+output through a separate kind-20 request.
 It reports `OUTPUT_MISSING` and withholds dependent execution when an output is
 absent; a host verification failure remains a failure. Kind 17 is reserved and
 is not the output-verification request. Embedding hosts must service
@@ -355,6 +391,44 @@ and target text. A watch resource's `metadata` flag covers all three views and
 can become true after a suspended host request completes. Existing content-only
 watches must then be promoted rather than retaining their initial flag. A
 metadata watch must detect retargeting even when both referents are absent.
+
+For a grouped glob, the watch snapshot supplies `scan` (an ordinary host
+wildcard) and `pattern` (the display spelling) alongside its opaque `name`.
+Use `scan` for candidate enumeration. Before comparing membership, call
+`kame_wasm_watch_glob_fingerprint(instance, name, name_length, candidates,
+candidates_length, destination, capacity, length)` with the snapshot's name
+and a JSON array of candidate path strings. It returns a hexadecimal digest
+of the exact matched list using the query/copy convention. A settled resource's
+`signature` field uses the same digest. The query does not change watch state.
+Pass the original snapshot name unchanged in invalidation batches.
+
+Declaration-time `files`, `dirs`, and `wildcard` use read request kind 45.
+The payload for regular-file membership is the candidate wildcard. For other
+kind masks the wildcard follows NUL, one lowercase hexadecimal mask digit,
+and NUL. The bits select regular files (1), directories (2), symbolic links
+(4), and other entries (8). The host returns a JSON array of candidate paths
+selected by the mask, checking kinds without following a final symlink. The
+module applies the exact pattern and owns the registration snapshot. A registration entry point
+may return `HOST_NEEDED`; service the request through the normal completion API
+and repeat the entry point with the same operands. The module reuses completed
+scans from that registration. It publishes a program only when registration
+finishes.
+
+`kame_wasm_declaration_state(instance, destination, capacity, length)` reports
+declaration snapshots after either successful or failed registration. Each
+entry includes `kind` (`discovery`), `name`, `scan`, `pattern`, `kindMask`,
+`directory`, and the accepted `signature`. A watch host enumerates candidates
+using `scan` relative to `directory`, applies `kindMask`, and passes
+`{name, directory, candidates}` as JSON to
+`kame_wasm_declaration_fingerprint(instance, data, data_length, destination,
+capacity, length)`. This pure query works without a compiled program. A changed
+signature requires a new registration and selection of the watch roots.
+
+Imports and includes reached during registration use source request kind 42 and the same
+`HOST_NEEDED` protocol. Their state entries use `kind: "declaration-source"`.
+The signature is the SHA-256 of the accepted source bytes, `missing` for an
+absent lookup candidate, or `unavailable` after a failed read. Hosts re-register
+when those signatures change, including after an initially failed registration.
 
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected
@@ -414,7 +488,7 @@ Individual `free` operations still release owned engine objects where supported
 so native and WebAssembly behavior remain comparable.
 
 Incremental records use ABI kind **40**, JSON
-`{"reader":ID,"path":PATH,"delimiter":10|0}` with optional `"stdin":true`.
+`{"reader":ID,"path"PATH:,"delimiter":10|0}` with optional `"stdin":true`.
 Stdin requests have an empty path and borrow the invocation's remaining input
 without a file grant. IDs are instance-scoped positive
 integers. For file sources, the first read opens and validates a regular local file; later reads
@@ -450,6 +524,21 @@ acyclicity, grants, and all stage configurations before launch or truncation.
 They join every node, retain the causal failure when cancelling peers, and keep
 terminal presentation outputs distinct from channel edges. Unsupported hosts
 must reject kind 32 rather than silently execute the nodes as a linear pipeline.
+
+The `emit` node routes bytes from an evaluated `out!` or `err!` invocation.
+Its argv is empty. Its setup carries standard base64 in `emit` and a Boolean
+`emitError` selecting stderr. Apply the usual stdout and stderr dispositions,
+including the order of stderr duplication. An `emit` node needs no run grant,
+and all file redirections require the usual grants. It closes unused stdin.
+
+A `callable` node has empty argv and uses kind 46 for its evaluator-owned I/O.
+A nested process descriptor may carry `stageParent` with the enclosing graph
+request ID in `graph`, the zero-based `index` of that callable, and Boolean
+`input`, `stdout`, and `stderr` selectors. These selectors apply to the
+nested request's default ports. Explicit redirections, pipeline connections,
+and private captures keep their normal precedence. When `input` is true,
+`inputRoot` selects the stage that borrows stdin. The nested request shares
+the enclosing input's current position and releases the borrow on completion.
 
 The optional parallel Boolean `framed` array declares each node's output kind
 (omitting it means all-byte topology). Hosts validate input/output framing as
@@ -864,8 +953,8 @@ complete the yielded request, and retry the query. Read-only inspection never
 starts artifact producers or commits effects. Parsing and unexpanded authored
 span queries perform no host effects.
 
-Forwarded build effects publish explicit writes and concatenated yields through
-write requests. The target waits for host completion, preserves authored effect
+Forwarded build effects publish explicit writes and returned rule content
+through write requests. The target waits for host completion, preserves authored effect
 order, and propagates publication failures. A dependent recipe runs after the
 file is published. The JavaScript host writes through a unique private sibling
 staging directory and atomic rename, cleaning staging on success and failure.

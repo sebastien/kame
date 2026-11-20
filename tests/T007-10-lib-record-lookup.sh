@@ -7,28 +7,32 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+ make dist-wasm >/dev/null
+ wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 project="$TMPDIR/lookup"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'KMK'
+cat >"$project/Makefile.km" <<'KM'
 mode = "release"
-flags = [debug: "-O0" release: "-O2"]
-selected = (get mode flags)
-inputs = [debug: [./debug.txt] release: [./release.txt]]
-default : @(get mode inputs) ; [shell: kash]
+flags = {debug: "-O0", release: "-O2"}
+selected = get mode flags
+source-files = {debug: [./debug.txt], release: [./release.txt]}
+task default : ${get mode source-files}
 	(out! selected)
-KMK
+KM
 printf debug >"$project/debug.txt"
 printf release >"$project/release.txt"
 for backend in native wasm; do
  test-step "$backend computed lookup and defaults"
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
- for sample in '(get (str "t" "wo") [one: 1 two: 2])|2' '(get "missing" [one: 1])|:nil' '(get "missing" :false [one: 1])|:false' '(get "one" [one: [a: 3]])|[a: 3]' '(apply (get "used" ([x] x) [used: ([x] (str "hello " x)) unused: ([x] x)]) ["Ada"])|"hello Ada"'; do
+ if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
+ for sample in 'get (str "t" "wo") {one: 1, two: 2}|2' 'get "missing" {one: 1}|nil' 'get "missing" false {one: 1}|false' 'get "one" {one: {a: 3}}|{a: 3}' 'apply (get "used" (x => x) {used: x => str "hello " x, unused: x => x}) ["Ada"]|"hello Ada"'; do
   "${runner[@]}" do run --lang expr -c "${sample%|*}" >"$project/value" 2>"$project/error"
   if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend record lookup"; fi
  done
  status=0
- "${runner[@]}" do run --lang expr -c '(get 1 [one: 1])' >"$project/value" 2>"$project/error" || status=$?
+ "${runner[@]}" do run --lang expr -c 'get 1 {one: 1}' >"$project/value" 2>"$project/error" || status=$?
  if [ "$status" = 1 ] && grep -q EXPR_INVALID "$project/error"; then test-ok "$backend invalid key contract"; else test-fail "$backend invalid key accepted"; fi
  "${runner[@]}" -C "$project" default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = -O2 ]; then test-ok "$backend computed configuration reaches recipe"; else test-fail "$backend computed definition"; fi

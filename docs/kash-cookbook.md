@@ -13,9 +13,9 @@ removes it with `defer`; no credentials, installation or network are involved.
 
 In `~/.config/kash/init.kash`:
 
-```kash
-alias ll = ["ls" "-lah"]
-alias gs = ["git" "status" "--short"]
+```kash-repl
+alias ll = ["ls", "-lah"]
+alias gs = ["git", "status", "--short"]
 ```
 
 Then type `ll` or `gs`, without `$...`. Use `alias` to list shortcuts and
@@ -27,20 +27,26 @@ read; nothing else in `~/.config/kash/` is loaded.
 For login-only environment setup, use `~/.config/kash/profile.kash`:
 
 ```kash
-export PATH="$HOME/.local/bin:$PATH"
+set env/PATH = str HOME "/.local/bin:" PATH
 ```
 
-`kash --login -i` loads that profile before interactive initialization;
-ordinary `kash -c COMMAND` loads neither. Exported PATH affects later tool
-lookup without restarting running jobs. Kash does not source POSIX profiles.
+`kash --login -i` loads the profile before interactive initialization.
+This example needs separate grants to read `HOME` and `PATH`.
+
+```sh
+kash --login --allow-env=HOME --allow-env=PATH --allow-run -c 'printenv PATH'
+```
+
+The session PATH affects later tool lookup. Ordinary `kash -c COMMAND`
+starts without a profile or interactive initialization file.
 See [login-shell setup and limitations](ref-kash.md#startup-file-and-prompt)
 before changing your account shell.
 
-## Typed prefixes, not generated command source
+## Typed command prefixes
 
 ```kash
-prefix = []
-command = [...prefix "printf" "<%s>" "two words" ""]
+let prefix = []
+let command = [...prefix, "printf", "<%s>", "two words", ""]
 $...command tail
 ```
 
@@ -50,39 +56,32 @@ Spreading preserves empty arguments, quotes, newlines and spaces, rejects nested
 lists and never interprets argument bytes as source. CLI callers can supply
 closed list data with `--set`, not joined shell strings.
 
-Raw `*.c` is literal; `(wildcard ./src/*.c)` explicitly produces an argv list.
-Lists splice only as standalone unquoted words. Quoted/mixed substitutions must
+Raw `*.c` is literal. Bind `let sources = ./src/*.c` and use `$...sources`
+to pass each match as an argument. Quoted/mixed substitutions must
 be scalar. `${name}.suffix` appends text; `$name.suffix` performs field lookup.
-Double quotes group words and still allow references/capture; single quotes are
-not Kash quoting. Parenthesized expressions use Kame values and value pipes,
-not shell grouping.
+Double quotes group words and allow reference and capture substitutions.
+Single quotes group literal text. Parenthesized expressions compute Kame values.
 
-## Accept selected statuses only after explicit `?`
+## Accept selected exit statuses
 
 ```kash
-def attempt command...
-	$...command ?
-result = (attempt "tidy" "-o" "./staged.html" "./input.html")
-(if (and (= result.signal 0) (in? result.status [0 1]))
-  :nil
-  (fail! "Tidy failed; do not publish its output"))
+let result = $?(accept-exit: [1] tidy -o ./staged.html ./input.html)
+if result.state != :completed
+	(fail! "Tidy failed; do not publish its output")
 ```
 
-The function is authored code, not generated command text. Args remain typed.
-Without `?`, an unsuccessful command stops execution. With `?`, inspect its
-existing completion record. This example rejects status 2 and signals; missing
-tools, timeouts and denied capabilities still fail. A nonempty output file is not
-evidence of success.
+This policy accepts status 1 and keeps its raw value in `result.status`.
+`result.state` is `:completed` for an accepted exit. `result.ok` still tests
+raw status zero. Other exits, signals, launch failures, and timeouts fail
+this check. Capability denial propagates from the capture.
 
-`CMD ? FALLBACK` is explicit process recovery; fallback failure still fails.
-Terminal `CMD ?` starts no fallback. Bare `nop` names an external executable,
-not Kame's `(nop)`. `LEFT ?? RIGHT` is Kash value recovery, not an expression
-operator or finalizer. Cancellation/capability denial cannot be swallowed.
-Command conditions test exit status; expression conditions use Kame truth.
-Only nil and false are false; zero and empty strings/lists are true.
+`CMD ? FALLBACK` runs a fallback on recoverable process failure. Terminal
+`CMD ?` accepts an ordinary nonzero exit. Use `A ?? B` for a missing lookup or
+nil in an expression. To test a command in a condition, use
+`$?(COMMAND).ok` or inspect its state when applying an acceptance policy.
 
-Pipelines count every stage's failure, including SIGPIPE. Do not infer success
-from the final stage or weaken checks to hide a failed downloader.
+Pipelines account for each stage's failures, including SIGPIPE. Inspect
+the aggregate outcome or its stage records before publishing an output.
 
 ## Sequence commands and route output deliberately
 
@@ -90,7 +89,7 @@ from the final stage or weaken checks to hide a failed downloader.
 compile && verify && publish
 probe || use-cache
 
-message = $(printf "payload" >&out && printf "progress\n" >&err)
+let message = $(printf "payload" >&out && printf "progress\n" >&err)
 printf "captured=%s\n" $message
 ```
 
@@ -126,23 +125,23 @@ remains invocation-owned, not per-iteration cleanup. For a single callback or
 value-producing transformation the existing expression pattern remains useful:
 
 ```kash
-(map ([file] (run! "checker" file)) files)
+(map (file => run! "checker" file) files)
 ```
 
 Callbacks run in order and stop on failure. To collect failures, map an authored
-callable whose command uses `?`, then inspect every result. Use `reduce` with a
+callable that returns `$?(COMMAND)`, then inspect its results. Use `reduce` with a
 small accumulator when retaining all callback results is unnecessary.
 
 ```kash
 def probe command...
-	$...command ?
-result = (reduce ([previous number]
-  (if (= previous.status 0) previous
-    (if (and (= previous.signal 0) (= previous.status 75))
-      (probe "safe-idempotent-probe" number)
-      (fail! "non-retryable failure"))))
-  [status: 75 signal: 0] [1 2 3])
-(if (= result.status 0) :nil (fail! "retry budget exhausted"))
+	return $?($...command)
+let result = reduce (previous number =>
+	if previous.ok then previous
+	elif previous.signal == 0 and previous.status == 75 then probe "safe-idempotent-probe" number
+	else fail! "non-retryable failure"
+) {ok: false, status: 75, signal: 0} [1, 2, 3]
+if not result.ok
+	(fail! "retry budget exhausted")
 ```
 
 Only the explicitly chosen transient status is eligible; success stops new
@@ -151,13 +150,13 @@ retry; an unused definition has no effects. Suspension resumes without replay.
 CLI recipe retry is a different policy. Never apply either policy to deployments
 without explicitly establishing that repeating the operation is safe.
 
-`while probe --pending` supports live command conditions. Do not put the probe
+`while $?(probe --pending).ok` checks a fresh command on each visit. Do not put the probe
 in a lazy outer definition and expect repeated lookup to refresh it.
 
 ## Temporary workspaces and `defer`
 
 ```kash
-workspace = (line $(mktemp -d ./workspace.XXXXXX))
+let workspace = line $(mktemp -d ./workspace.XXXXXX)
 defer rm -rf $workspace
 ```
 
@@ -167,7 +166,7 @@ top-level lazy values survive later statements and finalization. The directory
 is fresh and private: never substitute a shared directory, glob or existing path.
 
 Within Kame expressions, append an authored filename with
-`@{workspace}/config.json`; bare `{workspace}/config.json` is a pattern, not a
+`${workspace}/config.json`; bare `{workspace}/config.json` is a pattern, not a
 lookup. `joinpath` remains useful when joining computed parts or normalizing.
 
 `defer (cleanup workspace)` evaluates the whole expression at cleanup, retaining
@@ -191,8 +190,8 @@ external artifacts. `do clean` is not a finalizer.
 ## Environments, captures and tool lookup
 
 ```kash
-exports = [TOKEN: $(credential-reader) MODE: "preview"]
-:env $exports application
+let exports = {TOKEN: $(credential-reader), MODE: "preview"}
+env: $exports application
 ```
 
 Capture is exact UTF-8: empty output, spaces, CRLF and every terminal newline
@@ -209,9 +208,9 @@ credentials by default.
 
 Three separate boundaries:
 
-1. `$NAME` is a Kame binding. `$env.NAME` explicitly reads the environment and
-   needs an env grant; delivering a child environment grants no reads.
-2. Bare tools use startup PATH and `--tool NAME=PATH`. Explicit executable paths
+1. `$NAME` reads a binding or a permitted uppercase environment variable.
+   `${env/NAME}` selects the environment explicitly. Stage assignments grant no reads.
+2. Bare tools use the current unit PATH and `--tool NAME=PATH`. Explicit executable paths
    use stage cwd. A stage PATH override changes the child, not Kame's resolver.
    `TOOL_MISSING` differs from `CAP_DENIED`.
 3. A wrapper or child shell can do its own lookup. Tracking a wrapper does not
@@ -223,27 +222,26 @@ authored external shell. Do not interpret its stdout as Kash source.
 ## Documents are data
 
 ```kash
-(write! ./literal.txt """Literal $HOME and @(not-a-call).""")
-template = """Hello, @{name}.
+(write! ./literal.txt """Literal $HOME and ${literal-name}.""")
+let template = """Hello, @{name}.
 """
-(write! ./message.txt (render [name: "Ada"] template))
-(write! ./config.json (json [name: "a\"b" lines: ["one" "two\nthree"]]))
+(write! ./message.txt (render {name: "Ada"} template))
+(write! ./config.json (json {name: "a\"b", lines: ["one", "two\nthree"]}))
 consumer < ./config.json
 ```
 
 Verbatim text remains literal until explicitly rendered. JSON escaping belongs
 to `json`, not shell quoting. File-backed rendering and input redirection track
 reads; arbitrary filename arguments do not automatically declare dependencies.
-`write!`/`yield!` retain their phase/publication contracts, not a promise of a
-transactional multi-output external recipe.
+`write!` and returned rule content publish individual files.
 
 ## Publish a staged file without clobbering
 
 ```kash
-workspace = (line $(mktemp -d ./staging.XXXXXX))
+let workspace = line $(mktemp -d ./staging.XXXXXX)
 defer rm -rf $workspace
 generator > ${workspace}/output
-(publish! @{workspace}/output ./final.txt)
+(publish! ${workspace}/output ./final.txt)
 ```
 
 Choose private staging on the destination filesystem and finish every writer
@@ -269,9 +267,8 @@ Linux native and WASM/Node checks include:
 | Background joins and failures | `T017-18-kash-async.sh` |
 | Streaming and slow-consumer pressure | `T017-03-eval-pipelines.sh`, `T012-04-streams-backpressure.sh` |
 
-Parser success is not runtime evidence, and these checks do not certify other
-platforms. Windows job-assignment and non-Linux APE descendant-retirement
-limitations remain explicit in the native host source.
+These checks cover Linux native and Node/WASM execution. Native Windows process
+containment and filesystem durability require separate validation.
 
 For nonsecret debugging, print typed argv using `json` and retain the authored cwd
 and environment *names*. Lifecycle displays may be truncated and are not shell

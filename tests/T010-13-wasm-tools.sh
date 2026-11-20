@@ -11,22 +11,23 @@ test-start "T010-13 wasm tools"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 
 project="$TMPDIR/wasm-tools"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF'
-default : ./out.txt
+cat >"$project/Makefile.km" <<'EOF'
+task default : ./out.txt
 
-./out.txt :
-	@{x/sh} -c 'echo hi' > @>
-	@{x/definitely-not-a-real-tool-xyz} foo
+rule ./out.txt
+	x/sh -c 'echo hi' > $outputs.0
+	x/definitely-not-a-real-tool-xyz foo
 EOF
 
 test-step "tools JSON matches native including unresolved names"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools --json) >"$project/wasm.json" 2>"$project/wasm.err"
+(cd "$project" && node "$wasm_wrapper" do tools --json) >"$project/wasm.json" 2>"$project/wasm.err"
 wasm_status=$?
 (cd "$project" && "$CLI_BIN" do tools --json) >"$project/native.json" 2>"$project/native.err"
 native_status=$?
@@ -36,15 +37,15 @@ if [ "$wasm_status" = "$native_status" ] && cmp -s "$project/wasm.json" "$projec
 else
 	test-fail "tools JSON differs (wasm=$(cat "$project/wasm.json") native=$(cat "$project/native.json"))"
 fi
-if grep -q '"path":""' "$project/wasm.json"; then
-	test-ok "unresolved tool keeps an empty path"
+if jq -e 'any(.[]; .name == "definitely-not-a-real-tool-xyz" and .path == "") and any(.[]; .name == "sh" and .path != "") and all(.[]; .name | startswith("x/") | not)' "$project/wasm.json" >/dev/null; then
+	test-ok "qualified executable heads resolve by tool name and preserve missing paths"
 else
-	test-fail "unresolved tool path missing"
+	test-fail "qualified tool names or paths incorrect: $(cat "$project/wasm.json")"
 fi
 
 test-step "tools rejects targets"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools ./out.txt) >"$project/out" 2>"$project/err"
+(cd "$project" && node "$wasm_wrapper" do tools ./out.txt) >"$project/out" 2>"$project/err"
 status=$?
 set -e
 if [ "$status" = 2 ] && grep -q 'OPT_VALUE_INVALID' "$project/err"; then
@@ -54,16 +55,16 @@ else
 fi
 
 test-step "target-scoped checks match native without executing recipes"
-cat >>"$project/Makefile.kmk" <<'EOF'
-good :
-	@{x/sh} -c 'printf tool-ok'
-root : default
-computed : @(nop "default")
+cat >>"$project/Makefile.km" <<'EOF'
+task good
+	x/"sh" -c 'printf tool-ok'
+task root : default
+task computed : ${nop "default"}
 EOF
 compare_check() {
 	local wasm_status native_status
 	set +e
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools check "$@") >"$project/wasm.json" 2>"$project/wasm.err"
+	(cd "$project" && node "$wasm_wrapper" do tools check "$@") >"$project/wasm.json" 2>"$project/wasm.err"
 	wasm_status=$?
 	(cd "$project" && "$CLI_BIN" do tools check "$@") >"$project/native.json" 2>"$project/native.err"
 	native_status=$?
@@ -85,17 +86,22 @@ compare_check good
 compare_check --json root
 compare_check computed
 compare_check --json computed computed
+if jq -e -s 'any(.[]; .type == "diagnostic" and .diagnostic.code == "TOOL_MISSING" and .diagnostic.targetStack == ["computed", "default", "./out.txt"])' "$project/wasm.json" >/dev/null; then
+	test-ok "qualified executable failure retains its dependency path"
+else
+	test-fail "qualified executable failure omitted its dependency path"
+fi
 compare_check
 compare_check --json missing
 
 test-step "Kash command tools are listed and checked on both backends"
-cat >>"$project/Makefile.kmk" <<'EOF'
-kash_root : kash_used
-kash_used : ; [shell: kash]
+cat >>"$project/Makefile.km" <<'EOF'
+task kash_root : kash_used
+task kash_used
 	definitely-not-a-real-kash-tool run python | sh -c true
 	definitely-not-a-real-kash-tool again
 EOF
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools --json) >"$project/wasm.json"
+(cd "$project" && node "$wasm_wrapper" do tools --json) >"$project/wasm.json"
 (cd "$project" && "$CLI_BIN" do tools --json) >"$project/native.json"
 if cmp -s "$project/wasm.json" "$project/native.json" && jq -e '[.[] | select(.name == "definitely-not-a-real-kash-tool")] | length == 1' "$project/wasm.json" >/dev/null; then
 	test-ok "Kash listing matches and deduplicates"
@@ -114,19 +120,19 @@ mkdir -p "$project/input"
 touch "$project/input/needs.txt"
 printf default >"$project/dependency"
 printf glob_root >"$project/next-dependency"
-cat >>"$project/Makefile.kmk" <<'EOF'
-glob_root : @(wildcard ./input/*.txt)
+cat >>"$project/Makefile.km" <<'EOF'
+task glob_root : ${wildcard ./input/*.txt}
 	touch should-not-run
-./input/needs.txt :
-	@{x/definitely-not-a-real-tool-xyz}
-read_root : @(text (read "./dependency"))
-env_root : @(env "KAME_TOOL_TARGET")
-exists_root : @(if (exists "./input/needs.txt") "default" "good")
-write_bad : @(write! "./should-not-write" "forbidden")
-shell_bad : @(sh! "touch should-not-spawn")
-read_error : @(text (read "./missing-input"))
-two_reads : @(list (text (read "./dependency")) (text (read "./next-dependency")))
-two_globs : @(concat (wildcard ./input/*.txt) (wildcard ./input/*.txt))
+rule ./input/needs.txt
+	x/definitely-not-a-real-tool-xyz
+task read_root : ${text (read "./dependency")}
+task env_root : ${env/KAME_TOOL_TARGET}
+task exists_root : ${if exists ./input/needs.txt then "default" else "good"}
+task write_bad : ${write! "./should-not-write" "forbidden"}
+task shell_bad : ${sh! "touch should-not-spawn"}
+task read_error : ${text (read "./missing-input")}
+task two_reads : ${list (text (read "./dependency")) (text (read "./next-dependency"))}
+task two_globs : ${concat (wildcard ./input/*.txt) (wildcard ./input/*.txt)}
 EOF
 compare_check --json glob_root
 compare_check glob_root
@@ -147,7 +153,7 @@ else
 fi
 
 test-step "a reached tool executes and an unused unavailable tool does not block it"
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" good) >"$project/wasm.out" 2>"$project/wasm.err"
+(cd "$project" && node "$wasm_wrapper" good) >"$project/wasm.out" 2>"$project/wasm.err"
 if [ "$(cat "$project/wasm.out")" = tool-ok ]; then
 	test-ok "WASM renders the resolved executable"
 else

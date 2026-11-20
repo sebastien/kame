@@ -82,4 +82,31 @@ func (s *Source) release(a mem.Allocator) {
 // FreeSource releases an untransferred source.
 func FreeSource(a mem.Allocator, s *Source) { s.release(a) }
 
+// StreamInvocationState describes the invocation behind a runtime stream.
+type StreamInvocationState string
+
+const (
+	StreamSuspended StreamInvocationState = "suspended"
+	StreamRunning   StreamInvocationState = "running"
+	StreamCompleted StreamInvocationState = "completed"
+	StreamFailed    StreamInvocationState = "failed"
+	StreamCancelled StreamInvocationState = "cancelled"
+)
+
+func (s StreamInvocationState) Terminal() bool {
+	return s == StreamCompleted || s == StreamFailed || s == StreamCancelled
+}
+
+// OwnedStream is a shared handle to one consumable runtime stream.
+type OwnedStream struct {
+	State           any
+	InvocationState StreamInvocationState
+	references      int
+	release         func()
+}
+
+func NewStream(state any, release func()) Value {
+	return Value{Kind: Stream, Stream: &OwnedStream{State: state, InvocationState: StreamSuspended, references: 1, release: release}}
+}
+
 // Materializer owns active sources and incomplete batches. Next processes no

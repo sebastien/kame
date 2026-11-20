@@ -19,7 +19,7 @@ func TestValuePipeCloneAndFormattingPreserveAuthoredStructure(t *testing.T) {
 		`(value |> transform a _ b)`,
 		`(value |> map (item => (item |> transform)) |> join " ")`,
 		`(join " " (map transform value))`,
-		`"@{value |> transform _ b}"`,
+		`"${value |> transform _ b}"`,
 		`$(printf %s prefix-(value |> transform _ b).txt)`,
 	}
 	for i := range inputs {

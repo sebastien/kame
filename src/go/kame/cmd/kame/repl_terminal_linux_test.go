@@ -247,11 +247,14 @@ func TestNativeInteractiveKashPersistentLatency(t *testing.T) {
 		return time.Since(start)
 	}
 	cold := measure("cold")
-	for i := 0; i < 10; i++ {
-		s.send(strings.Repeat("(nop ())\r", 100))
+	// Drain each batch before sending more input. A busy PTY can lose the
+	// tail of an unchecked burst when its input queue fills.
+	for batch := 1; batch <= 20; batch++ {
+		s.waitReading()
+		label := strconv.Itoa(batch)
+		s.send(strings.Repeat("(nop ())\r", 50) + "(out! (str \"warmup-\" \"" + label + "\\n\"))\r")
+		s.waitFor("warmup-" + label + "\r\n")
 	}
-	s.send("(out! (str \"warmup-\" \"done\\n\"))\r")
-	s.waitFor("warmup-done\r\n")
 	warm := measure("after-1000")
 	t.Logf("PTY response (1ms polling): cold=%s after 1000 entries=%s", cold, warm)
 	if status := s.finish(); status != 0 {
@@ -501,8 +504,8 @@ func TestNativeInteractiveKashLoginTerminal(t *testing.T) {
 	if err := os.Symlink(nativeCLIBinary(t), interpreter); err != nil {
 		t.Fatal(err)
 	}
-	nativeCLIWrite(t, directory+"/profile.kash", "export LOGIN_STAGE=profile\n")
-	nativeCLIWrite(t, directory+"/init.kash", "export LOGIN_STAGE=${LOGIN_STAGE}-init\n")
+	nativeCLIWrite(t, directory+"/profile.kash", "let login-stage = \"profile\"\nset env/LOGIN_STAGE = login-stage\n")
+	nativeCLIWrite(t, directory+"/init.kash", "set env/LOGIN_STAGE = join \"-\" [login-stage, \"init\"]\n")
 	s := startTerminalSession(t, interpreter, directory, []string{
 		"KASH_PROFILE=" + directory + "/profile.kash",
 		"KASH_INIT=" + directory + "/init.kash",
@@ -664,17 +667,17 @@ task handoff ; {tty: true, foreground: true}
 
 task selective ; {tty: true, foreground: true}
 	sh -c '[ -t 1 ] && echo first-terminal || echo first-pi''pe'
-	:tty true sh -c '[ -t 1 ] && echo second-terminal || echo second-pipe'
+	tty: true sh -c '[ -t 1 ] && echo second-terminal || echo second-pipe'
 
 task background ; {tty: true}
 	sh -c '[ -t 1 ] && echo attached-$((40+2))'
 	sh -c 'ps -o stat= -p $$ | grep -q + && echo fore''ground || echo background-$((40+2))'
 
 task denied
-	:tty true sh -c 'true'
+	tty: true sh -c 'true'
 
 task capture ; {tty: true}
-	echo $(:tty true sh -c 'true')
+	echo $(tty: true sh -c 'true')
 
 task invalid ; {foreground: true}
 	true
@@ -700,6 +703,75 @@ task invalid ; {foreground: true}
 		if err := command.Run(); err == nil || !strings.Contains(errOut.String()+out.String(), check.code) {
 			t.Fatalf("%s: want %s, err=%v output=%q", check.target, check.code, err, errOut.String()+out.String())
 		}
+	}
+}
+
+func TestNativeRecipeTerminalRestoresForegroundGroup(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		commandExit int
+		timeout     string
+		diagnostic  string
+		cancel      bool
+	}{
+		{name: "success"},
+		{name: "failure", commandExit: 9, diagnostic: "process exited (status 9)"},
+		{name: "timeout", timeout: "timeout: 2 ", diagnostic: "RECIPE_TIMEOUT"},
+		{name: "cancellation", diagnostic: "EXEC_CANCELLED", cancel: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `task default ; {tty: true, foreground: true}
+	defer sh -c 'echo $$ > cleanup.pid; while [ ! -f release-cleanup ]; do sleep 0.01; done'
+	`+test.timeout+`sh -c 'echo $$ > command.pid; while [ ! -f release-command ]; do sleep 0.01; done; exit `+strconv.Itoa(test.commandExit)+`'
+`)
+			s := startTerminalSession(t, nativeCLIBinary(t), directory, nil, "default")
+			t.Cleanup(func() {
+				os.WriteFile(filepath.Join(directory, "release-command"), nil, 0o600)
+				os.WriteFile(filepath.Join(directory, "release-cleanup"), nil, 0o600)
+			})
+			child := s.readPID(filepath.Join(directory, "command.pid"))
+			checkForeground := func(want int) {
+				t.Helper()
+				group, err := unix.IoctlGetInt(int(s.control.Fd()), unix.TIOCGPGRP)
+				if err != nil || group != want {
+					t.Fatalf("terminal foreground group = %d, want %d: %v", group, want, err)
+				}
+			}
+			checkForeground(child)
+			if test.cancel {
+				if err := s.command.Process.Signal(syscall.SIGTERM); err != nil {
+					t.Fatal(err)
+				}
+			} else if test.timeout == "" {
+				nativeCLIWrite(t, filepath.Join(directory, "release-command"), "")
+			}
+			s.readPID(filepath.Join(directory, "cleanup.pid"))
+			checkForeground(s.command.Process.Pid)
+			if state := processStateOf(child); state != "" {
+				t.Fatalf("foreground child %d was still in state %q during cleanup", child, state)
+			}
+			nativeCLIWrite(t, filepath.Join(directory, "release-cleanup"), "")
+			wantStatus := 0
+			if test.diagnostic != "" {
+				wantStatus = 1
+				s.waitFor(test.diagnostic)
+			}
+			select {
+			case err := <-s.done:
+				status := 0
+				if exit, ok := err.(*exec.ExitError); ok {
+					status = exit.ExitCode()
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if status != wantStatus {
+					t.Fatalf("recipe exited %d, want %d: %q", status, wantStatus, s.text())
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("recipe did not exit: %q", s.text())
+			}
+		})
 	}
 }
 
@@ -752,7 +824,7 @@ func TestNativeInteractiveKashHighlightingFollowsSession(t *testing.T) {
 	styled("snapshot-alias", replUnknownCommandStyle)
 	styled("./snapshot-tool", replUnknownCommandStyle)
 	known := replTokenStyles[script.KashTokenCommand]
-	entry("export PATH=" + filepath.Join(directory, "bin") + ":" + os.Getenv("PATH") + "\r")
+	entry("set env/PATH = " + kameString(filepath.Join(directory, "bin")+":"+os.Getenv("PATH")) + "\r")
 	styled("snapshot-tool", known)
 	entry("alias snapshot-alias = [\"true\"]\r")
 	styled("snapshot-alias", known)

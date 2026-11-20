@@ -23,6 +23,11 @@ func (p *Program) pump(wait int) {
 			break
 		}
 		event := next.Event
+		if event.Kind == host.ProcessStageIOCompleted {
+			p.completeStageIO(event)
+			event.Free(p.Alloc)
+			continue
+		}
 		if event.Kind == host.ProcessSnapshot {
 			value := host.ProcessSnapshotPayload(p.Alloc, event.StageStates, event.EdgeMetrics)
 			p.processGraphSnapshot(host.Request{ID: event.ID}, value)
@@ -36,6 +41,15 @@ func (p *Program) pump(wait int) {
 			}
 			event.Free(p.Alloc)
 			continue
+		}
+		if event.Kind == host.ProcessStdout {
+			if consumed, overflow := p.Eval.CaptureCommandOutput(event.ID, event.Data); consumed {
+				if overflow {
+					p.Host.Cancel(event.ID)
+				}
+				event.Free(p.Alloc)
+				continue
+			}
 		}
 		entry := p.instanceForRequest(event.ID)
 		if entry == nil && (event.Kind == host.ProcessStarted || event.Kind == host.ProcessTerminal) {
@@ -105,10 +119,26 @@ func (p *Program) drainRequests() {
 			return
 		}
 		request := next.Request
+		if request.Kind == host.RequestProcessSignal {
+			process, signal := host.ProcessSignalTarget(request.Payload)
+			node := p.Engine.LookupID(request.NodeID)
+			if node != nil && node.Submitted && node.HostRequestID == process && node.Generation == request.Generation && node.Attempt == request.Attempt {
+				if p.Forwarding {
+					p.Outbound = append(p.Outbound, request)
+					continue
+				}
+				if control, ok := p.Host.(host.NamedProcessSignal); ok {
+					control.SignalNamed(process, signal)
+				}
+			}
+			request.Free(p.Alloc)
+			continue
+		}
 		// DispatchRoot can queue async startup and its scope can cancel it in the
 		// same evaluator turn. Never launch a request the engine can no longer accept.
 		node := p.Engine.LookupID(request.NodeID)
 		if node == nil || !node.Submitted || node.State != core.NodeWaiting || node.Generation != request.Generation || node.Attempt != request.Attempt || node.HostRequestID != request.ID {
+			p.Eval.ReleaseCommandOutput(request.ID)
 			request.Free(p.Alloc)
 			continue
 		}
@@ -134,6 +164,11 @@ func (p *Program) drainRequests() {
 			} else {
 				request.Free(p.Alloc)
 			}
+			continue
+		}
+		if request.Kind == host.RequestProcessStageIO {
+			p.dispatchStageIO(request)
+			request.Free(p.Alloc)
 			continue
 		}
 		if request.Kind == host.RequestProcess {
@@ -237,6 +272,13 @@ func (p *Program) drainRequests() {
 					stage.Framed = framed[i].Bool
 				}
 				if i < len(setups) {
+					if stage.Kind == "emit" {
+						stage.Emit = host.PayloadBytes(setups[i], host.FieldEmit)
+						stage.EmitError = host.PayloadBool(setups[i], host.FieldEmitError)
+						if !host.PayloadEmits(setups[i]) {
+							validDescriptor = false
+						}
+					}
 					accepted := host.PayloadList(setups[i], "acceptExit")
 					for j := range accepted {
 						if accepted[j].Kind != core.Int || accepted[j].Int < 1 || accepted[j].Int > 255 || stage.Accepted[accepted[j].Int] {
@@ -251,6 +293,7 @@ func (p *Program) drainRequests() {
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
 					stage.Terminal, stage.Foreground = host.PayloadBool(setups[i], "terminalAttach"), host.PayloadBool(setups[i], "terminalForeground")
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
+					stage.EnvironmentExact = host.PayloadBool(setups[i], host.FieldEnvironmentExact)
 					for j := range values {
 						stage.Environment = append(stage.Environment, values[j].Text)
 					}
@@ -324,10 +367,14 @@ func (p *Program) drainRequests() {
 				}
 			}
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+			if directory := host.PayloadText(request.Payload, host.FieldCwd); directory != "" {
+				processRequest.Directory = directory
+			}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
 			processRequest.InputMode = host.PayloadText(request.Payload, "inputMode")
 			processRequest.InputRoot = int(host.PayloadInt(request.Payload, "inputRoot"))
 			processRequest.InputFD = p.Options.InputFD
+			processRequest.StageParent = host.PayloadStageParent(request.Payload)
 			if processRequest.InputMode != "" && processRequest.InputMode != "closed" && processRequest.InputMode != "invocation" {
 				validDescriptor = false
 				descriptorCode, descriptorMessage = "EXPR_INVALID", "invalid process input mode"
@@ -389,6 +436,40 @@ func (p *Program) drainRequests() {
 		}
 		request.Free(p.Alloc)
 	}
+}
+
+func (p *Program) dispatchStageIO(request host.Request) {
+	exchange, valid := host.ParseStageIO(request.Payload)
+	endpoint, supported := p.Host.(host.ProcessStageIOHost)
+	if valid && supported && endpoint.StartStageIO(request, exchange) {
+		return
+	}
+	code := "HOST_FAIL"
+	if !supported {
+		code = "FEATURE_UNSUP"
+	}
+	p.Engine.Complete(core.Completion{
+		NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID,
+		Diagnostic: failure(p.Alloc, code, "process stage exchange was rejected"),
+	})
+}
+
+func (p *Program) completeStageIO(event host.ProcessEvent) {
+	stage := event.StageIO
+	completion := core.Completion{NodeID: stage.NodeID, Generation: stage.Generation, Attempt: stage.Attempt, RequestID: event.ID}
+	switch {
+	case event.Diagnostic.Code != "":
+		completion.Diagnostic = failure(p.Alloc, event.Diagnostic.Code, event.Diagnostic.Message)
+	case stage.Closed:
+		completion.HasValue = true
+	case stage.Operation == host.StageRead:
+		completion.HasValue = true
+		completion.Value = core.NewBytes(p.Alloc, event.Data)
+	default:
+		completion.HasValue = true
+		completion.Value = core.Value{Kind: core.Bool, Bool: true}
+	}
+	p.Engine.Complete(completion)
 }
 
 // ProcessStarted, ProcessStream, and ProcessTerminal service one forwarded
@@ -745,6 +826,14 @@ func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) 
 	if p.serviceProbeForRequest(request.ID) != nil {
 		return
 	}
+	if !stderr {
+		if consumed, overflow := p.Eval.CaptureCommandOutput(request.ID, data); consumed {
+			if overflow {
+				p.queueProcessCancellation(request.NodeID, request.Generation, request.Attempt, request.ID, 100)
+			}
+			return
+		}
+	}
 	for i := range request.Payload.Record {
 		if request.Payload.Record[i].Key == "stream" && request.Payload.Record[i].Value.Bool {
 			pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Stream: true}
@@ -965,7 +1054,7 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		p.completeServiceClock(entry, now)
 		return
 	}
-	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel || request.Kind == host.RequestRecordClose {
+	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel || request.Kind == host.RequestProcessSignal || request.Kind == host.RequestRecordClose {
 		value.Free(p.Alloc)
 		diagnostic.Free(p.Alloc)
 		return
@@ -1533,6 +1622,7 @@ func (p *Program) emitProcess(entry *instance, kind EventKind, requestID int64) 
 // retirePendingRequest releases terminal display storage and returns only the
 // scalar correlation/capture metadata needed to dispatch its completion.
 func (p *Program) retirePendingRequest(id int64) pendingRequest {
+	p.Eval.ReleaseCommandOutput(id)
 	for i := range p.Pending {
 		if p.Pending[i].ID != id {
 			continue

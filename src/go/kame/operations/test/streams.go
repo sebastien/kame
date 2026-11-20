@@ -93,7 +93,7 @@ func checkLibraryPublications(t *testing.T, mode int, expression string, expecte
 	defer registry.Free()
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: record, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "stream.km", "feed = (fixture-stream ())\nresult = "+expression+"\n")
+	parsed := script.ParseKameFile(a, "stream.km", "feed = (fixture-stream ())\nresult = "+expression+"\n")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 {
 		t.Fatal("parse streaming fixture")
@@ -147,7 +147,7 @@ func TestLibraryLiftsScalarAtomPublications(t *testing.T) {
 }
 
 func TestLibraryLiftsMapFilterFlatmapOverCompleteBatches(t *testing.T) {
-	checkLibraryPublications(t, 1, "(join \",\" (map (x => (str x)) (flatmap (x => (list x x)) (filter (x => (gt x 1)) feed))))", []string{"2,2", "", "3,3,4,4"})
+	checkLibraryPublications(t, 1, "(join \",\" (map (x => (str x)) (flatmap (x => (list x x)) (filter (x => (gt? x 1)) feed))))", []string{"2,2", "", "3,3,4,4"})
 }
 
 func TestLibraryLiftsReduceAndResumesOuterNestedSource(t *testing.T) {
@@ -165,7 +165,7 @@ func TestStreamUpdateCancelsPendingLibraryCallback(t *testing.T) {
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: record, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "stream.km", "feed = (fixture-stream ())\nresult = (map (x => (wait-each x)) feed)\n")
+	parsed := script.ParseKameFile(a, "stream.km", "feed = (fixture-stream ())\nresult = (map (x => (wait-each x)) feed)\n")
 	defer parsed.Free()
 	program := eval.Compile(a, engine, parsed, registry)
 	defer program.Free()
@@ -245,7 +245,7 @@ func TestLibraryCoalescesTwoStreamInputsBeforeInvocation(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: streamRecord, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream ())\nright = (fixture-stream ())\nresult = (out! (str (uppercase left) (uppercase right)))\n")
+	parsed := script.ParseKameFile(a, "coalesced.km", "left = (fixture-stream ())\nright = (fixture-stream ())\nresult = (out! (str (uppercase left) (uppercase right)))\n")
 	defer parsed.Free()
 	program := eval.Compile(a, engine, parsed, registry)
 	defer program.Free()

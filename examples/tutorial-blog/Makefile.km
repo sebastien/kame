@@ -1,0 +1,64 @@
+# A captured target template maps each source file to its corresponding output.
+posts = files ./content/posts/*.md
+projects = files ./content/projects/*.md
+post-html = (subst ./content/posts/{name:*}.md ./build/posts/{name}.html posts)
+project-html =
+	subst ./content/projects/{name:*}.md ./build/projects/{name}.html projects
+
+task default : ./build/index.html ./build/author.html ${post-html} ${project-html} ./build/style.css
+
+rule ./build/posts/{name}.html : ./content/posts/{name}.md ./templates/post.html
+	mkdir -p ./build/posts
+	x/pandoc $inputs.0 --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o $outputs.0
+
+rule ./build/projects/{name}.html : ./content/projects/{name}.md ./templates/post.html
+	mkdir -p ./build/projects
+	x/pandoc $inputs.0 --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o $outputs.0
+
+rule ./build/author.html : ./content/author.md ./templates/post.html
+	mkdir -p ./build
+	x/pandoc $inputs.0 --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="./style.css" -V home="./index.html" -V about="./author.html" -o $outputs.0
+
+# Helper script lives here in the Kamefile and is materialized as a build
+# artifact, so the index recipe stays small and inspectable with
+# `kame do cat ./build/tools/row.sh`.
+rule ./build/tools/row.sh : ./Makefile.km ; {shell: "/bin/sh"}
+	mkdir -p ./build/tools
+	cat > @{outputs.0} <<'EOF'
+	#!/bin/sh
+	f="$1"
+	slug="$(basename "$f" .md)"
+	section="$(basename "$(dirname "$f")")"
+	# Quoted single-line metadata is literal HTML text, not markup.
+	html_text() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+	title="$(sed -n 's/^title: *"\(.*\)"/\1/p' "$f" | html_text)"
+	date="$(sed -n 's/^date: *"\(.*\)"/\1/p' "$f" | html_text)"
+	desc="$(sed -n 's/^description: *"\(.*\)"/\1/p' "$f" | html_text)"
+	printf '<li><time>%s</time> <a href="./%s/%s.html">%s</a><p>%s</p></li>\n' "$date" "$section" "$slug" "$title" "$desc"
+	EOF
+
+rule ./build/index.html : ${posts} ${projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
+	let staging = line $(mktemp -d ./build/.index-rows.XXXXXX)
+	defer rm -rf $staging
+	touch $staging/posts $staging/projects
+	for post in posts
+		sh ./build/tools/row.sh $post >> $staging/posts
+	for project in projects
+		sh ./build/tools/row.sh $project >> $staging/projects
+	cat ./templates/header.html > $outputs.0
+	printf '<h2>Posts</h2>\n<ul class="posts">\n' >> $outputs.0
+	sort -r $staging/posts >> $outputs.0
+	printf '</ul>\n<h2>Projects</h2>\n<ul class="posts">\n' >> $outputs.0
+	sort -r $staging/projects >> $outputs.0
+	printf '</ul>\n' >> $outputs.0
+	cat ./templates/footer.html >> $outputs.0
+
+rule ./build/style.css : ./style.css
+	mkdir -p ./build
+	cp $inputs.0 $outputs.0
+
+task clean
+	rm -rf ./build
+
+task serve : default
+	x/python3 -m http.server -d ./build 8000

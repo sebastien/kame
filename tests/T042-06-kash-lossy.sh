@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-06 Kash bounded lossy broadcast parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/lossy"
 mkdir -p "$work"
@@ -30,7 +31,7 @@ records_valid() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	left="$work/$backend-left"
 	right="$work/$backend-right"
 	test-step "$backend: pending-record policies consume while both readers are blocked"
@@ -97,13 +98,13 @@ import { mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const { Kame } = await import('./dist/kame.js');
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
 const directory = mkdtempSync(join(tmpdir(), 'kame-lossy-'));
 const left = join(directory, 'left'), right = join(directory, 'right');
 writeFileSync(left, 'preserve'); writeFileSync(right, 'preserve');
-const kame = await Kame.create();
-const source = `SHELL = kash\nprobe :\n\tprintf "x\\n" |(frame :lines) |(broadcast :buffer 2 :overflow drop-new :items 2) (cat > ${JSON.stringify(left)}, cat > ${JSON.stringify(right)})\n`;
-const program = await kame.compile(source, { name: 'lossy.kmk' });
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
+const source = `task probe\n\tprintf "x\\n" |(frame :lines) |(broadcast :buffer 2 :overflow drop-new :items 2) (cat > ${JSON.stringify(left)}, cat > ${JSON.stringify(right)})\n`;
+const program = await kame.compile(source, { name: 'lossy.km' });
 const prototype = Object.getPrototypeOf(program.module);
 const dispatch = prototype.dispatch, spawn = childProcess.spawn;
 let launches = 0, forwarded = 0, mutate;

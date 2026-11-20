@@ -88,6 +88,35 @@ assert.equal(e.kame_wasm_free(neighbor, 16), 0);
 assert.equal(e.kame_wasm_free(live, 256), 0);
 assert.equal(e.kame_wasm_host_heap_used(), 0);
 
+// Formatter errors leave no partial output and repeated diagnostics release
+// their parsed document trees while the same instance stays live.
+{
+  const encoded = ['template', 'view.kmt', 'x'.repeat(64 * 1024) + '\n@if true\nunclosed', 'tab']
+    .map((value) => new TextEncoder().encode(value));
+  const fields = encoded.map((data) => {
+    const pointer = alloc(data.length);
+    new Uint8Array(e.memory.buffer, pointer, data.length).set(data);
+    return [pointer, data.length];
+  });
+  const length = alloc(4, 4);
+  const instance = e.kame_wasm_instance_create();
+  assert.notEqual(instance, 0n);
+  const format = () => e.kame_wasm_format(instance, ...fields.flat(), 4, 0, 0, length);
+  assert.equal(format(), 5);
+  e.kame_wasm_collect();
+  const baseline = e.kame_wasm_system_heap_used();
+  for (let i = 0; i < 128; i++) {
+    assert.equal(format(), 5);
+    assert.equal(new DataView(e.memory.buffer).getUint32(length, true), 0);
+  }
+  e.kame_wasm_collect();
+  assert.ok(e.kame_wasm_system_heap_used() < baseline + 4 * 1024 * 1024, 'formatter retained failed parse trees');
+  assert.equal(e.kame_wasm_instance_free(instance), 0);
+  for (const [pointer, size] of fields) assert.equal(e.kame_wasm_free(pointer, size), 0);
+  assert.equal(e.kame_wasm_free(length, 4), 0);
+  assert.equal(e.kame_wasm_host_heap_used(), 0);
+}
+
 const directory = await mkdtemp(join(tmpdir(), 'kame-memory-'));
 const kame = await Kame.create({ wasmPath });
 try {
@@ -100,6 +129,110 @@ try {
   await program.build('./output', options);
   assert.equal((await readFile(join(directory, 'output'), 'utf8')), 'ok');
   await program.dispose();
+
+  let wildcardRequests = 0;
+  const observeWildcard = { hostRequest: async () => {
+    wildcardRequests++;
+    return { type: 'json', value: [] };
+  } };
+  const wildcardSource = 'unused = files ./watched/*.txt\nselected = if false then dirs ./watched/* else []\n';
+  const parsedWildcard = await kame.parse('km', wildcardSource, observeWildcard);
+  assert.deepEqual(parsedWildcard.diagnostics, []);
+  assert.match(await kame.format('km', wildcardSource, observeWildcard), /files \.\/watched\/\*\.txt/);
+  const lazyWildcard = await kame.compile(wildcardSource, observeWildcard);
+  assert.equal(await lazyWildcard.evaluate('selected', observeWildcard), '[]');
+  await assert.rejects(lazyWildcard.evaluate('unused', observeWildcard), { code: 'CAP_DENIED' });
+  assert.equal(wildcardRequests, 0, 'inspection or an unreached or denied wildcard invoked the host');
+  await lazyWildcard.dispose();
+
+  const renderer = await kame.compile('value = render ./view.kmt\n', { name: join(directory, 'render.km') });
+  const template = Buffer.from('before @{text (read ./payload)} after');
+  const cancellation = new AbortController();
+  let markReadStarted, completeRead;
+  const readStarted = new Promise((resolve) => { markReadStarted = resolve; });
+  const cancelledRender = renderer.evaluate('value', { ...options, signal: cancellation.signal, hostRequest: async (request) => {
+    assert.equal(request.kind, 1);
+    if (request.payload === './view.kmt') return { type: 'bytes', value: template };
+    assert.equal(request.payload, './payload');
+    return new Promise((resolve) => { completeRead = resolve; markReadStarted(); });
+  } });
+  await Promise.race([readStarted, cancelledRender.then(() => assert.fail('render completed without the second read'))]);
+  cancellation.abort();
+  await assert.rejects(cancelledRender, { code: 'EXEC_CANCELLED' });
+  const cancelledModule = renderer.module.exports;
+  const cancelledHeap = cancelledModule.kame_wasm_host_heap_used();
+  completeRead({ type: 'bytes', value: Buffer.alloc(1024 * 1024, 65) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancelledModule.kame_wasm_host_heap_used(), cancelledHeap, 'late completion allocated a host buffer');
+  const freshRender = await renderer.evaluate('value', { ...options, hostRequest: async (request) => ({
+    type: 'bytes', value: request.payload === './view.kmt' ? template : Buffer.from('fresh'),
+  }) });
+  assert.equal(JSON.parse(freshRender), 'before fresh after');
+  await renderer.dispose();
+
+  await writeFile(join(directory, 'helper.kash'), 'def included = 42\n');
+  const composedSource = 'include ./helper.kash\nanswer = included\n';
+  const composedOptions = { ...options, name: join(directory, 'composed.km') };
+  await assert.rejects(kame.compile(composedSource, { name: composedOptions.name }), { code: 'CAP_DENIED' });
+  const composed = await kame.compile(composedSource, composedOptions);
+  assert.equal(await composed.evaluate('answer + 1', options), '43');
+  assert.equal(await composed.evaluate('answer', options), '42');
+  await composed.dispose();
+
+  const selecting = 'if count (files ./large*) > 0\n\tinclude ./helper.kash\nanswer = included\n';
+  const selected = await kame.compile(selecting, composedOptions);
+  assert.equal(await selected.evaluate('answer'), '42');
+  await selected.dispose();
+
+  const virtualDirectory = 'if count (dirs ./virtual/*) > 0\n\tinclude ./helper.kash\nanswer = included\n';
+  let directoryRequests = 0;
+  const discoveryOptions = { ...composedOptions, hostRequest: async (request) => {
+    directoryRequests++;
+    assert.equal(request.kind, 45);
+    assert.equal(request.capability, 'read');
+    assert.equal(request.kindMask, 2);
+    assert.equal(request.payload, join(directory, 'virtual', '*'));
+    return { type: 'json', value: [join(directory, 'virtual', 'candidate')] };
+  } };
+  await assert.rejects(kame.compile(virtualDirectory, { ...discoveryOptions, grants: [] }), { code: 'CAP_DENIED' });
+  assert.equal(directoryRequests, 0);
+  const virtual = await kame.compile(virtualDirectory, discoveryOptions);
+  assert.equal(directoryRequests, 1);
+  assert.equal(await virtual.evaluate('answer'), '42');
+  await virtual.dispose();
+
+  const library = join(directory, 'library.kash');
+  await writeFile(library, 'def number = 42\ndef where = module/file\nexport number, where\n');
+  const moduleSource = 'import ./library.kash as lib\nfrom ./library.kash import number\nanswer = lib/number + number\n';
+  const moduleOptions = { name: join(directory, 'module.km'), grants: [{ capability: 'read', names: [library] }] };
+  const imported = await kame.compile(moduleSource, moduleOptions);
+  assert.equal(await imported.evaluate('answer'), '84');
+  assert.equal(await imported.evaluate('lib/where', { cwd: tmpdir() }), library);
+  await assert.rejects(imported.evaluate('read lib/where'), { code: 'CAP_DENIED' });
+  await imported.dispose();
+
+  const mixed = await kame.compile(`include ./helper.kash\n${moduleSource}`, composedOptions);
+  assert.equal(await mixed.evaluate('answer + included'), '126');
+  await mixed.dispose();
+
+  const deniedImport = await kame.compile(moduleSource, {
+    ...moduleOptions, grants: [{ capability: 'read', names: [join(directory, 'helper.kash')] }],
+  });
+  let deniedCallbacks = 0;
+  await assert.rejects(deniedImport.evaluate('answer', {
+    grants: moduleOptions.grants,
+    hostRequest: async () => { deniedCallbacks++; return { type: 'nil' }; },
+  }), { code: 'CAP_DENIED' });
+  assert.equal(deniedCallbacks, 0);
+  await deniedImport.dispose();
+
+  const inline = await kame.compile(`import ${library} as lib\n`, { grants: moduleOptions.grants });
+  assert.equal(await inline.evaluate('lib/number'), '42');
+  await inline.dispose();
+
+  const exported = await kame.compile('answer = module/dir\nexport answer\n', { name: moduleOptions.name });
+  assert.equal(await exported.evaluate('answer'), directory);
+  await exported.dispose();
 
   // Tool tracking has internal read authority, not a user read grant. A large
   // real executable must be hashed without transporting it into WASM.

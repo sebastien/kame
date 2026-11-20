@@ -32,7 +32,7 @@ func historyClone(h *replHistory) *replHistory {
 
 func TestHistorySecrets(t *testing.T) {
 	for _, text := range []string{
-		"TOKEN=abc", "let api-key = \"short\"", "export CLIENT_SECRET='x'",
+		"TOKEN=abc", "let api-key = \"short\"", "set env/CLIENT_SECRET = \"x\"",
 		"curl --password short", "curl --api-key=abc", `curl "--token=abc"`,
 		`sh -c 'export AWS_SECRET_ACCESS_KEY=literal'`,
 		`TOKEN='$TOKEN'`, `TOKEN=\$TOKEN`,
@@ -248,7 +248,16 @@ func TestHistoryConcurrentAndClear(t *testing.T) {
 		wg.Go(func() {
 			writer := historyClone(h)
 			entry := historyEntry{ID: fmt.Sprintf("%032x", i+1), Time: h.now(), Text: fmt.Sprintf("echo writer-%d", i), CWD: h.cwd, Scope: h.scope}
-			errs <- writer.update(&entry, "")
+			// The command path deliberately bounds lock acquisition. A busy
+			// attempt may be retried before checking the committed history.
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				err := writer.update(&entry, "")
+				if err == nil || err.Error() != "history lock unavailable" || time.Now().After(deadline) {
+					errs <- err
+					return
+				}
+			}
 		})
 	}
 	wg.Wait()

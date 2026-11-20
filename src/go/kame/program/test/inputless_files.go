@@ -19,7 +19,7 @@ func TestInputlessFileMaterializeRunsForEachRootEpoch(t *testing.T) {
 		t.Fatal("temporary directory failed")
 		return
 	}
-	parsed := script.Parse(a, "inputless.kmk", "SHELL = kash\n./out :\n\tsh -c \"printf x >> runs; printf result > out\"\n")
+	parsed := script.ParseKameFile(a, "inputless.km", "rule ./out :\n\tsh -c \"printf x >> runs; printf result > out\"\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}})

@@ -21,7 +21,6 @@ const (
 	Symbol
 	Name
 	Path
-	Selector
 	Reference
 	List
 	Record
@@ -75,6 +74,7 @@ const (
 	ValueReturn
 	KashSet
 	KashYield
+	RuleValue
 )
 
 // Ungroup returns the expression inside any authored parentheses.
@@ -132,7 +132,37 @@ type StringPart struct {
 
 // Expr is immutable during evaluation; the compiler first attaches SourceOrigin.
 // All child storage is owned by Result.Alloc.
+// LetBinding identifies a declaration within a lexical block. Clones retain
+// the identity so escaping callables can still select the correct slot.
+type LetBinding struct{ Start int }
+
+// RuleSyntax is shared by copies of an expression. The rule parser owns the
+// concrete declaration type.
+type RuleSyntax struct {
+	Declaration any
+	Alloc       mem.Allocator
+	Release     func(mem.Allocator, any)
+	Format      func(mem.Allocator, any) string
+	References  int
+}
+
+func (syntax *RuleSyntax) Retain() { syntax.References++ }
+
+func (syntax *RuleSyntax) Free() {
+	syntax.References--
+	if syntax.References == 0 {
+		syntax.Release(syntax.Alloc, syntax.Declaration)
+	}
+}
+
+// ParseRuleValue is installed by the rule grammar, which also uses the value
+// grammar to parse declaration headers.
+var ParseRuleValue func(mem.Allocator, *source.Source, int, bool) (*RuleSyntax, int, []source.Diagnostic)
+
 type Expr struct {
+	PathGlob   bool // The path contains authored glob syntax outside groups.
+	RuleSyntax *RuleSyntax
+	LetBinding *LetBinding // Resolved identity for lets that share a block and name.
 	// SourceOrigin is compiler loading metadata (one-based), not authored syntax.
 	// Generated trees retain zero even if their byte spans overlap a source file.
 	SourceOrigin int
@@ -187,7 +217,6 @@ type Expr struct {
 	// Body holds callable expressions, or one right-associative process fallback.
 	Body         []*Expr
 	Pattern      *Pattern
-	LiteralPath  bool
 	Expansion    string
 	trivia       *expressionTrivia
 	wordSpelling []string
@@ -237,6 +266,9 @@ func (r *Result) Free() {
 func freeExpr(a mem.Allocator, e *Expr) {
 	if e == nil {
 		return
+	}
+	if e.RuleSyntax != nil {
+		e.RuleSyntax.Free()
 	}
 	for _, text := range e.wordSpelling {
 		mem.FreeString(a, text)
@@ -307,15 +339,20 @@ func Free(a mem.Allocator, e *Expr) { freeExpr(a, e) }
 func Clone(a mem.Allocator, e *Expr) *Expr { return cloneExpr(a, e) }
 
 type parser struct {
-	a                 mem.Allocator
-	s                 *source.Source
-	pos               int
-	diags             []source.Diagnostic
-	triviaSpans       []source.Span
-	kash              bool
-	commandGroup      bool
-	delimitedValue    bool
-	stopAtRecordFrame bool
+	a                      mem.Allocator
+	s                      *source.Source
+	pos                    int
+	diags                  []source.Diagnostic
+	triviaSpans            []source.Span
+	kash                   bool
+	commandGroup           bool
+	valueLayout            valueLayout
+	stopAtRecordFrame      bool
+	stopAtTemplateSep      bool
+	implicitPathReferences bool
+	expansionProbe         *ExpansionProbe
+	probeDepth             int
+	probeShortfalls        int
 	// One-based root position: only a top-level Kash path stops at semicolons.
 	valuePathStart int
 	// Rule indentation is structural, including inside multiline string data.
@@ -379,16 +416,47 @@ func (p *parser) valuePrefix() Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
+// ParseTemplateLoopSource reads the expression before an optional top-level sep.
+func ParseTemplateLoopSource(a mem.Allocator, s *source.Source, start, end int) Prefix {
+	bounded := *s
+	bounded.Text = s.Text[:end]
+	p := parser{a: a, s: &bounded, pos: start, indent: s.StructuralIndent, stopAtTemplateSep: true}
+	return p.valuePrefix()
+}
+
+// ParsePostfixRange reads one operand and leaves any following expression
+// unconsumed. Grouped operands can contain complete value expressions.
+func ParsePostfixRange(a mem.Allocator, s *source.Source, start int, end int) Prefix {
+	bounded := source.Borrow(a, s.Name, s.Text[:end])
+	defer mem.Free(a, bounded)
+	p := parser{a: a, s: bounded, pos: start, indent: s.StructuralIndent}
+	e := p.expression()
+	if len(p.diags) == 0 {
+		p.checkPlaceholders(e)
+	}
+	p.retainTrivia(e)
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
 // ParseRange parses exactly one expression, retaining authored source offsets.
 // A nonempty structural indent is stripped from multiline string content.
 // The caller owns the expression and diagnostics; source text stays borrowed.
 func ParseRange(a mem.Allocator, s *source.Source, start int, end int, indent string) Prefix {
+	return parseRange(a, s, start, end, indent, false)
+}
+
+// ParseRuleInputPath parses a computed rule input in its capture-binding context.
+func ParseRuleInputPath(a mem.Allocator, s *source.Source, start int, end int) Prefix {
+	return parseRange(a, s, start, end, "", true)
+}
+
+func parseRange(a mem.Allocator, s *source.Source, start int, end int, indent string, implicitPathReferences bool) Prefix {
 	if indent == "" {
 		indent = s.StructuralIndent
 	}
 	bounded := source.Borrow(a, s.Name, s.Text[:end])
 	defer mem.Free(a, bounded)
-	p := parser{a: a, s: bounded, pos: start, indent: indent}
+	p := parser{a: a, s: bounded, pos: start, indent: indent, implicitPathReferences: implicitPathReferences}
 	p.skipSpace()
 	e := p.valueExpression()
 	p.skipSpace()
@@ -414,29 +482,48 @@ func ParseQuotedTemplatePrefix(a mem.Allocator, s *source.Source, start int) Pre
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
-// ParseExpansionPrefix reads a template expansion. End includes the closing
-// delimiter; malformed openers can remain literal in document text.
+// ParseExpansionPrefix reads a template interpolation or a value substitution.
+// End includes the closing delimiter.
 func ParseExpansionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start}
-	closer := byte('}')
-	var e *Expr
-	if strings.HasPrefix(s.Text[start:], "@(") {
-		p.pos++
-		closer = ')'
-		e = p.paren()
-		if e != nil {
-			e.Expansion = "@("
-		}
-	} else {
-		e = p.interpolation()
+	opener := "@{"
+	if strings.HasPrefix(s.Text[start:], "${") {
+		opener = "${"
 	}
-	closed := p.pos > start+2 && s.Text[p.pos-1] == closer
+	e := p.interpolation(opener)
+	closed := p.pos > start+2 && s.Text[p.pos-1] == '}'
 	for i := range p.diags {
 		if strings.HasPrefix(p.diags[i].Message, "unclosed") {
 			closed = false
 		}
 	}
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags, Closed: closed}
+}
+
+// ExpansionProbe finds complete interpolations within one source range.
+// Remembering failed nested openers avoids rereading malformed continuations.
+type ExpansionProbe struct {
+	failed   map[int]struct{}
+	closings []int
+}
+
+// End returns the offset after the closing brace without recovering through
+// the surrounding template text.
+func (probe *ExpansionProbe) End(a mem.Allocator, s *source.Source, start int) (int, bool) {
+	if probe.closings == nil {
+		probe.closings = []int{}
+		for i := 0; i < len(s.Text); i++ {
+			if s.Text[i] == '}' {
+				probe.closings = append(probe.closings, i)
+			}
+		}
+	}
+	p := parser{a: a, s: s, pos: start, expansionProbe: probe}
+	e := p.interpolation("@{")
+	ok := e != nil && p.pos > start+2 && s.Text[p.pos-1] == '}'
+	freeExpr(a, e)
+	mem.FreeSlice(nil, p.diags)
+	return p.pos, ok
 }
 
 func ParseKashExpressionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
@@ -458,8 +545,9 @@ func (p *parser) node(kind Kind, start int) *Expr {
 	return e
 }
 
-func (p *parser) skipSpace() int {
-	start := p.pos
+// skipSpace reports whether it crossed a newline outside a continuation.
+func (p *parser) skipSpace() bool {
+	newline := false
 	lineStart := -1
 	for p.pos < len(p.s.Text) {
 		next := source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text))
@@ -478,6 +566,7 @@ func (p *parser) skipSpace() int {
 			break
 		}
 		if b == '\n' {
+			newline = true
 			if lineStart >= 0 {
 				p.triviaSpans = append(p.triviaSpans, source.Span{Start: lineStart, End: p.pos})
 			}
@@ -485,7 +574,7 @@ func (p *parser) skipSpace() int {
 		}
 		p.pos++
 	}
-	return p.pos - start
+	return newline
 }
 
 func (p *parser) lineComment() {
@@ -520,8 +609,16 @@ func (p *parser) inlineSpace() {
 	}
 }
 
+type valueLayout uint8
+
+const (
+	valueLine valueLayout = iota
+	valueDelimited
+	valueCollection
+)
+
 func (p *parser) valueSpace() {
-	if p.delimitedValue {
+	if p.valueLayout == valueDelimited {
 		p.skipSpace()
 	} else {
 		p.inlineSpace()
@@ -530,7 +627,7 @@ func (p *parser) valueSpace() {
 
 func (p *parser) operatorSpace(start int) {
 	p.valueSpace()
-	if p.delimitedValue {
+	if p.valueLayout == valueDelimited {
 		return
 	}
 	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '#' {
@@ -589,17 +686,17 @@ func (p *parser) valueExpression() *Expr {
 	}
 	e := p.node(Conditional, start)
 	for {
-		if !p.conditionalOperand(e) || !p.takeKeyword("then") {
+		if !p.conditionalOperand(e) || !p.takeConditionalKeyword("then") {
 			p.error(p.pos, p.pos, "expected 'then' after condition")
 			break
 		}
 		if !p.conditionalOperand(e) {
 			break
 		}
-		if p.takeKeyword("elif") {
+		if p.takeConditionalKeyword("elif") {
 			continue
 		}
-		if p.takeKeyword("else") {
+		if p.takeConditionalKeyword("else") {
 			p.conditionalOperand(e)
 		} else {
 			p.error(p.pos, p.pos, "expected 'elif' or 'else' after branch")
@@ -610,7 +707,11 @@ func (p *parser) valueExpression() *Expr {
 }
 
 func (p *parser) conditionalOperand(e *Expr) bool {
-	p.valueSpace()
+	if p.valueLayout == valueCollection {
+		p.skipSpace()
+	} else {
+		p.valueSpace()
+	}
 	before := len(p.diags)
 	operand := p.valueExpression()
 	if operand == nil {
@@ -620,6 +721,19 @@ func (p *parser) conditionalOperand(e *Expr) bool {
 	e.Span.End = operand.Span.End
 	p.valueSpace()
 	return len(p.diags) == before
+}
+
+func (p *parser) takeConditionalKeyword(keyword string) bool {
+	if p.valueLayout != valueCollection {
+		return p.takeKeyword(keyword)
+	}
+	position, trivia := p.pos, len(p.triviaSpans)
+	p.skipSpace()
+	if p.takeKeyword(keyword) {
+		return true
+	}
+	p.pos, p.triviaSpans = position, p.triviaSpans[:trivia]
+	return false
 }
 
 func (p *parser) applicationArgument() *Expr {
@@ -644,6 +758,14 @@ func (p *parser) spread(parse func() *Expr, subject string) *Expr {
 	return spread
 }
 
+func (p *parser) atTemplateSeparator() bool {
+	if !p.stopAtTemplateSep || p.valueLayout != valueLine {
+		return false
+	}
+	rest := p.s.Text[p.pos:]
+	return strings.HasPrefix(rest, "sep") && (len(rest) == 3 || rest[3] == ' ' || rest[3] == '\t')
+}
+
 func (p *parser) application() *Expr {
 	head := p.expression()
 	if head == nil || len(p.diags) != 0 {
@@ -654,11 +776,11 @@ func (p *parser) application() *Expr {
 		end := p.pos
 		p.valueSpace()
 		operator, _ := p.binaryOperator()
-		if p.pos == end || p.pos == len(p.s.Text) || operator != "" || p.branchKeyword() || strings.ContainsRune("\r\n,)]}#;=|", rune(p.s.Text[p.pos])) {
+		if p.pos == end || p.pos == len(p.s.Text) || operator != "" || p.atTemplateSeparator() || p.branchKeyword() || strings.ContainsRune("\r\n,)]}#;=|", rune(p.s.Text[p.pos])) {
 			p.pos = end
 			break
 		}
-		if p.stopAtRecordFrame && !p.delimitedValue && p.atRecordFrame() {
+		if p.stopAtRecordFrame && p.valueLayout == valueLine && p.atRecordFrame() {
 			break
 		}
 		if strings.HasPrefix(p.s.Text[p.pos:], "()") {
@@ -887,12 +1009,10 @@ func (p *parser) atom() *Expr {
 		return p.rawString()
 	case ':':
 		return p.symbol()
-	case '@':
-		if strings.HasPrefix(p.s.Text[p.pos:], "@{") {
+	case '$':
+		if strings.HasPrefix(p.s.Text[p.pos:], "${") {
 			return p.path()
 		}
-		return p.selector()
-	case '$':
 		if actionPrefix(p.s.Text[p.pos:]) != "" {
 			return p.commandCapture()
 		}
@@ -906,6 +1026,14 @@ func (p *parser) atom() *Expr {
 			return e
 		case "match":
 			return p.match(start)
+		case "rule", "task", "service":
+			if ParseRuleValue != nil {
+				e := p.node(RuleValue, start)
+				e.RuleSyntax = p.parseRuleValue(start)
+				e.Span.End = p.pos
+				e.Text, e.TextOwned = sourceText(p.a, p.s.Text[start:p.pos]), true
+				return e
+			}
 		case "nil":
 			return p.node(Nil, start)
 		}
@@ -931,6 +1059,16 @@ func (p *parser) atom() *Expr {
 	return nil
 }
 
+func (p *parser) parseRuleValue(start int) *RuleSyntax {
+	syntax, end, diagnostics := ParseRuleValue(p.a, p.s, start, p.valueLayout != valueLine)
+	for _, d := range diagnostics {
+		p.diags = append(p.diags, d)
+	}
+	mem.FreeSlice(nil, diagnostics)
+	p.pos = end
+	return syntax
+}
+
 func (p *parser) path() *Expr {
 	e := p.pathAtom()
 	p.classifyPathPattern(e, false)
@@ -945,11 +1083,7 @@ func (p *parser) pathAtom() *Expr {
 	classStart := -1
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
-		if b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@@") {
-			p.pos += 2
-			continue
-		}
-		if b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@{") {
+		if b == '$' && strings.HasPrefix(p.s.Text[p.pos:], "${") {
 			if patternDepth != 0 {
 				p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid")
 			}
@@ -957,11 +1091,11 @@ func (p *parser) pathAtom() *Expr {
 				e.Parts = append(e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
 			}
 			open := p.pos
-			inner := p.interpolation()
+			inner := p.interpolation("${")
 			if inner == nil {
 				break
 			}
-			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "@{", Span: source.Span{Start: open, End: p.pos}})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "${", Span: source.Span{Start: open, End: p.pos}})
 			partStart = p.pos
 			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') {
 				p.error(start, p.pos, "a leading path expansion requires / after it")
@@ -987,12 +1121,15 @@ func (p *parser) pathAtom() *Expr {
 			p.pos++
 			continue
 		}
+		if patternDepth == 0 && (b == '*' || b == '?' || b == '[') {
+			e.PathGlob = true
+		}
 		if b == '[' && patternDepth == 0 {
 			classStart = p.pos
 			p.pos++
 			continue
 		}
-		if (p.valuePathStart == start+1 || p.kash && !p.delimitedValue) && b == ';' && patternDepth == 0 {
+		if (p.valuePathStart == start+1 || p.kash && p.valueLayout == valueLine) && b == ';' && patternDepth == 0 {
 			break
 		}
 		if b == '{' {
@@ -1116,12 +1253,19 @@ func (p *parser) tplError(start int, end int, message string) {
 
 // classifyPathPattern assigns the role of each group in the parsed path.
 func (p *parser) classifyPathPattern(e *Expr, matchArm bool) {
-	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 {
-		return
-	}
 	parts := e.Parts
 	if len(parts) == 0 {
 		parts = []StringPart{{Text: e.Text, Span: e.Span}}
+	}
+	hasGroup := false
+	for _, part := range parts {
+		if part.Expr == nil && strings.IndexByte(part.Text, '{') >= 0 {
+			hasGroup = true
+			break
+		}
+	}
+	if !hasGroup {
+		return
 	}
 	parsed := ParsePathPatternParts(p.a, parts)
 	if len(parsed.Diagnostics) != 0 {
@@ -1130,21 +1274,26 @@ func (p *parser) classifyPathPattern(e *Expr, matchArm bool) {
 		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
-	if !HasGroups(parsed.Pattern) {
+	if !HasGroups(parsed.Pattern) && parsed.Pattern.Globs == 0 {
 		parsed.Pattern.Free(p.a)
 		mem.FreeSlice(nil, parsed.Diagnostics)
 		return
 	}
 	mem.FreeSlice(nil, parsed.Diagnostics)
-	if parsed.Pattern.References != 0 && (matchArm || parsed.Pattern.Matchers != 0) {
-		if span, ok := parsed.Pattern.promoteNamedCaptures(); !ok {
-			p.error(span.Start, span.End, "positional reference is not valid in a path pattern")
+	if parsed.Pattern.References != 0 && (matchArm || parsed.Pattern.Matchers != 0 || parsed.Pattern.Globs != 0) {
+		if span, ok := parsed.Pattern.PromoteNamedCaptures(); !ok {
+			const message = "positional reference is not valid in a path pattern"
+			if matchArm {
+				p.invalidMatchPattern(span, message)
+			} else {
+				p.error(span.Start, span.End, message)
+			}
 			parsed.Pattern.Free(p.a)
 			return
 		}
 	}
 	e.Pattern = parsed.Pattern
-	if e.Pattern.Matchers == 0 && (len(e.Parts) != 0 || strings.HasPrefix(e.Text, "/") || strings.HasPrefix(e.Text, "./") || strings.HasPrefix(e.Text, "../") || strings.HasPrefix(e.Text, "~/")) {
+	if p.implicitPathReferences && e.Pattern.Matchers == 0 && e.Pattern.Globs == 0 {
 		p.pathReferences(e)
 	}
 }
@@ -1246,77 +1395,6 @@ func (p *parser) symbol() *Expr {
 	e := p.node(Symbol, start)
 	e.Text = p.s.Text[nameStart:p.pos]
 	return e
-}
-
-func (p *parser) selector() *Expr {
-	start := p.pos
-	p.pos++
-	if p.pos == len(p.s.Text) {
-		p.error(start, p.pos, "invalid selector")
-		return nil
-	}
-	if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
-		p.pos++
-	}
-	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '*' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == '_' || (p.s.Text[p.pos] == '?' && p.pos == start+2 && p.s.Text[start+1] == '<')) {
-		p.pos++
-	} else {
-		for p.pos < len(p.s.Text) && (isDigit(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.' || p.s.Text[p.pos] == '-') {
-			p.pos++
-		}
-	}
-	text := p.s.Text[start:p.pos]
-	if !ValidSelector(text) {
-		p.error(start, p.pos, "invalid selector")
-		return nil
-	}
-	e := p.node(Selector, start)
-	e.Text = text
-	return e
-}
-
-// ValidSelector reports whether text is a complete selector.
-func ValidSelector(text string) bool {
-	if text == "@<?" {
-		return true
-	}
-	if len(text) < 2 || text[0] != '@' {
-		return false
-	}
-	i := 1
-	if text[i] == '<' || text[i] == '>' {
-		i++
-	}
-	if i == len(text) {
-		return true
-	}
-	if text[i] == '*' || text[i] == '#' || text[i] == '_' {
-		return i+1 == len(text)
-	}
-	if text[i] == '-' {
-		i++
-	}
-	start := i
-	for i < len(text) && isDigit(text[i]) {
-		i++
-	}
-	if i == start && !(i+1 < len(text) && text[i] == '.' && text[i+1] == '.') {
-		return false
-	}
-	if i == len(text) {
-		return true
-	}
-	if i+1 >= len(text) || text[i] != '.' || text[i+1] != '.' {
-		return false
-	}
-	i += 2
-	if i < len(text) && text[i] == '-' {
-		i++
-	}
-	for i < len(text) && isDigit(text[i]) {
-		i++
-	}
-	return i == len(text)
 }
 
 func (p *parser) number() *Expr {
@@ -1552,11 +1630,11 @@ func (p *parser) referenceAfterName(name nameResult, qualified bool) *Expr {
 			p.error(segmentStart, p.pos, "environment namespace requires a variable name")
 		}
 		if namespace == "env" && segmentText != "" {
-			environment = p.node(Symbol, segmentStart)
-			environment.Text = segmentText
-			if quotedNamespace {
-				environment.TextOwned = true
+			environment = p.node(String, segmentStart)
+			if !quotedNamespace {
+				segmentText = sourceText(p.a, segmentText)
 			}
+			*environment = LiteralString(segmentText, environment.Span)
 		} else if quotedNamespace {
 			mem.FreeString(p.a, segmentText)
 		}
@@ -1670,9 +1748,9 @@ func (p *parser) braceRecord() *Expr {
 	start := p.pos
 	p.pos++
 	e := p.node(Record, start)
-	previous := p.delimitedValue
-	p.delimitedValue = true
-	defer func() { p.delimitedValue = previous }()
+	previous := p.valueLayout
+	p.valueLayout = valueCollection
+	defer func() { p.valueLayout = previous }()
 	keys := map[string]bool{}
 	for p.skipSpace(); p.pos < len(p.s.Text); p.skipSpace() {
 		if p.s.Text[p.pos] == '}' {
@@ -1710,7 +1788,7 @@ func (p *parser) braceRecord() *Expr {
 				p.error(field.Span.Start, field.Span.End, "duplicate record field")
 			}
 			keys[field.Key] = true
-			p.skipSpace()
+			p.inlineSpace()
 			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ':' {
 				p.pos++
 				p.skipSpace()
@@ -1726,14 +1804,9 @@ func (p *parser) braceRecord() *Expr {
 			}
 		}
 		e.Fields = append(e.Fields, field)
-		p.skipSpace()
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '}' {
-			continue
-		}
-		if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ',' {
+		if !p.collectionSeparator('}') {
 			break
 		}
-		p.pos++
 	}
 	p.error(start, p.pos, "unclosed record; expected ',' or '}'")
 	e.Span.End = p.pos
@@ -1743,9 +1816,9 @@ func (p *parser) braceRecord() *Expr {
 func (p *parser) list() *Expr {
 	start := p.pos
 	p.pos++
-	previous := p.delimitedValue
-	p.delimitedValue = true
-	defer func() { p.delimitedValue = previous }()
+	previous := p.valueLayout
+	p.valueLayout = valueCollection
+	defer func() { p.valueLayout = previous }()
 
 	list := p.node(List, start)
 	p.skipSpace()
@@ -1772,25 +1845,32 @@ func (p *parser) list() *Expr {
 			list.Span.End = p.pos
 			return list
 		}
-		p.skipSpace()
+		if p.collectionSeparator(']') {
+			p.skipSpace()
+			continue
+		}
 		if p.pos == len(p.s.Text) {
 			break
 		}
-		switch p.s.Text[p.pos] {
-		case ']':
-			continue
-		case ',':
-			p.pos++
-			p.skipSpace()
-		default:
-			p.error(p.pos, p.pos+1, "expected ',' or ']' after list item")
-			list.Span.End = p.pos
-			return list
-		}
+		p.error(p.pos, p.pos+1, "expected ',' or ']' after list item")
+		list.Span.End = p.pos
+		return list
 	}
 	p.error(start, p.pos, "unclosed list; expected ']'")
 	list.Span.End = p.pos
 	return list
+}
+
+func (p *parser) collectionSeparator(close byte) bool {
+	newline := p.skipSpace()
+	if p.pos == len(p.s.Text) {
+		return false
+	}
+	if p.s.Text[p.pos] == ',' {
+		p.pos++
+		return true
+	}
+	return newline || p.s.Text[p.pos] == close
 }
 
 // MaxSectionArity bounds synthesized placeholder parameters, including gaps.
@@ -1970,9 +2050,9 @@ func placeholderIndex(text string) int {
 func (p *parser) paren() *Expr {
 	start := p.pos
 	p.pos++
-	previous := p.delimitedValue
-	p.delimitedValue = true
-	defer func() { p.delimitedValue = previous }()
+	previous := p.valueLayout
+	p.valueLayout = valueDelimited
+	defer func() { p.valueLayout = previous }()
 
 	p.skipSpace()
 	if p.pos == len(p.s.Text) {
@@ -2005,6 +2085,9 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	}
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
+	if copy.RuleSyntax != nil {
+		copy.RuleSyntax.Retain()
+	}
 	if original.trivia != nil {
 		copy.trivia = mem.Alloc[expressionTrivia](a)
 		*copy.trivia = *original.trivia
@@ -2159,7 +2242,10 @@ func (p *parser) quoted(patterns bool) *Expr {
 				text.WriteByte('\r')
 			} else if escaped == 't' {
 				text.WriteByte('\t')
-			} else if escaped == '"' || escaped == '\\' || escaped == '{' || escaped == '@' {
+			} else if escaped == '"' || escaped == '\\' || escaped == '{' || escaped == '@' || escaped == '$' {
+				if escaped == '$' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '{' {
+					patterns = false
+				}
 				text.WriteByte(escaped)
 			} else {
 				p.error(p.pos-1, p.pos+1, "invalid string escape")
@@ -2168,25 +2254,20 @@ func (p *parser) quoted(patterns bool) *Expr {
 			p.pos++
 			continue
 		}
-		if b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '@' {
-			if p.pos+2 < len(p.s.Text) && p.s.Text[p.pos+2] == '{' {
-				patterns = false
-			}
-			text.WriteByte('@')
-			p.pos += 2
-			continue
-		}
 		if b == '@' && strings.HasPrefix(p.s.Text[p.pos:], "@{") {
+			patterns = false
+		}
+		if b == '$' && strings.HasPrefix(p.s.Text[p.pos:], "${") {
 			p.addTextPart(e, &text, partStart, p.pos)
 			open := p.pos
 			before := len(p.diags)
-			inner := p.interpolation()
+			inner := p.interpolation("${")
 			if inner == nil {
 				text.Reset()
 				e.Span.End = p.pos
 				return e
 			}
-			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "@{", Span: source.Span{Start: open, End: p.pos}})
+			e.Parts = append(e.Parts, StringPart{Expr: inner, Form: "${", Span: source.Span{Start: open, End: p.pos}})
 			if p.pos == len(p.s.Text) && len(p.diags) > before {
 				text.Reset()
 				e.Span.End = p.pos
@@ -2206,15 +2287,49 @@ func (p *parser) quoted(patterns bool) *Expr {
 	return e
 }
 
-func (p *parser) interpolation() *Expr {
-	open := p.pos
-	if !strings.HasPrefix(p.s.Text[open:], "@{") {
-		p.error(open, open+1, "expected @{expression}")
+func (p *parser) interpolation(opener string) *Expr {
+	probe := p.expansionProbe
+	if probe == nil {
+		return p.parseInterpolation(opener)
+	}
+	if len(p.diags) != 0 {
 		return nil
 	}
-	previous := p.delimitedValue
-	p.delimitedValue = true
-	defer func() { p.delimitedValue = previous }()
+	start := p.pos
+	if _, failed := probe.failed[start]; failed {
+		p.error(start, start+2, "unclosed reference expansion; expected '}'")
+		return nil
+	}
+	// Every active expansion needs its own closing brace. Counts include
+	// literal braces, so a shortfall proves failure regardless of syntax.
+	closing := len(probe.closings) - p.probeDepth - 1
+	if closing < 0 || probe.closings[closing] <= start {
+		p.probeShortfalls++
+		p.error(start, start+2, "unclosed reference expansion; expected '}'")
+		return nil
+	}
+	shortfalls := p.probeShortfalls
+	p.probeDepth++
+	value := p.parseInterpolation(opener)
+	p.probeDepth--
+	if value == nil && (p.probeDepth == 0 || p.probeShortfalls == shortfalls) {
+		if probe.failed == nil {
+			probe.failed = make(map[int]struct{})
+		}
+		probe.failed[start] = struct{}{}
+	}
+	return value
+}
+
+func (p *parser) parseInterpolation(opener string) *Expr {
+	open := p.pos
+	if !strings.HasPrefix(p.s.Text[open:], opener) {
+		p.error(open, open+1, "expected "+opener+"expression}")
+		return nil
+	}
+	previous := p.valueLayout
+	p.valueLayout = valueDelimited
+	defer func() { p.valueLayout = previous }()
 	p.pos += 2
 	p.skipSpace()
 	diagnosticStart := len(p.diags)
@@ -2222,6 +2337,10 @@ func (p *parser) interpolation() *Expr {
 	p.skipSpace()
 	if p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' {
 		p.error(p.pos, p.pos+1, "expected '}' after interpolation expression")
+		if p.expansionProbe != nil {
+			freeExpr(p.a, inner)
+			return nil
+		}
 		for p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' {
 			before := p.pos
 			extra := p.expression()
@@ -2240,7 +2359,7 @@ func (p *parser) interpolation() *Expr {
 	}
 	p.pos++
 	if inner != nil {
-		inner.Expansion = "@{"
+		inner.Expansion = opener
 	}
 	return inner
 }
@@ -2287,7 +2406,7 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	var sourceStarts, sourceEnds []int
 	for pos := start + 1; pos < end; {
 		from := pos
-		if pos+1 < end && (p.s.Text[pos] == '\\' || (p.s.Text[pos] == '@' && p.s.Text[pos+1] == '@')) {
+		if pos+1 < end && p.s.Text[pos] == '\\' {
 			pos += 2
 		} else {
 			pos++
@@ -2335,8 +2454,8 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	}
 	mem.FreeSlice(nil, parsed.Diagnostics)
 	if parsed.Pattern.References != 0 {
-		if span, ok := parsed.Pattern.promoteNamedCaptures(); !ok {
-			p.error(span.Start, span.End, "positional reference is not valid in a match pattern")
+		if span, ok := parsed.Pattern.PromoteNamedCaptures(); !ok {
+			p.invalidMatchPattern(span, "positional reference is not valid in a match pattern")
 			parsed.Pattern.Free(p.a)
 			return
 		}
@@ -2494,6 +2613,10 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil {
 		return
 	}
+	if e.Kind == RuleValue {
+		b.WriteString(e.Text)
+		return
+	}
 	if e.Kind == Match {
 		line := b.String()
 		line = line[strings.LastIndexByte(line, '\n')+1:]
@@ -2649,9 +2772,8 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == CommandSetup {
-		b.WriteByte(':')
 		b.WriteString(e.Text)
-		b.WriteByte(' ')
+		b.WriteString(": ")
 		writeCommandWord(b, e.Items[0])
 		return
 	}
@@ -2729,10 +2851,6 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		}
 		return
 	}
-	if e.Kind == Selector {
-		b.WriteString(e.Text)
-		return
-	}
 	if e.Kind == Reference || e.Kind == EnvironmentReference {
 		writeReference(b, e)
 		return
@@ -2753,7 +2871,14 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == Group {
-		writeMany(b, '(', ')', e.Items)
+		if len(e.Items) == 1 && multilineRuleValue(e.Items[0]) {
+			b.WriteByte('(')
+			writeExpr(b, e.Items[0])
+			b.WriteByte('\n')
+			b.WriteByte(')')
+		} else {
+			writeMany(b, '(', ')', e.Items)
+		}
 		return
 	}
 	if e.Kind == Conditional {
@@ -2947,10 +3072,8 @@ func writeString(b *strings.Builder, e *Expr) {
 				b.WriteString("\\r")
 			} else if c == '\t' {
 				b.WriteString("\\t")
-			} else if c == '@' && j+1 < len(e.Text) && e.Text[j+1] == '{' {
-				b.WriteString("\\@")
-			} else if c == '@' {
-				b.WriteString("@@")
+			} else if c == '$' && j+1 < len(e.Text) && e.Text[j+1] == '{' {
+				b.WriteString("\\$")
 			} else {
 				b.WriteByte(c)
 			}
@@ -2980,8 +3103,8 @@ func writeString(b *strings.Builder, e *Expr) {
 				b.WriteString("\\r")
 			} else if c == '\t' {
 				b.WriteString("\\t")
-			} else if c == '@' {
-				b.WriteString("@@")
+			} else if c == '$' && j+1 < len(part.Text) && part.Text[j+1] == '{' {
+				b.WriteString("\\$")
 			} else {
 				b.WriteByte(c)
 			}
@@ -2997,8 +3120,8 @@ func writeExpansion(b *strings.Builder, part StringPart) {
 		b.WriteByte('}')
 		return
 	}
-	if part.Form == "@{" {
-		b.WriteString("@{")
+	if part.Form == "${" {
+		b.WriteString("${")
 		writeExpr(b, part.Expr)
 		b.WriteByte('}')
 		return

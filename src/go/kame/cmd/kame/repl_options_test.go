@@ -266,7 +266,7 @@ func TestNativeInteractiveOptions(t *testing.T) {
 		t.Fatalf("startup override: status=%d out=%q err=%q", status, &out, &errOut)
 	}
 	for _, test := range []struct{ source, code string }{
-		{"touch ./unexpected\noption history-scope global\n", "FEATURE_UNSUP"},
+		{"touch ./unexpected\noption history-scope global\n", "PARSE_ERR"},
 		{"((kash " + kameString("touch ./unexpected\noption history-scope global\n") + "))", "EXPR_INVALID"},
 	} {
 		command := exec.Command(nativeCLIBinary(t), "do", "run", "--lang", "kash", "-c", test.source)

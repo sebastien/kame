@@ -28,8 +28,8 @@ func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
 		t.Fatal("input mtime setup failed")
 		return
 	}
-	source := "def newer UNUSED = @<?\n./output : ./a named ./b ./a | ./order\n\tprintf '%s\\n' @(newer nil) > @>\nnamed :\n\ttrue\n"
-	code, _ := materializeSource(t, dir, source, false, false)
+	source := "rule ./output : ./a named ./b ./a | ./order = str (join \"\\n\" (map std/str changed-inputs)) \"\\n\"\ntask named\n"
+	code, _ := materializeSource(t, dir, source, true, false)
 	if code != "" || !tempMatches(t, dir+"/output", "./a\n./b\n") {
 		t.Fatal("existing output without a record did not select unique normal files")
 		return
@@ -38,7 +38,7 @@ func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
 		t.Fatal("input rewrite failed")
 		return
 	}
-	code, _ = materializeSource(t, dir, source, false, false)
+	code, _ = materializeSource(t, dir, source, true, false)
 	if code != "" || !tempMatches(t, dir+"/output", "./b\n") {
 		t.Error("changed bytes with unchanged older mtime were not selected")
 	}
@@ -47,7 +47,7 @@ func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
 		t.Fatal("input touch failed")
 		return
 	}
-	code, _ = materializeSource(t, dir, source, false, true)
+	code, _ = materializeSource(t, dir, source, true, true)
 	if code != "" || !tempMatches(t, dir+"/output", "\n") {
 		t.Error("force or newer mtime invented changed content")
 	}
@@ -55,7 +55,7 @@ func TestNewerInputsUseSuccessfulContentRecord(t *testing.T) {
 
 func materializeNewerKash(t *testing.T, directory string, text string) string {
 	a := t.Allocator()
-	parsed := script.Parse(a, "newer.kmk", text)
+	parsed := script.ParseKameFile(a, "newer.km", text)
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -85,7 +85,7 @@ func TestKashNewerInputsSurviveSuspendedFunctionRead(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "def newer UNUSED = (if (read \"./order\") then @<? else @<?)\nSELECTED = (newer nil)\n./output : ./a ./b ./a | ./order ; {shell: kash}\n\tprintf \"%s\\n\" $SELECTED > ./output\n"
+	source := "def newer changed = if (read ./order) then changed else []\nrule ./output : ./a ./b ./a | ./order\n\tlet selected = newer changed-inputs\n\tprintf '%s\\n' $...selected > $outputs.0\n"
 	code := materializeNewerKash(t, dir, source)
 	if code != "" || !tempMatches(t, dir+"/output", "./a\n./b\n") {
 		t.Fatal("Kash function lost initial newer-input frame: " + code)

@@ -59,7 +59,7 @@ func TestSuspendedOperationRetainsItsOwnArguments(t *testing.T) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "wait", Call: asyncOperation, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "memo.km", "result = (wait (once ()))")
+	parsed := script.ParseKameFile(a, "memo.km", "result = (wait (once ()))")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")
@@ -93,7 +93,7 @@ func TestLoweredOperationsWithSameSpanKeepSeparateOperands(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait", Call: asyncOperation, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "memo.km", "result = (list (wait 1))")
+	parsed := script.ParseKameFile(a, "memo.km", "result = (list (wait 1))")
 	// Template lowering assigns the wrapper and its sole include the same span.
 	outer := expr.Ungroup(parsed.Items[0].Definition.Expression)
 	outer.Items[1].Span = outer.Span
@@ -129,7 +129,7 @@ func checkRetainedOperandsCount(t *testing.T, source string, count int) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "memo.km", source)
+	parsed := script.ParseKameFile(a, "memo.km", source)
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")

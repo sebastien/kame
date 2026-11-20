@@ -1,0 +1,23 @@
+# Multi-rule build fixture driven by hermetic POSIX scripts.
+SOURCES = wildcard ./src/*.c
+VERSION = "1.2.3"
+
+task default : ./build/app
+
+rule ./build/app : ./build/main.o ./build/util.o
+	sh tools/link $outputs.0 $inputs.0
+
+rule ./build/{name}.o : ./src/{name}.c
+	echo compile-$outputs.0 >> ./runs.log
+	sh tools/compile $outputs.0 $inputs.0
+
+rule ./build/version.txt = str "version " VERSION
+
+task bundle : ./build/app
+	sh tools/link ./build/bundle.tar $inputs.0
+
+task report
+	(out! "sources=${count SOURCES}\n")
+
+task clean
+	rm -rf ./build

@@ -179,6 +179,10 @@ func (p *Program) manifestLimit() int {
 }
 
 func (p *Program) identityTarget(entry *instance) string {
+	if len(entry.Plan.Arguments) != 0 {
+		// The resource key includes defaulted arguments in declaration order.
+		return cloneText(p.Alloc, entry.Plan.Key.Name)
+	}
 	target := entry.Plan.Key.Name
 	if entry.Plan.Target != "" {
 		target = entry.Plan.Target
@@ -382,8 +386,28 @@ func (e *cacheEncoder) appendValue(value core.Value) {
 		e.appendText(value.Text)
 		return
 	}
+	if value.Kind == core.Symbol {
+		e.appendByte(15)
+		e.appendText(value.Text)
+		return
+	}
 	if value.Kind == core.Pattern {
 		e.appendByte(10)
+		e.appendText(value.Text)
+		return
+	}
+	if value.Kind == core.Path {
+		e.appendByte(12)
+		e.appendText(value.Text)
+		e.appendText(value.GlobPattern)
+		return
+	}
+	if value.Kind == core.PathPattern || value.Kind == core.PathTemplate {
+		if value.Kind == core.PathPattern {
+			e.appendByte(13)
+		} else {
+			e.appendByte(14)
+		}
 		e.appendText(value.Text)
 		return
 	}

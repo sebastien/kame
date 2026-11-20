@@ -33,7 +33,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 	*s.Source = *original
 	s.Source.Text = original.Text[:end]
 	if lang == "kash" {
-		parseKash(s, start)
+		parseKash(s, start, false)
 		return s
 	}
 	if lang == "expr" {
@@ -62,10 +62,6 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			_, commentEnd := trim(text, pos, lineEnd)
 			s.Items = append(s.Items, ScriptItem{Kind: Comment, Text: text[pos:commentEnd], Span: source.Span{Start: pos, End: commentEnd}})
 			pos = nextLine(text, lineEnd)
-			continue
-		}
-		if following := rejectLegacyDirective(s, pos, lineEnd); following != 0 {
-			pos = following
 			continue
 		}
 		lineStart := strings.LastIndexByte(text[:pos], '\n') + 1

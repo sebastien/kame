@@ -12,7 +12,7 @@ func TestCompositionUncheckedCompileHonorsValueDiagnostics(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	defer engine.Free()
-	parsed := script.Parse(a, "invalid.km", "unused = (() => (include ./a.km))\nother = 42\n")
+	parsed := script.ParseKameFile(a, "invalid.km", "unused = (() => (include ./a.km))\nother = 42\n")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, nil)
 	defer p.Free()

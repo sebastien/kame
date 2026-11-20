@@ -1,0 +1,18 @@
+include ./publication.km
+
+task default : ./public/index.txt
+
+# One rule describes every corresponding source/output pair.
+rule ./public/{name}.txt : ./notes/{name}.txt ./banner.txt
+	cat ./banner.txt > $outputs.0
+	tr '[:lower:]' '[:upper:]' < $inputs.0 >> $outputs.0
+	echo rendered $outputs.0
+
+# The discovered source set determines this rule's prerequisites.
+rule ./public/index.txt : ${pages}
+	cat $...inputs > $outputs.0
+	echo assembled $outputs.0
+
+task check : ./public/index.txt
+	grep -q 'LITTLE PUBLICATION' $inputs.0
+	echo publication checked

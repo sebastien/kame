@@ -1,16 +1,17 @@
 """Native/WASM JSON operation parity and generated-read regression."""
+import os
 import subprocess
 import tempfile
 import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-native = root / 'build/kame.debug'
-wasm = root / 'dist/kame.js'
+native = Path(os.environ.get('CLI_BIN', root / 'build/kame.debug'))
+wasm = Path(os.environ.get('KAME_TEST_WASM_WRAPPER', root / 'dist/kame.js'))
 expressions = [
     '(parse-json " {\\\"name\\\":\\\"Texto\\\",\\\"items\\\":[true,false,null,-42,1.5]} \\n")',
     '(parse-json "\\\"\\\\ud83d\\\\ude80\\\"")',
-    '(let [page (parse-json "{\\\"title\\\":\\\"News\\\"}")] page.title)',
+    '(parse-json "{\\\"title\\\":\\\"News\\\"}").title',
     '(parse-json "01")', '(parse-json "[1,]")', '(parse-json "[bad]")', '(parse-json 42)',
 ]
 for expression in expressions:
@@ -25,26 +26,24 @@ for expression in expressions:
         assert first.stdout, expression
 
 with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
-    project = Path(directory)
-    (project / 'Makefile.kmk').write_text('''default : ./page.html
-./data.json : ; [shell: kame]
-	"{\\\"title\\\":\\\"Generated\\\"}"
-./page.html : ; [shell: kame]
-	(let [data (parse-json (text (read ./data.json)))] data.title)
+    for backend, command in [('native', [str(native)]), ('wasm', ['node', str(wasm)])]:
+        project = Path(directory) / backend
+        project.mkdir()
+        (project / 'Makefile.km').write_text('''task default : ./page.html
+rule ./data.json = "{\\\"title\\\":\\\"Generated\\\"}"
+rule ./page.html = (parse-json (text (read ./data.json))).title
 ''')
-    result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
-    assert result.returncode == 0, result.stderr
-    assert (project / 'page.html').read_text() == 'Generated'
-    # Absolute requests must select relative template producers too.
-    (project / 'Makefile.kmk').write_text('''default : ./page.html
-./{name:*}.json : ; [shell: kame]
-	"{\\\"title\\\":\\\"Template\\\"}"
-./page.html : ; [shell: kame]
-	(let [data (parse-json (text (read ./other.json)))] data.title)
+        result = subprocess.run(command, cwd=project, capture_output=True, timeout=30)
+        assert result.returncode == 0, (backend, result.stderr)
+        assert (project / 'page.html').read_text() == 'Generated', backend
+        # Absolute requests must select relative template producers too.
+        (project / 'Makefile.km').write_text('''task default : ./page.html
+rule ./{name:*}.json = "{\\\"title\\\":\\\"Template\\\"}"
+rule ./page.html = (parse-json (text (read ./other.json))).title
 ''')
-    result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
-    assert result.returncode == 0, result.stderr
-    assert (project / 'page.html').read_text() == 'Template'
+        result = subprocess.run(command, cwd=project, capture_output=True, timeout=30)
+        assert result.returncode == 0, (backend, result.stderr)
+        assert (project / 'page.html').read_text() == 'Template', backend
 # Watch lifecycle conformance lives in the dedicated WASM watch tests; watch is
 # supported and intentionally does not terminate as a one-shot JSON probe.
 print('JSON native/WASM parity and generated-read checks passed.')

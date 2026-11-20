@@ -16,8 +16,8 @@ rule-file-looking-name.km	PARSE_ERR	error	-
 rule-indented-without-rule.km	PARSE_ERR	error	-
 rule-mixed-outputs.km	PARSE_ERR	error	-
 rule-recipe-unclosed-expression.km	PARSE_ERR	error	-
-template-string-malformed-expression.km	PARSE_ERR	warning	literal
-template-string-malformed-reference.km	PARSE_ERR	warning	literal
+template-string-malformed-expression.km	PARSE_ERR	error	-
+template-string-malformed-reference.km	PARSE_ERR	error	-
 template-target-empty-class.km	PARSE_ERR	error	-
 template-target-pattern-brace.km	PARSE_ERR	error	-
 template-target-pattern-colon.km	PARSE_ERR	error	-

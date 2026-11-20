@@ -4,42 +4,43 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-07 unified runner shared-session execution"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/session"
 mkdir -p "$work/cwd"
 cat >"$work/values.km" <<'KM'
 name = "Ada"
-(str "ignored" name)
+ignored = out! "ignored"
 KM
 cat >"$work/functions.km" <<'KM'
-(greet WHO) = (str "Hello " WHO)
+def greet who = str "Hello " who
 KM
 cat >"$work/process.kash" <<'KASH'
 printf "%s\n" (greet name) | cat
 KASH
 cat >"$work/definitions.kash" <<'KASH'
-unused = $(touch should-not-exist)
+def unused = $(touch should-not-exist)
 KASH
-cat >"$work/rules.kmk" <<'KMK'
-build :
+cat >"$work/rules.km" <<'KM'
+task build
 	printf rule
-KMK
-cat >"$work/arguments.kmk" <<'KMK'
-leaf :
+KM
+cat >"$work/arguments.km" <<'KM'
+task leaf
 	printf leaf
-build : @(first @*)
-	printf "rule%s" @(first @*)
-KMK
-cat >"$work/cwd/Makefile.kmk" <<'KMK'
+task build : ${first args}
+	printf "rule%s" (first args)
+KM
+cat >"$work/cwd/Makefile.km" <<'KM'
 name = "Ada"
-(report value) = (out! value)
-build :
+def report value = out! value
+task build
 	printf rule
-KMK
+KM
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "$wasm_wrapper"); fi
 	check() {
 		local expected="$1"; shift
 		local status=0
@@ -63,8 +64,8 @@ for backend in native wasm; do
 	check 'Hello Ada"Hello Ada"' do run --print-result -c '(out! "Hello ")' -c '(out! "Ada")' -c '"Hello Ada"'
 	# Explicit display never depends on whether out executed.
 	check 'firstsecond42' do run -c '(out! "first")' -c '(out! "second")' -l expr -c '42'
-	check '["one two" "--help"]' do run -l expr -c '@*' -- 'one two' --help
-	check ':nil' do run -l expr -c ':nil'
+	check '["one two", "--help"]' do run -l expr -c 'args' -- 'one two' --help
+	check 'nil' do run -l expr -c 'nil'
 	check '' do run -c ''
 	check '' do run "$work/definitions.kash"
 	check '"Ada"' "$work/values.km" name
@@ -78,7 +79,7 @@ for backend in native wasm; do
 	check 'AB' do run -l kash -c 'printf A; printf B' -l km -c '"C"'
 	check 'once"later"' do run --print-result -l kash -c 'printf once' -l km -c '$(printf later)'
 	check '"nested"' do run --allow-run --print-result -c 'capture = $(printf nested)' -c 'capture'
-	check '' do run -l kash -c 'unused = $(touch should-not-exist)'
+	check '' do run -l kash -c 'def unused = $(touch should-not-exist)'
 	check 'abc' do run --capture-limit 1 -l kash -c 'printf abc | cat'
 	"${command[@]}" do run -l kash -c 'printf "\\377"' >"$work/binary" 2>"$work/err"
 	printf '\377' >"$work/expected"
@@ -91,7 +92,7 @@ for backend in native wasm; do
 	reject TGT_NO_RULE do run -c '(out! "must-not-print")' "$work/values.km" missing
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/process.kash" "$work/functions.km"
 	reject CAP_DENIED do run -c '$(printf denied)'
-	reject CAP_DENIED do run --output text -c 'name = "Ada"' "$work/rules.kmk" build
+	reject CAP_DENIED do run --output text -c 'name = "Ada"' "$work/rules.km" build
     if [ "$backend" = wasm ]; then
         if python3 - "$work/err" <<'PYTIME'
 import re, sys
@@ -107,42 +108,43 @@ PYTIME
 	test-step "$backend single-source invocation deadline and service output restrictions"
 	service_case=0
 	for service_source in \
-		$'service daemon :\n\t@(write! "./forbidden-service-output" "payload")\n' \
-		$'BAD = (write! "./forbidden-service-output" "payload")\nservice daemon :\n\t@{BAD}\n' \
-		$'service daemon : ; [shell: kash]\n\t(write! "./forbidden-service-output" "payload")\n'; do
+		$'SHELL = "sh"\nservice daemon\n\t@{write! "./forbidden-service-output" "payload"}\n' \
+		$'SHELL = "sh"\nBAD = write! "./forbidden-service-output" "payload"\nservice daemon\n\t@{BAD}\n' \
+		$'service daemon\n\t(write! "./forbidden-service-output" "payload")\n'; do
 		service_case=$((service_case + 1))
 		service_directory="$work/service-$backend-$service_case"
 		mkdir -p "$service_directory"
-		cp "$work/cwd/Makefile.kmk" "$service_directory/Makefile.kmk"
+		cp "$work/cwd/Makefile.km" "$service_directory/Makefile.km"
 		service_code=PHASE_INVALID
 		if [ "$service_case" = 3 ]; then service_code=EXPR_INVALID; fi
-		reject "$service_code" do run -C "$service_directory" -l kmk -c "$service_source" daemon
+		reject "$service_code" do run -C "$service_directory" -l km -c "$service_source" daemon
 		if [ ! -e "$service_directory/forbidden-service-output" ]; then test-ok "$backend service case $service_case rejects writes before publication"; else test-fail "$backend service case $service_case published file output"; fi
 	done
 	check '"Hello Ada"' do run --print-result -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
 	test-step "$backend rule and value composition"
-	"${command[@]}" do run --json -l kmk -c 'value = 42' value > "$work/values-json" 2> "$work/err"
+	"${command[@]}" do run --json -l km -c 'value = 42' value > "$work/values-json" 2> "$work/err"
 	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == 42) and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
-	"${command[@]}" do run --timeout 1000 --json -l kmk -c 'value = 42' value > "$work/timed-values-json" 2> "$work/err"
+	"${command[@]}" do run --timeout 1000 --json -l km -c 'value = 42' value > "$work/timed-values-json" 2> "$work/err"
 	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == 42)' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
-	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared : ; [shell: kash]\n\t(out! "once")\n' a b > "$work/shared-json" 2> "$work/err"
+	printf anchor >"$work/shared-anchor"
+	shared_source=$'task a : shared\ntask b : shared\ntask shared : ./shared-anchor\n\t(out! "once")\n'
+	"${command[@]}" do run --json -l km -c "$shared_source" a b shared > "$work/shared-json" 2> "$work/err"
 	if jq -e -s '[.[] | select(.type == "target-started" and .target == "shared")] | length == 1' "$work/shared-json" >/dev/null; then test-ok "$backend multi-target build retains one shared prerequisite"; else test-fail "$backend multi-target build duplicated shared work"; fi
-	printf 'value = 42\n' | "${command[@]}" do parse --json --lang kmk > "$work/alias-ast" 2> "$work/err"
-	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/alias-format" 2> "$work/err"
-	if jq -e '.ast.items | length == 1' "$work/alias-ast" >/dev/null && grep -q 'value = 42' "$work/alias-format"; then test-ok "$backend parse/format accept source language aliases"; else test-fail "$backend source language aliases failed"; fi
-	check 'rule' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
-	check 'leafruleleaf' do run "$work/arguments.kmk" build -c '"done"' -- leaf
+	check 'oncebetweenonce' do run -l km -c "$shared_source" a -c '(out! "between")' -c '' b
+	printf 'value = 42\n' | "${command[@]}" do parse --json --lang km > "$work/value-ast" 2> "$work/err"
+	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/value-format" 2> "$work/err"
+	if jq -e '.ast.items | length == 1' "$work/value-ast" >/dev/null && grep -q 'value = 42' "$work/value-format"; then test-ok "$backend parse and format share Kame source grammar"; else test-fail "$backend Kame source parse or format failed"; fi
+	check 'rule' do run "$work/rules.km" build -c 'name = "Ada"' -c 'name'
+	check 'leafruleleaf' do run "$work/arguments.km" build -c '"done"' -- leaf
 	test-step "$backend discovered build plus inline work"
 	check 'ruleAda' -C "$work/cwd" build -c '(report name)'
 	check 'rulefirstAda' -C "$work/cwd" build -c '(out! "first")' -c '(report name)'
 	reject PARSE_ERR -C "$work/cwd" build -c '['
 	reject DEF_INVALID -C "$work/cwd" build -c 'name = "duplicate"'
-	test-step "$backend removed commands give migration help"
-	for removed in expr; do
-		status=0
-		"${command[@]}" do "$removed" -c '42' >"$work/out" 2>"$work/err" || status=$?
-		if [ "$status" = 2 ] && grep -q CMD_UNKNOWN "$work/err" && grep -q 'use kame do run' "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend migration for do $removed"; else test-fail "$backend migration for do $removed"; fi
-	done
+	test-step "$backend removed command reports the supported invocation"
+	status=0
+	"${command[@]}" do expr -c '42' >"$work/out" 2>"$work/err" || status=$?
+	if [ "$status" = 2 ] && grep -Fq CMD_UNKNOWN "$work/err" && grep -Fq 'kame do run --lang expr -c TEXT' "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend do expr diagnostic and replacement syntax"; else test-fail "$backend do expr diagnostic and replacement syntax"; fi
 	check 'alias' do kash -c 'printf alias'
 done
 test-end

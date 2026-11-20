@@ -51,16 +51,18 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
+	captures := captureValues(p.Alloc, entry.Captures)
+	defer freeValues(p.Alloc, captures)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	var newer []core.Value
 	if entry.NewerInputs != nil {
 		newer = entry.NewerInputs.Values
 	}
 	context := mem.Alloc[eval.Context](p.Alloc)
-	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule, NewerInputs: newer}}}
+	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule, NewerInputs: newer, Captures: captures}}}
 	p.bindDefinitionEnvironment(context)
 	context.TrackUnvalidatedReads = true
-	scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
+	scope := p.ruleScope(context, entry.Rule, entry.Captures, entry.Plan.Arguments)
 	context.Scope = scope
 	defer scope.Free()
 	if entry.KameExpression != nil {
@@ -75,6 +77,11 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	deferred := false
 	for i := range body {
 		if body[i].Template == nil {
+			if len(spans) != 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(body[i].Text)
+			spans = append(spans, diagnostic.Span(body[i].Span))
 			continue
 		}
 		result := p.Eval.Render(p.Alloc, body[i].Template, scope, context)
@@ -105,13 +112,11 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 			mem.Free(p.Alloc, context)
 			return renderResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "recipe line is not text")}
 		}
-		if result.Value.Text != "" {
-			if b.Len() != 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(result.Value.Text)
-			spans = append(spans, diagnostic.Span{Start: body[i].Span.Start, End: body[i].Span.End})
+		if len(spans) != 0 {
+			b.WriteByte('\n')
 		}
+		b.WriteString(result.Value.Text)
+		spans = append(spans, diagnostic.Span(body[i].Span))
 		result.Value.Free(p.Alloc)
 	}
 	var effects []eval.Effect
@@ -172,7 +177,7 @@ func (p *Program) ruleBodyOutput(value core.Value, span source.Span) (eval.Effec
 	default:
 		return eval.Effect{}, failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "a rule body must return text or bytes; use json for structured content")
 	}
-	return eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(data), Span: span}, diagnostic.Diagnostic{}
+	return eval.Effect{Kind: eval.EffectPublication, Data: slices.Clone(data), Span: span}, diagnostic.Diagnostic{}
 }
 
 func diagnosticFromSource(a mem.Allocator, code string, message string, start int, end int, src string) diagnostic.Diagnostic {

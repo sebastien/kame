@@ -14,11 +14,12 @@ func TestKashInterpreterRejectsTextCompilation(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test.km", "")
+	parsed := script.ParseKameFile(a, "test.km", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	textCalls := []string{
 		`kash "printf forbidden"`,
 		`kash "./module.kash"`,
+		`kash ./module.kash`,
 		`kash (out! "forbidden")`,
 	}
 	for i := range textCalls {
@@ -37,19 +38,6 @@ func TestKashInterpreterRejectsTextCompilation(t *testing.T) {
 		t.Error("built-in interpreter selection changed lexical lookup")
 	}
 	r.Free(a)
-	r = evaluate(t, program, "(kash ./module.kash)")
-	if r.Diagnostic.Code != "SEL_NO_CONTEXT" {
-		t.Error("literal module path did not require a file-backed source")
-	}
-	r.Free(a)
-	invalid := []string{"(kash ./module.km)", "(kash ./*.kash)", "(kash ./@{name}.kash)"}
-	for i := range invalid {
-		r = evaluate(t, program, invalid[i])
-		if r.Diagnostic.Code != "EXPR_INVALID" {
-			t.Error("invalid module path was accepted")
-		}
-		r.Free(a)
-	}
 	engine.Free()
 	program.Free()
 	parsed.Free()
@@ -61,7 +49,7 @@ func TestKashInterpreterDefinitionsPublish(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "test.km", "SHELL = kash\nselected = SHELL\n")
+	parsed := script.ParseKameFile(a, "test.km", "SHELL = kash\nselected = SHELL\n")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("SHELL")
 	engine.Request(node)

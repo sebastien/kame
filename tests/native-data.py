@@ -17,7 +17,7 @@ def check_watch(command, environment):
 		project = Path(directory)
 		(project / 'anchor').write_text('anchor')
 		os.symlink('absent', project / 'dangling')
-		(project / 'Makefile.kmk').write_text('task watch-link : ./anchor\n\tprintf %s @(readlink ./dangling) > watched\n')
+		(project / 'Makefile.km').write_text('task watch-link : ./anchor\n\tprintf %s (readlink ./dangling) > watched\n')
 		with (project / 'watch.log').open('w') as log:
 			process = subprocess.Popen(command + ['--watch', 'watch-link'], cwd=project, env=environment, stdout=log, stderr=log, start_new_session=True)
 			try:
@@ -43,8 +43,8 @@ def main():
 	part = sys.argv[4] if len(sys.argv) > 4 else 'all'
 	if part not in ('all', 'values', 'watch'):
 		raise SystemExit('expected all, values or watch')
-	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
-	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
+	command = [binary] if backend == 'native' else ['node', os.environ.get('KAME_TEST_WASM_WRAPPER', str(Path(root) / 'dist/kame.js'))]
+	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_') or key == 'KAME_WASM'}
 	if part == 'watch':
 		check_watch(command, environment)
 		print(f'{backend}: native data watch passed')
@@ -62,8 +62,8 @@ def main():
 		def values(samples, *flags):
 			# Keep every vector, but pay CLI/WASM startup once for independent successes.
 			nonlocal checks
-			value('[' + ' '.join(expression for expression, _ in samples) + ']',
-				'[' + ' '.join(expected for _, expected in samples) + ']', *flags)
+			value('[' + ', '.join(expression for expression, _ in samples) + ']',
+				'[' + ', '.join(expected for _, expected in samples) + ']', *flags)
 			checks += len(samples) - 1
 		def reject(expression, code='EXPR_INVALID', *flags):
 			nonlocal checks
@@ -71,21 +71,21 @@ def main():
 			assert result.returncode == 1 and code in result.stderr, (expression, result.stdout, result.stderr)
 			checks += 1
 		expressions = [
-			'(eq (items [z: 1 a: [x: [2 :nil]]]) [[key: "z" value: 1] [key: "a" value: [x: [2 :nil]]]])',
-			'(eq (items (set "z" :nil [z: 1 a: 2])) [[key: "z" value: :nil] [key: "a" value: 2]])',
-			'(eq (items (set "a" 2 [z: 1])) [[key: "z" value: 1] [key: "a" value: 2]])',
-			'(eq (merge) (parse-json "{}"))',
-			'(eq (items (merge [z: [x: 1] a: 2] [z: [y: 3] b: 4])) [[key: "z" value: [y: 3]] [key: "a" value: 2] [key: "b" value: 4]])',
-			'(let [r [x: 1]] (eq [(get "x" (set "x" 2 r)) r.x] [2 1]))',
-			'(eq (apply (get "value" (first (items [f: ([x] x)]))) [42]) 42)',
-			'(eq (apply (get "f" (set "f" ([x] 42) [f: ([x] x)])) [0]) 42)',
-			'(eq (apply (get "f" (merge [f: ([x] x)] [f: ([x] 42)])) [0]) 42)',
+			'(eq? (items {z: 1, a: {x: [2, nil]}}) [{key: "z", value: 1}, {key: "a", value: {x: [2, nil]}}])',
+			'(eq? (items (put "z" nil {z: 1, a: 2})) [{key: "z", value: nil}, {key: "a", value: 2}])',
+			'(eq? (items (put "a" 2 {z: 1})) [{key: "z", value: 1}, {key: "a", value: 2}])',
+			'(eq? (merge ()) (parse-json "{}"))',
+			'(eq? (items (merge {z: {x: 1}, a: 2} {z: {y: 3}, b: 4})) [{key: "z", value: {y: 3}}, {key: "a", value: 2}, {key: "b", value: 4}])',
+			'(r => eq? [(get "x" (put "x" 2 r)), r.x] [2, 1]) {x: 1}',
+			'(eq? (apply (get "value" (first (items {f: x => x}))) [42]) 42)',
+			'(eq? (apply (get "f" (put "f" (x => 42) {f: x => x})) [0]) 42)',
+			'(eq? (apply (get "f" (merge {f: x => x} {f: x => 42})) [0]) 42)',
 			'(record? (parse-json "{}"))', '(list? [])', '(string? "")',
-			'(not (record? []))', '(not (list? :nil))', '(not (string? "{x:*}"))',
-			'(not (string? [f: ([x] x)]))', '(not (list? ([x] x)))',
+			'(not (record? []))', '(not (list? nil))', '(not (string? (pattern "{x:*}")))',
+			'(not (string? {f: x => x}))', '(not (list? (x => x)))',
 		]
-		values([(expression, ':true') for expression in expressions])
-		for expression in ['(items [])', '(set "x" 1 [])', '(set 0 2 [x: 1])', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set "x" ([x] x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
+		values([(expression, 'true') for expression in expressions])
+		for expression in ['(items [])', '(put "x" 1 [])', '(put 0 2 {x: 1})', '(merge {x: 1} [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(put "x" (x => x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest nil "abc")']:
 			reject(expression)
 		for algorithm in ['sha1', 'sha256', 'sha512']:
 			samples = []
@@ -100,9 +100,9 @@ def main():
 			values(samples, '--allow-read')
 		(project / 'data').write_bytes(data)
 		(project / 'anchor').write_text('anchor')
-		value('(eq (get "data" (set "data" (read ./data) [data: :nil])) (read ./data))', ':true', '--allow-read')
-		value('(not (string? (read ./data)))', ':true', '--allow-read')
-		(project / 'Makefile.kmk').write_text('./hash : ./anchor\n\tprintf %s @(digest "sha512" (read ./data)) > @>\n')
+		value('(eq? (get "data" (put "data" (read ./data) {data: nil})) (read ./data))', 'true', '--allow-read')
+		value('(not (string? (read ./data)))', 'true', '--allow-read')
+		(project / 'Makefile.km').write_text('rule ./hash : ./anchor = digest "sha512" (read ./data)\n')
 		for data in [b'A\x00\xff\n', b'B\x00\xff\n']:
 			(project / 'data').write_bytes(data)
 			result = run('./hash')
@@ -119,12 +119,12 @@ def main():
 		os.symlink('\ufeff../one', project / 'bom-link')
 		os.symlink('x' * 600, project / 'long-link')
 		for expression, expected in [
-			('(get "link" (lstat ./link))', ':true'),
-			('(get "link" (lstat ./one))', ':false'),
-			('(get "dir" (lstat ./dir-link))', ':false'),
-			('(get "dir" (stat ./dir-link))', ':true'),
-			('(get "link" (lstat ./dangling))', ':true'),
-			('(get "link" (lstat ./loop))', ':true'),
+			('(get "link" (lstat ./link))', 'true'),
+			('(get "link" (lstat ./one))', 'false'),
+			('(get "dir" (lstat ./dir-link))', 'false'),
+			('(get "dir" (stat ./dir-link))', 'true'),
+			('(get "link" (lstat ./dangling))', 'true'),
+			('(get "link" (lstat ./loop))', 'true'),
 			('(readlink ./link)', '"one"'), ('(readlink ./dangling)', '"absent"'),
 			('(readlink ./loop)', '"loop"'),
 			('(readlink ./bom-link)', '"\ufeff../one"'),
@@ -135,14 +135,14 @@ def main():
 			reject(expression, 'FS_ERR', '--allow-read')
 		os.symlink('../link', project / 'sub/inner')
 		value('(readlink ./dir-link/inner)', '"../link"', '--allow-read')
-		value('(get "link" (lstat (resource "file://' + str(project / 'link') + '")))', ':true', '--allow-read')
+		value('(get "link" (lstat (resource "file://' + str(project / 'link') + '")))', 'true', '--allow-read')
 		for operation in ['lstat', 'readlink']:
-			(project / 'Makefile.kmk').write_text(f'@({operation} ./link) :\n\ttouch forbidden\n')
+			(project / 'Makefile.km').write_text(f'rule ${{{operation} ./link}}\n\ttouch forbidden\n')
 			result = run('do', 'plan', '--json', './any')
-			assert result.returncode == 1 and any(code in result.stdout for code in ['PHASE_INVALID', 'CAP_DENIED']), (result.stdout, result.stderr)
+			assert result.returncode == 1 and 'PHASE_INVALID' in result.stdout, (result.stdout, result.stderr)
 			assert not (project / 'forbidden').exists()
 			checks += 1
-		(project / 'Makefile.kmk').write_text('probe : @(if (get "link" (lstat ./dangling)) [] ["missing"])\n')
+		(project / 'Makefile.km').write_text('task probe : ${if (get "link" (lstat ./dangling)) then [] else ["missing"]}\n')
 		result = run('do', 'plan', '--json', 'probe')
 		assert result.returncode == 0, (result.stdout, result.stderr)
 		checks += 1
@@ -150,7 +150,7 @@ def main():
 		reject('(lstat ./link)', 'CAP_DENIED')
 		os.symlink(b'\xff', os.fsencode(project / 'invalid-link'))
 		reject('(readlink ./invalid-link)', 'FS_ERR', '--allow-read')
-		(project / 'Makefile.kmk').write_text('task inspect : ./anchor\n\tprintf %s @(readlink ./link) > seen\n\tprintf x >> runs\n')
+		(project / 'Makefile.km').write_text('task cached inspect : ./anchor\n\tprintf %s (readlink ./link) > seen\n\tprintf x >> runs\n')
 		for target in ['one', 'one', 'two']:
 			if target == 'two':
 				(project / 'link').unlink()

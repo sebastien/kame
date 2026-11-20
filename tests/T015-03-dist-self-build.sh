@@ -45,7 +45,7 @@ cp "$CLI_ROOT/VERSION" "$self_project/VERSION"
 # Exercise the repository's own rule, extracted from its Kamefile.
 {
 	printf 'SHELL = kash\n\n'
-	sed -n '/^\.\/src\/go\/kame\/cmd\/kame\/version_generated\.go :/,/^$/p' "$CLI_ROOT/Kamefile"
+	sed -n '/^rule \.\/src\/go\/kame\/cmd\/kame\/version_generated\.go :/,/^$/p' "$CLI_ROOT/Kamefile"
 } >"$self_project/Kamefile"
 cli_run --dir "$self_project" --env "HOME=$HOME" --env TMPDIR=/tmp -- --force --json ./src/go/kame/cmd/kame/version_generated.go
 cli_expect_status 0

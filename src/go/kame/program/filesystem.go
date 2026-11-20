@@ -13,6 +13,9 @@ import (
 )
 
 func (p *Program) isSourcePath(name string) bool {
+	if p.Eval.HasAuthoredSourceRequest(name) {
+		return true
+	}
 	for i := range p.Eval.SourceParts {
 		part := p.Eval.SourceParts[i]
 		if part.Signature.Mode != core.SignatureContent || part.Directory == "" {
@@ -111,6 +114,11 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: result.Exists}, true
 		return completion
 	}
+	if op == host.OpDirectoryCheck {
+		info := p.Host.Stat(filename)
+		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: info.Exists && info.Info.IsDir}, true
+		return completion
+	}
 	if op == host.OpReadlink {
 		result := p.Host.Readlink(p.Alloc, filename)
 		if result.Failed {
@@ -153,7 +161,8 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 }
 
 func (p *Program) wildcard(pattern string) core.Completion {
-	pattern = p.canonicalTarget(pattern, true)
+	key := pattern
+	pattern = p.canonicalTarget(host.DiscoveryScan(key), true)
 	defer mem.FreeString(p.Alloc, pattern)
 	root := globRoot(p.Alloc, pattern)
 	defer mem.FreeString(p.Alloc, root)
@@ -202,7 +211,8 @@ func (p *Program) wildcard(pattern string) core.Completion {
 		values[i].Free(p.Alloc)
 	}
 	mem.FreeSlice(nil, values)
-	return core.Completion{Value: result, HasValue: true}
+	value, d := host.FilterDiscovery(p.Alloc, key, result)
+	return core.Completion{Value: value, HasValue: d.Code == "", Diagnostic: d}
 }
 
 func (p *Program) relativePath(name string) string {
@@ -213,8 +223,11 @@ func (p *Program) relativePath(name string) string {
 	if cwd == "." && !path.IsAbs(name) {
 		return cloneText(p.Alloc, "./"+name)
 	}
-	if cwd != "" && len(name) > len(cwd) && name[:len(cwd)] == cwd && name[len(cwd)] == '/' {
-		return cloneText(p.Alloc, "./"+name[len(cwd)+1:])
+	if cwd != "" {
+		prefix := strings.TrimSuffix(cwd, "/") + "/"
+		if suffix, inside := strings.CutPrefix(name, prefix); inside && suffix != "" {
+			return cloneText(p.Alloc, "./"+suffix)
+		}
 	}
 	return cloneText(p.Alloc, name)
 }

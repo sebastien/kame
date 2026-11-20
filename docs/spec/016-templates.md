@@ -25,9 +25,9 @@ Document templates lower to the expression language of
 expression, a `match` expression, `map`, `join`, an applied lambda, `with`,
 `template-cat`, or `render`. There is no second evaluator, so templates share
 laziness, capabilities, and dynamic dependencies with the rest of Kame. Inline
-`@{EXPR}` interpolation is the one native inline form; it is shared with
-strings, path atoms, rule headers, and foreign-shell recipes. Kash recipes are
-direct programs under `038-direct-kash-and-values.md`.
+`@{EXPR}` interpolation is the inline form for document templates and
+foreign-shell recipes. Kame strings, path atoms, rule headers, and Kash
+command words use `${EXPR}`.
 
 ## Relationship to Kash
 
@@ -37,12 +37,10 @@ grammar. `$REFERENCE`, `${REFERENCE}`, and `$(COMMAND)` are emitted literally in
 document text; process capture is available only inside an evaluated
 expression, and only in phases that authorize it.
 
-Templates render `@{EXPR}` values as text. Kash uses `$REFERENCE` lookups and
-embeds parenthesized expressions directly as typed values, including fragments
-of unquoted words; a Kash body is never rendered as a template, and `@` has no
-meaning in Kash command words. The two share the expression grammar, not an
-outer interpolation syntax. Template directives such as `@if` and `@for` are
-not Kash statements.
+Templates render `@{EXPR}` values as text. Kash command words accept
+`$REFERENCE` lookups and full expressions in `${EXPR}` or `(EXPR)`.
+Inside a quoted or mixed Kash word, `${EXPR}` uses Kame string
+conversion, including space-separated list items (`017` §6).
 
 ## Inline interpolation
 

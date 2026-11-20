@@ -5,17 +5,16 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T038-06 direct Kash recipe lifecycle"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
 	test-step "$backend managed service keeps direct Kash ownership"
-	cat >"$work/Makefile.kmk" <<'KMK'
-SHELL = kash
-service daemon : ; [ready: [argv: ["test" "-f" "service-ready"] interval-ms: 10 timeout-ms: 3000]]
+	cat >"$work/Makefile.km" <<'KMK'
+service daemon ; {ready: {argv: ["test", "-f", "service-ready"], interval-ms: 10, timeout-ms: 3000}}
 	sh -c (nop """touch service-ready; printf %s "$$" > service-pid; exec sleep 30""")
-consumer : daemon
+task consumer : daemon
 	printf service
 KMK
 	if timeout 15 "${runner[@]}" -C "$work" consumer >"$work/out" 2>"$work/err" && [ "$(cat "$work/out")" = service ]; then test-ok "$backend service consumer"; else
@@ -35,10 +34,9 @@ KMK
 	else test-fail "$backend service did not start"; fi
 	test-step "$backend retained watch observes executable edits"
 	printf input >"$work/input"
-	cat >"$work/Makefile.kmk" <<'KMK'
-SHELL = kash
-./cached : ./input
-	./cached-tool @>
+	cat >"$work/Makefile.km" <<'KMK'
+rule ./cached : ./input
+	./cached-tool $outputs.0
 KMK
 	# shellcheck disable=SC2016
 	printf '#!/bin/sh\nprintf first > "$1"\nprintf x >> tool-runs\n' >"$work/cached-tool"

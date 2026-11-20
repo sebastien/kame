@@ -5,7 +5,6 @@ import (
 	"kame/internal/mem"
 	"kame/lang/rule"
 	"slices"
-	"strings"
 )
 
 // One accepted content snapshot serves every newer-input selector in a rule render.
@@ -18,7 +17,7 @@ type newerInputState struct {
 
 // Scan authored source so selectors reached through helpers share the snapshot.
 func (p *Program) needsNewerInputs(entry *instance) bool {
-	return entry.Rule.Kind == rule.FileRule && (strings.Contains(p.Parsed.Source.Text, "@<?") || strings.Contains(p.Parsed.Source.Text, "inputs/changed"))
+	return entry.Rule.Kind == rule.FileRule && p.Eval.UsesChangedInputs()
 }
 
 func (p *Program) freeNewerInputs(state *newerInputState) {

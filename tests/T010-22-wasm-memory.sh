@@ -4,13 +4,13 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-22 WASM memory exhaustion"
 cd "$CLI_ROOT"
-make wasm >/dev/null
+if [ -z "${KAME_WASM:-}" ]; then make wasm >/dev/null; fi
 test-step "Go reactor validates buffers and preserves language recursion guards"
 if node --input-type=module <<'NODE'; then
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { instantiateReactor } from './tests/wasm/instantiate-reactor.mjs';
-const { instance: { exports: e } } = await instantiateReactor(fs.readFileSync('build/wasm/kame.wasm'));
+const { instance: { exports: e } } = await instantiateReactor(fs.readFileSync(process.env.KAME_WASM ?? 'build/wasm/kame.wasm'));
 const alloc = (size, align = 1) => { const p = e.kame_wasm_alloc(size, align); assert.ok(p); return p; };
 const write = text => { const b = Buffer.from(text), p = alloc(b.length || 1); new Uint8Array(e.memory.buffer,p,b.length).set(b); return [p,b.length]; };
 const diagnostic = alloc(256), length = alloc(4,4), output = alloc(128);

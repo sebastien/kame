@@ -9,10 +9,9 @@ import (
 func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 	a := t.Allocator()
 	bodies := []string{
-		"prefix @match(1)@case(1)yes@end(match) suffix",
-		"@-match(1)-\n\t@-case(1)-\n\tyes\n\t@-end(match)-",
-		"prefix @if(true)yes@end(if) suffix",
-		"Hi @if(true)there@end!",
+		"@match 1\n\t@case 1\n\tyes\n\t@end match",
+		"@-match 1 -\n\t@-case 1 -\n\tyes\n\t@-end match -",
+		"@if true\n\tyes\n\t@end if",
 	}
 	for _, body := range bodies {
 		text := "task build : dep\n\t" + body
@@ -33,7 +32,7 @@ func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 		}
 		parsed.Free()
 	}
-	plain := rule.ParseRule(a, "plain.km", "task build : dep\n\techo \\@if(true)\n\techo @if (true)")
+	plain := rule.ParseRule(a, "plain.km", "task build : dep\n\techo @if true\n\techo @end if")
 	defer plain.Free()
 	if len(plain.Diagnostics) != 0 || plain.Rule.BodyDoc != nil {
 		t.Error("ordinary or escaped recipe text became a document")
@@ -43,7 +42,7 @@ func TestRecipeUsesDocumentScannerForInlineTrimmedMatch(t *testing.T) {
 func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) {
 	a := t.Allocator()
 	bodies := []string{
-		"echo @(str \"\"\"@if(true)\"\"\")",
+		"echo @{str \"@if true\"}",
 		"echo user@end2.example @else_foo @raw/path",
 		"@else_foo\n\t@raw/path\n\t@end2",
 	}
@@ -54,20 +53,20 @@ func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) 
 		}
 		parsed.Free()
 	}
-	raw := rule.ParseRule(a, "raw.km", "task build : dep\n\t@raw\n\tliteral @if(true) text @end(raw)")
+	raw := rule.ParseRule(a, "raw.km", "task build : dep\n\t@raw\n\tliteral @if true text\n\t@end raw")
 	defer raw.Free()
 	if len(raw.Diagnostics) != 0 || raw.Rule == nil || raw.Rule.BodyDoc == nil {
-		t.Error("recipe raw block missed its later same-line closing directive")
+		t.Error("recipe raw block missed its whole-line closing directive")
 	}
 }
 
 func TestRawRecipeKeepsMalformedContentsLiteral(t *testing.T) {
-	bodies := []string{"literal @(broken ", "literal @if() text "}
+	bodies := []string{"literal @{broken ", "literal @if ) text "}
 	for _, body := range bodies {
-		parsed := rule.ParseRule(t.Allocator(), "raw.km", "task build : dep\n\t@raw\n\t"+body+"@end(raw)")
+		parsed := rule.ParseRule(t.Allocator(), "raw.km", "task build : dep\n\t@raw\n\t"+body+"\n\t@end raw")
 		if len(parsed.Diagnostics) != 0 || parsed.Rule == nil || parsed.Rule.BodyDoc == nil || len(parsed.Rule.BodyDoc.Diagnostics) != 0 {
 			t.Error("raw recipe document parsed malformed literal contents or missed closing")
-		} else if len(parsed.Rule.BodyDoc.Root.Items) != 2 || len(parsed.Rule.BodyDoc.Root.Items[1].Parts) != 1 || parsed.Rule.BodyDoc.Root.Items[1].Parts[0].Text != "\t"+body {
+		} else if len(parsed.Rule.BodyDoc.Root.Items) != 2 || len(parsed.Rule.BodyDoc.Root.Items[1].Parts) != 1 || parsed.Rule.BodyDoc.Root.Items[1].Parts[0].Text != body+"\n" {
 			t.Error("raw recipe changed literal malformed bytes")
 		}
 		parsed.Free()

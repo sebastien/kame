@@ -49,7 +49,7 @@ func TestPureOperations(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(count (list \"one\" \"two\"))")
 	if result.Diagnostic.Code != "" || result.Value.Int != 2 {
@@ -106,10 +106,85 @@ func TestPureOperations(t *testing.T) {
 		t.Error("list-consuming apply failed")
 	}
 	result.Free(a)
+	checkPureOperationObservations(t, program, registry)
 	engine.Free()
 	program.Free()
 	parsed.Free()
 	registry.Free()
+}
+
+func checkPureOperationObservations(t *testing.T, program *eval.Program, registry *eval.Registry) {
+	a := t.Allocator()
+	examples := []string{
+		`not nil`, `bool 1`, `blank? " "`, `fmt {name: 1}`, `eval "1 + 1"`,
+		`parse-json "{\"name\":1}"`, `parse-args {} ["operand"]`, `sub-token "a" "b" "a a"`,
+		`str "a" 1`, `json {name: 1}`, `count ["a"]`,
+		`add 1 2`, `sub 3 2`, `mul 2 3`, `div 3 2`, `mod 3 2`, `neg 1`,
+		`eq? 1 1`, `ne? 1 2`, `lt? 1 2`, `gt? 2 1`, `gte? 2 2`, `lte? 2 2`,
+		`in? 1 [1, 2]`, `has-key? "x" {x: nil}`, `success? {status: 0, signal: 0}`,
+		`template-cat "a" nil 1`, `text "a"`, `template-apply (a b => add a b) [1, 2]`,
+		`template-map (x => uppercase x) ["a"]`, `template-trim-start " a"`, `template-trim-end "a "`,
+		`source-dir ()`, `get "a" {a: 1}`, `first [1]`, `nth 0 [1]`,
+		`apply (x => count x) [[1, 2]]`, `list 1 2`, `indexed ["a"]`, `items {x: 1}`,
+		`put "y" 2 {x: 1}`, `merge {x: 1} {y: 2}`,
+		`record? {}`, `list? []`, `string? "x"`, `nil? nil`, `bool? true`,
+		`number? 1.0`, `int? 1`, `float? 1.0`, `bytes? "x"`, `callable? uppercase`,
+		`resource? (resource "mem://suite/input")`, `pattern? (pattern "{name:*}")`,
+		`process? nil`, `empty? []`, `digest "sha256" "abc"`,
+		`map (x => x + 1) [1]`, `flatmap (x => [x, x]) [1]`,
+		`filter (x => x > 0) [0, 1]`, `filter-out (x => x > 0) [0, 1]`,
+		`reduce (a b => a + b) 0 [1, 2]`,
+		`concat [1] [2]`, `slice 0 1 [1, 2]`, `sorted [2, 1]`, `unique [1, 1]`,
+		`join "," ["a", "b"]`, `split "," "a,b"`, `strip " a "`, `line "a\n"`,
+		`subst (pattern "{name:*}.c") ./out/{name}.o "a.c"`,
+		`match? (pattern "{name:*}.c") "a.c"`, `includes? "b" "abc"`,
+		`regex-group "name" (regex-match (pattern "{name:~[a-z]+}") "abc")`,
+		`resub (pattern "{name:~[a-z]+}") ./out/{name} "abc"`,
+		`capture ./in/{name:*}.c ./in/a.c`, `bind ./out/{name}.o {name: "a"}`,
+		`starts? "a" "ab"`, `ends? "b" "ab"`,
+		`black "a"`, `red "a"`, `green "a"`, `yellow "a"`, `blue "a"`, `magenta "a"`,
+		`cyan "a"`, `white "a"`, `bold "a"`, `dim "a"`, `uppercase "a"`, `lowercase "A"`,
+		`basename ./dir/file.txt`, `dirname ./dir/file.txt`, `splitext ./dir/file.txt`,
+		`ext ./dir/file.txt`, `joinpath ./dir "file.txt"`, `relpath ./dir ./dir/file.txt`,
+		`abspath ./file.txt`, `nop 1`,
+	}
+	reached := make(map[string]bool)
+	program.AddSourcePart("/workspace/library.km", 0, 0, 0)
+	program.SetSourcePartDirectory("/workspace")
+	origin := len(program.SourceParts)
+	for _, text := range examples {
+		parsed := expr.Parse(a, "/workspace/library.km", text)
+		if len(parsed.Diagnostics) != 0 {
+			t.Errorf("invalid operation example %q: %v", text, parsed.Diagnostics)
+			parsed.Free()
+			continue
+		}
+		eval.SetExpressionSourceOrigin(parsed.Expr, origin, nil)
+		observations := 0
+		context := eval.Context{
+			Program: program, Scope: program.Scope, Run: a, Cwd: "/workspace", Source: parsed.Source.Name, SourceOrigin: origin,
+			Grants:             []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}},
+			DirectHostRequests: true,
+			DependencyObserver: func(any, core.ResourceKey) { observations++ },
+			ToolResolver:       func(any, string) (string, bool) { observations++; return "", false },
+			OperationObserver:  func(_ any, name, _ string) { reached[name] = true },
+		}
+		result := program.EvaluateWith(parsed.Expr, &context)
+		if result.Diagnostic.Code != "" || result.Waiting || program.Requests.HasRequests() ||
+			observations != 0 || len(context.Effects) != 0 || len(context.WritePaths) != 0 {
+			t.Errorf("pure operation example %q: diagnostic=%s waiting=%t requests=%t observations=%d effects=%d writes=%d",
+				text, result.Diagnostic.Message, result.Waiting, program.Requests.HasRequests(), observations,
+				len(context.Effects), len(context.WritePaths))
+		}
+		eval.FreeEffects(a, context.Effects)
+		result.Free(a)
+		parsed.Free()
+	}
+	for _, operation := range registry.Items {
+		if operation.Category == eval.PureOperation && !reached[operation.Name] {
+			t.Errorf("missing host-free operation example for %s", operation.Name)
+		}
+	}
 }
 
 type diagnosticCase struct {
@@ -123,7 +198,7 @@ func TestOperationDiagnosticsRetainOperandAndContract(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	scriptSource := script.Parse(a, "test", "")
+	scriptSource := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, scriptSource, registry)
 	cases := []diagnosticCase{
 		{Text: "(first 1)", Message: "`first` argument 1 expects list or string; got int", Operand: "1"},
@@ -164,7 +239,7 @@ func TestOutRejectsCallable(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(out! (subst ./{*} ./out/{_0}))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -189,7 +264,7 @@ func TestOutputEffectsReturnCombinedStandaloneValue(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "(out! \"hello\" 10)")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
@@ -215,7 +290,7 @@ func TestDefinitionOutputFlushesOnlyAfterSuccessfulResume(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "result = (list (out! \"once\") (wait-each \"done\"))")
+	parsed := script.ParseKameFile(a, "test", "result = (list (out! \"once\") (wait-each \"done\"))")
 	program := eval.Compile(a, engine, parsed, registry)
 	state := &outputState{}
 	program.SetDefinitionEffectSink(captureOutput, state)
@@ -249,7 +324,7 @@ func TestMapResumesWithoutRepeatingCallbacks(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "result = (map (item => (wait-each item)) (list \"one\" \"two\"))")
+	parsed := script.ParseKameFile(a, "test", "result = (map (item => (wait-each item)) (list \"one\" \"two\"))")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("result")
 	engine.Request(node)
@@ -299,7 +374,7 @@ func TestUntrackedCallbackSuspensionReleasesProgress(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "untracked-wait", Call: waitWithoutEngine, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		`(map untracked-wait ["first", "wait"])`,
@@ -328,7 +403,7 @@ func TestPatternReplace(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(subst ./{**}/{*}.c ./build/{_0}/{_1}.c \"./a/b/x.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/a/b/x.c" {
@@ -336,7 +411,7 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	captureExpressions := []string{
-		`(subst ./journal/{name:*} "@{name}" "./journal/demo")`,
+		`(subst ./journal/{name:*} "${name}" "./journal/demo")`,
 		`(subst ./journal/{name:*} name "./journal/demo")`,
 		`((r => ((name => (r ./journal/{name:*} name "./journal/demo")) "outer")) subst)`,
 		`(((prefix => (subst ./journal/{name:*} (str prefix name))) "") "./journal/demo")`,
@@ -463,10 +538,10 @@ func TestRuntimePatternConstruction(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "pattern", "")
+	parsed := script.ParseKameFile(a, "pattern", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `(pattern (str "./" "{" "name:*" "}.c"))`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern || result.Value.Text != "./{name:*}.c" {
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.PathPattern || result.Value.Text != "./{name:*}.c" {
 		t.Error("runtime pattern construction did not return the validated pattern")
 	}
 	result.Free(a)
@@ -488,7 +563,7 @@ func TestRegexCaptureOperations(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "regex", "")
+	parsed := script.ParseKameFile(a, "regex", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	match := `(regex-match (pattern (str "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42")`
 	result := evaluate(t, program, match)
@@ -502,17 +577,17 @@ func TestRegexCaptureOperations(t *testing.T) {
 		}
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture 1 (regex-match (pattern (str "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
+	result = evaluate(t, program, `(regex-group 1 (regex-match (pattern (str "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "42" {
 		t.Error("capture did not select the indexed value")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture "name" (regex-match (pattern (str "{" "name:~" "[a-z]+" "}")) "demo"))`)
+	result = evaluate(t, program, `(regex-group "name" (regex-match (pattern (str "{" "name:~" "[a-z]+" "}")) "demo"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" {
 		t.Error("capture did not select the named value")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture 1 (regex-match (pattern (str "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
+	result = evaluate(t, program, `(regex-group 1 (regex-match (pattern (str "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
 		t.Error("repeated named regex groups did not populate each positional slot")
 	}
@@ -570,7 +645,7 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "document-match", "")
+	parsed := script.ParseKameFile(a, "document-match", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `match "./posts/demo.md"
     ./posts/{slug:*}.md => slug
@@ -579,12 +654,12 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 		t.Error("baseline expression match failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "plain" (str "@match(\"./posts/demo.md\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "{" "slug" "}\n@else\nother\n@end(match)\n"))`)
+	result = evaluate(t, program, `(render "plain" (str "@match \"./posts/demo.md\"\n@case ./posts/" "{" "slug:*" "}.md\n@" "{" "slug" "}\n@else\nother\n@end match\n"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo\n" {
 		t.Error("document match selected capture mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "plain" (str "@match(\"./other.txt\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "{" "slug" "}\n@else\nother\n@end(match)\n"))`)
+	result = evaluate(t, program, `(render "plain" (str "@match \"./other.txt\"\n@case ./posts/" "{" "slug:*" "}.md\n@" "{" "slug" "}\n@else\nother\n@end match\n"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "other\n" {
 		t.Error("document match fallback mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
@@ -602,12 +677,12 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "document-for", "")
+	parsed := script.ParseKameFile(a, "document-for", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	templateText := `(str "@for([item] xs)\n" "@" "{" "index" "}" ":" "@" "{" "key" "}" ":" "@" "{" "item" "}" ";\n@end(for)\n")`
+	templateText := `(str "@for index item in indexed xs\n" "@" "{" "index" "}" ":" "@" "{" "item" "}" ";\n@end for\n")`
 	result := evaluate(t, program, `(render {xs: ["a", "b"]} "plain" `+templateText+`)`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0::a;\n1::b;\n" {
-		t.Error("list loop did not bind its zero-based index, nil key and item value")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0:a;\n1:b;\n" {
+		t.Error("list loop did not destructure explicitly indexed values")
 	}
 	result.Free(a)
 	engine.Free()
@@ -623,14 +698,14 @@ func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "document-inline", "")
+	parsed := script.ParseKameFile(a, "document-inline", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(render "plain" "Hi @if(true)there@end!")`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "Hi there!" {
-		t.Error("plain inline if block did not preserve text around the block")
+	result := evaluate(t, program, `(render "plain" "Hi @if true there @end!")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "Hi @if true there @end!" {
+		t.Error("plain style interpreted inline text as a directive")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "html" "a<!-- @if(true) -->b<!-- @end(if) -->c")`)
+	result = evaluate(t, program, `(render "html" "a<!-- @if true -->b<!-- @end if -->c")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
 		t.Error("HTML inline if block did not preserve text around the block")
 	}
@@ -643,7 +718,7 @@ func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
 
 func TestDocumentTrimMarkersRemoveAdjacentASCIIWhitespace(t *testing.T) {
 	a := t.Allocator()
-	doc := template.ParseDocument(a, "trim", "left   @-if(true)-  right  @-end(if)- \r\n\t tail", "plain")
+	doc := template.ParseDocument(a, "trim", "left \r\n \t @-if true -\r\n right \r\n\t@-end if - \r\n\t tail", "plain")
 	if len(doc.Diagnostics) != 0 {
 		t.Error("trim document parse: " + doc.Diagnostics[0].Code + " " + doc.Diagnostics[0].Message)
 	}
@@ -653,9 +728,9 @@ func TestDocumentTrimMarkersRemoveAdjacentASCIIWhitespace(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "document-trim", "")
+	parsed := script.ParseKameFile(a, "document-trim", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(render "plain" "left   @-if(true)-  right  @-end(if)- \r\n\t tail")`)
+	result := evaluate(t, program, `(render "plain" "left \r\n \t @-if true -\r\n right \r\n\t@-end if - \r\n\t tail")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "leftrighttail" {
 		t.Error("trim markers did not remove adjacent ASCII whitespace: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
@@ -673,11 +748,11 @@ func TestTemplateItemsOwnsInputRows(t *testing.T) {
 	if !operations.Register(registry) {
 		t.Error("library registration failed")
 	}
-	parsed := script.Parse(a, "template-items", "")
+	parsed := script.ParseKameFile(a, "template-items", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(template-items ["a", "b"])`)
+	result := evaluate(t, program, `(indexed ["a", "b"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 {
-		t.Error("template-items did not return one row per list item")
+		t.Error("indexed did not return one pair per list item")
 	}
 	result.Free(a)
 	engine.Free()
@@ -702,7 +777,7 @@ func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	parsed := script.Parse(a, "lookup", "")
+	parsed := script.ParseKameFile(a, "lookup", "")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()

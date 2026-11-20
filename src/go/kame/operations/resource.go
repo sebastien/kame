@@ -9,7 +9,7 @@ import (
 
 func opResource(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
-	if values[0].Kind != core.String {
+	if !values[0].IsPathText() {
 		return invalidArgument(c, values, 0, "resource URI string")
 	}
 	parsed := core.ParseResourceURI(c.Run, values[0].Text)

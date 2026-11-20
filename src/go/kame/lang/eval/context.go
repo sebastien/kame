@@ -14,6 +14,10 @@ import (
 )
 
 type Context struct {
+	generator     *generator
+	asyncHandle   *ProcessHandle
+	commandOutput *commandOutput
+	functionStage *functionStage
 	// Stream predicates may compute values, but may not observe or mutate host
 	// state, suspend, start processes, or dynamically parse code.
 	PurePredicate         bool
@@ -24,9 +28,16 @@ type Context struct {
 	Run                   mem.Allocator
 	Requests              *host.Queue
 	Cwd                   string
+	StageDirectory        string
+	DirectoryGrantRoot    string
 	Environment           []string
+	Unit                  *ExecutionUnit
+	StageEnvironment      []string
+	EnvironmentUnset      []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
-	HasEnvironment bool
+	HasEnvironment     bool
+	captureListMember  *expr.Expr
+	captureListOutcome *commandListOperand
 	// DefinitionNamespace identifies an immutable runtime environment and phase.
 	DefinitionNamespace    [32]byte
 	HasDefinitionNamespace bool
@@ -36,26 +47,35 @@ type Context struct {
 	Finalizing             bool
 	CleanupDeadlineNS      int64 // Inherited cleanup budget; scopes cannot restart it.
 	RecipeNode             int64
-	TimeoutMS              int64
-	Frames                 []diagnostic.Frame
-	Source                 string
-	SourceOrigin           int
-	EntrySource            *source.Source `json:"-"`
-	Grants                 []Grant
-	Inputs                 []core.Value
-	Outputs                []core.Value
-	Args                   []core.Value
-	HasArgs                bool
-	RuleFrames             []RuleFrame
-	Effects                []Effect
-	WritePaths             []string
-	Span                   source.Span
-	OperationName          string
+	// RecipeOutput publishes reached stdout and stderr alongside live process output.
+	RecipeOutput   func(Effect)
+	TimeoutMS      int64
+	TrackRuleCalls bool
+	ruleCallFrames []diagnostic.Frame
+	Frames         []diagnostic.Frame
+	Source         string
+	SourceOrigin   int
+	EntrySource    *source.Source `json:"-"`
+	Grants         []Grant
+	Inputs         []core.Value
+	Outputs        []core.Value
+	Args           []core.Value
+	HasArgs        bool
+	RuleFrames     []RuleFrame
+	Effects        []Effect
+	WritePaths     []string
+	Span           source.Span
+	OperationName  string
 	// CallPath distinguishes repeated calls of the same authored AST on a node.
-	CallPath                  string
-	operationArguments        []*expr.Expr
-	Phase                     Phase
-	ResolveDefinition         DefinitionResolver
+	CallPath           string
+	operationArguments []*expr.Expr
+	Phase              Phase
+	ResolveDefinition  DefinitionResolver
+	// DeclarationFiles is the planning-only snapshot operation. It cannot
+	// be used to read file contents or perform a general host request.
+	DeclarationFiles          func(any, string, string, source.Span, int) Result
+	SourceSelection           bool
+	ResolveDeclarationImport  func(any, *core.Node) Result
 	ResolverState             any
 	DependencyObserver        func(any, core.ResourceKey)
 	DependencyContextObserver func(any, core.ResourceKey, *Context)
@@ -80,7 +100,6 @@ type Context struct {
 	captureBudgetEnd   int
 	completionConsumed bool
 	RecoverFailures    bool
-	ReserveEnv         bool
 	DisableMemo        bool
 	sequencedOperand   bool // Reached let/exit operands retain in-flight progress.
 	loopDepth          int  // Native function and constructed-script boundaries reset it.
@@ -196,7 +215,7 @@ type EffectKind int
 const (
 	EffectOut EffectKind = iota
 	EffectErr
-	EffectYield
+	EffectPublication
 	EffectWrite
 	// ProcessWrite records a process-owned path, not bytes to write on commit.
 	EffectProcessWrite
@@ -266,6 +285,7 @@ type RuleFrame struct {
 	ServiceRule bool
 	FileRule    bool
 	NewerInputs []core.Value
+	Captures    []core.Value
 	Inputs      []core.Value
 	Outputs     []core.Value
 }
@@ -286,8 +306,15 @@ func (c *Context) Allows(capability Capability, name string) bool {
 	if a == nil {
 		a = mem.System
 	}
-	canonicalName := canonicalGrantName(a, c.Cwd, name)
-	defer mem.FreeString(a, canonicalName)
+	canonicalName := name
+	if capability != Env {
+		canonicalName = canonicalGrantName(a, c.Cwd, name)
+		defer mem.FreeString(a, canonicalName)
+	}
+	grantDirectory := c.Cwd
+	if c.Unit != nil && c.Program != nil && c.Program.DefinitionCwd != "" {
+		grantDirectory = c.Program.DefinitionCwd
+	}
 	for i := range c.Grants {
 		grant := c.Grants[i]
 		if grant.Capability != capability {
@@ -297,7 +324,17 @@ func (c *Context) Allows(capability Capability, name string) bool {
 			return true
 		}
 		for j := range grant.Names {
-			root := canonicalGrantName(a, c.Cwd, grant.Names[j])
+			rootName := grant.Names[j]
+			if capability == Env {
+				if rootName == name {
+					return true
+				}
+				continue
+			}
+			if (capability == Read || capability == Write) && c.DirectoryGrantRoot != "" && rootName == c.DirectoryGrantRoot {
+				rootName = c.Cwd
+			}
+			root := canonicalGrantName(a, grantDirectory, rootName)
 			allowed := canonicalName == root || (len(canonicalName) > len(root) && len(root) != 0 && canonicalName[:len(root)] == root && (root[len(root)-1] == '/' || canonicalName[len(root)] == '/'))
 			mem.FreeString(a, root)
 			if allowed {
@@ -450,12 +487,21 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), kind, payload)
 	// Internal monotonic clock requests only service deadlines and scheduling.
 	// The user-visible clock operation separately records its unvalidated read.
-	if id != 0 && (c.TrackUnvalidatedReads || kind != host.RequestProcess) && kind != host.RequestReadFile && kind != host.RequestEnvironment && kind != host.RequestMonotonicTime {
+	if id != 0 && (c.TrackUnvalidatedReads || kind != host.RequestProcess) && kind != host.RequestReadFile && kind != host.RequestEnvironment && kind != host.RequestMonotonicTime && kind != host.RequestProcessStageIO {
 		c.UnvalidatedRead()
 	}
 	if id != 0 {
 		if kind == host.RequestProcess {
-			c.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: ProcessEnvironmentName}, core.ObservationValue, c.Program.processEnvironmentSignature(c.Run, c.Environment))
+			if stage := c.functionStage; stage != nil && stage.node != nil && stage.node.ID == c.Engine.NodeID() {
+				stage.bodyProcessID = id
+			}
+			c.observeProcessEnvironment(payload)
+			if c.commandOutput != nil && host.PayloadBool(payload, "stream") {
+				c.Program.registerCommandOutput(id, c.commandOutput)
+			}
+			if c.asyncHandle != nil {
+				c.asyncHandle.task.processSubmitted(id, c)
+			}
 		}
 		c.Engine.Submit(id)
 	}
@@ -472,13 +518,29 @@ func (c *Context) submitSource(name string) int64 {
 	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), host.RequestLoadSource, request)
 	request.Free(c.Run)
 	if id != 0 {
+		if c.Program.sourceRequests == nil {
+			c.Program.sourceRequests = make(map[string]bool)
+		}
+		c.Program.sourceRequests[strings.Clone(name)] = true
 		c.Engine.Submit(id)
 	}
 	return id
 }
 
 func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool {
-	if kind == host.RequestLoadSource {
+	if kind == host.RequestProcessStageIO {
+		stage := c.functionStage
+		if stage == nil || stage.node == nil || c.Engine == nil {
+			return false
+		}
+		owner := stage.node
+		if host.PayloadText(payload, host.FieldOp) == host.StageWatch {
+			owner = stage.watcher
+		}
+		return owner != nil && c.Engine.NodeID() == owner.ID &&
+			host.PayloadInt(payload, "process") == stage.graph && host.PayloadInt(payload, "stage") == int64(stage.index)
+	}
+	if kind == host.RequestLoadSource || kind == host.RequestProcessSignal {
 		return false
 	}
 	if kind == host.RequestRecordRead {
@@ -499,6 +561,12 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		capability = Write
 	case host.RequestProcess:
 		capability = Run
+		if parent := host.PayloadStageParent(payload); parent.Graph != 0 {
+			stage := c.functionStage
+			if stage == nil || stage.graph != parent.Graph || stage.index != parent.Index {
+				return false
+			}
+		}
 		input, output := host.PayloadText(payload, host.FieldInput), host.PayloadText(payload, host.FieldOutput)
 		if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) {
 			return false
@@ -506,6 +574,7 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		stages := host.PayloadStages(payload)
 		kinds := host.PayloadList(payload, "kinds")
 		setups := host.PayloadSetups(payload)
+		hasEmission, hasExecutable := false, false
 		for i := range stages {
 			if i < len(setups) {
 				input, output := host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput)
@@ -518,12 +587,17 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 			// executable to authorize. "each" carries a command template and does.
 			if i < len(kinds) {
 				if operator := host.LookupOperatorKind(kinds[i].Text); operator != nil && !operator.Argv {
+					hasEmission = hasEmission || operator.Kind == "emit" || operator.Kind == "callable"
 					continue
 				}
 			}
+			hasExecutable = true
 			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {
 				return false
 			}
+		}
+		if hasEmission && !hasExecutable {
+			return true
 		}
 	case host.RequestEnvironment:
 		capability = Env

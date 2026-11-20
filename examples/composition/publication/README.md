@@ -6,7 +6,7 @@ different aspects of the same work?
 | Source | Describes | Status |
 | --- | --- | --- |
 | `publication.km` | The publication's source and output sets | Runnable through `-f` |
-| `Makefile.kmk` | How the requested files are produced | Runnable |
+| `Makefile.km` | How the requested files are produced | Runnable |
 | `publish.kash` | Build, validate, and summarize with processes | Runnable with standalone Kash and `kame` on PATH |
 
 Commands run from this directory with `kame` on PATH, or the absolute path to
@@ -30,7 +30,7 @@ kame do inputs ./public/index.txt
 kame do plan
 kame
 kame do cat ./public/index.txt
-kame -f ./Makefile.kmk publication
+kame -f ./Makefile.km publication
 ```
 
 The rule file includes `publication.km` directly. Its `pages` definition is now
@@ -59,11 +59,9 @@ It invokes the build, validates it, then summarizes its files. Its definitions
 and argument expansions use the same expression language as `publication.km`.
 Its process pipe is different from the value pipe in the expression lessons.
 
-**Boundary:** `(include ./publication.km)` is native source composition in the
-rule program. The `kame` commands in `publish.kash` are subprocesses, each with
-its own invocation and engine. The current Kash specification does not define
-an include/import facility or an in-process rule invocation. This example does
-not imply that those subprocesses share a live reactive graph.
+`include ./publication.km` adds the publication definitions to the rule
+program. Each `kame` command in `publish.kash` starts a subprocess with its own
+engine. The subprocesses share the files in the working directory.
 
 Three views help explain the complementarity:
 

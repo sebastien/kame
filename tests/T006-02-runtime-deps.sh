@@ -16,7 +16,7 @@ test-step "a diamond executes its shared node once per root"
 mkdir -p deps
 (
 	cd deps
-	printf './shared :\n\techo run >> runs.log\n\ttouch @>\n./a : ./shared\n\ttouch @>\n./b : ./shared\n\ttouch @>\n./top : ./a ./b\n\ttouch @>\n' >Makefile.kmk
+	printf 'rule ./shared\n\techo run >> runs.log\n\ttouch $outputs.0\nrule ./a : ./shared\n\ttouch $outputs.0\nrule ./b : ./shared\n\ttouch $outputs.0\nrule ./top : ./a ./b\n\ttouch $outputs.0\n' >Makefile.km
 	cli_run -- ./top
 	cli_expect_status 0
 	cli_expect_file ./top
@@ -45,8 +45,8 @@ fixture_copy errors deps-fail
 test-step "a missing declared input fails before execution"
 (
 	cd deps
-	printf './missing.out : ./no-such-input.c\n\tcp @< @>\n' >Missing.kmk
-	cli_run -- -f Missing.kmk ./missing.out
+	printf 'rule ./missing.out : ./no-such-input.c\n\tcp $inputs.0 $outputs.0\n' >Missing.km
+	cli_run -- -f Missing.km ./missing.out
 	cli_expect_status 1
 	cli_expect_stderr_contains 'required input does not exist' 'no-such-input.c'
 	cli_expect_no_file ./missing.out
@@ -54,9 +54,10 @@ test-step "a missing declared input fails before execution"
 
 test-step "independent roots continue when another root fails"
 (
-	cd deps
-	printf './bad.out :\n\texit 4\n./good.out :\n\techo good > @>\n' >Mixed.kmk
-	cli_run -- -f Mixed.kmk ./bad.out ./good.out
+	mkdir mixed
+	cd mixed
+	printf 'rule ./bad.out\n\texit 4\nrule ./good.out\n\techo good > $outputs.0\n' >Makefile.km
+	cli_run -- ./bad.out ./good.out
 	cli_expect_status 1
 	cli_expect_file ./good.out "good
 "
@@ -65,9 +66,10 @@ test-step "independent roots continue when another root fails"
 
 test-step "sibling outputs of one declaration share one execution"
 (
-	cd deps
-	printf './a.o ./b.o :\n\techo run >> sib.log\n\ttouch @>*\n' >Siblings.kmk
-	cli_run -- -f Siblings.kmk ./a.o ./b.o
+	mkdir siblings
+	cd siblings
+	printf 'rule ./a.o ./b.o\n\techo run >> sib.log\n\ttouch $...outputs\n' >Makefile.km
+	cli_run -- ./a.o ./b.o
 	cli_expect_status 0
 	cli_expect_file ./a.o
 	cli_expect_file ./b.o
@@ -81,8 +83,8 @@ test-step "sibling outputs of one declaration share one execution"
 test-step "output parent directories are created before execution"
 (
 	cd deps
-	printf './nested/deep/out.txt :\n\tprintf built > @>\n' >Nested.kmk
-	cli_run -- -f Nested.kmk ./nested/deep/out.txt
+	printf 'rule ./nested/deep/out.txt\n\tprintf built > $outputs.0\n' >Nested.km
+	cli_run -- -f Nested.km ./nested/deep/out.txt
 	cli_expect_status 0
 	cli_expect_file ./nested/deep/out.txt 'built'
 )

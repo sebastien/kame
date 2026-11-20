@@ -24,7 +24,7 @@ func TestPathAtomBoundaries(t *testing.T) {
 	for _, test := range []struct{ atom, suffix string }{
 		{`./{name:*}.c`, `,next`},
 		{`//server/share`, `,next`},
-		{`./@{dir}/file`, `}`},
+		{`./${dir}/file`, `}`},
 		{`./[a-z]`, `]`},
 		{`./a\,b`, `,next`},
 		{`./{name:a,b}`, `,next`},
@@ -103,7 +103,7 @@ func TestActionAtomJSON(t *testing.T) {
 }
 
 func TestRawStringAtom(t *testing.T) {
-	const text = `'a\n @{name} @@ "quoted"
+	const text = `'a\n ${name} @ "quoted"
 second line'`
 	result := expr.Parse(nil, "literal.km", text)
 	defer result.Free()
@@ -128,17 +128,17 @@ second line'`
 
 func TestStringAtEscape(t *testing.T) {
 	for _, test := range []struct{ text, literal string }{
-		{`"a@@b"`, `a@b`},
+		{`"a@b"`, `a@b`},
 		{`"@(missing)"`, `@(missing)`},
-		{`"@@{name}"`, `@{name}`},
-		{`"@@@@{name}"`, `@@{name}`},
-		{`"@@@{name}"`, `@`},
+		{`"\${name}"`, `${name}`},
+		{`"@{name}"`, `@{name}`},
+		{`"@${name}"`, `@`},
 	} {
 		r := expr.Parse(nil, "strings.km", test.text)
 		if len(r.Diagnostics) != 0 || r.Expr == nil || len(r.Expr.Parts) == 0 || r.Expr.Parts[0].Expr != nil || r.Expr.Parts[0].Text != test.literal {
 			t.Errorf("%s: incorrect literal escape: %v", test.text, r.Diagnostics)
 		}
-		if test.text == `"@@@{name}"` && (r.Expr == nil || len(r.Expr.Parts) != 2 || r.Expr.Parts[1].Expr == nil) {
+		if test.text == `"@${name}"` && (r.Expr == nil || len(r.Expr.Parts) != 2 || r.Expr.Parts[1].Expr == nil) {
 			t.Error("literal @ swallowed the following interpolation")
 		}
 		formatted := expr.Format(nil, r.Expr)
@@ -196,7 +196,7 @@ func TestQuotedNamespaceSegment(t *testing.T) {
 		mem.FreeString(nil, formatted)
 		expr.Free(nil, clone)
 	}
-	for _, text := range []string{`lib/"@{value}"`, `lib/"name"/extra`} {
+	for _, text := range []string{`lib/"${value}"`, `lib/"name"/extra`} {
 		r := expr.Parse(nil, "references.km", text)
 		if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "PARSE_ERR" {
 			t.Errorf("%s: expected PARSE_ERR", text)
@@ -521,7 +521,7 @@ func TestCommaSeparatedLists(t *testing.T) {
 	defer expanded.Free()
 	layout := expr.Format(nil, expanded.Expr)
 	defer mem.FreeString(nil, layout)
-	if want := "[\n\t" + longString + ",\n\t2,\n]"; layout != want {
+	if want := "[\n\t" + longString + "\n\t2\n]"; layout != want {
 		t.Errorf("expanded format = %q, want %q", layout, want)
 	}
 	for _, invalid := range []string{"[,]", "[1,, 2]", "[1, ...]"} {
@@ -631,7 +631,7 @@ func TestOperatorLineContinuation(t *testing.T) {
 }
 
 func TestValueExpressionsInInterpolation(t *testing.T) {
-	for _, text := range []string{`"Hi @{upper name}"`, `@{root ?? ./fallback}/file`, `./@{if ready then name else "default"}.c`, `"@{{key: "value"}."key"}"`} {
+	for _, text := range []string{`"Hi ${upper name}"`, `${root ?? ./fallback}/file`, `./${if ready then name else "default"}.c`, `"${{key: "value"}."key"}"`} {
 		r := expr.Parse(nil, "interpolation.km", text)
 		if len(r.Diagnostics) != 0 || r.Expr == nil {
 			t.Errorf("%s: interpolation did not parse: %v", text, r.Diagnostics)
@@ -670,7 +670,7 @@ func TestPlaceholderSectionBoundaries(t *testing.T) {
 		{`(f _ __ ___)`, 3},
 		{`(f _1)`, 2},
 		{`(f _ (g __))`, 1},
-		{`(f "@{_}")`, 1},
+		{`(f "${_}")`, 1},
 	} {
 		r := expr.Parse(nil, "sections.km", test.text)
 		if len(r.Diagnostics) != 0 || r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != test.arity {
@@ -834,7 +834,7 @@ func TestListItemsUseFullValueExpressions(t *testing.T) {
 }
 
 func TestInterpolationDelimiterContinuesValueExpression(t *testing.T) {
-	input := "\"hello @{format-name\n first-name\n last-name}\""
+	input := "\"hello ${format-name\n first-name\n last-name}\""
 	r := expr.Parse(nil, "interpolation.km", input)
 	defer r.Free()
 	if len(r.Diagnostics) != 0 || len(r.Expr.Parts) != 2 {
@@ -844,8 +844,37 @@ func TestInterpolationDelimiterContinuesValueExpression(t *testing.T) {
 	if call.Kind != expr.Application || len(call.Items) != 3 {
 		t.Fatalf("interpolation split its application: %+v", call)
 	}
-	if got := expr.Format(nil, r.Expr); got != `"hello @{format-name first-name last-name}"` {
+	if got := expr.Format(nil, r.Expr); got != `"hello ${format-name first-name last-name}"` {
 		t.Errorf("unexpected formatted interpolation: %q", got)
+	}
+}
+
+func TestCollectionNewlineSeparators(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   string
+	}{
+		{"[f x\n  y, z\n]", "[f x, y, z]"},
+		{"[1 # first\r\n\r\n2\r\n]", "[1, # first\n\n2]"},
+		{"{name: f x\nactive: true\nlabel\n...extra}", "{name: f x, active: true, label, ...extra}"},
+		{"[f \\\n  x\n(g\n y)\n1 +\n2\n3\n  + 4]", "[f x, (g y), 1 + 2, 3 + 4]"},
+		{"{items:\n  [1\n   2]\nlabel: if check\n  then yes\n  else no\nextra}", "{items: [1, 2], label: if check then yes else no, extra}"},
+		{"[{x: 1\ny: 2}\n[3\n4]]", "[{x: 1, y: 2}, [3, 4]]"},
+	} {
+		r := expr.Parse(nil, "collections.km", tc.source)
+		if len(r.Diagnostics) != 0 || r.Expr == nil {
+			t.Errorf("%q: %v", tc.source, r.Diagnostics)
+		} else if got := expr.Compact(nil, r.Expr); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.source, got, tc.want)
+		}
+		r.Free()
+	}
+	for _, input := range []string{`{a: 1 b: 2}`, `{a b}`, "[1\n,, 2]", "{a\n,, b}"} {
+		r := expr.Parse(nil, "collections.km", input)
+		if len(r.Diagnostics) == 0 {
+			t.Errorf("%q: expected a parse error", input)
+		}
+		r.Free()
 	}
 }
 
@@ -859,7 +888,7 @@ func TestCollectionLayoutWrapsDelimitedApplications(t *testing.T) {
 	}
 	got := expr.Format(nil, r.Expr)
 	defer mem.FreeString(nil, got)
-	want := "[\n\tcall\n\t\t" + long + "\n\t\t2,\n\t{\n\t\tkey:\n\t\t\t" + long + ",\n\t\tshort: 1,\n\t},\n]"
+	want := "[\n\tcall \\\n\t\t" + long + " \\\n\t\t2\n\t{\n\t\tkey:\n\t\t\t" + long + ",\n\t\tshort: 1,\n\t}\n]"
 	if want != got {
 		t.Fatalf("layout = %q, want %q", got, want)
 	}
@@ -958,7 +987,7 @@ func TestUndelimitedApplicationExpandsFromTheRight(t *testing.T) {
 	}
 	formatted := expr.Format(nil, parsed.Expr)
 	defer mem.FreeString(nil, formatted)
-	want := "call " + word + " (left) [\n\ta,\n\tb,\n] end"
+	want := "call " + word + " (left) [\n\ta\n\tb\n] end"
 	if formatted != want {
 		t.Fatalf("formatted %q, want %q", formatted, want)
 	}
@@ -979,9 +1008,9 @@ func TestUndelimitedApplicationExpandsFromTheRight(t *testing.T) {
 
 func TestExpressionFormattingKeepsInternalTrivia(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
-		{"[1, # first  \r\n\r\n # second\r\n  2]", "[\n\t1, # first\n\n\t# second\n\t2,\n]"},
-		{"[1,\n  \n  2]", "[\n\t1,\n\n\t2,\n]"},
-		{"[\"literal # text\", 1 # last\n]", "[\n\t\"literal # text\",\n\t1, # last\n]"},
+		{"[1, # first  \r\n\r\n # second\r\n  2]", "[\n\t1 # first\n\n\t# second\n\t2\n]"},
+		{"[1,\n  \n  2]", "[\n\t1\n\n\t2\n]"},
+		{"[\"literal # text\", 1 # last\n]", "[\n\t\"literal # text\"\n\t1 # last\n]"},
 		{"a # decision\n  and b", "a # decision\n\tand b"},
 		{"match value\n  1 => red # one\n  # remaining\n  else => blue", "match value\n\t1    => red # one\n\t# remaining\n\telse => blue"},
 	} {

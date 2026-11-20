@@ -14,7 +14,7 @@ import (
 
 func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "task default {mode=debug} :\n")
+	parsed := script.ParseKameFile(a, "<test>", "task default {mode=debug} :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
@@ -38,7 +38,7 @@ func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
 
 func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default : ; {shell: kash}\n\t(out! mode)\n")
+	parsed := script.ParseKameFile(a, "config.km", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default : ; {shell: kash}\n\t(out! mode)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	overrides := []string{"mode=first", "mode=@(missing)=literal"}
@@ -93,11 +93,11 @@ func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(nop \"./mode=debug\") :\n\ttrue\n",
-		"generate outputs = [{kind: \"file\", target: \"./mode=debug\", inputs: [], order-only: [], recipe: [\"true\"]}]\n",
+		"rule ${nop \"./mode=debug\"}\n\ttrue\n",
+		"generate (rule ${nop \"./mode=debug\"})\n",
 	}
 	for i := range fixtures {
-		parsed := script.Parse(a, "assignment-target.kmk", fixtures[i])
+		parsed := script.ParseKameFile(a, "assignment-target.km", fixtures[i])
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"./mode=debug"}})
@@ -126,11 +126,11 @@ func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(str \"./mode=\" mode) :\n\ttrue\n",
-		"generate outputs = [{kind: \"file\", target: (str \"./mode=\" mode), inputs: [], order-only: [], recipe: [\"true\"]}]\n",
+		"rule ${str \"./mode=\" mode}\n\ttrue\n",
+		"generate (rule ${str \"./mode=\" mode})\n",
 	}
 	for i := range fixtures {
-		parsed := script.Parse(a, "parameter-generation.kmk", "mode = (read \"not-evaluated\")\n"+fixtures[i])
+		parsed := script.ParseKameFile(a, "parameter-generation.km", "mode = (read \"not-evaluated\")\n"+fixtures[i])
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		parameters := []string{"mode=debug", "./mode=debug"}
@@ -157,7 +157,7 @@ func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T)
 
 func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [{kind: \"file\", target: (str \"./mode=\" mode), inputs: [], order-only: [], recipe: [\"exit 99\"]}]\n")
+	parsed := script.ParseKameFile(a, "unknown-parameter.km", "mode = (read \"not-evaluated\")\ngenerate (rule ${str \"./mode=\" mode})\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"mode=debug", "./mode=debug", "unknown=value"}})
@@ -174,7 +174,7 @@ func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 
 func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "typed.kmk", "flag = (read ./never)\nmodules = []\nresult = {flag: flag, modules: modules}\n")
+	parsed := script.ParseKameFile(a, "typed.km", "flag = (read ./never)\nmodules = []\nresult = {flag: flag, modules: modules}\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -199,12 +199,12 @@ func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 
 func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "typed.kmk", "flag = true\ndef f x = x\n")
+	parsed := script.ParseKameFile(a, "typed.km", "flag = true\ndef f x = x\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"@{missing}\"", "unknown:=false", "f:=false"}
+	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"${missing}\"", "unknown:=false", "f:=false"}
 	for i := range invalid {
 		compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{invalid[i]}})
 		if compiled.Program != nil {
@@ -228,9 +228,9 @@ func TestDuplicateDefinitionsRetainDistinctIncludeOccurrences(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	first := []diagnostic.Frame{{Kind: "include", Label: "shared.kmk", Source: "main.kmk", Span: diagnostic.Span{Start: 0, End: 22}}}
-	second := []diagnostic.Frame{{Kind: "include", Label: "shared.kmk", Source: "main.kmk", Span: diagnostic.Span{Start: 23, End: 45}}}
-	sources := []program.CompileSource{{Name: "shared.kmk", Text: "SETTING = 1\n", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Offset: 30, Includes: second}}
+	first := []diagnostic.Frame{{Kind: "include", Label: "shared.km", Source: "main.km", Span: diagnostic.Span{Start: 0, End: 22}}}
+	second := []diagnostic.Frame{{Kind: "include", Label: "shared.km", Source: "main.km", Span: diagnostic.Span{Start: 23, End: 45}}}
+	sources := []program.CompileSource{{Name: "shared.km", Text: "SETTING = 1\n", Offset: 10, Includes: first}, {Name: "shared.km", Text: "SETTING = 2\n", Offset: 30, Includes: second}}
 	compiled := program.CompileMany(a, sources, registry, program.Options{})
 	if compiled.Program != nil {
 		t.Error("duplicate definitions compiled")
@@ -242,14 +242,14 @@ func TestDuplicateDefinitionsRetainDistinctIncludeOccurrences(t *testing.T) {
 		return
 	}
 	d := compiled.Diagnostics[0]
-	if d.Code != "DEF_INVALID" || d.Message != "duplicate definition: SETTING" || d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Source != "shared.kmk" || d.Related[0].Span.Start != 10 {
+	if d.Code != "DEF_INVALID" || d.Message != "duplicate definition: SETTING" || d.Source != "shared.km" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Source != "shared.km" || d.Related[0].Span.Start != 10 {
 		t.Error("primary and original declarations lost authored locations")
 	}
 	if len(d.Frames) != 2 || d.Frames[0].Span.Start != 23 || d.Frames[1].Span.Start != 0 || len(d.Tips) == 0 {
 		t.Error("include occurrences or recovery lost after combined parser disposal")
 	}
 	compiled.Free(a)
-	fragments := []program.Fragment{{Name: "shared.kmk", Text: "SETTING = 1\n", Lang: "km", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Lang: "km", Offset: 30, Includes: second}}
+	fragments := []program.Fragment{{Name: "shared.km", Text: "SETTING = 1\n", Lang: "km", Offset: 10, Includes: first}, {Name: "shared.km", Text: "SETTING = 2\n", Lang: "km", Offset: 30, Includes: second}}
 	session := program.CompileSession(a, fragments, registry, program.Options{})
 	if session.Session != nil {
 		t.Error("duplicate session compiled")
@@ -261,7 +261,7 @@ func TestDuplicateDefinitionsRetainDistinctIncludeOccurrences(t *testing.T) {
 		return
 	}
 	d = session.Diagnostics[0]
-	if d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Span.Start != 10 || len(d.Frames) != 2 {
+	if d.Source != "shared.km" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Span.Start != 10 || len(d.Frames) != 2 {
 		t.Error("session did not map every located diagnostic fact")
 	}
 	session.Free(a)

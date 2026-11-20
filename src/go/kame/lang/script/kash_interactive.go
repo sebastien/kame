@@ -8,6 +8,16 @@ import (
 
 const emptyKashBody = "empty Kash control body"
 
+// ParseKashEntry parses syntax before a session validates lexical assignments.
+func ParseKashEntry(a mem.Allocator, name, text string) *Script {
+	return parseKashText(a, name, text, false, false)
+}
+
+// ParseKashSessionText also recognizes declarations handled by the session driver.
+func ParseKashSessionText(a mem.Allocator, name, text string) *Script {
+	return parseKashText(a, name, text, false, true)
+}
+
 // KashInput classifies interactive Kash text before it is executed.
 type KashInput int
 
@@ -28,7 +38,7 @@ func ClassifyKashInput(text string) KashInput {
 		return KashComplete
 	}
 	// A trailing newline makes an unclosed construct fail at the end.
-	s := ParseKash(mem.System, "<input>", text+"\n")
+	s := ParseKashSessionText(mem.System, "<input>", text+"\n")
 	defer s.Free()
 	end := len(strings.TrimRight(text, " \t\r\n"))
 	result := KashComplete

@@ -66,7 +66,7 @@ the nested scope finishes its work before the enclosing cleanup removes staging:
 ```kash
 let workspace = line $(mktemp -d)
 defer rm -rf $workspace
-with :cwd $workspace
+with cwd: $workspace
 	generator > ./output 2> ./errors
 	verifier ./output
 ```
@@ -297,7 +297,7 @@ their own local loops and function returns.
 
 ```kash
 include ./lib/checks.kash
-let config = @{module/dir}/defaults.json
+let config = ${module/dir}/defaults.json
 check-config $config
 ```
 
@@ -340,17 +340,19 @@ create a script loader.
 
 ```kash
 let overrides = {MODE: "release"}
-with :cwd ./project :env $overrides
+with cwd: ./project env: $overrides
 	configure
 	compile
 	verify
 ```
 
 `with` introduces a nonempty indented Kash body and may have no setup pairs.
-Its header occupies its own line. Accepted pairs are `:cwd VALUE` and `:env VALUE`,
+Its header occupies its own line. Accepted pairs are `cwd: VALUE` and `env: VALUE`,
 each at most once, in either order. Reuse scalar cwd composition and typed
 environment-record grammar from stage setup; no second value parser is added.
-Unknown or duplicate setup keys are errors. Block `:timeout` and shorthand
+An unquoted bare word such as `repo` is a literal directory name. Use
+`with cwd: $repo` to take the directory from the `repo` binding.
+Unknown or duplicate setup keys are errors. Block `timeout:` and shorthand
 arbitrary environment keys are not provided. Unit-wide changes use
 `set env/NAME = VALUE` and `cd` (`055` §5.3); `with` confines its overlay to the
 block.
@@ -361,9 +363,9 @@ body. Resolve relative cwd from enclosing cwd; merge the validated environment
 record over the inherited child environment. Only then establish the child scope.
 
 Direct body work and calls inherit this context; stage setup may override it.
-A relative stage `:cwd` override resolves against the enclosing execution scope's
+A relative stage `cwd:` override resolves against the enclosing execution scope's
 effective cwd, not the boundary's original directory. With boundary cwd `/repo`,
-`with :cwd ./project` containing `:cwd ./build pwd` runs `pwd` in
+`with cwd: ./project` containing `cwd: ./build pwd` runs `pwd` in
 `/repo/project/build`.
 
 The overlay applies to processes started within the block; it does not write the
@@ -456,10 +458,11 @@ spooling, per-record process wrapper, or implicit parallelism is introduced.
 ## 9. Selected ordinary exit acceptance
 
 ```kash
-:accept-exit [1] grep needle ./input
+accept-exit: [1] grep needle ./input
 ```
 
-`:accept-exit VALUE` is typed stage setup, also available to `run!`; it is not an
+`accept-exit: VALUE` is typed Kash stage setup. `run!` accepts the equivalent
+`:accept-exit VALUE` symbol and value pair. This setting is not an
 environment override. VALUE is one list expression or standalone reference to a
 list of distinct integers from 1 through 255. Empty lists add no accepted status;
 zero is always successful. Invalid kinds, duplicates, and out-of-range values

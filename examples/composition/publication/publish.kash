@@ -1,10 +1,8 @@
-# Requires standalone Kash and kame on PATH.
-# This is an explicit subprocess boundary, not a shared in-process build graph.
-kame -f ./Makefile.kmk
-kame -f ./Makefile.kmk check
+# Run the project's build and verification as subprocesses.
+kame
+kame check
 
-# Lazy discovery is first demanded after the build has completed.
-pages = ./public/*.txt
+let pages = files ./public/*.txt
 echo "Publication files:" (count pages)
-wc -l $pages
+wc -l $...pages
 cat ./public/index.txt | sort | uniq

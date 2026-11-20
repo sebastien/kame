@@ -4,7 +4,7 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-11 Kash terminal exit acceptance"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 cli_build
 work="$TMPDIR/accept"
 mkdir -p "$work"
@@ -12,7 +12,7 @@ printf '%s\n' '#!/bin/sh' 'kill -TERM $$' >"$work/signal"
 chmod +x "$work/signal"
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_cli"); fi
 	check() {
 		local expected="$1"; shift
 		local status=0
@@ -36,13 +36,13 @@ for backend in native wasm; do
 	check 'after' do run -l kash -c "$work/signal?; printf after"
 	check 'literal?' do run -l kash -c 'printf "%s" "literal?"'
 	check 'literal?' do run -l kash -c 'printf "%s" literal\?'
-	check 'name?' do run -l kash -c 'name? = "name?"; printf "%s" $name?'
+	check 'name?' do run -l kash -c 'def name? = "name?"; printf "%s" $name?'
 	check '"nested"' do run --allow-run -l expr -c '$(printf "%s" $(/bin/sh -c "printf nested; exit 7"?))'
 	reject RECIPE_FAIL do run -l kash -c '/bin/sh -c "exit 7"'
 	reject TOOL_MISSING do run -l kash -c 'kame-nonexistent-accept-test?'
-	reject RECIPE_TIMEOUT do run -l kash -c ':timeout 0.05 sleep 30?'
+	reject RECIPE_TIMEOUT do run -l kash -c 'timeout: 0.05 sleep 30?'
 	reject CAP_DENIED do run -c '$(printf denied?)'
-	reject EXPR_INVALID do run -l kash -c 'printf (nop [bad: 1])?'
+	reject EXPR_INVALID do run -l kash -c 'printf (nop {bad: 1})?'
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(printf too-long?)'
 	reject CAPTURE_ENCODING do run --allow-run -l expr -c '$(printf "\\377"?)'
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(/bin/sh -c "printf too-long; exit 7"?)'
@@ -55,7 +55,7 @@ test-step "acceptance AST and canonical formatting preserve operator binding"
 printf '%s\n' 'printf "literal?" | cat?; printf $(false?)' >"$work/source.kash"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" -l kash "$work/source.kash" >"$work/native"
-	node "$CLI_ROOT/dist/kame.js" do "$operation" -l kash "$work/source.kash" >"$work/wasm"
+	node "$wasm_cli" do "$operation" -l kash "$work/source.kash" >"$work/wasm"
 	if cmp -s "$work/native" "$work/wasm"; then test-ok "$operation acceptance parity"; else test-fail "$operation acceptance parity"; fi
 done
 "$CLI_BIN" do fmt -l kash "$work/native" >"$work/again"

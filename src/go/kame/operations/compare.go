@@ -16,11 +16,7 @@ func opEq(c *eval.Context, s any, v []core.Value) eval.Result {
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: eq}}
 }
 
-func opIs(c *eval.Context, s any, v []core.Value) eval.Result {
-	return opEq(c, s, v)
-}
-
-func opHas(c *eval.Context, s any, v []core.Value) eval.Result {
+func opIn(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[1].Kind != core.List {
 		return invalidArgument(c, v, 1, "list")
@@ -95,7 +91,7 @@ func opLte(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 
 func equalityFailure(c *eval.Context, left core.Value, right core.Value) eval.Result {
-	return c.InvalidOperation("cannot compare equality of " + core.KindName(left.Kind) + " and " + core.KindName(right.Kind) + "; expects nil, bool, number, string, bytes, or recursively comparable lists/records (unique keys, nesting below 256); opaque values are unsupported")
+	return c.InvalidOperation("cannot compare equality of " + core.KindName(left.Kind) + " and " + core.KindName(right.Kind) + "; expects nil, bool, number, string, symbol, bytes, path, or recursively comparable lists/records (unique keys, nesting below 256)")
 }
 
 // Validate both complete operands before comparison: unequal shapes or earlier
@@ -114,7 +110,7 @@ func equalitySupported(value core.Value, depth int) bool {
 		return false
 	}
 	switch value.Kind {
-	case core.Nil, core.Bool, core.Int, core.Float, core.String, core.Bytes:
+	case core.Nil, core.Bool, core.Int, core.Float, core.String, core.Symbol, core.Path, core.Bytes:
 		return true
 	case core.List:
 		for i := range value.List {
@@ -158,7 +154,7 @@ func equalValues(left core.Value, right core.Value) bool {
 		return left.Int == right.Int
 	case core.Float:
 		return left.Float == right.Float
-	case core.String:
+	case core.String, core.Symbol, core.Path:
 		return left.Text == right.Text
 	case core.Bytes:
 		if len(left.Bytes) != len(right.Bytes) {

@@ -187,7 +187,7 @@ returns a lazy `Stream` value instead of running the body:
 
 ```kash
 def changed-sources root
-	for path in files @{root}/**/*.c
+	for path in files ${root}/**/*.c
 		if $?(git diff --quiet -- $path).ok
 			continue
 		yield path
@@ -212,8 +212,10 @@ allocated so that it outlives every wait.
   consuming it twice, or passing it where a materialized value is required, is
   `EXPR_INVALID`. No operation materializes a stream into a list implicitly; an
   operation that does so explicitly publishes the result as one batch.
-- **States.** While waiting for its consumer to pull, the invocation's state is
-  `:suspended`. It becomes `:completed` after `EndStream`, `:failed` after
+  `collect! STREAM` returns all elements as one list. The bounded form
+  `collect! LIMIT STREAM` closes the source immediately on reaching the limit.
+- **States.** While waiting for its consumer to pull, the invocation's internal
+  state is `:suspended`. It becomes `:completed` after `EndStream`, `:failed` after
   `Failed(diagnostic)`, and `:cancelled` when the consumer stops early.
 - **Early stop.** When a consumer stops before `EndStream` (`break`, an early
   return, a failure in the consumer, or a closed downstream stage), the engine

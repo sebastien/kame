@@ -61,7 +61,7 @@ func (p *Program) validateParameters(parameters []string) diagnostic.Diagnostic 
 func (p *Program) configureDefinitions(defines, environment []string) diagnostic.Diagnostic {
 	for i := range defines {
 		override := definition.ParseOverride(defines[i])
-		if override.Name == "" || p.Eval.Definition(override.Name) == nil {
+		if override.Name == "" {
 			option := "--define"
 			if override.Typed {
 				option = "--set"
@@ -80,36 +80,43 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 	p.Eval.SetDefinitionOverrides(defines)
 	for i := range p.Eval.Definitions {
 		name := p.Eval.Definitions[i].Name
-		prefix := "KAME_" + name + "="
-		value, provided, typed := "", false, false
-		for j := range environment {
-			if strings.HasPrefix(environment[j], prefix) {
-				value, provided = environment[j][len(prefix):], true
-			}
-		}
-		prefix = name + "="
-		for j := range defines {
-			override := definition.ParseOverride(defines[j])
-			if override.Name == name {
-				value, provided, typed = override.Text, true, override.Typed
-			}
-		}
-		if !provided {
+		override := definition.SelectOverride(name, defines, environment)
+		if override.Name == "" {
 			continue
 		}
 		installed := false
-		if typed {
-			installed = p.Eval.OverrideDefinitionValue(name, value)
+		if override.Typed {
+			installed = p.Eval.OverrideDefinitionValue(name, override.Text)
 		} else {
-			installed = p.Eval.OverrideDefinition(name, value)
+			installed = p.Eval.OverrideDefinition(name, override.Text)
 		}
 		if !installed {
 			return failure(p.Alloc, "DEF_INVALID", "cannot override an active definition")
 		}
-		if typed {
-			prefix = name + ":="
+		p.recordDefinitionOverride(override)
+	}
+	return diagnostic.Diagnostic{}
+}
+
+func (p *Program) recordDefinitionOverride(override definition.Override) {
+	separator := "="
+	if override.Typed {
+		separator = ":="
+	}
+	p.Configuration = append(p.Configuration, cloneText(p.Alloc, override.Name+separator+override.Text))
+}
+
+// An explicit override can name a value introduced by a selected include.
+func (p *Program) validateDefinitionOverrides(defines []string) diagnostic.Diagnostic {
+	for _, value := range defines {
+		override := definition.ParseOverride(value)
+		if !p.Eval.HasConfigurableDefinition(override.Name) {
+			option := "--define"
+			if override.Typed {
+				option = "--set"
+			}
+			return failure(p.Alloc, "DEF_INVALID", option+" must name a declared value definition")
 		}
-		p.Configuration = append(p.Configuration, cloneText(p.Alloc, prefix+value))
 	}
 	return diagnostic.Diagnostic{}
 }

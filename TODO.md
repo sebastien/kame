@@ -6,41 +6,30 @@ Completed work and historical audit results are not retained here.
 
 ## Release
 
-- [ ] Publish the first actual signed GitHub release. Staged-release checks do
-  not complete publication. Attach only `kame.com`, `kame.js`, `kame.wasm`,
-  `VERSION`, `PROVENANCE.json`, `SHA256SUMS`, and `SHA256SUMS.sig`, as required by
-  [distribution](docs/spec/015-distribution.md). Keep launcher/bootstrap helpers
-  and package definitions in source; native CI outputs are development artifacts,
-  not release attachments. Verify installation and execution
-  from the published assets, including offline reuse and integrity rejection.
-- [ ] Before release, rerun native, leak and WASM gates at a stable revision:
-  `CC=clang CFLAGS=-O0 make test`, `CC=clang CFLAGS=-O0 make test-leaks`, and
-  `CC=clang CFLAGS=-O0 make test-wasm`. Verify sanitizer instrumentation survives
-  harness rebuilds and rerun artifact/build-mode checks without changing Git HEAD.
-   Validate the exact release tree; development-tree passes do not establish
-   published-asset conformance. See [test requirements](docs/spec/013-tests.md).
+- [ ] Publish the signed GitHub release with the flat asset set listed in
+  [distribution](docs/spec/015-distribution.md#release-artifacts). Verify setup
+  and execution from the published assets, including offline reuse and rejection
+  of assets that fail verification.
+- [ ] Run `make test-all` and `make test-wasm` at the stable release revision.
+  Verify Go pointer-check instrumentation and per-artifact build modes. See
+  [test requirements](docs/spec/013-tests.md).
 
 ## Remaining repository-review remediation
 
 - [ ] Validate every element of `sorted`/`unique` before comparing: unsupported
   singleton inputs such as `(sorted [[1]])` and `(unique [[1]])` currently pass.
   Preserve the scalar-only [library contract](docs/skills/kame/ref/library.md).
-- [ ] Settle the [streaming boundaries](docs/spec/042-kash-streaming.md#12-unresolved-boundaries-and-extensions)
-  for zero-terminal multi-branch capture and whitespace-separated channel stdin.
-  Preserve the existing empty-string result for redirected linear capture.
+- [ ] Decide whether whitespace-separated `command < &name` should select
+  channel stdin. See the remaining streaming extensions in
+  [spec 042](docs/spec/042-kash-streaming.md#12-reserved-presentation-ports-and-remaining-extensions).
 - [ ] Run Windows pipeline stream-error and taskkill/grace cleanup conformance
   on a real host. Natural watch invalidation cancellation is covered on Linux.
 - [ ] Validate Windows direct-argv PATH/PATHEXT, cross-drive cwd and resolved-tool
   handoffs on a real host; policy/native Linux/cross-link tests do not establish
   Windows runtime acceptance. Repair launch-time job assignment and verify
   Windows directory durability.
-  Containment must cover both graph launch and exec replacement: Cosmopolitan
-  4.0.2 reparents replacements to Kame, so assigning the blocked fork child is
-  insufficient. Validate a supervisor or supported job-at-creation bridge on Windows.
-  Verify non-consuming exit
-  observation for macOS/BSD APE hosts before enabling the new descendant-retirement
-  path there; the pinned Cosmopolitan BSD waitid dispatch is unsupported, so those
-  APE hosts retain legacy observation rather than losing process execution.
+  Validate descendant containment at launch, including graph stages and exec
+  replacement, on a real Windows host.
 - [ ] Decide the initial bootstrap trust model before changing it (explicitly
   deferred).
 

@@ -4,6 +4,7 @@ import (
 	"io"
 	"kame/cli"
 	"kame/core"
+	"kame/host"
 	"kame/host/posix"
 	"kame/internal/mem"
 	"kame/program"
@@ -16,6 +17,7 @@ import (
 type watchResource struct {
 	Key        core.ResourceKey
 	Stamp      string
+	Directory  string
 	Probe      string
 	Metadata   bool
 	Source     bool
@@ -28,6 +30,7 @@ func freeWatchResources(items []watchResource) {
 		items[i].Key.Free(mem.System)
 		mem.FreeString(mem.System, items[i].Stamp)
 		mem.FreeString(mem.System, items[i].Probe)
+		mem.FreeString(mem.System, items[i].Directory)
 	}
 	mem.FreeSlice(nil, items)
 }
@@ -76,6 +79,11 @@ func watchProbe(p *program.Program, key core.ResourceKey) string {
 }
 
 func scanWatchStamp(p *program.Program, item *watchResource) string {
+	if isDeclarationWatchResource(item.Key.Kind) {
+		h := posix.New(mem.System)
+		defer h.Free()
+		return program.DeclarationFingerprint(mem.System, h, item.Directory, item.Key)
+	}
 	if p == nil || item.Source || item.Key.Kind != core.ResourceFile {
 		return watchStamp(p, item.Key, item.Source)
 	}
@@ -96,6 +104,10 @@ func scanWatchStamp(p *program.Program, item *watchResource) string {
 	mem.FreeString(mem.System, probe)
 	mem.FreeString(mem.System, after)
 	return stamp
+}
+
+func isDeclarationWatchResource(kind core.ResourceKind) bool {
+	return kind == core.ResourceDiscovery || kind == core.ResourceDeclarationSource
 }
 
 func addWatchResource(items *[]watchResource, p *program.Program, key core.ResourceKey, source bool) {
@@ -123,7 +135,8 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 
 func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) {
 	for i := range *items {
-		(*items)[i].Seen = (*items)[i].Source
+		item := &(*items)[i]
+		item.Seen = item.Source || (session.Status != 0 && isDeclarationWatchResource(item.Key.Kind))
 	}
 	// Keep failed included sources until a successful compile replaces them.
 	if session.Status == 0 {
@@ -150,6 +163,16 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 		}
 	}
+	for _, discovery := range session.Discoveries {
+		known := slices.IndexFunc(*items, func(item watchResource) bool {
+			return item.Key.Kind == discovery.Key.Kind && item.Key.Name == discovery.Key.Name && item.Directory == discovery.Directory
+		})
+		if known >= 0 {
+			(*items)[known].Seen = true
+		} else {
+			*items = append(*items, watchResource{Key: discovery.Key.Clone(mem.System), Directory: cloneCommandText(discovery.Directory), Stamp: cloneCommandText(discovery.Fingerprint), Seen: true})
+		}
+	}
 	if session.Program != nil {
 		resources := session.Program.FilesystemResources()
 		for i := range resources {
@@ -166,6 +189,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 			(*items)[i].Key.Free(mem.System)
 			mem.FreeString(mem.System, (*items)[i].Stamp)
 			mem.FreeString(mem.System, (*items)[i].Probe)
+			mem.FreeString(mem.System, (*items)[i].Directory)
 		}
 	}
 	mem.FreeSlice(nil, *items)
@@ -210,12 +234,23 @@ func syncWatchNotifications(w *posix.Watcher, p *program.Program, items []watchR
 	complete := true
 	for i := range items {
 		name := items[i].Key.Name
+		glob := items[i].Key.Kind == core.ResourceGlob || items[i].Key.Kind == core.ResourceDiscovery
+		if items[i].Key.Kind == core.ResourceDiscovery {
+			name, _ = host.DeclarationDiscovery(name)
+		}
+		if glob {
+			name = host.DiscoveryScan(name)
+		}
 		owned := false
-		if p != nil && !items[i].Source && !core.IsResourceURIName(name) && !path.IsAbs(name) {
-			name = path.Join(p.Options.Directory, name)
+		directory := items[i].Directory
+		if directory == "" && p != nil && !items[i].Source {
+			directory = p.Options.Directory
+		}
+		if directory != "" && !core.IsResourceURIName(name) && !path.IsAbs(name) {
+			name = path.Join(directory, name)
 			owned = true
 		}
-		if !h.AddWatch(w, name, items[i].Key.Kind == core.ResourceGlob) {
+		if !h.AddWatch(w, name, glob) {
 			complete = false
 		}
 		if owned {
@@ -369,10 +404,10 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 					session.Program.NoteProductionInputChange(resources[i].Key)
 					clearDashboard(errOut)
 					if !options.JSON {
-						io.WriteString(errOut, "info watch: change queued: "+resources[i].Key.Name+"\n")
+						io.WriteString(errOut, "info watch: change queued: "+host.DiscoveryPattern(resources[i].Key.Name)+"\n")
 					}
 					pending = append(pending, resources[i].Key.Clone(mem.System))
-					recompile = recompile || resources[i].Source
+					recompile = recompile || resources[i].Source || isDeclarationWatchResource(resources[i].Key.Kind)
 					mem.FreeString(mem.System, resources[i].Stamp)
 					resources[i].Stamp = stamp
 					lastChange = now

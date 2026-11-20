@@ -1,126 +1,170 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/050-kash-libraries.md — authored Kash module values
+# Spec: docs/spec/050-kash-libraries.md — imported Kash modules
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
-test-start "T050-02 Kash module values"
+test-start "T050-02 Kash modules"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
-	mkdir -p "$work/lib"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
-	cat >"$work/lib/helper.kmk" <<'KASH'
-def helper
+	mkdir -p "$work/lib" "$work/caller"
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "${KAME_TEST_WASM_WRAPPER:-$CLI_ROOT/dist/kame.js}"); fi
+
+	run_module() {
+		"${runner[@]}" do run -C "$work" "$@" >"$work/log" 2>"$work/err"
+	}
+
+	expect_error() {
+		local code="$1" message="$2" status=0
+		shift 2
+		run_module "$@" || status=$?
+		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && grep -Fq "$message" "$work/err"; then
+			test-ok "$backend $code includes $message"
+		else
+			test-fail "$backend expected $code mentioning $message, status=$status: $(cat "$work/err")"
+		fi
+	}
+
+	cat >"$work/lib/helper.kash" <<'KASH'
+def helper ()
 	(write! ./helper-result "reached")
 KASH
 	cat >"$work/lib/main.kash" <<'KASH'
-(include ./helper.kmk)
-value = "first"
-unused = (fail! "must stay lazy")
-def build
-	(helper)
-	(write! ./origin (source-dir))
+include ./helper.kash
+def value = "first"
+def unused = fail! "must stay lazy"
+def build ()
+	helper
+	(write! ./origin (str module/dir))
+export value, build
+export value
 KASH
 	cat >"$work/Kamefile" <<'KAME'
-SHELL = kash
-module = (kash ./lib/main.kash)
-./out : ./input
-	(write! ./out (get "value" module))
+import ./lib/main as lib
+from ./lib/main.kash import build as selected
+rule ./out : ./input = lib/value
+rule ./with-helper : ./input
+	lib/build
+	out! ok > $outputs.0
+rule ./with-selected : ./input
+	selected
+	out! selected > $outputs.0
 KAME
 	printf input >"$work/input"
-	"${runner[@]}" -C "$work" -n ./out >"$work/log" 2>"$work/err"
-	if [ ! -e "$work/out" ]; then test-ok "$backend dry-run does not execute module bodies"; else test-fail "$backend dry-run executed module body"; fi
+	"${runner[@]}" -C "$work" -n ./out ./with-helper ./with-selected >"$work/log" 2>"$work/err"
+	if [ ! -e "$work/out" ] && [ ! -e "$work/helper-result" ]; then test-ok "$backend dry-run leaves module values and commands unexecuted"; else test-fail "$backend dry-run executed the module"; fi
 	"${runner[@]}" -C "$work" ./out >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/out")" = first ]; then test-ok "$backend get demands only selected field"; else test-fail "$backend module get"; fi
+	if [ "$(cat "$work/out")" = first ]; then test-ok "$backend only the reached export is demanded"; else test-fail "$backend selected module export"; fi
 	before=$(stat -c %y "$work/out")
 	"${runner[@]}" -C "$work" ./out >"$work/log" 2>"$work/err"
 	if [ "$(stat -c %y "$work/out")" = "$before" ]; then test-ok "$backend unchanged module remains fresh"; else test-fail "$backend unchanged module rebuilt"; fi
-	printf 'def helper\n\t(write! ./helper-result "changed")\n' >"$work/lib/helper.kmk"
+	printf 'def helper ()\n\t(write! ./helper-result "changed")\n' >"$work/lib/helper.kash"
 	"${runner[@]}" -C "$work" ./out >"$work/log" 2>"$work/err"
 	if [ "$(stat -c %y "$work/out")" = "$before" ]; then test-ok "$backend unreached helper does not rebuild"; else test-fail "$backend unreached helper rebuilt"; fi
-	cat >"$work/with-helper.kmk" <<'KAME'
-SHELL = kash
-module = (kash ./lib/main.kash)
-./with-helper : ./input
-	(module.build)
-	(write! ./with-helper "ok")
-KAME
-	"${runner[@]}" -C "$work" -f with-helper.kmk -n ./with-helper >"$work/log" 2>"$work/err"
-	if [ ! -e "$work/helper-result" ] && [ ! -e "$work/with-helper" ]; then test-ok "$backend dry-run skips demanded function body"; else test-fail "$backend dry-run ran function body"; fi
-	"${runner[@]}" -C "$work" -f with-helper.kmk ./with-helper >"$work/log" 2>"$work/err"
+
+	"${runner[@]}" -C "$work" ./with-helper ./with-selected >"$work/log" 2>"$work/err"
+	if [ "$(cat "$work/helper-result")" = changed ] && [ "$(cat "$work/with-helper")" = ok ] && [ "$(cat "$work/with-selected")" = selected ]; then
+		test-ok "$backend qualified and selective imports call the same exported function"
+	else
+		test-fail "$backend qualified or selective import"
+	fi
 	before=$(stat -c %y "$work/with-helper")
-	"${runner[@]}" -C "$work" -f with-helper.kmk ./with-helper >"$work/log" 2>"$work/err"
+	"${runner[@]}" -C "$work" ./with-helper >"$work/log" 2>"$work/err"
 	if [ "$(stat -c %y "$work/with-helper")" = "$before" ]; then test-ok "$backend reached helper remains fresh"; else test-fail "$backend reached helper rebuilt"; fi
-	printf 'def helper\n\t(write! ./helper-result "new bytes")\n' >"$work/lib/helper.kmk"
-	"${runner[@]}" -C "$work" -f with-helper.kmk ./with-helper >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/helper-result")" = 'new bytes' ]; then test-ok "$backend reached helper change invalidates"; else test-fail "$backend reached helper stayed fresh"; fi
-	cat >"$work/call.km" <<'KAME'
-module = (kash ./lib/main.kash)
-(module.build)
-KAME
-	status=0
-	"${runner[@]}" do run -C "$work" ./call.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err"; then test-ok "$backend source loading does not grant writes"; else test-fail "$backend module widened grants"; fi
-	"${runner[@]}" do run -C "$work" --allow-write=. ./call.km >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/helper-result")" = 'new bytes' ] && [ "$(cat "$work/origin")" = "$work/lib" ]; then test-ok "$backend nested helper and source origin"; else test-fail "$backend nested helper or origin"; fi
-	mkdir -p "$work/caller"
-	printf 'module = (kash ./main.kash)\n((get "build" module))\n' >"$work/lib/relative.km"
-	"${runner[@]}" do run -C "$work/caller" --allow-write=. "$work/lib/relative.km" >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/caller/helper-result")" = 'new bytes' ] && [ "$(cat "$work/caller/origin")" = "$work/lib" ]; then test-ok "$backend get calls field relative to authored source across cwd"; else test-fail "$backend get function or source-relative load"; fi
-	printf '(kash ./lib/main.txt)\n' >"$work/malformed.km"
-	status=0
-	"${runner[@]}" do run -C "$work" ./malformed.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend malformed module path rejected"; else test-fail "$backend malformed module path accepted"; fi
-	cat >"$work/missing.km" <<'KAME'
-module = (kash ./lib/main.kash)
-(out! (get "helper" "absent" module))
-KAME
-	"${runner[@]}" do run -C "$work" ./missing.km >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/log")" = absent ]; then test-ok "$backend nested helpers are not fields"; else test-fail "$backend helper exposed as field"; fi
-	printf 'module = (kash ./lib/main.kash)\n(out! module.helper)\n' >"$work/field.km"
-	status=0
-	"${runner[@]}" do run -C "$work" ./field.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q REF_MISSING "$work/err"; then test-ok "$backend missing dotted field"; else test-fail "$backend missing dotted field accepted"; fi
-	printf 'module = (kash ./lib/main.kash)\n(out! (set "value" "x" module))\n' >"$work/record.km"
-	status=0
-	"${runner[@]}" do run -C "$work" ./record.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend module is not a record"; else test-fail "$backend module treated as record"; fi
-	printf 'value = "duplicate"\n' >"$work/lib/helper.kmk"
-	status=0
-	"${runner[@]}" do run -C "$work" ./missing.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q DEF_INVALID "$work/err"; then test-ok "$backend duplicate definition rejected"; else test-fail "$backend duplicate module definition accepted"; fi
-	printf 'def helper\n\t(write! ./helper-result "new bytes")\n' >"$work/lib/helper.kmk"
-	touch -r "$work/lib/main.kash" "$work/old-mtime"
-	printf 'value = "second"\n' >"$work/lib/main.kash"
-	touch -r "$work/old-mtime" "$work/lib/main.kash"
+	stamp=$(stat -c %y "$work/lib/helper.kash")
+	printf 'def helper ()\n\t(write! ./helper-result "new bytes")\n' >"$work/lib/helper.kash"
+	touch -d "$stamp" "$work/lib/helper.kash"
+	"${runner[@]}" -C "$work" ./with-helper >"$work/log" 2>"$work/err"
+	if [ "$(cat "$work/helper-result")" = 'new bytes' ]; then test-ok "$backend changed helper bytes invalidate with preserved mtime"; else test-fail "$backend reached helper stayed fresh"; fi
+
+	printf 'from ./lib/main.kash import build\ndef call-build () = build ()\n' >"$work/call.km"
+	expect_error CAP_DENIED write ./call.km -c '(call-build ())'
+	run_module --allow-write=. ./call.km -c '(call-build ())'
+	if [ "$(cat "$work/origin")" = "$work/lib" ]; then test-ok "$backend module loading preserves grants and lexical origin"; else test-fail "$backend module lexical origin"; fi
+	printf 'import ./main.kash as lib\ndef relative-build () = lib/build ()\n' >"$work/lib/relative.km"
+	"${runner[@]}" do run -C "$work/caller" --allow-write=. "$work/lib/relative.km" -c '(relative-build ())' >"$work/log" 2>"$work/err"
+	if [ "$(cat "$work/caller/helper-result")" = 'new bytes' ] && [ "$(cat "$work/caller/origin")" = "$work/lib" ]; then test-ok "$backend import is relative to authored source across cwd"; else test-fail "$backend source-relative import"; fi
+
+	printf 'import ./lib/main.kash as lib\nprivate = lib/helper\n' >"$work/import.km"
+	expect_error REF_MISSING helper ./import.km --entry private
+	printf 'from ./lib/main.kash import helper\ndefault = helper\n' >"$work/private.km"
+	expect_error REF_MISSING helper ./private.km --entry default
+	printf 'import "./lib/main.kash"\n' >"$work/quoted.km"
+	expect_error PARSE_ERR quoted.km ./quoted.km
+	printf 'import ${source}\n' >"$work/computed.km"
+	expect_error PARSE_ERR computed.km ./computed.km
+	printf 'import ./document.kmt\n' >"$work/malformed.km"
+	expect_error RES_INVALID document.kmt ./malformed.km
+	printf 'import ./lib/main.kash as lib\nimport ./lib/main.kash as lib\n' >"$work/duplicate-alias.km"
+	expect_error DEF_INVALID 'duplicate module namespace: lib' ./duplicate-alias.km
+	printf 'import ./lib/std.kash\n' >"$work/reserved.km"
+	expect_error DEF_INVALID 'unreserved namespace alias: std' ./reserved.km
+	cp "$work/lib/main.kash" "$work/lib/std.kash"
+	printf 'import ./lib/std.kash as library\nanswer = library/value\n' >"$work/allowed-alias.km"
+	run_module ./allowed-alias.km --entry answer
+	if [ "$(cat "$work/log")" = '"first"' ]; then test-ok "$backend explicit alias permits a reserved filename stem"; else test-fail "$backend valid alias did not bind the module"; fi
+	printf 'from ./lib/main.kash import value\nvalue = 0\n' >"$work/duplicate-definition.km"
+	expect_error DEF_INVALID 'duplicate imported binding: value' ./duplicate-definition.km
+	printf 'from ./lib/main.kash import value\nfrom ./lib/main.kash import build as value\n' >"$work/duplicate-selective.km"
+	expect_error DEF_INVALID 'duplicate imported binding: value' ./duplicate-selective.km
+	printf 'export missing\n' >"$work/lib/unknown.kash"
+	printf 'import ./lib/unknown.kash\nanswer = unknown/missing\n' >"$work/unknown-export.km"
+	expect_error DEF_INVALID 'cannot export unknown definition: missing' ./unknown-export.km --entry answer
+
+	printf 'from ./lib/absent import value\ndefault = value\n' >"$work/missing.km"
+	expect_error FS_ERR absent.kash ./missing.km --entry default
+	for suffix in km kash; do : >"$work/lib/ambiguous.$suffix"; done
+	printf 'from ./lib/ambiguous import value\ndefault = value\n' >"$work/ambiguous.km"
+	expect_error RES_INVALID ambiguous.kash ./ambiguous.km --entry default
+	if grep -Fq ambiguous.km "$work/err"; then test-ok "$backend ambiguous import names both candidates"; else test-fail "$backend ambiguous import omitted a candidate"; fi
+
+	printf 'def value = "duplicate"\n' >"$work/lib/helper.kash"
+	expect_error DEF_INVALID value ./import.km --entry private
+	printf 'def helper ()\n\t(write! ./helper-result "new bytes")\n' >"$work/lib/helper.kash"
+	stamp=$(stat -c %y "$work/lib/main.kash")
+	printf 'def value = "second"\ndef build () = nil\nexport value, build\n' >"$work/lib/main.kash"
+	touch -d "$stamp" "$work/lib/main.kash"
 	"${runner[@]}" -C "$work" ./out >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/out")" = second ]; then test-ok "$backend changed bytes with preserved mtime invalidate"; else test-fail "$backend changed module stayed fresh"; fi
+	if [ "$(cat "$work/out")" = second ]; then test-ok "$backend changed reached export invalidates with preserved mtime"; else test-fail "$backend changed module stayed fresh"; fi
+
 	printf 'not a definition\n' >"$work/lib/main.kash"
-	status=0
-	"${runner[@]}" do run -C "$work" ./missing.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q PARSE_ERR "$work/err" && grep -q main.kash "$work/err"; then test-ok "$backend invalid module rejected at load"; else test-fail "$backend invalid module accepted"; fi
-	printf '(include ./loop.kash)\n' >"$work/lib/main.kash"
-	printf '(include ./main.kash)\n' >"$work/lib/loop.kash"
-	status=0
-	"${runner[@]}" do run -C "$work" ./missing.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q DEP_CYCLE "$work/err"; then test-ok "$backend lexical include cycle rejected"; else test-fail "$backend module include cycle"; fi
-	printf '(include ./helper.kmk)\nvalue = "safe"\n' >"$work/lib/main.kash"
-	printf 'printf forbidden\n' >"$work/lib/helper.kmk"
-	status=0
-	"${runner[@]}" do run -C "$work" ./missing.km >"$work/log" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && grep -q PARSE_ERR "$work/err" && grep -q helper.kmk "$work/err" && grep -q include "$work/err"; then test-ok "$backend nested parse error retains include frame"; else test-fail "$backend nested parse diagnostic"; fi
-	printf 'value = "ONE"\n' >"$work/identity-one.kash"
-	printf 'value = "TWO"\n' >"$work/identity-two.kash"
-	printf 'child = (kash ./identity-one.kash)\n' >"$work/identity-a.kash"
-	printf 'child = (kash ./identity-two.kash)\n' >"$work/identity-b.kash"
-	printf 'a = (kash ./identity-a.kash)\nb = (kash ./identity-b.kash)\n(out! a.child.value)\n(out! b.child.value)\n' >"$work/identity.km"
-	"${runner[@]}" do run -C "$work" ./identity.km >"$work/log" 2>"$work/err"
-	if [ "$(cat "$work/log")" = ONETWO ]; then test-ok "$backend module source spans have distinct loader states"; else test-fail "$backend module loader state alias"; fi
-	printf 'value = x\n' >"$work/scope.kash"
-	for extra in '' 'n (kash ./identity-one.kash)'; do
-		printf '(let [m (kash ./scope.kash) %s x "later"] (out! m.value))\n' "$extra" >"$work/scope.km"
-		"${runner[@]}" do run -C "$work" ./scope.km >"$work/log" 2>"$work/err"
-		if [ "$(cat "$work/log")" = later ]; then test-ok "$backend module retains resumed lexical scope ($extra)"; else test-fail "$backend module retained abandoned scope"; fi
-	done
+	expect_error DEF_INVALID main.kash ./import.km --entry private
+	printf 'import ./loop.kash\n' >"$work/lib/main.kash"
+	printf 'import ./main.kash\n' >"$work/lib/loop.kash"
+	expect_error DEP_CYCLE loop.kash ./import.km --entry private
+	printf 'include ./helper.kash\ndef value = "safe"\nexport value\n' >"$work/lib/main.kash"
+	printf 'printf forbidden\n' >"$work/lib/helper.kash"
+	expect_error DEF_INVALID helper.kash ./import.km --entry private
+	if grep -Fq include "$work/err"; then test-ok "$backend nested module error retains its include frame"; else test-fail "$backend nested module error omitted its include frame"; fi
+	printf 'include ./incompatible.km\n' >"$work/lib/main.kash"
+	printf 'value = "wrong grammar"\n' >"$work/lib/incompatible.km"
+	expect_error RES_INVALID incompatible.km ./import.km --entry private
+
+	printf 'def value = "ONE"\nexport value\n' >"$work/identity-one.kash"
+	printf 'def value = "TWO"\nexport value\n' >"$work/identity-two.kash"
+	printf 'import ./identity-one.kash as child\ndef value = child/value\nexport value\n' >"$work/identity-a.kash"
+	printf 'import ./identity-two.kash as child\ndef value = child/value\nexport value\n' >"$work/identity-b.kash"
+	printf 'import ./identity-a.kash as a\nimport ./identity-b.kash as b\nfirst = a/value\nsecond = b/value\n' >"$work/identity.km"
+	run_module ./identity.km -c '(out! first)' -c '(out! second)'
+	if [ "$(cat "$work/log")" = ONETWO ]; then test-ok "$backend source-relative nested imports have distinct identities"; else test-fail "$backend module loader state alias"; fi
+
+	cat >"$work/lib/from-kame.km" <<'KAME'
+def greet who = str "hello " who
+export greet
+rule ./unregistered = "forbidden"
+KAME
+	cat >"$work/from-kame.kash" <<'KASH'
+import ./lib/from-kame.km as lib
+out! (lib/greet "Kash")
+KASH
+	cat >"$work/from-kame.km" <<'KAME'
+import ./lib/from-kame.km as lib
+task default
+	out! (lib/greet "Kame")
+KAME
+	run_module ./from-kame.kash
+	if [ "$(cat "$work/log")" = 'hello Kash' ]; then test-ok "$backend Kash can import a Kame function"; else test-fail "$backend cross-language import"; fi
+	"${runner[@]}" do list --json -C "$work" -f from-kame.km >"$work/log" 2>"$work/err"
+	if jq -e '. == ["default"]' "$work/log" >/dev/null; then test-ok "$backend import registers only the caller's targets"; else test-fail "$backend import registered the library's rule"; fi
 done
 test-end

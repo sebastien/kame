@@ -5,6 +5,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
+	"kame/lang/script"
 	"slices"
 	"strconv"
 )
@@ -66,13 +67,18 @@ func (p *Program) HasFunction(name string) bool {
 	return b != nil && b.Kind == bindingFunction
 }
 
+// HasLexicalBinding keeps driver commands below session lexical names.
+func (p *Program) HasLexicalBinding(name string) bool {
+	return p.Scope.localBinding(name) != nil
+}
+
 // RegisterInteractive adds definitions entered into a live interactive session.
 // Eager bindings and functions shadow earlier top-level bindings, as successive
 // REPL entries do. Lazy definitions are engine resources whose evaluated value
 // may already be retained, so they cannot be redefined; contributions would
 // likewise mutate an already-evaluated aggregate. Validation completes before
 // any registration so a rejected entry leaves the session unchanged.
-func (p *Program) RegisterInteractive(definitions []*definition.Definition) []diagnostic.Diagnostic {
+func (p *Program) RegisterInteractive(definitions []*definition.Definition, captured []string) []diagnostic.Diagnostic {
 	var diagnostics []diagnostic.Diagnostic
 	fail := func(d *definition.Definition, message string, tip string) {
 		failure := diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}}
@@ -105,11 +111,13 @@ func (p *Program) RegisterInteractive(definitions []*definition.Definition) []di
 		return diagnostics
 	}
 	p.Scope.replaceBindings = true
+	letNames := make(map[string]bool)
 	for _, d := range definitions {
 		switch {
 		case d.Default && p.Scope.lookup(d.Name) != nil:
 		case d.Eager:
-			p.Scope.reserveEager(d.Name)
+			p.Scope.reserveEager(d.Expression, letNames[d.Name])
+			letNames[d.Name] = true
 		case d.Function:
 			// The binding and saved aliases own this body, not parsed history.
 			cloned := mem.Alloc[definition.Definition](p.Alloc)
@@ -121,5 +129,23 @@ func (p *Program) RegisterInteractive(definitions []*definition.Definition) []di
 			p.registerLazy(d)
 		}
 	}
+	p.retainCapturedLets(captured)
 	return nil
+}
+
+func (p *Program) retainCapturedLets(captured []string) {
+	for _, name := range captured {
+		if b := p.Scope.localBinding(name); b != nil && b.Kind == bindingEager {
+			b.Captured = true
+		}
+	}
+}
+
+// CheckInteractiveAssignments resolves references to the session's existing
+// lets before an entry changes its binding table.
+func (p *Program) CheckInteractiveAssignments(part *script.Script) []string {
+	return part.ValidateSessionAssignments(func(name string) (bool, bool) {
+		b := p.Scope.localBinding(name)
+		return b != nil && b.Kind == bindingEager, b != nil && b.Captured
+	})
 }

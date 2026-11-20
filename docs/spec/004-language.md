@@ -30,7 +30,7 @@ Parsers retain zero-based, half-open byte spans into a named source file.
 Diagnostic rendering computes one-based lines and display columns; tabs advance
 to the next eight-column boundary (`011-diagnostics.md`). Spans of embedded
 grammars (a value fragment inside a command word, a command inside `$(…)`, an
-expression inside `@{…}`) are authored spans in the enclosing file, never offsets
+expression inside `${…}`) are authored spans in the enclosing file, never offsets
 into synthetic text.
 
 ### 1.2 Comments
@@ -44,7 +44,8 @@ foreign-shell recipe text is literal. `//` is not a comment.
 
 A newline ends an expression, statement or declaration header unless:
 
-- a delimiter (`(`, `[`, `{`, `$(`, `$?(`, `@{`) is still open;
+- a delimiter (`(`, `[`, `{`, `$(`, `$?(`, `${`) is still open, subject to the
+  list and record item boundaries in §3.3;
 - the line ends with a binary operator, `=>`, `=`, `?=` or `+=`;
 - the next line is more indented and begins with `|>` or a binary operator.
 
@@ -165,18 +166,18 @@ are in §3.6.
 
 ### 2.7 Strings
 
-`"…"` strings decode the escapes `\"`, `\\`, `\n`, `\r` and `\t`, and
-interpolate `@{EXPR}` (§3.9). `@@` is a literal `@`. A string may span lines;
+`"…"` strings decode escapes including `\"`, `\\`, `\$`, `\n`, `\r` and `\t`, and
+interpolate `${EXPR}` (§3.9). `@` is literal. A string may span lines;
 the line endings inside it are part of its value. Any other backslash sequence
 is `PARSE_ERR`.
 
 `'…'` strings are raw: no escapes and no interpolation. A raw string cannot
 contain `'`.
 
-In expression position `$` has no meaning inside a string: `"$HOME"` is the five
-characters `$HOME`. To embed a process result, interpolate a capture:
-`"Revision: @{$(git rev-parse --short HEAD)}"`. Inside a command word, `"…"`
-strings interpolate `$` references instead (§6.1, `017-kash.md`).
+In expression position `"$HOME"` is the five characters `$HOME`. To embed a
+process result, interpolate a capture: `"Revision: ${$(git rev-parse --short HEAD)}"`.
+Inside a command word, double quotes also allow unbraced `$name` references
+and captures (§6.1, `017-kash.md`).
 
 A quoted string is text in expression position. It is never reclassified as a
 path, pattern, template or resource.
@@ -184,12 +185,12 @@ path, pattern, template or resource.
 ### 2.8 Path atoms
 
 A path atom begins with `./`, `../`, `/` or `~/`, or with a leading
-interpolation directly followed by `/` (`@{root}/suffix`). No other token is a
+interpolation directly followed by `/` (`${root}/suffix`). No other token is a
 filesystem path; strings are never reclassified as paths. A path atom continues
 until whitespace or an unbalanced delimiter: `,`, `)`, `]` or `}`. Inside a path
 atom:
 
-- `@{EXPR}` interpolates a value (§3.9).
+- `${EXPR}` interpolates a value (§3.9).
 - `{name}`, `{name:*}`, `{name:**}`, `{*}`, `{**}` and the other group forms of
   `014-patterns.md`, `029-pattern-extensions.md` and
   `041-pattern-predicates-and-substitution.md` are pattern groups.
@@ -200,7 +201,7 @@ atom:
 
 Brace groups in a path atom are never record literals, and an interpolation
 inside a group is `PARSE_ERR`. Glob and group syntax is recognized only in
-authored static fragments: a value inserted with `@{…}` is literal path text and
+authored static fragments: a value inserted with `${…}` is literal path text and
 cannot inject pattern syntax. Interpolated values must render as NUL-free text.
 
 The kind of a path atom follows from its syntax (§3.10): plain atoms are `Path`
@@ -278,11 +279,13 @@ value must be a list, otherwise `EXPR_INVALID` when demanded.
 
 ### 3.3 Lists, records and spreads
 
-Lists are `[a, b, c]`; records are `{name: value, "key with space": v}`. Commas
-are mandatory between elements, and a trailing comma is allowed. `[]` is the
-empty list and `{}` the empty record. A field written as a bare `name` is
-shorthand for `name: name`. Duplicate literal keys in one record are
-`PARSE_ERR`.
+Lists are `[a, b, c]`; records are `{name: value, "key with space": v}`. Separate
+items and fields with a comma or a newline. A newline at collection depth ends
+a complete item unless it continues the expression through an operator,
+required branch, or explicit `\` continuation. A record value may begin on the
+line after its colon. A trailing comma is allowed. `[]` is the empty list and
+`{}` the empty record. A bare `name` field is shorthand for `name: name`.
+Duplicate literal keys in one record are `PARSE_ERR`.
 
 ```kame
 argv = [...prefix, "printf", "%s\n"]
@@ -391,38 +394,37 @@ occur. They must not be implemented as eager operations.
 
 ### 3.9 Interpolation
 
-`@{EXPR}` interpolates in `"…"` strings, path atoms, rule headers, `.kmt`
-documents and foreign-shell recipes. `EXPR` is any expression of §3.1:
+`${EXPR}` substitutes values in `"…"` strings, path atoms, rule headers and
+Kash command words. Document templates and foreign-shell recipes use
+`@{EXPR}`. Both forms accept any expression of §3.1:
 
 ```kame
-greeting = "Hello @{project.name}"
-summary = "Bundle of @{count files} files"
-stamp = "Built @{now ()}"
+greeting = "Hello ${project.name}"
+summary = "Bundle of ${count files} files"
+stamp = "Built ${now ()}"
 ```
 
-`@{name}` reads the binding `name` and never invokes it; `@{f ()}` calls `f`
-with zero arguments. There is no type-dependent invocation. Interpolation
-renders strings, numbers, booleans, symbols and paths as text and `nil` as the
-empty string. Lists, records and bytes are `EXPR_INVALID` unless an explicit
-operation (`join`, `json`, `fmt`) renders them. `@@` is a literal `@`.
-Interpolation never applies HTML escaping, shell quoting or source quoting
-implicitly.
+`${name}` reads the binding `name` and never invokes it; `${f ()}` calls `f`
+with zero arguments. In strings, substitution renders atoms as text and
+`nil` as empty text. It renders lists recursively with a single space
+between items and uses the standard display format for other values.
+Path atoms, rule headers and template interpolation follow their own
+conversion rules. In templates, `@@` renders `@`. Interpolation applies no
+implicit HTML escaping or shell quoting.
 
-Delimiters, nested strings and embedded processes inside `@{…}` are balanced by
-their own parsers. An unclosed `@{` is `PARSE_ERR` in every context. `@` not
-followed by `{` or `@` is literal text in strings and templates. In command
-words `@` is ordinary text, except that an unquoted `@{` is `PARSE_ERR` (`055`
-§7.1).
+Delimiters, nested strings and embedded processes inside a substitution are
+balanced by their own parsers. An unclosed opener is `PARSE_ERR` in its active
+context. In Kame strings, `\${` keeps `${` literal. In command words, unquoted
+`@{` is `PARSE_ERR` (`055` §7.1).
 
-Raw strings, `@raw` template bodies, `@@` escapes and command-word data are
-inert. Formatting preserves these distinctions and escapes literal `@` where
-needed so that reparsing cannot activate interpolation.
+Raw strings and `@raw` template bodies are inert. Formatting escapes literal
+substitution openers where reparsing would activate them.
 
 ### 3.10 Paths, patterns and discovery
 
 | Kind | Written as | Meaning |
 | --- | --- | --- |
-| `Path` | `./src/main.c`, `@{dir}/x.o` | One location |
+| `Path` | `./src/main.c`, `${dir}/x.o` | One location |
 | `PathPattern` | `./src/**/*.c`, `./src/{path:**}.c` | Matches paths; may capture |
 | `PathTemplate` | `./build/{path}.o` | Builds a path from captures |
 
@@ -434,9 +436,9 @@ never convert implicitly. A path renders as text only in interpolation,
 template output and argv.
 
 Interpolation fixes literal parts when the atom is evaluated and leaves groups
-deferred: `@{root}/{name:*}.@{ext}` constructs a matcher, and
-`@{out}/{name}` constructs a template. To use a lexical binding in a path, write
-`@{name}`; `{name}` is never resolved lexically. Deliberately dynamic pattern
+deferred: `${root}/{name:*}.${ext}` constructs a matcher, and
+`${out}/{name}` constructs a template. To use a lexical binding in a path, write
+`${name}`; `{name}` is never resolved lexically. Deliberately dynamic pattern
 syntax uses `pattern TEXT`.
 
 ```kame
@@ -465,9 +467,9 @@ membership semantics (§8.4).
 
 ```kame
 def object-path source = match source
-	./src/{path:**}.c => ./build/@{path}.o
-	./gen/{name}.c    => ./build/gen/@{name}.o
-	else              => fail "not a source: @{source}"
+	./src/{path:**}.c => ./build/${path}.o
+	./gen/{name}.c    => ./build/gen/${name}.o
+	else              => fail "not a source: ${source}"
 ```
 
 An arm pattern is a path pattern, a string pattern or a literal. In arm-pattern
@@ -565,7 +567,7 @@ At the top level of a Kame program, and in the module scope of a `.kash` source
 version = "1.0"
 sources = files ./src/**/*.c
 
-def greeting name = "Hello @{name}!"
+def greeting name = "Hello ${name}!"
 
 def compile source output
 	mkdir -p (dirname output)
@@ -710,7 +712,7 @@ semantics of `017-kash.md`:
 | `'…'` | A literal string |
 | `"…"` | A string with `$` interpolation |
 | `$name`, `$name.field`, `$xs.0` | Reference substitution |
-| `${REFERENCE}` | Braced reference, including `${ns/name}` |
+| `${EXPR}` | Value substitution, including `${ns/name}` or `${f x}` |
 | `$...name`, `$...{REFERENCE}` | List spread into separate argv entries |
 | `(EXPR)` | Value fragment |
 | `$(…)` | Captured stdout |
@@ -764,7 +766,7 @@ include? ./local.km
 `include` and `include?` are source-composition statements, not runtime
 operations. Each takes exactly one literal operand: a path atom beginning with
 `./`, `../`, `/` or `~/`, without interpolation. Quoted strings, empty paths,
-NUL, glob or pattern syntax, `@{…}` interpolation, references and computed
+NUL, glob or pattern syntax, `${…}` interpolation, references and computed
 operands are `PARSE_ERR`.
 
 - **Placement.** Includes are valid at the top level of a Kame program, inside
@@ -874,20 +876,21 @@ FILE-RULE   = "rule" ("always")? OUTPUTS (":" INPUTS?)? META? BODY?
 TASK        = "task" ("cached")? TARGET-NAME TARGET-ARGS? (":" INPUTS?)? META? BODY?
 SERVICE     = "service" TARGET-NAME TARGET-ARGS? (":" INPUTS?)? META? BODY?
 OUTPUTS     = OUTPUT (WS+ OUTPUT)*
-OUTPUT      = PATH-ATOM | QUOTED-STRING | "@{" EXPR "}"
-TARGET-NAME = NAME | NAME-TEMPLATE | QUOTED-STRING | "@{" EXPR "}"
+OUTPUT      = PATH-ATOM | QUOTED-STRING | "${" EXPR "}" | "(" EXPR ")"
+TARGET-NAME = NAME | NAME-TEMPLATE | QUOTED-STRING | "${" EXPR "}"
 INPUTS      = GROUP (WS* "," WS+ GROUP)* (WS* "|" WS+ GROUP)?
 GROUP       = INPUT (WS+ INPUT)*
-INPUT       = PATH-ATOM | NAME | QUOTED-STRING | "@{" EXPR "}"
+INPUT       = PATH-ATOM | NAME | QUOTED-STRING | "${" EXPR "}"
 META        = ";" RECORD
 BODY        = "=" EXPR | NEWLINE INDENTED-BLOCK
 ```
 
 The colon is optional when there are no inputs (`task clean`). Separators
-inside quoted strings, path atoms and balanced `@{…}` or record delimiters are
-not header punctuation. Whitespace inside quoted strings and balanced
-interpolations does not split header items. `022-target-arguments.md` specifies the named
-arguments (`TARGET-ARGS`) that can follow a task or service name.
+inside quoted strings, path atoms, balanced interpolations, parenthesized
+outputs and record delimiters stay within their header item. Whitespace inside
+quoted strings, balanced interpolations and parenthesized outputs also stays
+within the item. `022-target-arguments.md` specifies the named arguments
+(`TARGET-ARGS`) that can follow a task or service name.
 
 ### 8.2 Classification
 
@@ -919,20 +922,20 @@ output's `name` capture.
 
 ### 8.3 Computed outputs
 
-An output written as a standalone `@{EXPR}` contributes values; an output atom
-containing `@{…}` renders one target string.
+An output written as a standalone `${EXPR}` contributes values; an output atom
+containing `${…}` renders one target string.
 
 ```kame
 build-dir = ./build
-rule @{build-dir}/{name}.o : ./src/{name}.c
+rule ${build-dir}/{name}.o : ./src/{name}.c
 	cc -c $inputs.0 -o $outputs.0
 
 extra-outputs = [./build/one, [./build/two, nil], []]
-rule @{extra-outputs} : ./seed
+rule ${extra-outputs} : ./seed
 	generate-all $outputs.0 $outputs.1
 
 chosen = "chosen"
-task @{chosen}
+task ${chosen}
 	echo $chosen
 ```
 
@@ -953,7 +956,7 @@ task @{chosen}
   registration. Capture syntax supplied by expression results is active. No
   second interpolation pass is performed on computed text.
 - Explicit prefixes remain mandatory: with `build-dir = "build"`,
-  `@{build-dir}/{name}.o` is not a file pattern. Invalid resolved path or name
+  `${build-dir}/{name}.o` is not a file pattern. Invalid resolved path or name
   shapes and malformed target templates are `PARSE_ERR` at the authored output
   span. Classification and cardinality restrictions apply to the resolved
   output set.
@@ -966,7 +969,7 @@ task @{chosen}
 
 ### 8.4 Inputs and prerequisite groups
 
-Input items are path atoms, names, quoted strings and `@{…}` interpolations.
+Input items are path atoms, names, quoted strings and `${…}` interpolations.
 
 - **Groups.** Whitespace-separated items form one parallel group. A comma ends
   the group and starts the next: every prerequisite in a group finishes before
@@ -976,13 +979,13 @@ Input items are path atoms, names, quoted strings and `@{…}` interpolations.
 - **Order-only.** `|` begins the order-only prerequisites (`006-runtime.md`).
   Order-only items may themselves be grouped with commas. Sequencing is
   independent of normal versus order-only purpose.
-- **Computed inputs.** A standalone `@{EXPR}` contributes values; strings,
+- **Computed inputs.** A standalone `${EXPR}` contributes values; strings,
   paths, resources and lists flatten in authored order into its group, and `nil`
   and empty lists contribute nothing while keeping the barriers around them. An
-  interpolated path atom such as `@{root}/js/{path}.js` evaluates as a path
+  interpolated path atom such as `${root}/js/{path}.js` evaluates as a path
   expression with dependencies retained, and its `{path}` groups resolve
   against the rule's captures.
-- **Quoted inputs.** Quoted inputs render as strings with `@{…}` interpolation;
+- **Quoted inputs.** Quoted inputs render as strings with `${…}` interpolation;
   bare `{path}` in a quoted input stays literal. Quoted inputs without
   interpolation are static literal inputs, including literal wildcard bytes.
   Computed bytes are never reparsed for captures or interpolation, and decoding
@@ -1101,7 +1104,7 @@ variants = ["debug", "release"]
 for variant in variants
 	let flags = if variant == "debug" then ["-g"] else ["-O2"]
 
-	rule ./build/@{variant}/{name}.o : ./src/{name}.c
+	rule ./build/${variant}/{name}.o : ./src/{name}.c
 		cc $...flags -c $inputs.0 -o $outputs.0
 
 if mode == "debug"
@@ -1115,7 +1118,7 @@ else
 - Declaration blocks contain `let`, nested control, declarations, `include`
   and `generate`. Commands are `PARSE_ERR` there. `if` without `else` selects
   nothing when no condition holds.
-- `@{variant}` is fixed when the declaration is evaluated; `{name}` stays a
+- `${variant}` is fixed when the declaration is evaluated; `{name}` stays a
   capture. Each declared rule closes over its own iteration scope.
 - Registration order follows source and iteration order.
 - Inactive branches register nothing, and their conditions and includes are not
@@ -1179,7 +1182,7 @@ task project-check
 
 The module supplies `build-dir ?= ./build` and a list-valued `checks` binding;
 `"project-check"` names a task prerequisite when it reaches a rule header
-through `@{checks}`. No declaration reordering, mutable hooks or process
+through `${checks}`. No declaration reordering, mutable hooks or process
 execution is implied.
 
 ## 9. Source files
@@ -1213,7 +1216,7 @@ resolve against the root directory: the entry file's directory for Kame
 programs and the invocation's working directory for Kash programs. `-C`
 overrides both. Relative path values keep their authored form; host operations
 and rule identity resolve them against the root. A module reaches its own files
-through `module/dir`: `@{module/dir}/templates/page.kmt`.
+through `module/dir`: `${module/dir}/templates/page.kmt`.
 
 ### 9.3 Multiple sources
 
@@ -1264,9 +1267,10 @@ spans.
 - Numbers reject misplaced underscores, `1.`, `.5`, hex floats and `int64`
   overflow.
 - Strings decode only the specified escapes; raw strings are inert; `$` is
-  literal in expression strings; `@@` yields `@`; an unclosed `@{` is
+  literal in expression strings; `@` yields `@`; an unclosed `${` is
   `PARSE_ERR` everywhere.
-- Lists and records require commas, accept trailing commas and shorthand fields,
+- Lists and records accept commas or newlines as separators, trailing commas,
+  and record shorthand fields,
   and reject duplicate literal keys. Spreads keep their markers and spans through
   parse, clone, format and AST output; spreading the wrong kind fails.
 - Brace groups in path atoms never parse as records; bracket classes adjacent to
@@ -1287,9 +1291,10 @@ spans.
 - `|>` inserts last or at `_`; pipes, nested calls and placeholder positions
   survive parse/format/parse without changing evaluation order, multiplicity,
   dependencies or effects. `|>` and `|` produce distinct trees.
-- `@{name}` reads and `@{f ()}` calls in strings, path atoms, rule headers,
-  templates and foreign-shell bodies alike; lists and records require explicit
-  rendering.
+- `${name}` reads and `${f ()}` calls in strings, path atoms and rule headers.
+  String substitution joins list items with spaces and displays records.
+  Templates and foreign-shell bodies evaluate the same expressions in `@{…}`
+  using the template rendering rules.
 - Path atoms classify as `Path`, `PathPattern` or `PathTemplate`; mixed matcher
   and reference groups are rejected; inserted values never inject pattern
   syntax; `{name}` is never resolved lexically.
@@ -1344,7 +1349,7 @@ spans.
   duplicates, and keep their order through formatting and JSON.
 - Rule bodies: consistent indentation prefixes, Kash bodies parsed before
   execution, `return VALUE` and `= EXPR` publish under `044`, foreign-shell
-  bodies remove directive lines, interpolate `@{…}` and pass `$` and `@media`
+  bodies remove directive lines, interpolate `${…}` and pass `$` and `@media`
   through.
 - Declaration-time `for`/`if` register deterministic rule sets with
   per-iteration closures; inactive branches neither evaluate conditions nor read

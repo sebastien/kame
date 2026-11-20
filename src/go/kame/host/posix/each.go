@@ -2,46 +2,30 @@ package posix
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"kame/host"
 	"os/exec"
 )
 
-// Start and register under the same lock used by cancellation. A stopped graph
-// may never advance to the next record, and retired workers leave no history.
-func (r *running) startWorker(cmd *exec.Cmd) (*ownedProcess, error) {
-	r.commandMu.Lock()
-	defer r.commandMu.Unlock()
-	select {
-	case <-r.stopped:
-		return nil, io.ErrClosedPipe
-	default:
-	}
-	if e := cmd.Start(); e != nil {
-		return nil, e
-	}
-	if r.owned == nil {
-		r.owned = make(map[*exec.Cmd]*ownedProcess)
-	}
-	p := &ownedProcess{cmd: cmd}
-	r.owned[cmd] = p
-	return p, nil
-}
-
-func runEach(request host.ProcessRequest, stage host.ProcessStage, template *exec.Cmd, run *running, input io.Reader, output io.Writer) host.ProcessStageResult {
+func runEach(request host.ProcessRequest, stage host.ProcessStage, template *exec.Cmd, run *running, input io.Reader, output io.Writer) (host.ProcessStageResult, bool) {
 	result := host.ProcessStageResult{HasEffectiveStatus: true}
+	if stage.TimeoutMS > 0 {
+		timer := run.newTimer(stage.TimeoutMS, func() { run.terminate(host.ProcessTimedOut, 100) })
+		defer timer.Stop()
+	}
 	for {
 		select {
 		case <-run.stopped:
-			return operatorResult(io.ErrClosedPipe, run)
+			return operatorResult(io.ErrClosedPipe, run), false
 		default:
 		}
 		frame, e := readFrame(input, 0)
 		if e == io.EOF {
-			return result
+			return result, true
 		}
 		if e != nil {
-			return operatorResult(e, run)
+			return operatorResult(e, run), false
 		}
 		cmd := stageCommand(request, stage)
 		cmd.Path, cmd.Dir, cmd.Env, cmd.Err = template.Path, template.Dir, template.Env, nil
@@ -50,25 +34,22 @@ func runEach(request host.ProcessRequest, stage host.ProcessStage, template *exe
 		if stage.ErrorMode == host.StderrStdout {
 			cmd.Stderr = cmd.Stdout
 		}
-		owner, e := run.startWorker(cmd)
+		owner, e := run.startOwnedCommand(cmd, false)
 		if e != nil {
-			return operatorResult(e, run)
-		}
-		var timer *pausableTimer
-		if stage.TimeoutMS > 0 {
-			timer = run.newTimer(stage.TimeoutMS, func() { run.terminate(host.ProcessTimedOut, 100) })
+			return operatorResult(e, run), false
 		}
 		e = owner.wait(run)
-		if timer != nil {
-			timer.Stop()
-		}
 		run.commandMu.Lock()
 		delete(run.owned, cmd)
 		run.commandMu.Unlock()
 		worker := processExit(e, cmd, stage)
 		if outcome := host.ProcessOutcome(run.outcome.Load()); outcome != host.ProcessExited {
 			worker.Outcome = outcome
-			return worker
+			return worker, false
+		}
+		var exit *exec.ExitError
+		if e != nil && !errors.As(e, &exit) {
+			return operatorResult(e, run), false
 		}
 		if worker.Status != 0 {
 			if worker.EffectiveStatus == 0 {
@@ -77,7 +58,7 @@ func runEach(request host.ProcessRequest, stage host.ProcessStage, template *exe
 			result = worker
 		}
 		if worker.Signal != 0 || (worker.EffectiveStatus != 0 && !request.CollectFailures) {
-			return worker
+			return worker, false
 		}
 	}
 }

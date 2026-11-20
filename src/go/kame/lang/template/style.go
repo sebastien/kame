@@ -24,6 +24,9 @@ func InferStyle(path string) (string, bool) {
 }
 
 func extStyle(ext string) (string, bool) {
+	if eqFold(ext, "kmt") {
+		return "plain", true
+	}
 	if eqFold(ext, "html") || eqFold(ext, "htm") || eqFold(ext, "xml") || eqFold(ext, "svg") || eqFold(ext, "vue") || eqFold(ext, "md") || eqFold(ext, "markdown") {
 		return "html", true
 	}
@@ -144,21 +147,8 @@ func hasAtAfterSpace(line string, pos int) bool {
 }
 
 func isDirectiveToken(text string) bool {
-	if len(text) < 2 || text[0] != '@' {
-		return false
-	}
-	i := 1
-	for i < len(text) && isKeywordLetter(text[i]) {
-		i++
-	}
-	if i == 1 {
-		return false
-	}
-	switch text[1:i] {
-	case "if", "elif", "else", "for", "with", "let", "include", "raw", "end", "match", "case":
-		return true
-	}
-	return false
+	kind, _, _ := directiveKeyword(text, 0, len(text))
+	return kind != dirNone
 }
 
 func trimHorizontal(text string, start int, end int) (int, int) {

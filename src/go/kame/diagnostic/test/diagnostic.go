@@ -13,15 +13,15 @@ func TestFreeAcceptsBorrowedDiagnostic(t *testing.T) {
 func TestCloneOwnsStructuredDiagnosticContext(t *testing.T) {
 	a := t.Allocator()
 	d := diagnostic.Diagnostic{
-		Source:      "Makefile.kmk",
+		Source:      "Makefile.km",
 		Code:        "RECIPE_FAIL",
 		Severity:    diagnostic.Error,
 		Message:     "recipe exited unsuccessfully",
 		Span:        diagnostic.Span{Start: 3, End: 7},
 		Target:      "build",
 		Notes:       []string{"output was not produced"},
-		Related:     []diagnostic.Related{{Message: "declared here", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 1, End: 2}}},
-		Frames:      []diagnostic.Frame{{Kind: "rule", Label: "build", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 1, End: 7}}},
+		Related:     []diagnostic.Related{{Message: "declared here", Source: "Makefile.km", Span: diagnostic.Span{Start: 1, End: 2}}},
+		Frames:      []diagnostic.Frame{{Kind: "rule", Label: "build", Source: "Makefile.km", Span: diagnostic.Span{Start: 1, End: 7}}},
 		TargetStack: []string{"all", "build"},
 		Tips:        []string{"check the compiler"},
 		Cause:       diagnostic.Cause{Kind: "process", Message: "shell exited", Program: "sh", Status: 127, HasStatus: true, StderrTruncated: true, StderrLimit: 64},

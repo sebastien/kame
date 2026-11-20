@@ -11,7 +11,7 @@ import (
 
 func TestOutAndErrEmitEvents(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run : ; {shell: kash}\n\t(out! \"out\")\n\t(err! \"err\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run :\n\t(out! \"out\")\n\t(err! \"err\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -52,7 +52,7 @@ func TestOutAndErrEmitEvents(t *testing.T) {
 
 func TestOutCoercesScalarValues(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run : ; {shell: kash}\n\t(out! 42)\n\t(out! true)\n\t(out! nil)\n\t(out! 1.5)\n\t(out! (list 1 2))\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run :\n\t(out! 42)\n\t(out! true)\n\t(out! nil)\n\t(out! 1.5)\n\t(out! (list 1 2))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -106,7 +106,7 @@ func TestOutCoercesScalarValues(t *testing.T) {
 
 func TestOperationDependencyEmitsEvent(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "input :\n\ttrue\noutput : input\n\t@(depends \"x\")\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "task input\ntask output : input\n\t(depends \"x\")\n")
 	registry := eval.NewRegistry(a)
 	if !registry.Add(eval.Operation{Name: "depends", Call: observeDependency, MinArity: 1, MaxArity: 1}) {
 		t.Fatal("operation registration failed")
@@ -167,8 +167,8 @@ func containsSubstring(text string, sub string) bool {
 
 func TestRecipeFailureRetainsBodySpan(t *testing.T) {
 	a := t.Allocator()
-	source := "./output :\n\tfalse\n"
-	parsed := script.Parse(a, "test.kmk", source)
+	source := "rule ./output ; {shell: \"/bin/sh\"}\n\tfalse\n"
+	parsed := script.ParseKameFile(a, "test.km", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -188,7 +188,7 @@ func TestRecipeFailureRetainsBodySpan(t *testing.T) {
 
 func TestRecipeFailureCarriesNestedTargetStack(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "root : leaf\n\ttrue\nleaf :\n\tfalse\n")
+	parsed := script.ParseKameFile(a, "test.km", "task root : leaf\ntask leaf ; {shell: \"/bin/sh\"}\n\tfalse\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -208,7 +208,7 @@ func TestRecipeFailureCarriesNestedTargetStack(t *testing.T) {
 
 func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run :\n\t@(nop \"\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run\n\t(nop \"\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -262,8 +262,8 @@ func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 
 func TestPipelineProcessDisplayIsBoundedToFourStages(t *testing.T) {
 	a := t.Allocator()
-	source := "run : ; {shell: kash}\n\t(out! (pipe! (run! \"printf\" \"one\") (run! \"cat\") (run! \"cat\") (run! \"cat\") (run! \"cat\")))\n"
-	parsed := script.Parse(a, "test.kmk", source)
+	source := "task run :\n\t(out! (pipe! (run! \"printf\" \"one\") (run! \"cat\") (run! \"cat\") (run! \"cat\") (run! \"cat\")))\n"
+	parsed := script.ParseKameFile(a, "test.km", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")

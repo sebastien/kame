@@ -10,7 +10,7 @@ import (
 
 func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "contributions.km", "items ?= [0]\nitems += later\nitems ?= missing\nitems += [[3], 4]\nlater = [1, 2]\nunused += missing\n")
+	parsed := script.ParseKameFile(a, "contributions.km", "items ?= [0]\nitems += later\nitems ?= missing\nitems += [[3], 4]\nlater = [1, 2]\nunused += missing\n")
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -47,7 +47,7 @@ func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 
 func TestContributionOverrideReplacesUnevaluatedOperands(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "contributions.km", "items += missing\nitems += items\n")
+	parsed := script.ParseKameFile(a, "contributions.km", "items += missing\nitems += items\n")
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -73,7 +73,7 @@ func TestContributionFailuresRetainOrdinaryDiagnostics(t *testing.T) {
 	sources := []string{"items += 1", "items = 1\nitems += []", "items += items", "items += later\nlater = items", "items += []\nitems = []", "def items () = []\nitems += []"}
 	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "DEP_CYCLE", "DEP_CYCLE", "DEF_INVALID", "DEF_INVALID"}
 	for i := range sources {
-		parsed := script.Parse(a, "contributions.km", sources[i])
+		parsed := script.ParseKameFile(a, "contributions.km", sources[i])
 		engine := core.NewEngine(a)
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
@@ -114,7 +114,7 @@ func TestContributionOperandsSurviveSuspensionAndInvalidation(t *testing.T) {
 
 func TestScopedContributionOverrideOwnsItsLiteralSnapshot(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "contributions.km", "items += missing\nitems += items\n")
+	parsed := script.ParseKameFile(a, "contributions.km", "items += missing\nitems += items\n")
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	p := eval.Compile(a, engine, parsed, registry)

@@ -38,8 +38,8 @@ constructed:
 sources = files ./src/**/*.c
 
 def object-path source = match source
-	./src/{path:**}.c => ./build/@{path}.o
-	else              => fail! "not a source: @{source}"
+	./src/{path:**}.c => ./build/${path}.o
+	else              => fail! "not a source: ${source}"
 
 def object-rule source =
 	rule (object-path source) : source
@@ -47,7 +47,7 @@ def object-rule source =
 
 generate (sources |> map object-rule)
 
-task objects : @{sources |> map object-path}
+task objects : ${sources |> map object-path}
 ```
 
 A constructed `Rule` that is never passed to `generate` registers nothing.
@@ -65,14 +65,14 @@ variants = ["debug", "release"]
 for variant in variants
 	let flags = if variant == "debug" then ["-g"] else ["-O2"]
 
-	rule ./build/@{variant}/{name}.o : ./src/{name}.c
+	rule ./build/${variant}/{name}.o : ./src/{name}.c
 		cc $...flags -c $inputs.0 -o $outputs.0
 
 if env/CI != nil
 	include ./ci.km
 ```
 
-- `@{variant}` is fixed when the declaration is evaluated; `{name}` stays a
+- `${variant}` is fixed when the declaration is evaluated; `{name}` stays a
   capture. Each declared rule closes over its own iteration scope.
 - Inactive branches register nothing, and their includes are not read, tracked
   or cycle-checked.
@@ -136,7 +136,7 @@ that each output has exactly one producer:
 
 ```kame
 def object-for source =
-	rule ./build/@{(splitext (basename source)).0}.o : source
+	rule ./build/${(splitext (basename source)).0}.o : source
 		cc -c $inputs.0 -o $outputs.0
 
 generate (files ./src/*.c ./src/*.cpp |> map object-for)

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-make wasm >/dev/null
+if [ -z "${KAME_WASM:-}" ]; then make wasm >/dev/null; fi
 # Exercise the production host, not a second implementation of its services.
 export KAME_WASM="${KAME_WASM:-$ROOT/build/wasm/kame.wasm}"
 cli=(node ./src/js/kame.js do run)
@@ -25,12 +25,12 @@ case "$info" in
 	exit 1
 	;;
 esac
-actual="$("${cli[@]}" --lang expr -c '(count [1 2 3])')"
+actual="$("${cli[@]}" --lang expr -c '(count [1, 2, 3])')"
 if [ "$actual" != "3" ]; then
 	echo "WASM expression CLI = $actual, want 3" >&2
 	exit 1
 fi
-actual="$("${cli[@]}" --lang expr -c '(let [a 10] (out! "hello" a))')"
+actual="$("${cli[@]}" --lang expr -c '((a => out! "hello" a) 10)')"
 if [ "$actual" != 'hello10"hello10"' ]; then
 	echo "WASM output expression CLI = $actual, want hello10\"hello10\"" >&2
 	exit 1
@@ -43,9 +43,9 @@ if [ "$actual" != '"notice"' ] || [ "$(cat "$effect_err")" != "notice" ]; then
 	exit 1
 fi
 rm -f "$effect_err"
-actual="$("${cli[@]}" --lang expr -c '(yield! "generated")')"
-if [ "$actual" != "generated:nil" ]; then
-	echo "WASM yield expression CLI = $actual, want generated:nil" >&2
+actual="$("${cli[@]}" --lang expr -c '(out! "generated")')"
+if [ "$actual" != 'generated"generated"' ]; then
+	echo "WASM stdout expression CLI did not preserve effect and result: $actual" >&2
 	exit 1
 fi
 program="$(mktemp)"
@@ -53,14 +53,14 @@ input="$(mktemp)"
 written="$(mktemp)"
 calls="$(mktemp)"
 trap 'rm -f "$program" "$input" "$written" "$calls"' EXIT
-printf 'result = (join "-" ["wasm" "source"])\n' >"$program"
+printf 'result = (join "-" ["wasm", "source"])\n' >"$program"
 actual="$("${cli[@]}" --lang km -f "$program" result)"
 if [ "$actual" != '"wasm-source"' ]; then
 	echo "WASM source expression CLI = $actual, want \"wasm-source\"" >&2
 	exit 1
 fi
 # Definitions stay lazy, and querying/copying a result must not run it twice.
-printf 'unused = (fail! "unused definition evaluated")\nresult = (let [p (sh! "printf x >> %s; printf async-source")] p.stdout)\n' "$calls" >"$program"
+printf 'unused = (fail! "unused definition evaluated")\nresult = ((p => p.stdout) (sh! "printf x >> %s; printf async-source"))\n' "$calls" >"$program"
 actual="$("${cli[@]}" --lang km --allow-run -f "$program" result)"
 if [ "$actual" != 'async-source' ] || [ "$(cat "$calls")" != x ]; then
 	echo "WASM source result was not selected lazily exactly once: $actual" >&2
@@ -79,13 +79,13 @@ if [ "$actual" != "async-read" ]; then
 	exit 1
 fi
 actual="$("${cli[@]}" --lang expr --allow-write -c "(write! \"$written\" \"async-write\")")"
-if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "async-write" ]; then
+if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "async-write" ]; then
 	echo "WASM async write CLI failed" >&2
 	exit 1
 fi
 printf 'result = (write! "%s" "source-write")\n' "$written" >"$program"
 actual="$("${cli[@]}" --lang km --allow-write -f "$program" result)"
-if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "source-write" ]; then
+if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "source-write" ]; then
 	echo "WASM async source write CLI failed" >&2
 	exit 1
 fi
@@ -95,12 +95,12 @@ if [ "$actual" != '"async-env"' ]; then
 	exit 1
 fi
 actual="$("${cli[@]}" --lang expr --allow-run -c '(sh! "printf async-wasm")')"
-if [ "$actual" != '[status: 0 stdout: async-wasm stderr:  signal: 0 effectiveStatus: 0 effectiveSignal: 0]' ]; then
+if [ "$actual" != '{status: 0, stdout: async-wasm, stderr: , signal: 0, effectiveStatus: 0, effectiveSignal: 0}' ]; then
 	echo "WASM process result lost its status or streams: $actual" >&2
 	exit 1
 fi
 # sh! captures nonzero status as data; authored failures remain diagnostics.
-actual="$("${cli[@]}" --lang expr --allow-run -c '(let [p (sh! "false")] p.status)')"
+actual="$("${cli[@]}" --lang expr --allow-run -c '((p => p.status) (sh! "false"))')"
 if [ "$actual" != 1 ]; then
 	echo "WASM process result did not retain a nonzero status: $actual" >&2
 	exit 1

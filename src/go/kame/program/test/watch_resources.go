@@ -17,7 +17,7 @@ func TestModuleWatchStartsFromAcceptedSourceBytes(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	compiled := program.CompileMany(a, []program.CompileSource{{Name: "/project/watch.kmk", SourceDirectory: "/project", Text: "module = (kash ./main.kash)\nresult = module.value\n"}}, registry, program.Options{Host: memory, Directory: "/project", ForwardRequests: true})
+	compiled := program.CompileMany(a, []program.CompileSource{{Name: "/project/watch.km", SourceDirectory: "/project", Text: "import ./main.kash as lib\nresult = lib/value\n"}}, registry, program.Options{Host: memory, Directory: "/project", ForwardRequests: true})
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		t.Fatal("module watch program compile failed")
@@ -38,7 +38,7 @@ func TestModuleWatchStartsFromAcceptedSourceBytes(t *testing.T) {
 			if next.Request.Kind != host.RequestLoadSource {
 				t.Error("unexpected module watch request")
 			}
-			p.Complete(next.Request, core.NewBytes(a, []byte("def value = 42\n")), core.Diagnostic{})
+			p.Complete(next.Request, core.NewBytes(a, []byte("def value = 42\nexport value\n")), core.Diagnostic{})
 			next.Request.Free(a)
 		}
 		polled := root.PollRetained()
@@ -71,13 +71,13 @@ func TestModuleWatchStartsFromAcceptedSourceBytes(t *testing.T) {
 	if !found {
 		t.Error("accepted module source missing from watch resources")
 	}
-	memory.SetFile("/project/main.kash", []byte("def value = 42\n"))
+	memory.SetFile("/project/main.kash", []byte("def value = 42\nexport value\n"))
 	expected := p.ResourceFingerprint(key)
 	defer mem.FreeString(a, expected)
 	before := p.ResourceAcceptedFingerprint(key)
 	defer mem.FreeString(a, before)
 	// The embedding's live bytes change before watch first subscribes.
-	memory.SetFile("/project/main.kash", []byte("def value = 99\n"))
+	memory.SetFile("/project/main.kash", []byte("def value = 99\nexport value\n"))
 	after := p.ResourceAcceptedFingerprint(key)
 	defer mem.FreeString(a, after)
 	live := p.ResourceFingerprint(key)
@@ -93,7 +93,7 @@ func TestSourceValidationUsesSourceAuthorityOnlyForLoadedContent(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	text := "result = 42\n"
-	compiled := program.CompileMany(a, []program.CompileSource{{Name: "/project/main.kmk", SourceDirectory: "/project", Text: text, Signature: core.ContentSignature([]byte(text))}}, registry, program.Options{Host: wasm.NewMemoryHost(a), Directory: "/project", ForwardRequests: true})
+	compiled := program.CompileMany(a, []program.CompileSource{{Name: "/project/main.km", SourceDirectory: "/project", Text: text, Signature: core.ContentSignature([]byte(text))}}, registry, program.Options{Host: wasm.NewMemoryHost(a), Directory: "/project", ForwardRequests: true})
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		t.Fatal("source authority program failed to compile")
@@ -102,9 +102,9 @@ func TestSourceValidationUsesSourceAuthorityOnlyForLoadedContent(t *testing.T) {
 	p := compiled.Program
 	defer p.Free()
 	for i := 0; i < 3; i++ {
-		name, op := "/project/main.kmk", host.OpFileContent
+		name, op := "/project/main.km", host.OpFileContent
 		if i == 1 {
-			name = "/project/unloaded.kmk"
+			name = "/project/unloaded.km"
 		}
 		if i == 2 {
 			op = host.OpRead

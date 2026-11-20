@@ -85,28 +85,37 @@ lesson="$TEST_PATH/idioms"
 mkdir -p "$lesson/docs"
 printf 'one\n' >"$lesson/docs/a.md"
 printf 'two\n' >"$lesson/docs/b.md"
-cli_run --dir "$lesson" -- do run --lang expr -c '(join "-" ["a" "b"])'
+cli_run --dir "$lesson" -- do run --lang expr -c 'join "-" ["a", "b"]'
 cli_expect_status 0
 cli_expect_stdout '"a-b"'
-cli_run --dir "$lesson" -- do run --lang expr -c '(count [1 2 3])'
+cli_run --dir "$lesson" -- do run --lang expr -c 'count [1, 2, 3]'
 cli_expect_status 0
 cli_expect_stdout '3'
-cli_run --dir "$lesson" -- do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'
+cli_run --dir "$lesson" -- do run --lang expr --allow-read=. -c 'files ./docs/*.md'
 cli_expect_status 0
-cli_expect_stdout '["./docs/a.md" "./docs/b.md"]'
-cli_run --dir "$lesson" -- do run --lang expr -c '(replace ./src/{name:*}.c "1" "./src/demo.c")'
+cli_expect_stdout '[./docs/a.md, ./docs/b.md]'
+cli_run --dir "$lesson" -- do run --lang expr -c 'subst ./src/{name:*}.c "1" "./src/demo.c"'
 cli_expect_status 0
 cli_expect_stdout '"1"'
 
-test-step "README build example executes and reuses unchanged file outputs"
-readme_project="$TEST_PATH/readme"
-mkdir -p "$readme_project/src/demo" "$readme_project/lib/h" "$readme_project/bin"
-awk '/^## Build example$/ { example = 1 } example && /^```kame$/ { code = 1; next } code && /^```$/ { exit } code { print }' \
-	"$CLI_ROOT/README.md" >"$readme_project/Makefile.kmk"
-printf 'main\n' >"$readme_project/src/main.c"
-printf 'util\n' >"$readme_project/src/demo/util.c"
-printf 'header\n' >"$readme_project/src/demo/common.h"
-cat >"$readme_project/bin/cc" <<'SH'
+test-step "pattern build example executes and reuses unchanged file outputs"
+build_project="$TEST_PATH/pattern-build"
+mkdir -p "$build_project/src/demo" "$build_project/lib/h" "$build_project/bin"
+cat >"$build_project/Makefile.km" <<'KM'
+sources = files ./src/**/*.c
+headers = concat (files ./src/**/*.h) (files ./lib/h/**/*.h)
+objects = subst ./src/{path:**}.c ./build/{path}.o sources
+
+task default : ${objects}
+
+rule ./build/{path:**}.o : ./src/{path}.c ${headers}
+	mkdir -p (dirname outputs.0)
+	x/cc -I ./lib/h -c $inputs.0 -o $outputs.0
+KM
+printf 'main\n' >"$build_project/src/main.c"
+printf 'util\n' >"$build_project/src/demo/util.c"
+printf 'header\n' >"$build_project/src/demo/common.h"
+cat >"$build_project/bin/cc" <<'SH'
 #!/bin/sh
 set -eu
 while [ "$#" -gt 0 ]; do
@@ -119,19 +128,19 @@ while [ "$#" -gt 0 ]; do
 done
 exit 1
 SH
-chmod +x "$readme_project/bin/cc"
-cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- -n
+chmod +x "$build_project/bin/cc"
+cli_run --dir "$build_project" --env "PATH=$build_project/bin:$PATH" -- -n
 cli_expect_status 0
-cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
+cli_run --dir "$build_project" --env "PATH=$build_project/bin:$PATH" --
 cli_expect_status 0
-cli_expect_file "$readme_project/build/main.o"
-cli_expect_file "$readme_project/build/demo/util.o"
-cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
+cli_expect_file "$build_project/build/main.o"
+cli_expect_file "$build_project/build/demo/util.o"
+cli_run --dir "$build_project" --env "PATH=$build_project/bin:$PATH" --
 cli_expect_status 0
-if [ "$(wc -l <"$readme_project/compiled.log")" -eq 2 ]; then
-	test-ok "unchanged README artifacts do not recompile"
+if [ "$(wc -l <"$build_project/compiled.log")" -eq 2 ]; then
+	test-ok "unchanged pattern build artifacts do not recompile"
 else
-	test-fail "README artifacts recompiled despite unchanged inputs"
+	test-fail "pattern build artifacts recompiled despite unchanged inputs"
 fi
 
 test-step "unknown do command is a usage error with a hint"
@@ -178,7 +187,7 @@ cli_expect_status 1
 cli_expect_stderr_contains "BUILD_NO_SOURCE"
 
 test-step "an explicitly requested missing source is FS_ERR"
-cli_run -- -f missing.kmk
+cli_run -- -f missing.km
 cli_expect_status 1
 cli_expect_stderr_contains "FS_ERR" "cannot read source"
 

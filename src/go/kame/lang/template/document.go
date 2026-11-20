@@ -120,9 +120,8 @@ func ParseDocument(a mem.Allocator, name string, text string, style string) *Doc
 	}
 	s := source.New(a, name, text)
 	p := docParser{a: a, s: s, style: norm}
-	root := p.parseRange(0, len(s.Text))
-	d := mem.Alloc[Document](a)
-	d.Alloc, d.Source, d.OwnSource, d.Root, d.Diagnostics = a, s, true, root, p.diags
+	d := p.documentRange(0, len(s.Text))
+	d.OwnSource = true
 	return d
 }
 
@@ -131,7 +130,7 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 	norm := normStyle(style)
 	if style != "" && norm == "" {
 		d := mem.Alloc[Document](a)
-		d.Alloc = a
+		d.Alloc, d.Source = a, s
 		d.Root = newCat(a, nil, source.Span{Start: start, End: start})
 		d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "unknown comment style"})
 		return d
@@ -141,7 +140,7 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 		norm, ok = ResolveAutoStyle(s.Name, s.Text[start:end])
 		if !ok {
 			d := mem.Alloc[Document](a)
-			d.Alloc = a
+			d.Alloc, d.Source = a, s
 			d.Root = newCat(a, nil, source.Span{Start: start, End: start})
 			d.Diagnostics = append(d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "ambiguous template comment style"})
 			return d
@@ -151,9 +150,20 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 		norm = "plain"
 	}
 	p := docParser{a: a, s: s, style: norm}
+	return p.documentRange(start, end)
+}
+
+// ParseRecipeDocumentRange removes the rule's indentation from plain template
+// text while keeping all expression and directive offsets in the authored source.
+func ParseRecipeDocumentRange(a mem.Allocator, s *source.Source, start int, end int, indent string) *Document {
+	p := docParser{a: a, s: s, style: "plain", indent: indent}
+	return p.documentRange(start, end)
+}
+
+func (p *docParser) documentRange(start int, end int) *Document {
 	root := p.parseRange(start, end)
-	d := mem.Alloc[Document](a)
-	d.Alloc, d.Root, d.Diagnostics = a, root, p.diags
+	d := mem.Alloc[Document](p.a)
+	d.Alloc, d.Source, d.Root, d.Diagnostics = p.a, p.s, root, p.diags
 	return d
 }
 
@@ -187,43 +197,43 @@ type docParser struct {
 	a           mem.Allocator
 	s           *source.Source
 	style       string
+	indent      string
 	diags       []source.Diagnostic
 	inlineFound inlineBlockDirective
+	expansions  expr.ExpansionProbe
 }
 
-// HasDocumentDirectivesRange uses the document parser's own directive scanners.
-// It does not retain probe expressions or diagnostics, and keeps authored offsets.
-func HasDocumentDirectivesRange(a mem.Allocator, s *source.Source, start int, end int) bool {
+// NeedsDocumentRange reports whether a plain template contains a directive or
+// an interpolation that crosses a line boundary.
+func NeedsDocumentRange(a mem.Allocator, s *source.Source, start int, end int) bool {
 	p := docParser{a: a, s: s, style: "plain"}
 	found := false
 	for pos := start; pos < end; {
-		lineEnd := pos
-		for lineEnd < end && s.Text[lineEnd] != '\n' {
-			lineEnd++
-		}
-		d := p.directiveOnLine(pos, lineEnd)
+		line := scanLine(s.Text, pos, end)
+		d := p.directiveOnLine(pos, line.ContentEnd)
 		found = d.Kind != dirNone
 		freeArgs(a, d.Args)
-		if !found && p.nextInlineBlockDirective(pos, lineEnd) != 0 {
-			found = true
-			freeArgs(a, p.inlineFound.Dir.Args)
+		if !found {
+			lineEnd := line.LineEnd
+			p.scanInlineLine(&line, end)
+			found = line.LineEnd > lineEnd
 		}
 		if found {
 			break
 		}
-		pos = lineEnd + 1
+		pos = line.LineEnd
 	}
 	mem.FreeSlice(nil, p.diags)
 	return found
 }
 
 type dirOut struct {
-	Kind       int
-	Args       []*expr.Expr
-	Span       source.Span
-	EscapeRest source.Span
-	TrimLeft   bool
-	TrimRight  bool
+	Kind      int
+	Args      []*expr.Expr
+	Span      source.Span
+	EscapeAt  int
+	TrimLeft  bool
+	TrimRight bool
 }
 
 func (p *docParser) diag(code string, span source.Span, msg string) {
@@ -269,12 +279,6 @@ type lineOut struct {
 type trimOut struct {
 	Start int
 	End   int
-}
-
-type argsRes struct {
-	Args []*expr.Expr
-	End  int
-	OK   bool
 }
 
 type ifRes struct {
@@ -335,144 +339,70 @@ type inlineBlockDirective struct {
 	Dir   dirOut
 }
 
-func (p *docParser) nextInlineBlockDirective(start int, end int) int {
+// scanInlineLine extends a text line through multiline interpolations and
+// finds the first block comment directive outside those interpolations.
+func (p *docParser) scanInlineLine(line *lineOut, documentEnd int) bool {
+	open, close := blockCommentDelimiters(p.style)
 	text := p.s.Text
-	for i := start; i < end; i++ {
-		innerStart, innerEnd := -1, -1
-		if p.style == "plain" {
-			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') {
-				i++
-				continue
-			}
-			if text[i] == '@' && i+1 < end && text[i+1] == '@' {
-				i++
-				continue
-			}
-			if text[i] == '@' && i+1 < end && (text[i+1] == '(' || text[i+1] == '{') {
-				// Expression contents belong to the value parser, including strings
-				// containing directive-looking text.
-				value := p.inlineExpr(i, end)
-				expr.Free(p.a, value.Expr)
-				mem.FreeSlice(nil, value.Diagnostics)
-				if !value.Closed {
-					return 0
-				}
-				i = value.End
-				continue
-			}
-			if text[i] != '@' || i+1 >= end || text[i+1] == '(' || text[i+1] == '@' {
-				continue
-			}
-			wordStart := i + 1
-			if wordStart < end && text[wordStart] == '-' {
-				wordStart++
-			}
-			wordEnd := wordStart
-			for wordEnd < end && isKeywordLetter(text[wordEnd]) {
-				wordEnd++
-			}
-			kind := keywordKind(text[wordStart:wordEnd])
-			if !isBlockDirective(kind) {
-				continue
-			}
-			innerStart = i
-			if wordEnd < end && text[wordEnd] == '(' {
-				close := directiveParenEnd(text, wordEnd, end)
-				if close < 0 {
-					continue
-				}
-				innerEnd = close + 1
-				if innerEnd < end && text[innerEnd] == '-' {
-					innerEnd++
-				}
-			} else if kind == dirElse || kind == dirRaw || kind == dirEnd {
-				innerEnd = wordEnd
-				if innerEnd < end && text[innerEnd] == '-' {
-					innerEnd++
-				} else if innerEnd < end && isDirectiveWordContinuation(text[innerEnd]) {
-					continue
-				}
-			} else {
-				continue
-			}
-		} else if p.style == "html" || p.style == "c" || p.style == "powershell" {
-			open, close := "<!--", "-->"
-			if p.style == "c" {
-				open, close = "/*", "*/"
-			} else if p.style == "powershell" {
-				open, close = "<#", "#>"
-			}
-			if !hasPrefixAt(text, i, end, open) {
-				continue
-			}
-			bodyStart := i + len(open)
-			bodyEnd := findFirst(text, bodyStart, end, close)
-			if bodyEnd < 0 {
-				continue
-			}
-			tr := trimRange(text, bodyStart, bodyEnd)
-			if tr.Start >= tr.End || text[tr.Start] != '@' {
-				continue
-			}
-			innerStart, innerEnd = tr.Start, tr.End
-			span := source.Span{Start: i, End: bodyEnd + len(close)}
-			d := p.parseInner(innerStart, innerEnd, span)
-			if isBlockDirective(d.Kind) {
-				p.inlineFound = inlineBlockDirective{Start: i, End: span.End, Dir: d}
-				return 1
-			}
-			freeArgs(p.a, d.Args)
-			continue
-		} else {
-			return 0
-		}
-		span := source.Span{Start: innerStart, End: innerEnd}
-		d := p.parseInner(innerStart, innerEnd, span)
-		if isBlockDirective(d.Kind) {
-			p.inlineFound = inlineBlockDirective{Start: innerStart, End: innerEnd, Dir: d}
-			return 1
-		}
-		freeArgs(p.a, d.Args)
-	}
-	return 0
-}
-
-func isBlockDirective(kind int) bool {
-	switch kind {
-	case dirIf, dirElif, dirElse, dirFor, dirWith, dirRaw, dirEnd, dirMatch, dirCase:
-		return true
-	default:
-		return false
-	}
-}
-
-func directiveParenEnd(text string, open int, end int) int {
-	depth := 0
-	quoted, escaped := false, false
-	for i := open; i < end; i++ {
-		b := text[i]
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if b == '\\' {
-				escaped = true
-			} else if b == '"' {
-				quoted = false
-			}
+	for i := line.Start; i < line.ContentEnd; i++ {
+		end := line.ContentEnd
+		if hasPrefixAt(text, i, end, "@@") {
+			i++
 			continue
 		}
-		if b == '"' {
-			quoted = true
-		} else if b == '(' {
-			depth++
-		} else if b == ')' {
-			depth--
-			if depth == 0 {
-				return i
+		if hasPrefixAt(text, i, end, "@{") {
+			value := p.inlineExpr(i, end)
+			closed, last := value.Closed, value.End
+			expr.Free(p.a, value.Expr)
+			mem.FreeSlice(nil, value.Diagnostics)
+			if !closed && end < documentEnd {
+				view := *p.s
+				view.Text = text[:documentEnd]
+				var next int
+				next, closed = p.expansions.End(p.a, &view, i)
+				last = next - 1
 			}
+			if !closed {
+				return false
+			}
+			if last >= end {
+				tail := scanLine(text, last+1, documentEnd)
+				line.ContentEnd, line.LineEnd = tail.ContentEnd, tail.LineEnd
+			}
+			i = last
+			continue
 		}
+		if open == "" || !hasPrefixAt(text, i, end, open) {
+			continue
+		}
+		closeStart := findFirst(text, i+len(open), end, close)
+		if closeStart < 0 {
+			return false
+		}
+		inner := trimRange(text, i+len(open), closeStart)
+		kind, _, _ := directiveKeyword(text, inner.Start, inner.End)
+		switch kind {
+		case dirIf, dirElif, dirElse, dirFor, dirWith, dirRaw, dirEnd, dirMatch, dirCase:
+			span := source.Span{Start: i, End: closeStart + len(close)}
+			d := p.parseInner(inner.Start, inner.End, span)
+			p.inlineFound = inlineBlockDirective{Start: i, End: span.End, Dir: d}
+			return true
+		}
+		i = closeStart + len(close) - 1
 	}
-	return -1
+	return false
+}
+
+func blockCommentDelimiters(style string) (string, string) {
+	switch style {
+	case "html":
+		return "<!--", "-->"
+	case "c":
+		return "/*", "*/"
+	case "powershell":
+		return "<#", "#>"
+	}
+	return "", ""
 }
 
 func findFirst(text string, start int, end int, needle string) int {
@@ -493,7 +423,9 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 		lineStart, contentEnd, lineEnd := ln.Start, ln.ContentEnd, ln.LineEnd
 		d := p.directiveOnLine(lineStart, contentEnd)
 		if d.Kind == dirNone {
-			if p.nextInlineBlockDirective(cur, contentEnd) != 0 {
+			inlineBlock := p.scanInlineLine(&ln, end)
+			contentEnd, lineEnd = ln.ContentEnd, ln.LineEnd
+			if inlineBlock {
 				inline := p.inlineFound
 				parts := p.inlineParts(cur, inline.Start, inline.Start)
 				for i := range parts {
@@ -503,45 +435,27 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 				lineStart, contentEnd, lineEnd, d = inline.Start, inline.End, inline.End, inline.Dir
 			}
 		}
-		if d.Kind == dirNone {
-			// Body text line: parse inline expansions + preserve ending.
+		if d.Kind == dirNone || d.Kind == dirError {
+			lineStart = p.literalStart(lineStart, contentEnd)
 			parts := p.inlineParts(lineStart, contentEnd, lineEnd)
-			for i := range parts {
-				items = append(items, parts[i])
-			}
-			mem.FreeSlice(nil, parts)
-			cur = lineEnd
-			continue
-		}
-		if d.Kind == dirError {
-			// Malformed: diagnostic already pushed. Treat line as text to
-			// continue parsing and surface further errors.
-			parts := p.inlineParts(lineStart, contentEnd, lineEnd)
-			for i := range parts {
-				items = append(items, parts[i])
-			}
+			items = append(items, parts...)
 			mem.FreeSlice(nil, parts)
 			cur = lineEnd
 			continue
 		}
 		if d.Kind == dirEscape {
-			// "@@" at directive position: emit "@" + rest + ending.
-			restText := ""
-			if d.EscapeRest.End > d.EscapeRest.Start {
-				restText = p.s.Text[d.EscapeRest.Start:d.EscapeRest.End]
-			}
-			ending := ""
-			if lineEnd > contentEnd {
-				ending = p.s.Text[contentEnd:lineEnd]
-			}
-			combined := "@" + restText + ending
+			text := p.s.Text
+			lineStart = p.literalStart(lineStart, d.EscapeAt)
+			combined := text[lineStart:d.EscapeAt] + text[d.EscapeAt+1:lineEnd]
 			items = append(items, newStringLit(p.a, combined, source.Span{Start: lineStart, End: lineEnd}))
 			cur = lineEnd
 			continue
 		}
 		if d.TrimLeft && len(items) != 0 {
-			last := len(items) - 1
-			items[last] = wrapTemplateTrim(p.a, items[last], false)
+			items = wrapTemplateTrimTail(p.a, items, trimStartAt)
+			trimStartAt = -1
+			span := source.Span{Start: items[0].Span.Start, End: items[len(items)-1].Span.End}
+			items = []*expr.Expr{wrapTemplateTrim(p.a, newCat(p.a, items, span), false)}
 		}
 		if d.Kind == dirElif || d.Kind == dirElse || d.Kind == dirEnd || d.Kind == dirCase {
 			// Terminator for caller. Free nothing; caller owns TermArgs.
@@ -553,6 +467,9 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			// The binding scopes over the remainder of this block.
 			rest := p.parseBlock(lineEnd, end)
 			restCat := newCat(p.a, rest.Items, source.Span{Start: lineEnd, End: rest.Next})
+			if d.TrimRight {
+				restCat = wrapTemplateTrim(p.a, restCat, true)
+			}
 			nameExpr := d.Args[0]
 			valExpr := d.Args[1]
 			mem.FreeSlice(nil, d.Args)
@@ -582,7 +499,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			head := mem.Alloc[expr.Expr](p.a)
 			head.Kind = expr.Name
 			head.Span = d.Span
-			head.Text = "render"
+			head.Text = "template-include"
 			inc.Items = append(inc.Items, head)
 			for i := 1; i < len(d.Args); i++ {
 				inc.Items = append(inc.Items, d.Args[i])
@@ -590,6 +507,10 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			inc.Items = append(inc.Items, d.Args[0])
 			mem.FreeSlice(nil, d.Args)
 			items = append(items, inc)
+			if d.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
+				trimStartAt = len(items)
+			}
 			cur = lineEnd
 			continue
 		}
@@ -597,7 +518,8 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			r := p.parseIf(d, lineEnd, end)
 			items = append(items, r.Expr)
 			cur = r.Next
-			if r.TrimRight && trimStartAt < 0 {
+			if r.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
 				trimStartAt = len(items)
 			}
 			continue
@@ -606,7 +528,8 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			r := p.parseFor(d, lineEnd, end)
 			items = append(items, r.Expr)
 			cur = r.Next
-			if r.TrimRight && trimStartAt < 0 {
+			if r.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
 				trimStartAt = len(items)
 			}
 			continue
@@ -615,7 +538,8 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			r := p.parseWith(d, lineEnd, end)
 			items = append(items, r.Expr)
 			cur = r.Next
-			if r.TrimRight && trimStartAt < 0 {
+			if r.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
 				trimStartAt = len(items)
 			}
 			continue
@@ -624,7 +548,8 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			r := p.parseRaw(d, lineEnd, end)
 			items = append(items, r.Expr)
 			cur = r.Next
-			if r.TrimRight && trimStartAt < 0 {
+			if r.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
 				trimStartAt = len(items)
 			}
 			continue
@@ -633,7 +558,8 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			r := p.parseMatch(d, lineEnd, end)
 			items = append(items, r.Expr)
 			cur = r.Next
-			if r.TrimRight && trimStartAt < 0 {
+			if r.TrimRight {
+				items = wrapTemplateTrimTail(p.a, items, trimStartAt)
 				trimStartAt = len(items)
 			}
 			continue
@@ -722,125 +648,51 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	body := p.parseBlock(bodyPos, end)
 	bodyCat := newCat(p.a, body.Items, source.Span{Start: bodyPos, End: body.Next})
+	next := body.Next
 	if body.Term == dirEnd {
 		p.checkEndLabel(body.TermArgs, "for", body.TermSpan)
-	}
-	freeArgs(p.a, body.TermArgs)
-	if body.Term != dirEnd {
+		next = body.TermEnd
+	} else {
 		p.diag("TPL_BLOCK", head.Span, "unterminated @for block")
 	}
-	nextPos := body.Next
-	if body.Term == dirEnd {
-		nextPos = body.TermEnd
+	freeArgs(p.a, body.TermArgs)
+	params := lambdaParams(head.Args[0])
+	callback := mem.Alloc[expr.Expr](p.a)
+	callback.Kind, callback.Span = expr.Lambda, head.Span
+	callback.Parameters, callback.Body = params, []*expr.Expr{bodyCat}
+	if len(params) != 1 || params[0].Rest {
+		const item = "@template-item"
+		arg := mem.Alloc[expr.Expr](p.a)
+		arg.Kind, arg.Span, arg.Text = expr.Name, head.Span, item
+		apply := p.templateCall("template-apply", head.Span, callback, arg)
+		callback = mem.Alloc[expr.Expr](p.a)
+		callback.Kind, callback.Span = expr.Lambda, head.Span
+		callback.Parameters = []expr.Parameter{{Name: item, Span: head.Span}}
+		callback.Body = []*expr.Expr{apply}
 	}
-	// The lowering-only template-items operation supplies index, key and value
-	// in a record. The callback binds that record with `with`, then invokes the
-	// original parameter list with the loop value as its one map argument.
-	inner := mem.Alloc[expr.Expr](p.a)
-	inner.Kind = expr.Lambda
-	inner.Span = head.Span
-	inner.Parameters = lambdaParams(p.a, head.Args[0])
-	inner.Body = append(inner.Body, bodyCat)
-	getApp := templateItemField(p.a, "__template_item", "value", head.Span)
-	argsApp := mem.Alloc[expr.Expr](p.a)
-	argsApp.Kind = expr.Application
-	argsApp.Span = head.Span
-	argsHead := mem.Alloc[expr.Expr](p.a)
-	argsHead.Kind = expr.Name
-	argsHead.Text = "list"
-	argsHead.Span = head.Span
-	argsApp.Items = append(argsApp.Items, argsHead)
-	argsApp.Items = append(argsApp.Items, getApp)
-	applyApp := mem.Alloc[expr.Expr](p.a)
-	applyApp.Kind = expr.Application
-	applyApp.Span = head.Span
-	applyHead := mem.Alloc[expr.Expr](p.a)
-	applyHead.Kind = expr.Name
-	applyHead.Text = "template-apply"
-	applyHead.Span = head.Span
-	applyApp.Items = append(applyApp.Items, applyHead)
-	applyApp.Items = append(applyApp.Items, inner)
-	applyApp.Items = append(applyApp.Items, argsApp)
-	withApp := mem.Alloc[expr.Expr](p.a)
-	withApp.Kind = expr.Application
-	withApp.Span = head.Span
-	withHead := mem.Alloc[expr.Expr](p.a)
-	withHead.Kind = expr.Name
-	withHead.Text = "with"
-	withHead.Span = head.Span
-	withApp.Items = append(withApp.Items, withHead)
-	bindings := mem.Alloc[expr.Expr](p.a)
-	bindings.Kind = expr.Record
-	bindings.Span = head.Span
-	bindings.Fields = append(bindings.Fields, expr.Field{Key: "index", Span: head.Span, Value: templateItemField(p.a, "__template_item", "index", head.Span)})
-	bindings.Fields = append(bindings.Fields, expr.Field{Key: "key", Span: head.Span, Value: templateItemField(p.a, "__template_item", "key", head.Span)})
-	withApp.Items = append(withApp.Items, bindings)
-	withApp.Items = append(withApp.Items, applyApp)
-	lam := mem.Alloc[expr.Expr](p.a)
-	lam.Kind = expr.Lambda
-	lam.Span = head.Span
-	lam.Parameters = append(lam.Parameters, expr.Parameter{Name: "__template_item", Span: head.Span})
-	lam.Body = append(lam.Body, withApp)
-	itemsApp := mem.Alloc[expr.Expr](p.a)
-	itemsApp.Kind = expr.Application
-	itemsApp.Span = head.Span
-	itemsHead := mem.Alloc[expr.Expr](p.a)
-	itemsHead.Kind = expr.Name
-	itemsHead.Text = "template-items"
-	itemsHead.Span = head.Span
-	itemsApp.Items = append(itemsApp.Items, itemsHead)
-	itemsApp.Items = append(itemsApp.Items, head.Args[1])
-	// (map lam xs)
-	mapApp := mem.Alloc[expr.Expr](p.a)
-	mapApp.Kind = expr.Application
-	mapApp.Span = head.Span
-	mapHead := mem.Alloc[expr.Expr](p.a)
-	mapHead.Kind = expr.Name
-	mapHead.Span = head.Span
-	mapHead.Text = "map"
-	mapApp.Items = append(mapApp.Items, mapHead)
-	mapApp.Items = append(mapApp.Items, lam)
-	mapApp.Items = append(mapApp.Items, itemsApp)
-	// (join sep mapApp)
-	joinApp := mem.Alloc[expr.Expr](p.a)
-	joinApp.Kind = expr.Application
-	joinApp.Span = head.Span
-	joinHead := mem.Alloc[expr.Expr](p.a)
-	joinHead.Kind = expr.Name
-	joinHead.Span = head.Span
-	joinHead.Text = "join"
-	joinApp.Items = append(joinApp.Items, joinHead)
+	mapped := p.templateCall("template-map", head.Span, callback, head.Args[1])
+	var separator *expr.Expr
 	if len(head.Args) == 3 {
-		joinApp.Items = append(joinApp.Items, head.Args[2])
+		separator = head.Args[2]
 	} else {
-		joinApp.Items = append(joinApp.Items, newStringLit(p.a, "", head.Span))
+		separator = newStringLit(p.a, "", head.Span)
 	}
-	joinApp.Items = append(joinApp.Items, mapApp)
+	joined := p.templateCall("join", source.Span{Start: head.Span.Start, End: next}, separator, mapped)
 	expr.Free(p.a, head.Args[0])
 	mem.FreeSlice(nil, head.Args)
-	joinApp.Span.End = nextPos
 	if head.TrimRight {
-		joinApp = wrapTemplateTrim(p.a, joinApp, true)
+		joined = wrapTemplateTrim(p.a, joined, true)
 	}
-	return pairRes{Expr: joinApp, Next: nextPos, TrimRight: body.TermTrimRight}
+	return pairRes{Expr: joined, Next: next, TrimRight: body.TermTrimRight}
 }
 
-func templateItemField(a mem.Allocator, rowName string, field string, span source.Span) *expr.Expr {
-	app := mem.Alloc[expr.Expr](a)
-	app.Kind = expr.Application
-	app.Span = span
-	head := mem.Alloc[expr.Expr](a)
-	head.Kind = expr.Name
-	head.Text = "get"
-	head.Span = span
-	row := mem.Alloc[expr.Expr](a)
-	row.Kind = expr.Name
-	row.Text = rowName
-	row.Span = span
-	app.Items = append(app.Items, head)
-	app.Items = append(app.Items, newStringLit(a, field, span))
-	app.Items = append(app.Items, row)
-	return app
+func (p *docParser) templateCall(name string, span source.Span, args ...*expr.Expr) *expr.Expr {
+	head := mem.Alloc[expr.Expr](p.a)
+	head.Kind, head.Span, head.Text = expr.Name, span, name
+	call := mem.Alloc[expr.Expr](p.a)
+	call.Kind, call.Span = expr.Application, span
+	call.Items = append([]*expr.Expr{head}, args...)
+	return call
 }
 
 func (p *docParser) parseWith(head dirOut, bodyPos int, end int) pairRes {
@@ -925,7 +777,7 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 				return pairRes{Expr: app, Next: fallback.Next}
 			}
 			marker := mem.Alloc[expr.Expr](p.a)
-			marker.Kind = expr.Symbol
+			marker.Kind = expr.KashBranch
 			marker.Text = "else"
 			marker.Span = block.TermSpan
 			elseClause := mem.Alloc[expr.Expr](p.a)
@@ -967,7 +819,8 @@ func (p *docParser) parseRaw(head dirOut, bodyPos int, end int) pairRes {
 		ln := scanLine(p.s.Text, cur, end)
 		if p.nextRawEnd(cur, ln.ContentEnd) {
 			directive := p.inlineFound
-			rawText := p.s.Text[bodyPos:directive.Start]
+			freeArgs(p.a, directive.Dir.Args)
+			rawText := p.rawText(bodyPos, directive.Start)
 			value := newStringLit(p.a, rawText, source.Span{Start: bodyPos, End: directive.Start})
 			if directive.Dir.TrimLeft {
 				value = wrapTemplateTrim(p.a, value, false)
@@ -981,26 +834,38 @@ func (p *docParser) parseRaw(head dirOut, bodyPos int, end int) pairRes {
 			}
 			return pairRes{Expr: value, Next: next, TrimRight: directive.Dir.TrimRight}
 		}
-		if p.isEndLine(ln.Start, ln.ContentEnd) {
-			rawText := p.s.Text[bodyPos:ln.Start]
-			value := newStringLit(p.a, rawText, source.Span{Start: bodyPos, End: ln.Start})
-			if head.TrimRight {
-				value = wrapTemplateTrim(p.a, value, true)
-			}
-			return pairRes{Expr: value, Next: ln.LineEnd}
-		}
 		cur = ln.LineEnd
 	}
 	p.diag("TPL_PARSE", head.Span, "unterminated @raw block")
-	rawText := ""
-	if bodyPos < end {
-		rawText = p.s.Text[bodyPos:end]
-	}
-	lit := newStringLit(p.a, rawText, source.Span{Start: bodyPos, End: end})
+	lit := newStringLit(p.a, p.rawText(bodyPos, end), source.Span{Start: bodyPos, End: end})
 	if head.TrimRight {
 		lit = wrapTemplateTrim(p.a, lit, true)
 	}
 	return pairRes{Expr: lit, Next: end}
+}
+
+func (p *docParser) literalStart(start int, end int) int {
+	if hasPrefixAt(p.s.Text, start, end, p.indent) {
+		return start + len(p.indent)
+	}
+	return start
+}
+
+func (p *docParser) rawText(start int, end int) string {
+	if start >= end {
+		return ""
+	}
+	text := p.s.Text
+	if p.indent == "" {
+		return text[start:end]
+	}
+	var result strings.Builder
+	for start < end {
+		line := scanLine(text, start, end)
+		result.WriteString(text[p.literalStart(start, line.ContentEnd):line.LineEnd])
+		start = line.LineEnd
+	}
+	return result.String()
 }
 
 func onlyTemplateWhitespace(text string, start int, end int) bool {
@@ -1021,254 +886,49 @@ func (p *docParser) checkEndLabel(args []*expr.Expr, expected string, span sourc
 	}
 }
 
-// isEndLine reports whether the line is a valid bare @end directive in the
-// current style, without emitting diagnostics. Raw regions only recognize
-// @end; all other text is verbatim.
-func (p *docParser) isEndLine(lineStart int, contentEnd int) bool {
+// Raw text is scanned only for an end directive in the active style.
+func (p *docParser) nextRawEnd(start int, end int) bool {
 	text := p.s.Text
-	pos := lineStart
-	for pos < contentEnd && (text[pos] == ' ' || text[pos] == '\t') {
-		pos++
+	whole := p.directiveBodyOnLine(start, end)
+	span := source.Span{Start: start, End: end}
+	if d, ok := p.rawEndDirective(whole, span); ok {
+		p.inlineFound = inlineBlockDirective{Start: start, End: end, Dir: d}
+		return true
 	}
-	indentEnd := pos
-	if p.style == "none" || p.style == "plain" {
-		if p.style == "none" {
-			return false
-		}
-		trimEnd := contentEnd
-		for trimEnd > indentEnd && (text[trimEnd-1] == ' ' || text[trimEnd-1] == '\t') {
-			trimEnd--
-		}
-		return isRawEndToken(text[indentEnd:trimEnd])
+	open, close := blockCommentDelimiters(p.style)
+	if open == "" {
+		return false
 	}
-	// Comment styles: extract inner without diagnostics.
-	var innerStart, innerEnd int
-	hasInner := false
-	switch p.style {
-	case "html":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "<!--") {
-			return false
+	for i := start; i < end; i++ {
+		if !hasPrefixAt(text, i, end, open) {
+			continue
 		}
-		openEnd := indentEnd + 4
-		closeStart := findSuffix(text, openEnd, contentEnd, "-->")
+		closeStart := findFirst(text, i+len(open), end, close)
 		if closeStart < 0 {
 			return false
 		}
-		for i := closeStart + 3; i < contentEnd; i++ {
-			if text[i] != ' ' && text[i] != '\t' {
-				return false
-			}
+		inner := trimRange(text, i+len(open), closeStart)
+		span := source.Span{Start: i, End: closeStart + len(close)}
+		if d, ok := p.rawEndDirective(inner, span); ok {
+			p.inlineFound = inlineBlockDirective{Start: i, End: span.End, Dir: d}
+			return true
 		}
-		tr := trimRange(text, openEnd, closeStart)
-		innerStart, innerEnd, hasInner = tr.Start, tr.End, true
-	case "c":
-		if hasPrefixAt(text, indentEnd, contentEnd, "/*") {
-			openEnd := indentEnd + 2
-			closeStart := findSuffix(text, openEnd, contentEnd, "*/")
-			if closeStart < 0 {
-				return false
-			}
-			for i := closeStart + 2; i < contentEnd; i++ {
-				if text[i] != ' ' && text[i] != '\t' {
-					return false
-				}
-			}
-			tr := trimRange(text, openEnd, closeStart)
-			innerStart, innerEnd, hasInner = tr.Start, tr.End, true
-		} else {
-			if !hasPrefixAt(text, indentEnd, contentEnd, "//") {
-				return false
-			}
-			innerStart = indentEnd + 2
-			for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-				innerStart++
-			}
-			innerEnd = contentEnd
-			for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-				innerEnd--
-			}
-			hasInner = true
-		}
-	case "hash":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "#") {
-			return false
-		}
-		innerStart = indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd = contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		hasInner = true
-	case "dash":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "--") {
-			return false
-		}
-		innerStart = indentEnd + 2
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd = contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		hasInner = true
-	case "semi":
-		if !hasPrefixAt(text, indentEnd, contentEnd, ";") {
-			return false
-		}
-		innerStart = indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd = contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		hasInner = true
-	case "percent":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "%") {
-			return false
-		}
-		innerStart = indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd = contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		hasInner = true
-	case "powershell":
-		if hasPrefixAt(text, indentEnd, contentEnd, "<#") {
-			openEnd := indentEnd + 2
-			closeStart := findSuffix(text, openEnd, contentEnd, "#>")
-			if closeStart < 0 {
-				return false
-			}
-			for i := closeStart + 2; i < contentEnd; i++ {
-				if text[i] != ' ' && text[i] != '\t' {
-					return false
-				}
-			}
-			tr := trimRange(text, openEnd, closeStart)
-			innerStart, innerEnd, hasInner = tr.Start, tr.End, true
-		} else if hasPrefixAt(text, indentEnd, contentEnd, "#") {
-			innerStart = indentEnd + 1
-			for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-				innerStart++
-			}
-			innerEnd = contentEnd
-			for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-				innerEnd--
-			}
-			hasInner = true
-		}
-	case "batch":
-		innerStart = batchInnerStart(text, indentEnd, contentEnd)
-		if innerStart >= 0 {
-			innerEnd = contentEnd
-			for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-				innerEnd--
-			}
-			hasInner = true
-		}
-	}
-	if !hasInner {
-		return false
-	}
-	return isRawEndToken(text[innerStart:innerEnd])
-}
-
-func isRawEndToken(text string) bool {
-	return len(text) != 0 && rawEndAt(text, 0, len(text)) == len(text)
-}
-
-// rawEndAt recognizes only raw terminators, never expressions or other args.
-func rawEndAt(text string, start int, end int) int {
-	if start >= end || text[start] != '@' {
-		return 0
-	}
-	pos := start + 1
-	if pos < end && text[pos] == '-' {
-		pos++
-	}
-	if !hasPrefixAt(text, pos, end, "end") {
-		return 0
-	}
-	pos += len("end")
-	labeled := pos < end && text[pos] == '('
-	if labeled {
-		pos++
-		for pos < end && templateSpace(text[pos]) {
-			pos++
-		}
-		if !hasPrefixAt(text, pos, end, "raw") {
-			return 0
-		}
-		pos += len("raw")
-		for pos < end && templateSpace(text[pos]) {
-			pos++
-		}
-		if pos >= end || text[pos] != ')' {
-			return 0
-		}
-		pos++
-	}
-	if pos < end && text[pos] == '-' {
-		pos++
-	} else if !labeled && pos < end && isDirectiveWordContinuation(text[pos]) {
-		return 0
-	}
-	return pos
-}
-
-func (p *docParser) nextRawEnd(start int, end int) bool {
-	text := p.s.Text
-	for i := start; i < end; i++ {
-		innerStart, innerEnd, spanEnd := i, end, 0
-		if p.style == "plain" {
-			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') {
-				i++
-				continue
-			}
-			if text[i] == '@' && i+1 < end && text[i+1] == '@' {
-				i++
-				continue
-			}
-		} else if p.style == "html" || p.style == "c" || p.style == "powershell" {
-			open, close := "<!--", "-->"
-			if p.style == "c" {
-				open, close = "/*", "*/"
-			} else if p.style == "powershell" {
-				open, close = "<#", "#>"
-			}
-			if !hasPrefixAt(text, i, end, open) {
-				continue
-			}
-			closeStart := findFirst(text, i+len(open), end, close)
-			if closeStart < 0 {
-				continue
-			}
-			inner := trimRange(text, i+len(open), closeStart)
-			innerStart, innerEnd, spanEnd = inner.Start, inner.End, closeStart+len(close)
-		} else {
-			return false
-		}
-		tokenEnd := rawEndAt(text, innerStart, innerEnd)
-		if tokenEnd == 0 || (spanEnd != 0 && tokenEnd != innerEnd) {
-			continue
-		}
-		if spanEnd == 0 {
-			spanEnd = tokenEnd
-		}
-		span := source.Span{Start: i, End: spanEnd}
-		p.inlineFound = inlineBlockDirective{Start: i, End: spanEnd, Dir: dirOut{Kind: dirEnd, Span: span, TrimLeft: text[innerStart+1] == '-', TrimRight: text[tokenEnd-1] == '-'}}
-		return true
+		i = closeStart + len(close) - 1
 	}
 	return false
+}
+
+func (p *docParser) rawEndDirective(inner trimOut, span source.Span) (dirOut, bool) {
+	text := p.s.Text
+	kind, after, _ := directiveKeyword(text, inner.Start, inner.End)
+	if kind != dirEnd || (after < inner.End && !horizontal(text[after])) {
+		return dirOut{}, false
+	}
+	args, _ := directiveOperands(text, after, inner.End)
+	if label := text[args.Start:args.End]; label != "" && label != "raw" {
+		return dirOut{}, false
+	}
+	return p.parseInner(inner.Start, inner.End, span), true
 }
 
 // scanLine splits one line: ContentEnd excludes \r\n, LineEnd includes \n.
@@ -1290,206 +950,49 @@ func scanLine(text string, pos int, end int) lineOut {
 	return lineOut{Start: lineStart, ContentEnd: contentEnd, LineEnd: i}
 }
 
-func plainDirectiveEnd(text string, start int, end int) int {
-	if start >= end || text[start] != '@' || start+1 >= end {
-		return 0
-	}
-	wordStart := start + 1
-	if text[wordStart] == '-' {
-		wordStart++
-	}
-	wordEnd := wordStart
-	for wordEnd < end && isKeywordLetter(text[wordEnd]) {
-		wordEnd++
-	}
-	kind := keywordKind(text[wordStart:wordEnd])
-	if !isBlockDirective(kind) && kind != dirLet && kind != dirInclude {
-		return 0
-	}
-	tokenEnd := wordEnd
-	if wordEnd < end && text[wordEnd] == '(' {
-		close := directiveParenEnd(text, wordEnd, end)
-		if close < 0 {
-			return 0
-		}
-		tokenEnd = close + 1
-	} else if kind != dirElse && kind != dirRaw && kind != dirEnd {
-		return wordEnd
-	}
-	if tokenEnd < end && text[tokenEnd] == '-' {
-		tokenEnd++
-	}
-	return tokenEnd
+func (p *docParser) directiveOnLine(start, end int) dirOut {
+	body := p.directiveBodyOnLine(start, end)
+	return p.parseInner(body.Start, body.End, source.Span{Start: start, End: end})
 }
 
-func (p *docParser) directiveOnLine(lineStart int, contentEnd int) dirOut {
+func (p *docParser) directiveBodyOnLine(start, end int) trimOut {
 	text := p.s.Text
-	pos := lineStart
-	for pos < contentEnd && (text[pos] == ' ' || text[pos] == '\t') {
-		pos++
-	}
-	indentEnd := pos
-	if p.style == "none" {
-		return dirOut{Kind: dirNone}
-	}
+	line := trimRange(text, start, end)
 	if p.style == "plain" {
-		trimEnd := contentEnd
-		for trimEnd > indentEnd && (text[trimEnd-1] == ' ' || text[trimEnd-1] == '\t') {
-			trimEnd--
-		}
-		if indentEnd >= trimEnd {
-			return dirOut{Kind: dirNone}
-		}
-		if text[indentEnd] == '@' && indentEnd+1 < trimEnd && text[indentEnd+1] == '@' {
-			return p.parseInner(indentEnd, trimEnd, source.Span{Start: lineStart, End: contentEnd})
-		}
-		tokenEnd := plainDirectiveEnd(text, indentEnd, trimEnd)
-		if tokenEnd == 0 {
-			return p.parseInner(indentEnd, trimEnd, source.Span{Start: lineStart, End: contentEnd})
-		}
-		for i := tokenEnd; i < trimEnd; i++ {
-			if text[i] != ' ' && text[i] != '\t' {
-				return dirOut{Kind: dirNone}
-			}
-		}
-		return p.parseInner(indentEnd, tokenEnd, source.Span{Start: lineStart, End: tokenEnd})
+		return line
 	}
-	// Comment styles.
+	open, close := blockCommentDelimiters(p.style)
+	if open != "" && hasPrefixAt(text, line.Start, line.End, open) {
+		closeStart := findFirst(text, line.Start+len(open), line.End, close)
+		if closeStart >= 0 && closeStart+len(close) == line.End {
+			return trimRange(text, line.Start+len(open), closeStart)
+		}
+		return trimOut{}
+	}
+	var prefix string
 	switch p.style {
-	case "html":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "<!--") {
-			return dirOut{Kind: dirNone}
-		}
-		openEnd := indentEnd + 4
-		closeStart := findSuffix(text, openEnd, contentEnd, "-->")
-		if closeStart < 0 {
-			return dirOut{Kind: dirNone}
-		}
-		for i := closeStart + 3; i < contentEnd; i++ {
-			if text[i] != ' ' && text[i] != '\t' {
-				return dirOut{Kind: dirNone}
-			}
-		}
-		tr := trimRange(text, openEnd, closeStart)
-		return p.parseInner(tr.Start, tr.End, source.Span{Start: lineStart, End: contentEnd})
 	case "c":
-		if hasPrefixAt(text, indentEnd, contentEnd, "/*") {
-			openEnd := indentEnd + 2
-			closeStart := findSuffix(text, openEnd, contentEnd, "*/")
-			if closeStart < 0 {
-				return dirOut{Kind: dirNone}
-			}
-			for i := closeStart + 2; i < contentEnd; i++ {
-				if text[i] != ' ' && text[i] != '\t' {
-					return dirOut{Kind: dirNone}
-				}
-			}
-			tr2 := trimRange(text, openEnd, closeStart)
-			return p.parseInner(tr2.Start, tr2.End, source.Span{Start: lineStart, End: contentEnd})
-		}
-		if !hasPrefixAt(text, indentEnd, contentEnd, "//") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 2
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
-	case "hash":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "#") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+		prefix = "//"
+	case "hash", "powershell":
+		prefix = "#"
 	case "dash":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "--") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 2
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+		prefix = "--"
 	case "semi":
-		if !hasPrefixAt(text, indentEnd, contentEnd, ";") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+		prefix = ";"
 	case "percent":
-		if !hasPrefixAt(text, indentEnd, contentEnd, "%") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
-	case "powershell":
-		if hasPrefixAt(text, indentEnd, contentEnd, "<#") {
-			openEnd := indentEnd + 2
-			closeStart := findSuffix(text, openEnd, contentEnd, "#>")
-			if closeStart < 0 {
-				return dirOut{Kind: dirNone}
-			}
-			for i := closeStart + 2; i < contentEnd; i++ {
-				if text[i] != ' ' && text[i] != '\t' {
-					return dirOut{Kind: dirNone}
-				}
-			}
-			tr := trimRange(text, openEnd, closeStart)
-			return p.parseInner(tr.Start, tr.End, source.Span{Start: lineStart, End: contentEnd})
-		}
-		if !hasPrefixAt(text, indentEnd, contentEnd, "#") {
-			return dirOut{Kind: dirNone}
-		}
-		innerStart := indentEnd + 1
-		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') {
-			innerStart++
-		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+		prefix = "%"
 	case "batch":
-		innerStart := batchInnerStart(text, indentEnd, contentEnd)
-		if innerStart < 0 {
-			return dirOut{Kind: dirNone}
+		if inner := batchInnerStart(text, line.Start, line.End); inner >= 0 {
+			return trimRange(text, inner, line.End)
 		}
-		innerEnd := contentEnd
-		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') {
-			innerEnd--
-		}
-		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+		return trimOut{}
+	default:
+		return trimOut{}
 	}
-	return dirOut{Kind: dirNone}
+	if hasPrefixAt(text, line.Start, line.End, prefix) {
+		return trimRange(text, line.Start+len(prefix), line.End)
+	}
+	return trimOut{}
 }
 
 func batchInnerStart(text string, start int, end int) int {
@@ -1522,28 +1025,6 @@ func hasPrefixAt(text string, pos int, end int, prefix string) bool {
 	return true
 }
 
-func findSuffix(text string, start int, end int, suffix string) int {
-	if len(suffix) > end-start {
-		return -1
-	}
-	// Last occurrence such that only spaces follow is checked by caller;
-	// here find the last occurrence within range.
-	last := -1
-	for i := start; i+len(suffix) <= end; i++ {
-		match := true
-		for j := 0; j < len(suffix); j++ {
-			if text[i+j] != suffix[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			last = i
-		}
-	}
-	return last
-}
-
 func trimRange(text string, start int, end int) trimOut {
 	for start < end && (text[start] == ' ' || text[start] == '\t') {
 		start++
@@ -1555,12 +1036,6 @@ func trimRange(text string, start int, end int) trimOut {
 }
 
 func isKeywordLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
-
-// Name/path continuations keep keyword lookalikes literal; prose punctuation
-// can follow a bare marker without whitespace (for example, "@end!").
-func isDirectiveWordContinuation(b byte) bool {
-	return isKeywordLetter(b) || (b >= '0' && b <= '9') || b == '_' || b == '-' || b == '/' || b == '.' || b == '\\'
-}
 
 func keywordKind(word string) int {
 	switch word {
@@ -1590,347 +1065,220 @@ func keywordKind(word string) int {
 	return dirNone
 }
 
-func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Span) dirOut {
-	text := p.s.Text
-	if innerStart >= innerEnd {
-		return dirOut{Kind: dirNone}
+func directiveKeyword(text string, start, end int) (kind, operandStart int, trimLeft bool) {
+	if start >= end || text[start] != '@' {
+		return dirNone, start, false
 	}
-	if text[innerStart] != '@' {
-		return dirOut{Kind: dirNone}
-	}
-	if innerStart+1 < innerEnd && text[innerStart+1] == '@' {
-		return dirOut{Kind: dirEscape, Span: lineSpan, EscapeRest: source.Span{Start: innerStart + 2, End: innerEnd}}
-	}
-	trimLeft := innerStart+1 < innerEnd && text[innerStart+1] == '-'
-	keywordStart := innerStart + 1
+	word := start + 1
+	trimLeft = word < end && text[word] == '-'
 	if trimLeft {
-		keywordStart++
+		word++
 	}
-	trimRight := innerEnd > keywordStart && text[innerEnd-1] == '-'
-	if trimRight {
-		innerEnd--
+	pos := word
+	for pos < end && isKeywordLetter(text[pos]) {
+		pos++
 	}
-	// Parse keyword letters.
-	kend := keywordStart
-	for kend < innerEnd && isKeywordLetter(text[kend]) {
-		kend++
+	if pos < end && !horizontal(text[pos]) && text[pos] != '-' {
+		return dirNone, pos, trimLeft
 	}
-	if kend == keywordStart {
-		return dirOut{Kind: dirNone}
-	}
-	word := text[keywordStart:kend]
-	// Case-sensitive? Spec examples lowercase; match literally but allow
-	// exact lowercase only to keep @media etc untouched (they are lowercase
-	// but unknown, so dirNone anyway). Use exact match.
-	kind := keywordKind(word)
-	if kind == dirNone {
-		return dirOut{Kind: dirNone}
-	}
-	if kend < innerEnd && text[kend] != '(' && !templateSpace(text[kend]) {
-		return dirOut{Kind: dirNone}
-	}
-	span := source.Span{Start: innerStart, End: innerEnd}
-	// Bare keywords; @end also accepts a block label.
-	if kind == dirElse || kind == dirRaw || (kind == dirEnd && kend == innerEnd) {
-		if kend == innerEnd {
-			return dirOut{Kind: kind, Span: lineSpan, TrimLeft: trimLeft, TrimRight: trimRight}
-		}
-		// "@else (" with space before paren is not a directive per spec?
-		// For bare keywords, any trailing content is malformed.
-		// Distinguish "@else (" (space) as non-directive to avoid false
-		// positives on English? Keep strict: malformed.
-		_ = span
-		p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-		return dirOut{Kind: dirError, Span: lineSpan}
-	}
-	if kind == dirEnd && (kend >= innerEnd || text[kend] != '(') {
-		return dirOut{Kind: dirNone}
-	}
-	// Args keywords need "(" adjacent.
-	if kend >= innerEnd || text[kend] != '(' {
-		// "@if (" with space, or bare "@if": not a directive (ordinary text).
-		return dirOut{Kind: dirNone}
-	}
-	if kind == dirEnd {
-		if text[innerEnd-1] != ')' {
-			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-		label := strings.TrimSpace(text[kend+1 : innerEnd-1])
-		switch label {
-		case "if", "for", "with", "match", "raw":
-			arg := mem.Alloc[expr.Expr](p.a)
-			labelStart := kend + 1 + strings.Index(text[kend+1:innerEnd-1], label)
-			arg.Kind, arg.Text = expr.Name, label
-			arg.Span = source.Span{Start: labelStart, End: labelStart + len(label)}
-			return dirOut{Kind: kind, Args: []*expr.Expr{arg}, Span: lineSpan, TrimLeft: trimLeft, TrimRight: trimRight}
-		default:
-			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-	}
-	ares := p.parseArgs(kend+1, innerEnd, kind == dirCase)
-	args := ares.Args
-	argsEnd := ares.End
-	ok := ares.OK
-	if !ok {
-		p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-		for i := range args {
-			expr.Free(p.a, args[i])
-		}
-		mem.FreeSlice(nil, args)
-		return dirOut{Kind: dirError, Span: lineSpan}
-	}
-	if argsEnd != innerEnd {
-		p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-		for i := range args {
-			expr.Free(p.a, args[i])
-		}
-		mem.FreeSlice(nil, args)
-		return dirOut{Kind: dirError, Span: lineSpan}
-	}
-	// Validate arity and shapes.
-	switch kind {
-	case dirIf, dirElif, dirWith, dirMatch, dirCase:
-		// A directive owns argument slots, unlike a bare @ expression prefix:
-		// one item is a value/reference; multiple items form an application.
-		if len(args) > 1 {
-			app := mem.Alloc[expr.Expr](p.a)
-			app.Kind, app.Span, app.Items = expr.Application, source.Span{Start: args[0].Span.Start, End: args[len(args)-1].Span.End}, args
-			args = append([]*expr.Expr(nil), app)
-		}
-		if len(args) != 1 {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-	case dirFor:
-		if len(args) != 2 && len(args) != 3 {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-		if args[0].Kind != expr.List {
-			p.diag("TPL_PARSE", args[0].Span, forParameterMessage(args[0].Kind, false))
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-		if !validParams(args[0]) {
-			message := "@for parameters must be unique names, with any rest parameter last"
-			span := args[0].Span
-			for i := range args[0].Items {
-				if args[0].Items[i].Kind != expr.Name {
-					message = forParameterMessage(args[0].Items[i].Kind, true)
-					span = args[0].Items[i].Span
-					break
-				}
-			}
-			p.diag("TPL_PARSE", span, message)
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-	case dirLet:
-		if len(args) != 2 || args[0].Kind != expr.Name {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-	case dirInclude:
-		if len(args) != 1 && len(args) != 2 {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return dirOut{Kind: dirError, Span: lineSpan}
-		}
-
-	}
-	return dirOut{Kind: kind, Args: args, Span: lineSpan, TrimLeft: trimLeft, TrimRight: trimRight}
+	return keywordKind(text[word:pos]), pos, trimLeft
 }
 
-// parseArgs parses whitespace-separated expressions starting at pos until
-// the outer ")".
-func (p *docParser) parseArgs(pos int, innerEnd int, casePattern bool) argsRes {
+func (p *docParser) parseInner(start, end int, span source.Span) dirOut {
 	text := p.s.Text
+	if hasPrefixAt(text, start, end, "@@") {
+		return dirOut{Kind: dirEscape, Span: span, EscapeAt: start}
+	}
+	kind, after, left := directiveKeyword(text, start, end)
+	if kind == dirNone {
+		return dirOut{}
+	}
+	argsRange, right := directiveOperands(text, after, end)
 	var args []*expr.Expr
-	cur := pos
-	for {
-		for cur < innerEnd && (text[cur] == ' ' || text[cur] == '\t') {
-			cur++
-		}
-		if cur < innerEnd && text[cur] == ')' {
-			cur++
-			for cur < innerEnd && (text[cur] == ' ' || text[cur] == '\t') {
-				cur++
+	ok := false
+	code, message := "TPL_PARSE", "malformed template directive"
+	if after == end || horizontal(text[after]) {
+		switch kind {
+		case dirElse, dirRaw:
+			ok = argsRange.Start == argsRange.End
+		case dirEnd:
+			label := text[argsRange.Start:argsRange.End]
+			switch label {
+			case "":
+				ok = true
+			case "if", "for", "with", "match", "raw":
+				args = []*expr.Expr{p.directiveName(argsRange)}
+				ok = true
 			}
-			if cur != innerEnd {
-				for i := range args {
-					expr.Free(p.a, args[i])
+		case dirLet:
+			args, ok = p.parseLetOperands(argsRange)
+			message = "expected @let NAME = EXPR"
+		case dirFor:
+			args, ok = p.parseForOperands(argsRange)
+			message = "expected @for NAME… in EXPR with unique names, any rest parameter last, and an optional sep EXPR"
+		case dirInclude:
+			args, ok = p.parseIncludeOperands(argsRange)
+			message = "expected @include PATH followed by an optional payload expression"
+		case dirCase:
+			bounded := *p.s
+			bounded.Text = text[:argsRange.End]
+			if argsRange.Start != argsRange.End {
+				pattern := expr.ParseMatchPatternPrefix(p.a, &bounded, argsRange.Start)
+				ok = pattern.Expr != nil && len(pattern.Diagnostics) == 0 && pattern.End == argsRange.End
+				args = []*expr.Expr{pattern.Expr}
+				if len(pattern.Diagnostics) != 0 && pattern.Diagnostics[0].Code == "PAT_INVALID" {
+					code, message = pattern.Diagnostics[0].Code, pattern.Diagnostics[0].Message
 				}
-				mem.FreeSlice(nil, args)
-				return argsRes{End: innerEnd, OK: false}
+				mem.FreeSlice(nil, pattern.Diagnostics)
 			}
-			return argsRes{Args: args, End: cur, OK: true}
-		}
-		if cur >= innerEnd {
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			return argsRes{End: innerEnd, OK: false}
-		}
-		var prefix expr.Prefix
-		if casePattern && len(args) == 0 && text[cur] == '"' {
-			prefix = expr.ParseMatchPatternPrefix(p.a, p.s, cur)
-		} else {
-			prefix = expr.ParsePrefix(p.a, p.s, cur)
-		}
-		if prefix.Expr == nil {
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			mem.FreeSlice(nil, prefix.Diagnostics)
-			return argsRes{End: innerEnd, OK: false}
-		}
-		if len(prefix.Diagnostics) != 0 {
-			expr.Free(p.a, prefix.Expr)
-			for i := range args {
-				expr.Free(p.a, args[i])
-			}
-			mem.FreeSlice(nil, args)
-			mem.FreeSlice(nil, prefix.Diagnostics)
-			return argsRes{End: innerEnd, OK: false}
-		}
-		mem.FreeSlice(nil, prefix.Diagnostics)
-		args = append(args, prefix.Expr)
-		cur = prefix.End
-		if cur < innerEnd && text[cur] != ')' && text[cur] != ' ' && text[cur] != '\t' {
-			freeArgs(p.a, args)
-			return argsRes{End: cur, OK: false}
-		}
-	}
-}
-
-// Parse diagnostics borrow strings; these complete messages must stay static.
-var forParameterShapes = [18]string{
-	"@for parameters must be a list of names; got invalid",
-	"@for parameters must be a list of names; got bool",
-	"@for parameters must be a list of names; got nil",
-	"@for parameters must be a list of names; got int",
-	"@for parameters must be a list of names; got float",
-	"@for parameters must be a list of names; got string",
-	"@for parameters must be a list of names; got symbol",
-	"@for parameters must be a list of names; got name",
-	"@for parameters must be a list of names; got path",
-	"@for parameters must be a list of names; got selector",
-	"@for parameters must be a list of names; got reference",
-	"@for parameters must be a list of names; got list",
-	"@for parameters must be a list of names; got record",
-	"@for parameters must be a list of names; got application",
-	"@for parameters must be a list of names; got lambda",
-	"@for parameters must be a list of names; got placeholder",
-	"@for parameters must be a list of names; got section",
-	"@for parameters must be a list of names; got command capture",
-}
-
-var forParameterMembers = [18]string{
-	"@for parameter list must contain only names; got invalid",
-	"@for parameter list must contain only names; got bool",
-	"@for parameter list must contain only names; got nil",
-	"@for parameter list must contain only names; got int",
-	"@for parameter list must contain only names; got float",
-	"@for parameter list must contain only names; got string",
-	"@for parameter list must contain only names; got symbol",
-	"@for parameter list must contain only names; got name",
-	"@for parameter list must contain only names; got path",
-	"@for parameter list must contain only names; got selector",
-	"@for parameter list must contain only names; got reference",
-	"@for parameter list must contain only names; got list",
-	"@for parameter list must contain only names; got record",
-	"@for parameter list must contain only names; got application",
-	"@for parameter list must contain only names; got lambda",
-	"@for parameter list must contain only names; got placeholder",
-	"@for parameter list must contain only names; got section",
-	"@for parameter list must contain only names; got command capture",
-}
-
-func forParameterMessage(kind expr.Kind, member bool) string {
-	if kind == expr.EnvironmentReference {
-		if member {
-			return "@for parameter list must contain only names; got environment reference"
-		}
-		return "@for parameters must be a list of names; got environment reference"
-	}
-	if int(kind) < 0 || int(kind) >= len(forParameterShapes) {
-		if member {
-			return "@for parameter list must contain only names; got expression"
-		}
-		return "@for parameters must be a list of names; got expression"
-	}
-	if member {
-		return forParameterMembers[int(kind)]
-	}
-	return forParameterShapes[int(kind)]
-}
-
-func validParams(list *expr.Expr) bool {
-	seenRest := false
-	for i := range list.Items {
-		it := list.Items[i]
-		if it.Kind != expr.Name {
-			return false
-		}
-		if it.Rest {
-			if i != len(list.Items)-1 {
-				return false
-			}
-			seenRest = true
-		}
-		for j := 0; j < i; j++ {
-			if list.Items[j].Text == it.Text {
-				return false
+		default:
+			if value := p.directiveExpression(argsRange); value != nil {
+				args, ok = []*expr.Expr{value}, true
 			}
 		}
 	}
-	_ = seenRest
-	return true
+	if !ok {
+		freeArgs(p.a, args)
+		p.diag(code, span, message)
+		return dirOut{Kind: dirError, Span: span}
+	}
+	return dirOut{Kind: kind, Args: args, Span: span, TrimLeft: left, TrimRight: right}
 }
 
-func lambdaParams(a mem.Allocator, list *expr.Expr) []expr.Parameter {
-	var out []expr.Parameter
-	for i := range list.Items {
-		it := list.Items[i]
-		rest := it.Rest
-		end := it.Span.End
-		if rest {
-			end += 3
+func directiveOperands(text string, after, end int) (trimOut, bool) {
+	right := end > after && text[end-1] == '-' && horizontal(text[end-2])
+	if right {
+		end--
+	}
+	return trimRange(text, after, end), right
+}
+
+func (p *docParser) directiveName(r trimOut) *expr.Expr {
+	name := mem.Alloc[expr.Expr](p.a)
+	name.Kind, name.Text = expr.Name, p.s.Text[r.Start:r.End]
+	name.Span = source.Span{Start: r.Start, End: r.End}
+	return name
+}
+
+func (p *docParser) directiveExpression(r trimOut) *expr.Expr {
+	if r.Start == r.End {
+		return nil
+	}
+	value := expr.ParseRange(p.a, p.s, r.Start, r.End, "")
+	defer mem.FreeSlice(nil, value.Diagnostics)
+	if len(value.Diagnostics) != 0 {
+		expr.Free(p.a, value.Expr)
+		return nil
+	}
+	return value.Expr
+}
+
+func (p *docParser) parseLetOperands(r trimOut) ([]*expr.Expr, bool) {
+	text := p.s.Text
+	equal := strings.IndexByte(text[r.Start:r.End], '=')
+	if equal < 0 {
+		return nil, false
+	}
+	equal += r.Start
+	name := trimRange(text, r.Start, equal)
+	if !expr.ValidBindingName(text[name.Start:name.End]) {
+		return nil, false
+	}
+	value := p.directiveExpression(trimRange(text, equal+1, r.End))
+	if value == nil {
+		return nil, false
+	}
+	return []*expr.Expr{p.directiveName(name), value}, true
+}
+
+func (p *docParser) parseForOperands(r trimOut) ([]*expr.Expr, bool) {
+	text := p.s.Text
+	params := mem.Alloc[expr.Expr](p.a)
+	params.Kind = expr.List
+	params.Span.Start = r.Start
+	params.Span.End = r.Start
+	names := make(map[string]bool)
+	pos := r.Start
+	for pos < r.End {
+		start := pos
+		for pos < r.End && !horizontal(text[pos]) {
+			pos++
 		}
-		out = append(out, expr.Parameter{Name: it.Text, Span: source.Span{Start: it.Span.Start, End: end}, Rest: rest})
+		word := text[start:pos]
+		if word == "in" {
+			break
+		}
+		name, rest := strings.CutSuffix(word, "...")
+		if !expr.ValidBindingName(name) || names[name] || (len(params.Items) != 0 && params.Items[len(params.Items)-1].Rest) {
+			expr.Free(p.a, params)
+			return nil, false
+		}
+		names[name] = true
+		arg := p.directiveName(trimOut{Start: start, End: start + len(name)})
+		arg.Rest = rest
+		params.Items = append(params.Items, arg)
+		params.Span.End = pos
+		pos = trimRange(text, pos, r.End).Start
+	}
+	sourceRange := trimRange(text, pos, r.End)
+	if len(params.Items) == 0 || sourceRange.Start == sourceRange.End {
+		expr.Free(p.a, params)
+		return nil, false
+	}
+	list := expr.ParseTemplateLoopSource(p.a, p.s, sourceRange.Start, sourceRange.End)
+	defer mem.FreeSlice(nil, list.Diagnostics)
+	args := []*expr.Expr{params, list.Expr}
+	if list.Expr == nil || len(list.Diagnostics) != 0 {
+		return args, false
+	}
+	tail := trimRange(text, list.End, r.End)
+	if tail.Start == tail.End {
+		return args, true
+	}
+	if !hasPrefixAt(text, tail.Start, tail.End, "sep") || tail.Start+3 == tail.End || !horizontal(text[tail.Start+3]) {
+		return args, false
+	}
+	separator := p.directiveExpression(trimRange(text, tail.Start+3, tail.End))
+	return append(args, separator), separator != nil
+}
+
+func (p *docParser) parseIncludeOperands(r trimOut) ([]*expr.Expr, bool) {
+	if r.Start == r.End {
+		return nil, false
+	}
+	path := expr.ParsePostfixRange(p.a, p.s, r.Start, r.End)
+	defer mem.FreeSlice(nil, path.Diagnostics)
+	args := []*expr.Expr{path.Expr}
+	if path.Expr == nil || len(path.Diagnostics) != 0 || (path.End < r.End && !horizontal(p.s.Text[path.End])) {
+		return args, false
+	}
+	switch path.Expr.Kind {
+	case expr.Path, expr.String, expr.Name, expr.Reference, expr.EnvironmentReference, expr.Group, expr.Application:
+	default:
+		return args, false
+	}
+	tail := trimRange(p.s.Text, path.End, r.End)
+	if tail.Start == tail.End {
+		return args, true
+	}
+	payload := p.directiveExpression(tail)
+	return append(args, payload), payload != nil
+}
+
+func lambdaParams(list *expr.Expr) []expr.Parameter {
+	out := make([]expr.Parameter, 0, len(list.Items))
+	for _, item := range list.Items {
+		span := item.Span
+		if item.Rest {
+			span.End += 3
+		}
+		out = append(out, expr.Parameter{Name: item.Text, Span: span, Rest: item.Rest})
 	}
 	return out
 }
 
 // inlineParts parses body text (lineStart..contentEnd) plus its line ending
-// (contentEnd..lineEnd) into lowered pieces: string literals, inline
-// reference/call expansions, selectors, and \@ escapes. Malformed expansions
-// remain literal; complete expressions keep their ordinary evaluation semantics.
+// (contentEnd..lineEnd) into string literals and expression interpolations.
 func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*expr.Expr {
 	var items []*expr.Expr
 	text := p.s.Text
@@ -1938,7 +1286,7 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 	i := lineStart
 	for i < contentEnd {
 		b := text[i]
-		if b == '\\' && i+1 < contentEnd && (text[i+1] == '@' || text[i+1] == '\\') {
+		if b == '@' && i+1 < contentEnd && text[i+1] == '@' {
 			if i > litStart {
 				items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 			}
@@ -1947,7 +1295,7 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			litStart = i
 			continue
 		}
-		if b == '@' && i+1 < contentEnd && (text[i+1] == '(' || text[i+1] == '{') {
+		if b == '@' && i+1 < contentEnd && text[i+1] == '{' {
 			if i > litStart {
 				items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 			}
@@ -1955,19 +1303,13 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			if !prefix.Closed {
 				expr.Free(p.a, prefix.Expr)
 				mem.FreeSlice(nil, prefix.Diagnostics)
-				message := "unclosed template expression; expected ')'"
-				if text[i+1] == '{' {
-					message = "unclosed reference expansion; expected '}'"
-				}
-				p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i + 2}, Message: message})
+				p.diag("PARSE_ERR", source.Span{Start: i, End: i + 2}, "unclosed template interpolation; expected '}'")
 				items = append(items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
 				i++
 				litStart = i
 				continue
 			}
-			for j := range prefix.Diagnostics {
-				p.diags = append(p.diags, prefix.Diagnostics[j])
-			}
+			p.diags = append(p.diags, prefix.Diagnostics...)
 			mem.FreeSlice(nil, prefix.Diagnostics)
 			if prefix.Expr == nil {
 				items = append(items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End + 1}))
@@ -1977,23 +1319,6 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			i = prefix.End + 1
 			litStart = i
 			continue
-		}
-		if b == '@' {
-			selEnd := docSelectorEnd(text, contentEnd, i)
-			if selEnd > i {
-				if i > litStart {
-					items = append(items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
-				}
-				sel := mem.Alloc[expr.Expr](p.a)
-				sel.Kind = expr.Selector
-				sel.Expansion = "selector"
-				sel.Span = source.Span{Start: i, End: selEnd}
-				sel.Text = text[i:selEnd]
-				items = append(items, sel)
-				i = selEnd
-				litStart = i
-				continue
-			}
 		}
 		i++
 	}
@@ -2006,48 +1331,6 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 	}
 	return items
 }
-
-func docSelectorEnd(text string, end int, start int) int {
-	if start+1 >= end {
-		// Need at least "@x"; lone "@" at end is not a selector.
-		// Allow two-char selectors only when both bytes exist.
-		if start+1 == end {
-			return start
-		}
-		return start
-	}
-	b := text[start+1]
-	if b == '*' || b == '#' || b == '_' {
-		candidate := text[start : start+2]
-		if expr.ValidSelector(candidate) {
-			return start + 2
-		}
-		return start
-	}
-	if b != '<' && b != '>' && !isDocDigit(b) && b != '-' {
-		return start
-	}
-	i := start + 2
-	if b == '<' || b == '>' {
-		if i < end && (text[i] == '*' || text[i] == '#' || (b == '<' && text[i] == '?')) {
-			candidate := text[start : i+1]
-			if expr.ValidSelector(candidate) {
-				return i + 1
-			}
-			return start
-		}
-	}
-	for i < end && (isDocDigit(text[i]) || text[i] == '-' || text[i] == '.') {
-		i++
-	}
-	candidate := text[start:i]
-	if expr.ValidSelector(candidate) {
-		return i
-	}
-	return start
-}
-
-func isDocDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 type inlineOut struct {
 	Expr        *expr.Expr

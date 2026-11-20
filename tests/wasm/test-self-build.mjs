@@ -18,31 +18,50 @@ let watch;
 try {
   for (const name of new Set(files)) {
     await mkdir(dirname(join(directory, name)), { recursive: true });
-    await cp(join(root, name), join(directory, name));
+    try {
+      await cp(join(root, name), join(directory, name), { verbatimSymlinks: true });
+    } catch (error) {
+      // A tracked file can be deleted in an in-progress source checkout.
+      if (error.code !== 'ENOENT') throw error;
+    }
   }
+  // The Go module resolves this dependency through the tracked symlink.
+  await cp(join(root, 'deps/readline'), join(directory, 'deps/readline'), {
+    recursive: true,
+    filter: (source) => !source.endsWith('/.git'),
+  });
   const version = (await readFile(join(directory, 'VERSION'), 'utf8')).trim();
-  const source = await readFile(join(directory, 'Makefile.kmk'), 'utf8');
+  const name = join(directory, 'Kamefile');
+  const source = await readFile(name, 'utf8');
   // This standalone test owns the process cwd, matching CLI execution.
   process.chdir(directory);
-  const program = await kame.compile(source, { language: 'kmk', name: 'Makefile.kmk' });
+  const program = await kame.compile(source, {
+    language: 'km',
+    name,
+    grants: [{ capability: 'read', names: [directory] }],
+  });
   watch = await program.watch('./dist/kame', {
     cwd: directory,
     grants: ['read', 'write', 'run', 'env'].map(capability => ({ capability, names: [] })),
+    environment: Object.entries(process.env).map(([name, value]) => `${name}=${value}`),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
   const settle = async () => {
+    let stderr = '';
     for (let step = 0; step < 100000; step++) {
       const state = watch.module.drainWatch(watch.watch);
       if (state === 1) watch.module.serviceWatchRequest(watch.watch);
       if (watch.watch.pending.size) await Promise.all([...watch.watch.pending]);
       if (watch.watch.hostError) throw watch.watch.hostError;
-      watch.watch.context.events.splice(0);
+      for (const event of watch.watch.context.events.splice(0)) {
+        if (event.type === 'stderr') stderr = (stderr + JSON.stringify(event) + '\n').slice(-4096);
+      }
       // A full graph snapshot after every file request is quadratic in the
       // source count. Inspect only when the driver has no queued host request.
       if (state === 1 || (state !== 2 && step % 256 !== 0)) continue;
       const snapshot = watch.snapshot();
       if (!snapshot.busy) {
-        assert.equal(snapshot.roots[0].diagnosticJSON, undefined, JSON.stringify(snapshot.roots));
+        assert.equal(snapshot.roots[0].diagnosticJSON, undefined, JSON.stringify(snapshot.roots) + '\n' + stderr);
         return;
       }
     }

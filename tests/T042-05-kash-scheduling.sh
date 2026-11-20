@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-05 Kash scheduling and buffer parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/scheduling"
 mkdir -p "$work"
@@ -28,7 +29,7 @@ expect() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	left="$work/$backend-left"
 	right="$work/$backend-right"
 	test-step "$backend: whole-record round-robin and slow-destination backpressure"
@@ -40,7 +41,7 @@ for backend in native wasm; do
 	expect "empty and partial final records are each assigned once" cmp -s "$left" "$work/expected"
 	printf 'alpha\r\n' >"$work/expected"
 	expect "record delimiters survive injection into an external child" cmp -s "$right" "$work/expected"
-	run_case "printf empty |(frame :lines) |(filter :false | cat > $work/unused) |(balance) (cat > $left, cat > $right)" 0
+	run_case "printf empty |(frame :lines) |(filter false | cat > $work/unused) |(balance) (cat > $left, cat > $right)" 0
 	expect "one record is not broadcast" test "$(cat "$left")" = empty
 	expect "unassigned child receives EOF" test ! -s "$right"
 	run_case "printf \"\" |(frame :lines) |(balance) (cat > $left, cat > $right)" 0
@@ -107,13 +108,13 @@ import { mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const { Kame } = await import('./dist/kame.js');
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
 const directory = mkdtempSync(join(tmpdir(), 'kame-scheduling-'));
 const left = join(directory, 'left'), right = join(directory, 'right');
 writeFileSync(left, 'preserve'); writeFileSync(right, 'preserve');
-const kame = await Kame.create();
-const source = `SHELL = kash\nprobe :\n\tprintf "x\\n" |(frame :lines) |(balance :buffer 2) (cat > ${JSON.stringify(left)}, cat > ${JSON.stringify(right)})\n`;
-const program = await kame.compile(source, { name: 'budgets.kmk' });
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
+const source = `task probe\n\tprintf "x\\n" |(frame :lines) |(balance :buffer 2) (cat > ${JSON.stringify(left)}, cat > ${JSON.stringify(right)})\n`;
+const program = await kame.compile(source, { name: 'budgets.km' });
 const prototype = Object.getPrototypeOf(program.module);
 const dispatch = prototype.dispatch, spawn = childProcess.spawn;
 let launches = 0, forwarded = 0, mutate;

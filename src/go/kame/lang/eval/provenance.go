@@ -6,6 +6,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/definition"
 	"kame/lang/expr"
+	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/lang/template"
@@ -14,14 +15,16 @@ import (
 
 // SourcePart maps one include-expanded segment back to its authored file.
 type SourcePart struct {
-	Name      string
-	Start     int
-	End       int
-	Offset    int
-	Directory string
-	Includes  []diagnostic.Frame
-	Signature core.Signature // Original bytes of a file-backed source.
-	Module    bool           // Module spans are outside the combined source.
+	Name         string
+	Start        int
+	End          int
+	Offset       int
+	Directory    string
+	Includes     []diagnostic.Frame
+	Signature    core.Signature // Original bytes of a file-backed source.
+	Module       bool           // Module spans are outside the combined source.
+	Included     *source.Source // Independently parsed declaration include.
+	moduleSource *moduleSource
 	// observedCwd and observedName memoize the canonical file key recorded by
 	// observeSourcePart, which runs on every call of a source-defined function.
 	observedCwd  string
@@ -33,6 +36,18 @@ type Location struct {
 	Span   source.Span
 }
 
+// IndependentSource returns the file backing spans outside the combined script.
+func (p *Program) IndependentSource(origin int) *source.Source {
+	if origin <= 0 || origin > len(p.SourceParts) {
+		return nil
+	}
+	part := &p.SourceParts[origin-1]
+	if part.moduleSource != nil {
+		return part.moduleSource.Parsed.Source
+	}
+	return part.Included
+}
+
 func (c *Context) observeDefinitionSource(e *definition.Definition) {
 	if e == nil {
 		return
@@ -41,7 +56,8 @@ func (c *Context) observeDefinitionSource(e *definition.Definition) {
 }
 
 func (c *Context) observeExpressionSource(e *expr.Expr) {
-	if e == nil || c.Program == nil {
+	// A separately parsed recipe is already signed by its authored body.
+	if e == nil || e.EntrySource != nil || c.Program == nil {
 		return
 	}
 	c.observeSourcePart(e.SourceOrigin)
@@ -105,31 +121,62 @@ func (p *Program) SetSourcePartDirectory(directory string) {
 // Cloning retains it; parsing generated text deliberately starts without it.
 func SetScriptSourceOrigin(parsed *script.Script, start int, end int, origin int) {
 	for i := range parsed.Items {
-		item := parsed.Items[i]
+		item := &parsed.Items[i]
 		if item.Span.Start < start || item.Span.End > end {
 			continue
 		}
-		setExpressionOrigin(item.Expression, origin, nil)
-		if item.Definition != nil {
-			setExpressionOrigin(item.Definition.Expression, origin, nil)
-		}
-		if item.Rule != nil {
-			setExpressionOrigin(item.Rule.Metadata, origin, nil)
-			setExpressionOrigin(item.Rule.BodyExpression, origin, nil)
-			for j := range item.Rule.Outputs {
-				setTemplateSourceOrigin(item.Rule.Outputs[j].Expansion, origin)
-			}
-			for j := range item.Rule.Inputs {
-				setTemplateSourceOrigin(item.Rule.Inputs[j].Template, origin)
-			}
-			if item.Rule.BodyDoc != nil {
-				setExpressionOrigin(item.Rule.BodyDoc.Root, origin, nil)
-			}
-			for j := range item.Rule.Body {
-				setTemplateSourceOrigin(item.Rule.Body[j].Template, origin)
-			}
+		setItemOrigin(item, origin)
+	}
+}
+
+func setItemOrigin(item *script.ScriptItem, origin int) {
+	item.SourceOrigin = origin
+	if item.Module != nil {
+		item.Module.SourceOrigin = origin
+	}
+	setExpressionOrigin(item.Expression, origin, nil)
+	if item.Definition != nil {
+		setExpressionOrigin(item.Definition.Expression, origin, nil)
+	}
+	setRuleOrigin(item.Rule, origin)
+	for _, branch := range item.Branches {
+		setExpressionOrigin(branch.Condition, origin, nil)
+		for i := range branch.Items {
+			setItemOrigin(&branch.Items[i], origin)
 		}
 	}
+	if item.Loop != nil {
+		for i := range item.Loop.Items {
+			setItemOrigin(&item.Loop.Items[i], origin)
+		}
+	}
+}
+
+func setRuleOrigin(r *rule.Rule, origin int) {
+	if r != nil {
+		r.SourceOrigin = origin
+		setExpressionOrigin(r.Metadata, origin, nil)
+		setExpressionOrigin(r.BodyExpression, origin, nil)
+		for i := range r.Outputs {
+			r.Outputs[i].SourceOrigin = origin
+			setTemplateSourceOrigin(r.Outputs[i].Expansion, origin)
+		}
+		for _, input := range r.Inputs {
+			setTemplateSourceOrigin(input.Template, origin)
+		}
+		if r.BodyDoc != nil {
+			setExpressionOrigin(r.BodyDoc.Root, origin, nil)
+		}
+		for _, line := range r.Body {
+			setTemplateSourceOrigin(line.Template, origin)
+		}
+	}
+}
+
+// SetExpressionSourceOrigin gives a separately parsed expression the lexical
+// scope of an authored source while retaining its own diagnostic spans.
+func SetExpressionSourceOrigin(e *expr.Expr, origin int, entry *source.Source) {
+	setExpressionOrigin(e, origin, entry)
 }
 
 func setTemplateSourceOrigin(value *template.String, origin int) {
@@ -158,6 +205,9 @@ func setExpressionOrigin(e *expr.Expr, origin int, entry *source.Source) {
 	}
 	e.SourceOrigin = origin
 	e.EntrySource = entry
+	if e.RuleSyntax != nil {
+		setRuleOrigin(e.RuleSyntax.Declaration.(*rule.Rule), origin)
+	}
 	for i := range e.Items {
 		setExpressionOrigin(e.Items[i], origin, entry)
 	}
@@ -174,13 +224,33 @@ func setExpressionOrigin(e *expr.Expr, origin int, entry *source.Source) {
 }
 
 func (c *Context) SourceDirectory() Result {
-	if c.Program != nil && c.SourceOrigin > 0 && c.SourceOrigin <= len(c.Program.SourceParts) {
-		part := c.Program.SourceParts[c.SourceOrigin-1]
-		if part.Directory != "" {
-			return Result{Value: core.NewString(c.Run, part.Directory)}
-		}
+	if part := c.authoringSource(); part != nil {
+		return Result{Value: core.NewString(c.Run, part.Directory)}
 	}
 	return failure(c.Run, "SEL_NO_CONTEXT", c.Span, "source-dir requires file-backed source context")
+}
+
+func (c *Context) modulePath(member string, span source.Span) Result {
+	if member != "dir" && member != "file" {
+		return failure(c.Run, "REF_MISSING", span, "unknown module member: "+member)
+	}
+	if part := c.authoringSource(); part != nil {
+		if member == "dir" {
+			return Result{Value: core.NewPath(c.Run, part.Directory)}
+		}
+		return Result{Value: core.NewPath(c.Run, path.Join(part.Directory, path.Base(part.Name)))}
+	}
+	return failure(c.Run, "SEL_NO_CONTEXT", span, "module path requires file-backed source context")
+}
+
+func (c *Context) authoringSource() *SourcePart {
+	if c.Program != nil && c.SourceOrigin > 0 && c.SourceOrigin <= len(c.Program.SourceParts) {
+		part := &c.Program.SourceParts[c.SourceOrigin-1]
+		if part.Directory != "" {
+			return part
+		}
+	}
+	return nil
 }
 
 // SetSourceOrigin hides a driver's synthetic wrapper around authored input.
@@ -202,7 +272,7 @@ func (p *Program) LocateSource(name string, span source.Span) Location {
 	}
 	for i := len(p.SourceParts) - 1; i >= 0; i-- {
 		part := p.SourceParts[i]
-		if part.Module {
+		if part.Module || part.Included != nil {
 			// Independent spans belong to separate sources; only SourceOrigin
 			// may select them, never a combined-script offset lookup.
 			continue

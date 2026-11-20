@@ -15,19 +15,12 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 	var result Result
 	firstPart := 1
 	if expression.Kind == expr.EnvironmentReference {
-		if p.Registry == nil {
-			return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable")
-		}
-		operation := p.Registry.lookup("env")
-		if operation == nil {
-			return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable")
-		}
-		result = p.operation(scope, operation, expression.Items, context, expression.Span)
+		result = p.readEnvironment(scope, expression.Items, context, expression.Span)
 	} else if len(expression.Items) != 0 {
 		result = p.evaluate(context.Engine, scope, expression.Items[0], context)
 		firstPart = 0
 	} else {
-		result = name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context)
+		result = name(scope, expression.Reference[0].Text, expression.LetBinding, expression.Reference[0].Span, context)
 	}
 	if result.Waiting || result.Diagnostic.Code != "" {
 		return result
@@ -44,6 +37,27 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 		}
 	}
 	return result
+}
+
+func (p *Program) readEnvironment(scope *Scope, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	operation := p.Registry.lookup("env")
+	if operation == nil {
+		return failure(context.Run, "OP_UNKNOWN", span, "environment operation unavailable")
+	}
+	return p.operation(scope, operation, arguments, context, span)
+}
+
+func bareEnvironmentName(name string) bool {
+	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Program) referencePart(value core.Value, part expr.ReferencePart, context *Context) Result {
@@ -156,126 +170,43 @@ func runeOffset(text string, index int) int {
 	return offset
 }
 
-type sliceBounds struct {
-	Start      int
-	End        int
-	EndOmitted bool
-	OK         bool
-}
-
-func parseSlice(text string) sliceBounds {
-	cut := -1
-	for i := 0; i+1 < len(text); i++ {
-		if text[i] == '.' && text[i+1] == '.' {
-			cut = i
-			break
+// contextList provides the list bound by the active rule or invocation.
+func (c *Context) contextList(name string, span source.Span) Result {
+	var values []core.Value
+	var available bool
+	if name == "args" {
+		values, available = c.Args, c.HasArgs
+	} else {
+		if name == "inputs" {
+			values = c.Inputs
+		} else {
+			values = c.Outputs
 		}
-	}
-	if cut < 0 {
-		return sliceBounds{}
-	}
-	start, end, ok := 0, 0, true
-	if cut != 0 {
-		start, ok = parseIndex(text[:cut])
-	}
-	if !ok {
-		return sliceBounds{}
-	}
-	if cut+2 != len(text) {
-		end, ok = parseIndex(text[cut+2:])
-	}
-	return sliceBounds{Start: start, End: end, EndOmitted: cut+2 == len(text), OK: ok}
-}
-
-func normalizedSlice(bounds sliceBounds, length int) sliceBounds {
-	start, end := bounds.Start, bounds.End
-	if start < 0 {
-		start = length + start
-	}
-	if bounds.EndOmitted {
-		end = length
-	} else if end < 0 {
-		end = length + end
-	}
-	if start < 0 || end < start || end > length {
-		return sliceBounds{}
-	}
-	return sliceBounds{Start: start, End: end, OK: true}
-}
-
-func (p *Program) selector(text string, span source.Span, context *Context) Result {
-	_ = p
-	if text == "@<?" {
-		if context.Phase == PlanningPhase || context.Phase == ResolvingPhase {
-			return failure(context.Run, "PHASE_INVALID", span, "newer-input selection is available only while rendering a file recipe")
-		}
-		if len(context.RuleFrames) == 0 || !context.RuleFrames[len(context.RuleFrames)-1].FileRule {
-			return failure(context.Run, "SEL_NO_CONTEXT", span, "newer-input selector requires a file rule")
-		}
-		return Result{Value: core.NewList(context.Run, context.RuleFrames[len(context.RuleFrames)-1].NewerInputs)}
-	}
-	values := context.Args
-	offset := 1
-	present := context.HasArgs
-	if len(text) >= 2 && (text[1] == '<' || text[1] == '>') {
-		present = false
-		if len(context.RuleFrames) != 0 {
-			frame := context.RuleFrames[len(context.RuleFrames)-1]
-			if text[1] == '<' {
+		available = values != nil
+		if len(c.RuleFrames) != 0 {
+			frame := c.RuleFrames[len(c.RuleFrames)-1]
+			if name == "inputs" {
 				values = frame.Inputs
 			} else {
 				values = frame.Outputs
 			}
-			present = true
-		} else if text[1] == '<' {
-			values = context.Inputs
-			present = context.Inputs != nil
-		} else {
-			values = context.Outputs
-			present = context.Outputs != nil
+			available = true
 		}
-		offset = 2
 	}
-	if !present {
-		kind := "argument"
-		if offset == 2 {
-			if text[1] == '<' {
-				kind = "input"
-			} else {
-				kind = "output"
-			}
-		}
-		result := failure(context.Run, "SEL_NO_CONTEXT", span, kind+" selector "+text+" requires an "+kind+" context; none is available")
-		result.Diagnostic.Tips = append(result.Diagnostic.Tips, cloneFailureText(context.Run, "use "+text+" in a rule recipe, or pass the "+kind+" value explicitly"))
+	if !available {
+		result := failure(c.Run, "SEL_NO_CONTEXT", span, name+" requires an active rule or invocation context")
+		result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(c.Run, "Use "+name+" where it is bound, or pass the list explicitly."))
 		return result
 	}
-	suffix := text[offset:]
-	if suffix == "*" {
-		return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: values})}
+	return Result{Value: borrowValue(c.Run, core.Value{Kind: core.List, List: values})}
+}
+
+func (c *Context) changedInputs(span source.Span) Result {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
+		return failure(c.Run, "PHASE_INVALID", span, "changed-inputs is available only while rendering a file recipe")
 	}
-	if suffix == "#" {
-		return Result{Value: core.Value{Kind: core.Int, Int: int64(len(values))}}
+	if len(c.RuleFrames) == 0 || !c.RuleFrames[len(c.RuleFrames)-1].FileRule {
+		return failure(c.Run, "SEL_NO_CONTEXT", span, "changed-inputs requires a file rule")
 	}
-	if suffix == "" || suffix == "_" {
-		if len(values) == 0 {
-			return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index is empty")
-		}
-		return Result{Value: borrowValue(context.Run, values[0])}
-	}
-	if bounds := parseSlice(suffix); bounds.OK {
-		bounds = normalizedSlice(bounds, len(values))
-		if !bounds.OK {
-			return failure(context.Run, "SEL_INDEX_INVALID", span, "selector slice out of range")
-		}
-		return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: values[bounds.Start:bounds.End]})}
-	}
-	index, ok := parseIndex(suffix)
-	if !ok {
-		return failure(context.Run, "SEL_INDEX_INVALID", span, "invalid selector index")
-	}
-	index = normalizedIndex(index, len(values))
-	if index < 0 || index >= len(values) {
-		return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index out of range")
-	}
-	return Result{Value: borrowValue(context.Run, values[index])}
+	return Result{Value: core.NewList(c.Run, c.RuleFrames[len(c.RuleFrames)-1].NewerInputs)}
 }

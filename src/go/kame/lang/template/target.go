@@ -291,6 +291,8 @@ func validCapture(name string) bool {
 func isCaptureStart(b byte) bool    { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
 func isCaptureContinue(b byte) bool { return isCaptureStart(b) || isDigit(b) || b == '-' }
 
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+
 type CaptureValue struct {
 	Name string
 	Text string

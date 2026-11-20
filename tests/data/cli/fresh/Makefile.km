@@ -1,0 +1,6 @@
+# Freshness fixture. runs.log counts executions.
+rule ./out.txt : ./in.txt
+	echo run >> ./runs.log
+	cp $inputs.0 $outputs.0
+
+task default : ./out.txt

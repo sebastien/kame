@@ -59,7 +59,7 @@ func publicationRequest(c *eval.Context, payload core.Value) eval.Result {
 }
 
 func publicationPath(value core.Value) string {
-	if value.Kind == core.String {
+	if value.IsPathText() {
 		return value.Text
 	}
 	if value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile {

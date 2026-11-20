@@ -72,87 +72,65 @@ func (p *Program) emitCachedLog(entry *instance, kind EventKind, data []byte, tr
 	p.emit(event)
 }
 
-func hasYield(effects []eval.Effect) bool {
+func hasPublication(effects []eval.Effect) bool {
 	for i := range effects {
-		if effects[i].Kind == eval.EffectYield {
+		if effects[i].Kind == eval.EffectPublication {
 			return true
 		}
 	}
 	return false
 }
-func yieldSpan(effects []eval.Effect) diagnostic.Span {
+func publicationSpan(effects []eval.Effect) diagnostic.Span {
 	for i := range effects {
-		if effects[i].Kind == eval.EffectYield {
+		if effects[i].Kind == eval.EffectPublication {
 			return diagnostic.Span{Start: effects[i].Span.Start, End: effects[i].Span.End}
 		}
 	}
 	return diagnostic.Span{}
 }
 func validateEffects(a mem.Allocator, entry *instance, effects []eval.Effect) diagnostic.Diagnostic {
-	if hasYield(effects) && (entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1) {
-		return failureAt(a, "EXPR_INVALID", yieldSpan(effects), "yield requires one file output")
+	if hasPublication(effects) && (entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1) {
+		return failureAt(a, "EXPR_INVALID", publicationSpan(effects), "publishing a body value requires one file output")
 	}
 	return diagnostic.Diagnostic{}
 }
 
 func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePaths []string, dryRun bool) diagnostic.Diagnostic {
-	var yielded []byte
 	writeIndex := 0
-	hasYielded := false
-	for i := range effects {
-		effect := effects[i]
-		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, Data: slices.Clone(effect.Data), Effect: effectName(effect.Kind)})
-		if effect.Kind == eval.EffectOut {
-			p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
+	for _, effect := range effects {
+		span := diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}
+		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: span, Data: slices.Clone(effect.Data), Effect: effectName(effect.Kind)})
+		switch effect.Kind {
+		case eval.EffectOut:
+			p.emitNode(entry.Node, entry.Plan.Target, Stdout, span, effect.Data)
 			if entry.Rule.Kind == rule.CachedTaskRule {
 				p.cacheAppend(&entry.CacheStdout, &entry.CacheStdoutTruncated, effect.Data, p.Options.CacheRetainBytes)
 			}
-		} else if effect.Kind == eval.EffectErr {
-			p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
+		case eval.EffectErr:
+			p.emitNode(entry.Node, entry.Plan.Target, Stderr, span, effect.Data)
 			if entry.Rule.Kind == rule.CachedTaskRule {
 				p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, effect.Data, p.Options.CacheRetainBytes)
 			}
-		} else if effect.Kind == eval.EffectYield {
-			hasYielded = true
-			for j := range effect.Data {
-				yielded = append(yielded, effect.Data[j])
-			}
-		}
-		if effect.Kind == eval.EffectWrite {
-			if writeIndex >= len(writePaths) {
-				mem.FreeSlice(nil, yielded)
-				return failure(p.Alloc, "FS_ERR", "missing write path")
+		case eval.EffectWrite, eval.EffectPublication:
+			var output string
+			if effect.Kind == eval.EffectPublication {
+				output = entry.Plan.Outputs[0]
+			} else {
+				if writeIndex >= len(writePaths) {
+					return failure(p.Alloc, "FS_ERR", "missing write path")
+				}
+				output = writePaths[writeIndex]
+				writeIndex++
 			}
 			if !dryRun {
-				name := p.canonicalTarget(writePaths[writeIndex], true)
+				name := p.canonicalTarget(output, true)
 				ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, effect.Data, 0o644, false) == nil
+				mem.FreeString(p.Alloc, name)
 				if !ok {
-					mem.FreeString(p.Alloc, name)
-					mem.FreeSlice(nil, yielded)
 					return failure(p.Alloc, "FS_ERR", "cannot write file")
 				}
-				mem.FreeString(p.Alloc, name)
 			}
-			writeIndex++
 		}
-	}
-	if !hasYielded {
-		return diagnostic.Diagnostic{}
-	}
-	if dryRun {
-		mem.FreeSlice(nil, yielded)
-		return diagnostic.Diagnostic{}
-	}
-	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 {
-		mem.FreeSlice(nil, yielded)
-		return failure(p.Alloc, "EXPR_INVALID", "yield requires one file output")
-	}
-	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
-	ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, yielded, 0o644, false) == nil
-	mem.FreeString(p.Alloc, name)
-	mem.FreeSlice(nil, yielded)
-	if !ok {
-		return failure(p.Alloc, "FS_ERR", "cannot write yielded output")
 	}
 	return diagnostic.Diagnostic{}
 }
@@ -167,8 +145,8 @@ func effectName(kind eval.EffectKind) string {
 	if kind == eval.EffectErr {
 		return "err"
 	}
-	if kind == eval.EffectYield {
-		return "yield"
+	if kind == eval.EffectPublication {
+		return "publish"
 	}
 	return "write"
 }
@@ -221,12 +199,14 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		}
 		values, outputs := makeRuleInputValues(p.Alloc, inputs, resourceInputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
-		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
+		captures := captureValues(p.Alloc, entry.Captures)
+		defer freeValues(p.Alloc, captures)
+		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs, Captures: captures}}}
 		if entry.Inspection {
 			context.Environment, context.HasEnvironment = p.Options.Environment, p.Options.Environment != nil
 		}
 		p.bindDefinitionEnvironment(context)
-		scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
+		scope := p.ruleScope(context, entry.Rule, entry.Captures, entry.Plan.Arguments)
 		context.Scope = scope
 		result := p.evaluateInput(input, context)
 		scope.Free()
@@ -299,7 +279,7 @@ func appendInputValue(a mem.Allocator, inputs *[]string, resourceInputs *[]PlanI
 	if value.Kind == core.Nil {
 		return true
 	}
-	if value.Kind == core.String || value.Kind == core.Pattern {
+	if value.IsPathText() || value.Kind == core.Pattern {
 		text := cloneText(a, value.Text)
 		*inputs = append(*inputs, text)
 		*resourceInputs = append(*resourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})

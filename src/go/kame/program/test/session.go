@@ -403,7 +403,7 @@ func TestTemplateSessionPreservesPayloadAndAuthoredDiagnostics(t *testing.T) {
 		t.Error("template payload changed type or escaping")
 	}
 	h.Free()
-	bad := []program.Fragment{{Name: "bad.md", Lang: "template", Text: "<!-- @if(true) -->\nmissing end", Check: true}}
+	bad := []program.Fragment{{Name: "bad.md", Lang: "template", Text: "<!-- @if true -->\nmissing end", Check: true}}
 	rejected := program.CompileSession(a, bad, registry, program.Options{})
 	defer rejected.Free(a)
 	if rejected.Session != nil {

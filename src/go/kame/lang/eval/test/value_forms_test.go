@@ -15,7 +15,7 @@ func TestApplicationSpread(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "spread.km", "")
+	parsed := script.ParseKameFile(a, "spread.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()
@@ -37,7 +37,7 @@ func TestApplicationSpread(t *testing.T) {
 		r.Free(a)
 	}
 
-	result := evaluate(ctx, p, `subst ...[./{name:*}.c] "@{name}.o" ...["./test.c"]`)
+	result := evaluate(ctx, p, `subst ...[./{name:*}.c] "${name}.o" ...["./test.c"]`)
 	if result.Diagnostic.Code != "" || result.Value.Text != "test.o" {
 		t.Errorf("spread lost the deferred replacement scope: value=%q, diagnostic=%s", result.Value.Text, result.Diagnostic.Code)
 	}
@@ -62,7 +62,7 @@ func TestValueFallbackUsesOnlyMissingLookups(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "fallback.km", "")
+	parsed := script.ParseKameFile(a, "fallback.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()
@@ -95,7 +95,7 @@ func TestValuePipeStages(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "pipes.km", "")
+	parsed := script.ParseKameFile(a, "pipes.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()
@@ -132,7 +132,7 @@ func TestNumericOperatorsUseLibraryContracts(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "numbers.km", "")
+	parsed := script.ParseKameFile(a, "numbers.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()
@@ -196,7 +196,7 @@ func checkSuspendedValueEffect(t *testing.T, input string, nilInput bool) {
 		return result
 	}})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "suspended.km", input)
+	parsed := script.ParseKameFile(a, "suspended.km", input)
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()
@@ -225,7 +225,7 @@ func TestGroupingDoesNotInvokeCallable(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "groups.km", "def example () = 42")
+	parsed := script.ParseKameFile(a, "groups.km", "def example () = 42")
 	p := eval.Compile(a, engine, parsed, registry)
 	defer func() {
 		engine.Free()

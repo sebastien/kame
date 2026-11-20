@@ -70,32 +70,26 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 	for cur < len(text) {
 		line := scanLine(text, cur, len(text))
 		if len(blocks) != 0 && blocks[len(blocks)-1] == dirRaw {
-			if p.isEndLine(line.Start, line.ContentEnd) {
-				directive := p.directiveOnLine(line.Start, line.ContentEnd)
-				indentEnd := line.Start
-				for indentEnd < line.ContentEnd && horizontal(text[indentEnd]) {
-					indentEnd++
-				}
-				trailingStart := line.ContentEnd
-				for trailingStart > indentEnd && horizontal(text[trailingStart-1]) {
-					trailingStart--
-				}
-				out.WriteString(text[cur:indentEnd])
-				canonical := canonicalDirective(a, directive, &blocks)
-				wrapped := canonicalComment(a, style, canonical)
-				out.WriteString(wrapped)
-				mem.FreeString(a, wrapped)
-				out.WriteString(text[trailingStart:line.ContentEnd])
-				freeArgs(a, directive.Args)
-				mem.FreeString(a, canonical)
-				if line.LineEnd > line.ContentEnd {
-					out.WriteString(text[line.ContentEnd:line.LineEnd])
-				}
+			if !p.nextRawEnd(cur, line.ContentEnd) {
+				out.WriteString(text[cur:line.LineEnd])
 				cur = line.LineEnd
 				continue
 			}
-			out.WriteString(text[cur:line.LineEnd])
-			cur = line.LineEnd
+			directive := p.inlineFound
+			isWhole := directive.Start == cur && directive.End == line.ContentEnd
+			start, end := directive.Start, directive.End
+			if isWhole {
+				token := trimRange(text, start, end)
+				start, end = token.Start, token.End
+			}
+			out.WriteString(text[cur:start])
+			writeCanonicalDirective(a, &out, style, directive.Dir, &blocks)
+			freeArgs(a, directive.Dir.Args)
+			cur = end
+			if isWhole {
+				out.WriteString(text[cur:line.LineEnd])
+				cur = line.LineEnd
+			}
 			continue
 		}
 		lineDirective := p.directiveOnLine(line.Start, line.ContentEnd)
@@ -114,36 +108,25 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 				trailingStart--
 			}
 			out.WriteString(text[cur:indentEnd])
-			canonical := canonicalDirective(a, lineDirective, &blocks)
-			wrapped := canonicalComment(a, style, canonical)
-			out.WriteString(wrapped)
-			mem.FreeString(a, wrapped)
+			writeCanonicalDirective(a, &out, style, lineDirective, &blocks)
 			out.WriteString(text[trailingStart:line.ContentEnd])
 			if line.LineEnd > line.ContentEnd {
 				out.WriteString(text[line.ContentEnd:line.LineEnd])
 			}
 			freeArgs(a, lineDirective.Args)
-			mem.FreeString(a, canonical)
 			cur = line.LineEnd
 			continue
 		}
-		if p.nextInlineBlockDirective(cur, line.ContentEnd) != 0 {
+		if p.scanInlineLine(&line, len(text)) {
 			directive := p.inlineFound
-			out.WriteString(text[cur:directive.Start])
-			canonical := canonicalDirective(a, directive.Dir, &blocks)
-			if style == "html" || style == "c" || style == "powershell" {
-				wrapped := canonicalComment(a, style, canonical)
-				out.WriteString(wrapped)
-				mem.FreeString(a, wrapped)
-			} else {
-				out.WriteString(canonical)
-			}
+			p.writeInlineText(&out, cur, directive.Start)
+			writeCanonicalDirective(a, &out, style, directive.Dir, &blocks)
 			freeArgs(a, directive.Dir.Args)
-			mem.FreeString(a, canonical)
 			cur = directive.End
 			continue
 		}
-		out.WriteString(text[cur:line.LineEnd])
+		p.writeInlineText(&out, cur, line.ContentEnd)
+		out.WriteString(text[line.ContentEnd:line.LineEnd])
 		cur = line.LineEnd
 	}
 	mem.FreeSlice(nil, blocks)
@@ -151,6 +134,40 @@ func FormatDocument(a mem.Allocator, name string, text string, requestedStyle st
 	result := mem.Alloc[DocumentFormatResult](a)
 	result.Alloc, result.Text, result.OK = a, cloneDocumentFormatText(a, out.String()), true
 	return result
+}
+
+func (p *docParser) writeInlineText(out *strings.Builder, start, end int) {
+	text := p.s.Text
+	literal := start
+	for i := start; i+1 < end; i++ {
+		if text[i] != '@' {
+			continue
+		}
+		if text[i+1] == '@' {
+			i++
+			continue
+		}
+		if text[i+1] != '{' {
+			continue
+		}
+		value := p.inlineExpr(i, end)
+		if value.Closed && value.Expr != nil && len(value.Diagnostics) == 0 {
+			out.WriteString(text[literal:i])
+			out.WriteString("@{")
+			formatted := expr.Compact(p.a, value.Expr)
+			if strings.ContainsRune(formatted, '\n') {
+				out.WriteByte('\n')
+			}
+			out.WriteString(formatted)
+			mem.FreeString(p.a, formatted)
+			out.WriteByte('}')
+			literal = value.End + 1
+			i = value.End
+		}
+		expr.Free(p.a, value.Expr)
+		mem.FreeSlice(nil, value.Diagnostics)
+	}
+	out.WriteString(text[literal:end])
 }
 
 func documentFormatError(a mem.Allocator, code string, message string) *DocumentFormatResult {
@@ -168,6 +185,14 @@ func cloneDocumentFormatText(a mem.Allocator, text string) string {
 	buffer := mem.AllocSlice[byte](a, len(text), len(text))
 	copy(buffer, text)
 	return string(buffer)
+}
+
+func writeCanonicalDirective(a mem.Allocator, out *strings.Builder, style string, d dirOut, blocks *[]int) {
+	canonical := canonicalDirective(a, d, blocks)
+	wrapped := canonicalComment(a, style, canonical)
+	out.WriteString(wrapped)
+	mem.FreeString(a, wrapped)
+	mem.FreeString(a, canonical)
 }
 
 func canonicalDirective(a mem.Allocator, d dirOut, blocks *[]int) string {
@@ -204,32 +229,45 @@ func canonicalDirective(a mem.Allocator, d dirOut, blocks *[]int) string {
 		out.WriteString("-")
 	}
 	out.WriteString(name)
-	if d.Kind == dirElse || d.Kind == dirRaw || (d.Kind == dirEnd && len(d.Args) == 0) {
-		if d.Kind == dirEnd && len(*blocks) != 0 {
-			out.WriteString("(")
+	writeOperand := func(operand *expr.Expr) {
+		out.WriteByte(' ')
+		formatted := expr.Compact(a, operand)
+		out.WriteString(formatted)
+		mem.FreeString(a, formatted)
+	}
+	switch d.Kind {
+	case dirEnd:
+		if len(d.Args) != 0 {
+			writeOperand(d.Args[0])
+		} else if len(*blocks) != 0 {
+			out.WriteByte(' ')
 			out.WriteString(blockName((*blocks)[len(*blocks)-1]))
-			out.WriteString(")")
 		}
-	} else {
-		out.WriteString("(")
-		for i := range d.Args {
-			if i != 0 {
-				out.WriteString(" ")
+	case dirFor:
+		for _, param := range d.Args[0].Items {
+			out.WriteByte(' ')
+			out.WriteString(param.Text)
+			if param.Rest {
+				out.WriteString("...")
 			}
-			formatted := expr.Compact(a, d.Args[i])
-			// Only one-expression directives can safely omit an application's
-			// own parentheses. Keep zero-argument calls distinct from references.
-			if (d.Kind == dirIf || d.Kind == dirElif || d.Kind == dirWith || d.Kind == dirMatch || d.Kind == dirCase) && d.Args[i].Kind == expr.Application && !d.Args[i].Juxtaposed && len(d.Args[i].Items) > 1 {
-				out.WriteString(formatted[1 : len(formatted)-1])
-			} else {
-				out.WriteString(formatted)
-			}
-			mem.FreeString(a, formatted)
 		}
-		out.WriteString(")")
+		out.WriteString(" in")
+		writeOperand(d.Args[1])
+		if len(d.Args) == 3 {
+			out.WriteString(" sep")
+			writeOperand(d.Args[2])
+		}
+	case dirLet:
+		writeOperand(d.Args[0])
+		out.WriteString(" =")
+		writeOperand(d.Args[1])
+	default:
+		for _, operand := range d.Args {
+			writeOperand(operand)
+		}
 	}
 	if d.TrimRight {
-		out.WriteString("-")
+		out.WriteString(" -")
 	}
 	text := cloneDocumentFormatText(a, out.String())
 	out.Reset()

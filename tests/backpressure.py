@@ -35,7 +35,7 @@ def drain(pipe, json_events=False, expected_bytes=None):
             return total
 
 
-root = Path(sys.argv[1])
+wasm_cli = sys.argv[1]
 case = sys.argv[2]
 with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
@@ -49,11 +49,10 @@ with tempfile.TemporaryDirectory() as temporary:
         f"for _ in range({1000000 if endless else 16 if case == 'cache' else 128}): os.write({channel},b'Z'*65536)\n"
         "pathlib.Path('done').touch()\n"
     )
-    # Cover direct argv publication as well as legacy shell recipes.
+    # Exercise standalone Kash as well as task execution.
     structured = case == 'argv'
-    recipe = '$(python3 emit.py)' if structured else 'python3 emit.py'
-    (project / 'Makefile.kmk').write_text(f'emit :\n\t{recipe}\n')
-    command = ['node', str(root / 'dist/kame.js')]
+    (project / 'Makefile.km').write_text('task emit\n\tpython3 emit.py\n')
+    command = ['node', wasm_cli]
     if structured:
         command += ['do', 'run', '-C', str(project), '-l', 'kash', '-c', 'python3 emit.py']
     else:
@@ -72,9 +71,9 @@ with tempfile.TemporaryDirectory() as temporary:
         # share one root, and one 64 KiB prefix can fit in the OS pipe buffer.
         rules = []
         for index in range(16):
-            prerequisite = f'emit{index - 1}' if index else ''
-            rules.append(f'task emit{index} : {prerequisite}\n\tpython3 emit.py\n')
-        (project / 'Makefile.kmk').write_text(''.join(rules) + 'marker : emit15\n\ttouch proceeded\n')
+            prerequisite = f' : emit{index - 1}' if index else ''
+            rules.append(f'task cached emit{index}{prerequisite}\n\tpython3 emit.py\n')
+        (project / 'Makefile.km').write_text(''.join(rules) + 'task marker : emit15\n\ttouch proceeded\n')
         command[-1] = 'emit15'
         subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15)
         (project / 'ready').unlink()

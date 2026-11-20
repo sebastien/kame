@@ -1,0 +1,41 @@
+# Failure fixtures (spec 006).
+SHELL = "/bin/sh"
+
+rule ./missing.out
+	true
+
+rule ./failing.out
+	echo failing
+	exit 3
+
+rule ./conflict.out
+	@{write! ./conflict.out "declared"}
+	echo command
+
+A = "${B}"
+B = "${A}"
+rule ./cycle.out : ${A}
+	true
+
+rule ./amb-{x}.c
+	echo x
+rule ./amb-{y}.c
+	echo y
+
+rule ./direct.out : ./dep-fails.out
+	echo dependent
+rule ./dep-fails.out
+	exit 4
+
+rule ./timeout.out
+	sleep 5
+	echo done > @{outputs.0}
+
+service serve : ./dep-fails.out
+	sleep 1
+
+rule ./unsupported.out ; {executor: "remote:missing"}
+	true
+
+task noart
+	true

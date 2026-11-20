@@ -28,7 +28,7 @@ func TestDeclarationLoopBindingsAndGenerationRoundTrip(t *testing.T) {
 		binding := loop.Loop.Items[0]
 		generate := loop.Loop.Items[1].Branches[0].Items[0]
 		if binding.Kind != script.DeclarationLet || binding.Definition.Name != "flags" || binding.Definition.Expression.Kind != expr.Conditional ||
-			generate.Kind != script.Generate || generate.GenerateName != "" || expr.Ungroup(generate.Expression).Kind != expr.Application || parsed.Items[1].Kind != script.Generate {
+			generate.Kind != script.Generate || expr.Ungroup(generate.Expression).Kind != expr.Application || parsed.Items[1].Kind != script.Generate {
 			t.Fatalf("incorrect binding or generation: %+v %+v", binding, generate)
 		}
 		if formatted := script.Format(nil, parsed); formatted != want {
@@ -46,7 +46,7 @@ func TestDeclarationLoopBindingsAndGenerationRoundTrip(t *testing.T) {
 func TestDeclarationBlocksRejectActionStatementsAndMalformedHeaders(t *testing.T) {
 	for _, text := range []string{
 		"for value from values\n  task check\n",
-		"for env in values\n  task check\n",
+		"for true in values\n  task check\n",
 		"for value in\n  task check\n",
 		"for value in values\n",
 		"for value in values\n  echo forbidden\n",

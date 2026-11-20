@@ -57,7 +57,7 @@ tests/
   native/                          C harnesses: argv, posix, CLI lifecycle
   wasm/                            raw ABI probes, the public header check, import/handle/memory gates
   windows/                         packaged launcher and PowerShell conformance
-  platform/                        opt-in APE and published-channel gates
+  platform/                        opt-in published-channel gates
   py/                              Python embedding API suite
   *.py                             kebab-case drivers for one T* entry
   data/cli/<fixture>/              build trees, inputs, scripts
@@ -283,7 +283,8 @@ Native/WASM conformance covers:
   cwd/args/timeout budgets, and whole-session dry-run suppression.
 - Kash stdin isolation, recovery, cancellation, async handles across fragments,
   and owned async joining at whole-session completion rather than file boundaries.
-- Deterministic migration diagnostics for removed `do expr` and `do kash` names.
+- `do kash` follows the unified runner with Kash as its initial language.
+  `do expr` reports `CMD_UNKNOWN` and names `do run --lang expr -c TEXT`.
 
 Fixtures and advertised examples must remain runnable; regression coverage
 continues to apply when test infrastructure changes.
@@ -306,7 +307,7 @@ Native/WASM conformance covers the contracts in 004, 009, 011 and 018:
   defaults and valid repeated contributions are not diagnosed as conflicts.
   Formatting preserves this declaration order.
 - Literal `--mtime=@0` in direct Kash, quoted or unquoted, retains argv bytes
-  and formats idempotently, while `@{…}` in a command word reports the
+  and formats idempotently, while `${…}` in a command word reports the
   action-context boundary.
 
 ### Artifact identity requirements

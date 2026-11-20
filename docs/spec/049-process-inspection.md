@@ -17,7 +17,7 @@ surface follows `055-unified-kame-kash-language.md`.
 
 ```kame
 report = (capture! {stdout: true, stderr: true, stdoutLimit: 65536, stderrLimit: 4096}
-	:accept-exit [1] :cwd ./workspace "checker" "--report")
+	accept-exit: [1] cwd: ./workspace "checker" "--report")
 ```
 
 `capture! POLICY SETUP... EXECUTABLE ARGUMENTS...` is a process special form.
@@ -55,7 +55,7 @@ of `055` §8.1:
 
 | Field | Meaning |
 | --- | --- |
-| `state` | `:completed`, `:failed`, `:cancelled` or `:suspended` |
+| `state` | `:completed`, `:failed` or `:cancelled` |
 | `ok` | `true` exactly when `state` is `:completed`, the status is 0 and `signal` is 0 |
 | `status` | Aggregate exit status; derived for functions |
 | `signal` | Terminating signal or 0 |
@@ -97,13 +97,12 @@ if check.state == :failed
   cancelled function stage is treated as a broken pipe and does not fail its
   graph; it runs its `defer` cleanup. Process stages keep the signal and failure
   policy of `042` §8.2.
-- **Acceptance.** An exit accepted by terminal `?` or `:accept-exit` (spec 048)
+- **Acceptance.** An exit accepted by terminal `?` or `accept-exit:` (spec 048)
   has `state: :completed` and keeps its raw `status`, so `ok` is `false`;
   `effectiveStatus` is 0. Acceptance never changes `state` for signals, launch
   failures, deadlines or cancellation.
-- **Suspension.** `:suspended` is observable only on a generator's own
-  invocation while it waits for its consumer; a completed `$?(…)` never yields
-  it.
+- **Suspension.** `:suspended` is an internal state while a generator waits for
+  its consumer. Script-visible outcomes report terminal states.
 - **Retention.** The outcome retains no stream payload beyond explicit typed
   capture. Inspecting an outcome is a pure field read and never relaunches work.
 

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"encoding/base64"
 	"kame/core"
 	json "kame/internal/jsonstream"
 	"kame/internal/mem"
@@ -11,42 +12,55 @@ import (
 
 // Payload record fields shared by library operations and runtime hosts.
 const (
-	FieldOp          = "op"
-	FieldPath        = "path"
-	FieldData        = "data"
-	FieldScript      = "script"
-	FieldArgv        = "argv"
-	FieldStages      = "stages"
-	FieldInput       = "input"
-	FieldOutput      = "output"
-	FieldAppend      = "append"
-	FieldError       = "error"
-	FieldErrorAppend = "errorAppend"
-	FieldErrorMode   = "errorMode"
-	FieldCapture     = "capture"
-	FieldSetup       = "setup"
-	FieldCwd         = "cwd"
-	FieldTimeout     = "timeoutMS"
-	FieldEnvironment = "environment"
-	FieldKey         = "key"
-	FieldRecord      = "record"
-	OpRead           = "read"
-	OpFileContent    = "file-content"
-	OpToolContent    = "tool-content"
-	OpOutputContent  = "output-content"
-	OpExists         = "exists"
-	OpOutputExists   = "output-exists"
-	OpFileTimes      = "file-times"
-	OpStat           = "stat"
-	OpLstat          = "lstat"
-	OpReadlink       = "readlink"
-	OpWildcard       = "wildcard"
+	FieldOp               = "op"
+	FieldPath             = "path"
+	FieldDiscoveryKey     = "discoveryKey"
+	FieldData             = "data"
+	FieldScript           = "script"
+	FieldArgv             = "argv"
+	FieldStages           = "stages"
+	FieldInput            = "input"
+	FieldOutput           = "output"
+	FieldAppend           = "append"
+	FieldError            = "error"
+	FieldErrorAppend      = "errorAppend"
+	FieldErrorMode        = "errorMode"
+	FieldCapture          = "capture"
+	FieldSetup            = "setup"
+	FieldCwd              = "cwd"
+	FieldTimeout          = "timeoutMS"
+	FieldEnvironment      = "environment"
+	FieldEnvironmentExact = "environmentExact"
+	FieldEmit             = "emit"
+	FieldEmitError        = "emitError"
+	FieldKey              = "key"
+	FieldRecord           = "record"
+	OpRead                = "read"
+	OpFileContent         = "file-content"
+	OpToolContent         = "tool-content"
+	OpOutputContent       = "output-content"
+	OpExists              = "exists"
+	OpOutputExists        = "output-exists"
+	OpFileTimes           = "file-times"
+	OpStat                = "stat"
+	OpDirectoryCheck      = "directory-check"
+	OpLstat               = "lstat"
+	OpReadlink            = "readlink"
+	OpWildcard            = "wildcard"
+	OpDeclarationFiles    = "declaration-files"
 )
 
 // FilePayload creates a filesystem request payload. A string payload remains a
 // read request for callers that predate the record protocol.
 func FilePayload(a mem.Allocator, op string, name string) core.Value {
-	fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, op)}, {Key: FieldPath, Value: core.NewString(a, name)}}
+	path := name
+	if op == OpWildcard {
+		path = DiscoveryScan(name)
+	}
+	fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, op)}, {Key: FieldPath, Value: core.NewString(a, path)}}
+	if path != name {
+		fields = append(fields, core.RecordField{Key: FieldDiscoveryKey, Value: core.NewString(a, name)})
+	}
 	payload := core.NewRecord(a, fields)
 	for i := range fields {
 		fields[i].Value.Free(a)
@@ -75,14 +89,18 @@ func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, 
 
 // RecipeExecutionPayload carries the selected rule shell argv as well as its environment.
 func RecipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string) core.Value {
-	return recipeExecutionPayload(a, script, outputs, environment, shell, environment != nil, false)
+	return recipeExecutionPayload(a, script, outputs, environment, shell, "", environment != nil, false)
 }
 
 // ScopedProcessPayload carries an exact environment for a collected shell call,
 // including an explicitly empty snapshot. It declares no file outputs and
 // marks stdout/stderr/status as a captured operation result, not recipe streams.
 func ScopedProcessPayload(a mem.Allocator, script string, environment []string) core.Value {
-	return recipeExecutionPayload(a, script, nil, environment, nil, true, true)
+	return ShellProcessPayload(a, script, "", environment, true)
+}
+
+func ShellProcessPayload(a mem.Allocator, script, directory string, environment []string, exact bool) core.Value {
+	return recipeExecutionPayload(a, script, nil, environment, nil, directory, exact, true)
 }
 
 // PluginInvocationPayload copies one operation call into a serializable host
@@ -155,12 +173,16 @@ func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion strin
 	return payload
 }
 
-func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool, capture bool) core.Value {
+func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, directory string, includeEnvironment bool, capture bool) core.Value {
 	b := strings.Builder{}
 	e := json.NewEncoder(&b)
 	e.BeginObject()
 	e.Str("script")
 	e.Str(script)
+	if directory != "" {
+		e.Str(FieldCwd)
+		e.Str(directory)
+	}
 	e.Str("outputs")
 	e.BeginArray()
 	for i := range outputs {
@@ -191,6 +213,9 @@ func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, en
 	e.Flush()
 	fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
 	payload := core.NewRecord(a, fields)
+	if directory != "" {
+		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldCwd).Text, Value: core.NewString(a, directory)})
+	}
 	if capture {
 		payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldCapture).Text, Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
@@ -346,6 +371,33 @@ func ServiceCancelPayload(a mem.Allocator, processID int64, graceMS int64) core.
 	return payload
 }
 
+func ProcessSignalPayload(a mem.Allocator, processID int64, signal string) core.Value {
+	return core.NewString(a, strconv.FormatInt(processID, 10)+":"+signal)
+}
+
+func ProcessSignalTarget(payload core.Value) (int64, string) {
+	id, signal, _ := strings.Cut(payload.Text, ":")
+	request, _ := strconv.ParseInt(id, 10, 64)
+	return request, signal
+}
+
+// ProcessSignalName accepts portable names and native signal numbers.
+func ProcessSignalName(text string) string {
+	if n, err := strconv.Atoi(text); err == nil {
+		if n > 0 && n < 65 {
+			return strconv.Itoa(n)
+		}
+		return ""
+	}
+	name := strings.TrimPrefix(strings.ToUpper(text), "SIG")
+	switch name {
+	case "ABRT", "ALRM", "BUS", "CHLD", "CLD", "CONT", "EMT", "FPE", "HUP", "ILL", "INFO", "INT", "IO", "IOT", "KILL", "PIPE", "POLL", "PROF", "PWR", "QUIT", "SEGV", "STKFLT", "STOP", "SYS", "TERM", "TRAP", "TSTP", "TTIN", "TTOU", "URG", "USR1", "USR2", "VTALRM", "WINCH", "XCPU", "XFSZ":
+		return "SIG" + name
+	default:
+		return ""
+	}
+}
+
 // PayloadArgv returns a borrowed argv list, or nil for legacy shell requests.
 func PayloadArgv(payload core.Value) []core.Value {
 	for i := range payload.Record {
@@ -427,6 +479,22 @@ func StageSetupPayload(a mem.Allocator, cwd string, timeout int64, environment [
 func ConfigureStages(a mem.Allocator, payload *core.Value, setups []core.Value) {
 	payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, FieldSetup).Text, Value: core.NewList(a, setups)})
 	writeConfiguredGraph(a, payload)
+}
+
+func ConfigureEmission(a mem.Allocator, setup *core.Value, data []byte, stderr bool) {
+	setup.Record = append(setup.Record,
+		core.RecordField{Key: core.NewString(a, FieldEmit).Text, Value: core.NewBytes(a, data)},
+		core.RecordField{Key: core.NewString(a, FieldEmitError).Text, Value: core.Value{Kind: core.Bool, Bool: stderr}},
+	)
+}
+
+func PayloadEmits(setup core.Value) bool {
+	for _, field := range setup.Record {
+		if field.Key == FieldEmit && field.Value.Kind == core.Bytes {
+			return true
+		}
+	}
+	return false
 }
 
 func ConfigureTopology(a mem.Allocator, payload *core.Value, kinds []core.Value, edges []core.Value) {
@@ -536,10 +604,33 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 			e.Int(PayloadInt(*payload, "inputRoot"))
 		}
 	}
+	if parent := PayloadStageParent(*payload); parent.Graph != 0 {
+		e.Str("stageParent")
+		e.BeginObject()
+		e.Str("graph")
+		e.Int(parent.Graph)
+		e.Str("index")
+		e.Int(int64(parent.Index))
+		e.Str("input")
+		e.Bool(parent.Input)
+		e.Str("stdout")
+		e.Bool(parent.Stdout)
+		e.Str("stderr")
+		e.Bool(parent.Stderr)
+		e.EndObject()
+		if parent.Input {
+			e.Str("inputRoot")
+			e.Int(PayloadInt(*payload, "inputRoot"))
+		}
+	}
 	e.Str("output")
 	e.Str(PayloadText(*payload, FieldOutput))
 	e.Str("append")
 	e.Bool(PayloadAppend(*payload))
+	if PayloadBool(*payload, "terminalRequired") {
+		e.Str("terminalRequired")
+		e.Bool(true)
+	}
 	for i := range payload.Record {
 		if payload.Record[i].Key == "stream" {
 			e.Str("stream")
@@ -612,6 +703,16 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 			e.Str(values[j].Text)
 		}
 		e.EndArray()
+		if PayloadBool(setups[i], FieldEnvironmentExact) {
+			e.Str(FieldEnvironmentExact)
+			e.Bool(true)
+		}
+		if PayloadEmits(setups[i]) {
+			e.Str(FieldEmit)
+			e.Str(base64.StdEncoding.EncodeToString(PayloadBytes(setups[i], FieldEmit)))
+			e.Str(FieldEmitError)
+			e.Bool(PayloadBool(setups[i], FieldEmitError))
+		}
 		e.EndObject()
 	}
 	e.EndArray()
@@ -624,6 +725,30 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		}
 	}
 	b.Reset()
+}
+
+func ConfigureStageParent(a mem.Allocator, payload *core.Value, parent ProcessStageParent) {
+	value := core.NewRecord(a, []core.RecordField{
+		{Key: "graph", Value: core.Value{Kind: core.Int, Int: parent.Graph}},
+		{Key: "index", Value: core.Value{Kind: core.Int, Int: int64(parent.Index)}},
+		{Key: "input", Value: core.Value{Kind: core.Bool, Bool: parent.Input}},
+		{Key: "stdout", Value: core.Value{Kind: core.Bool, Bool: parent.Stdout}},
+		{Key: "stderr", Value: core.Value{Kind: core.Bool, Bool: parent.Stderr}},
+	})
+	payload.Record = append(payload.Record, core.RecordField{Key: core.NewString(a, "stageParent").Text, Value: value})
+}
+
+func PayloadStageParent(payload core.Value) ProcessStageParent {
+	for _, field := range payload.Record {
+		if field.Key == "stageParent" {
+			value := field.Value
+			return ProcessStageParent{
+				Graph: PayloadInt(value, "graph"), Index: int(PayloadInt(value, "index")),
+				Input: PayloadBool(value, "input"), Stdout: PayloadBool(value, "stdout"), Stderr: PayloadBool(value, "stderr"),
+			}
+		}
+	}
+	return ProcessStageParent{}
 }
 
 // PayloadAppend is the named form of PayloadBool for the output-append field.

@@ -12,12 +12,106 @@ import (
 	"kame/program"
 )
 
+func globPathResult(a mem.Allocator, names []string) core.Value {
+	value := globObservation(a, names)
+	for i := range value.List {
+		value.List[i].Kind = core.Path
+	}
+	return value
+}
+
 func globObservation(a mem.Allocator, names []string) core.Value {
 	value := core.Value{Kind: core.List}
 	for i := range names {
 		value.List = append(value.List, core.NewString(a, names[i]))
 	}
 	return value
+}
+
+func TestGroupedGlobRevalidatesExactMembership(t *testing.T) {
+	a := t.Allocator()
+	for _, forwarded := range []bool{false, true} {
+		memory := wasm.NewMemoryHost(a)
+		memory.Mkdir("items", 0o755)
+		parsed := script.ParseKameFile(a, "watch.km", "matches = wildcard ./items/{name:*}-{name}.txt\nother = wildcard ./items/{left:*}-{right}.txt\n")
+		registry := eval.NewRegistry(a)
+		operations.Register(registry)
+		compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", ForwardRequests: forwarded, Grants: []eval.Grant{{Capability: eval.Read}}})
+		if compiled.Program == nil {
+			t.Fatal("grouped glob program compile failed")
+			return
+		}
+		p := compiled.Program
+		matches, other := p.Start("matches").Handle, p.Start("other").Handle
+		for phase, name := range []string{"yes-yes.txt", "left-right.txt", "also-also.txt"} {
+			memory.SetFile("items/"+name, nil)
+			candidates := []string{"./items/yes-yes.txt"}
+			if phase > 0 {
+				candidates = append([]string{"./items/left-right.txt"}, candidates...)
+			}
+			want := []string{"./items/yes-yes.txt"}
+			if phase == 2 {
+				candidates = append([]string{"./items/also-also.txt"}, candidates...)
+				want = append([]string{"./items/also-also.txt"}, want...)
+			}
+			revision := matches.Node.Revision
+			if phase != 0 {
+				keys := p.FilesystemResources()
+				if len(keys) != 2 {
+					t.Error("grouped patterns with the same scan must have distinct resource keys")
+				}
+				for _, key := range keys {
+					if key.Kind != core.ResourceGlob || host.DiscoveryScan(key.Name) != "./items/*-*.txt" {
+						t.Error("unexpected grouped glob key")
+					}
+					p.InvalidateResource(key)
+					key.Free(a)
+				}
+				mem.FreeSlice(nil, keys)
+			}
+			settled := false
+			for tick := 0; tick < 100; tick++ {
+				p.Tick(0)
+				for next := p.NextOutbound(); next.OK; next = p.NextOutbound() {
+					request := next.Request
+					if request.Kind != host.RequestReadFile || host.PayloadText(request.Payload, host.FieldOp) != host.OpWildcard || host.PayloadPath(request.Payload) != "./items/*-*.txt" {
+						t.Error("unexpected grouped glob request")
+					}
+					p.Complete(request, globObservation(a, candidates), core.Diagnostic{})
+					request.Free(a)
+				}
+				left, right := matches.PollRetained(), other.PollRetained()
+				settled = left.Done && right.Done
+				if settled {
+					for i, result := range []program.HandleResult{left, right} {
+						names := want
+						if i == 1 {
+							names = candidates
+						}
+						expected := globPathResult(a, names)
+						if result.Result.Diagnostic.Code != "" || !core.ValueSignature(result.Result.Value).Equal(core.ValueSignature(expected)) {
+							t.Error("grouped wildcard did not publish exact membership")
+						}
+						expected.Free(a)
+					}
+				}
+				left.Result.Free(a)
+				right.Result.Free(a)
+				if settled {
+					break
+				}
+			}
+			if !settled || (matches.Node.Revision == revision) != (phase == 1) {
+				t.Error("consumer must keep its revision when only a nonmatch is added")
+			}
+		}
+		matches.Free()
+		other.Free()
+		p.Free()
+		compiled.Free(a)
+		registry.Free()
+		parsed.Free()
+	}
 }
 
 func settleGlobRoots(t *testing.T, p *program.Program, roots []*program.Handle, names []string, code string) {
@@ -57,7 +151,7 @@ func settleGlobRoots(t *testing.T, p *program.Program, roots []*program.Handle, 
 			}
 			if polled.Done {
 				wantCode := code
-				want := globObservation(a, names)
+				want := globPathResult(a, names)
 				if i == 2 {
 					wantCode = ""
 					want.Free(a)
@@ -86,7 +180,7 @@ func TestGlobRevalidationSharedMembershipLocalAndForwarded(t *testing.T) {
 		memory := wasm.NewMemoryHost(a)
 		memory.Mkdir("items", 0o755)
 		memory.Mkdir("other", 0o755)
-		parsed := script.Parse(a, "watch.kmk", "ROOT = \"./items\"\nFILES = @{ROOT}/*.txt\none = FILES\ntwo = FILES\nisolated = ./other/*.txt\n")
+		parsed := script.ParseKameFile(a, "watch.km", "ROOT = \"./items\"\nFILES = wildcard ${ROOT}/*.txt\none = FILES\ntwo = FILES\nisolated = wildcard ./other/*.txt\n")
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		directory := "."
@@ -170,7 +264,7 @@ func TestGlobRevalidationSharedMembershipLocalAndForwarded(t *testing.T) {
 
 func TestForwardedGlobRevalidationFailureStaleAndCancellation(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "watch.kmk", "FILES = ./items/*.txt\none = FILES\ntwo = FILES\nisolated = ./other/*.txt\n")
+	parsed := script.ParseKameFile(a, "watch.km", "FILES = wildcard ./items/*.txt\none = FILES\ntwo = FILES\nisolated = wildcard ./other/*.txt\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: wasm.NewMemoryHost(a), Directory: ".", ForwardRequests: true, Grants: []eval.Grant{{Capability: eval.Read}}})

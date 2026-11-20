@@ -13,13 +13,13 @@ cli_build
 
 project="$TMPDIR/cache-lock"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'SRC'
-task cached : ; [shell: kash]
+cat >"$project/Makefile.km" <<'SRC'
+task cached memoized
 	echo cached >> runs.log
 	sleep 0.6
 	(out! "cached-result")
 
-task slow : ; [shell: kash]
+task cached slow
 	echo slow >> slow.log
 	sleep 1
 	(out! "slow-result")
@@ -27,9 +27,9 @@ SRC
 
 # Two independent processes see the same cold identity. The second must wait
 # for publication, then read the record instead of running the recipe again.
-(cd "$project" && "$CLI_BIN" cached >one.out 2>one.err) & first=$!
+(cd "$project" && "$CLI_BIN" memoized >one.out 2>one.err) & first=$!
 sleep 0.08
-(cd "$project" && "$CLI_BIN" cached >two.out 2>two.err) & second=$!
+(cd "$project" && "$CLI_BIN" memoized >two.out 2>two.err) & second=$!
 wait "$first"
 wait "$second"
 if [ "$(wc -l <"$project/runs.log")" -eq 1 ] && cmp -s "$project/one.out" "$project/two.out"; then

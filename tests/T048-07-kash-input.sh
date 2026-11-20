@@ -4,8 +4,12 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T048-07 Kash invocation input"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
-CLI_BIN="$CLI_BIN" CLI_ROOT="$CLI_ROOT" INPUT_WORK="$TMPDIR" node <<'JS'
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make -C "$CLI_ROOT" dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
+CLI_BIN="$CLI_BIN" WASM_RUNNER="$wasm_runner" INPUT_WORK="$TMPDIR" node <<'JS'
 const { spawnSync, spawn } = require('node:child_process');
 const { writeFileSync, openSync, readSync, closeSync } = require('node:fs');
 const { join } = require('node:path');
@@ -14,7 +18,7 @@ const work = process.env.INPUT_WORK;
 writeFileSync(join(work, 'file'), 'file');
 writeFileSync(join(work, 'source.kash'), 'cat');
 let checks = 0;
-for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env.CLI_ROOT, 'dist/kame.js')]]) {
+for (const runner of [[process.env.CLI_BIN], [process.execPath, process.env.WASM_RUNNER]]) {
   const invoke = (source, input = 'payload\n', extra = []) => {
     const result = spawnSync(runner[0], [...runner.slice(1), 'do', 'run', '-C', work, ...extra, '-l', 'kash', '-c', source], { input, encoding: 'utf8', timeout: 6000, maxBuffer: 8 * 1024 * 1024 });
     assert.equal(result.error, undefined, source);
@@ -29,15 +33,15 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env
   assert.equal(invoke('cat < ./file\ncat'), 'filepayload\n');
   assert.equal(invoke('cat < ./file', 'unconsumed'), 'file');
   assert.equal(invoke('printf C%s $(cat)\ncat'), 'Cpayload\n');
-  assert.equal(invoke('def helper\n\tcat\n\treturn 0\nprintf %s $(printf %s (let [unused (helper)] "C"))\ncat'), 'Cpayload\n');
-  assert.equal(invoke('def helper\n\tcat\n\treturn 0\nlazy = (helper)\nprintf %s $(printf %s (let [unused lazy] "C"))\ncat'), 'Cpayload\n');
-  assert.equal(invoke('def helper\n\tprintf H\n\tcat\n\treturn 0\nlazy = (helper)\nprintf %s $(printf %s (let [unused lazy] "C"))\n(let [unused lazy] :nil)\ncat'), 'HCpayload\n');
+  assert.equal(invoke('def helper ()\n\tcat\n\treturn "C"\nprintf %s $(printf %s (helper ()))\ncat'), 'Cpayload\n');
+  assert.equal(invoke('def helper ()\n\tcat\n\treturn "C"\ndef lazy = helper ()\nprintf %s $(printf %s (lazy))\ncat'), 'Cpayload\n');
+  assert.equal(invoke('def helper ()\n\tprintf H\n\tcat\n\treturn "C"\ndef lazy = helper ()\nprintf %s $(printf %s (lazy))\nlet ignored = lazy\ncat'), 'HCpayload\n');
   assert.equal(invoke('cat &\ncat'), 'payload\n');
-  assert.equal(invoke('let job = (run! :async :true "cat")\n(await job)\ncat'), 'payload\n');
+  assert.equal(invoke('let job = $&(cat)\nlet result = $?(wait $job)\nout! $result.value\ncat'), 'payload\n');
   assert.equal(invoke('defer cat\nprintf X'), 'X');
-  assert.equal(invoke('def helper\n\tcat\n\treturn 0\ndefer (helper)\nprintf X'), 'X');
-  assert.equal(invoke('def helper\n\tcat\n\treturn 0\n(finally! ([] :nil) ([] (helper)))\nprintf X'), 'X');
-  assert.equal(invoke('def helper\n\tcat\nwith\n\t(helper)'), 'payload\n');
+  assert.equal(invoke('def helper ()\n\tcat\n\treturn 0\ndefer (helper ())\nprintf X'), 'X');
+  assert.equal(invoke('def helper ()\n\tcat\n\treturn 0\n(finally! (() => nil) (() => helper ()))\nprintf X'), 'X');
+  assert.equal(invoke('def helper ()\n\tcat\nwith\n\t(helper ())'), 'payload\n');
   assert.equal(invoke('(run! "cat")'), 'payload\n');
   assert.equal(invoke('(pipe! (run! "cat") (run! "cat"))'), 'payload\n');
   assert.equal(invoke('cat |(broadcast) (cat, cat)'), 'payload\npayload\n');
@@ -71,7 +75,7 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env
   } finally { closeSync(fd); }
 }
 async function deadlines() {
-  for (const runner of [[process.env.CLI_BIN], [process.execPath, join(process.env.CLI_ROOT, 'dist/kame.js')]]) {
+  for (const runner of [[process.env.CLI_BIN], [process.execPath, process.env.WASM_RUNNER]]) {
     // Leave time for WASM's first engine steps to register the defer. The
     // readiness byte checks execution passed registration before timing out;
     // expiring before the defer is registered would not exercise cleanup.

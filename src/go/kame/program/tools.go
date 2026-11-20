@@ -7,7 +7,6 @@ import (
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
-	"kame/lang/template"
 	"slices"
 	"strings"
 )
@@ -50,13 +49,13 @@ func (p *Program) RequiredTools(target string) ToolsResult {
 	result := ToolsResult{}
 	var visited []string
 	var stack []string
-	result.Diagnostic = p.collectTools(target, &visited, &stack, &result)
+	result.Diagnostic = p.collectTools(target, authoredShell(p.Parsed), &visited, &stack, &result)
 	freeStrings(p.Alloc, visited)
 	mem.FreeSlice(nil, stack)
 	return result
 }
 
-func (p *Program) collectTools(target string, visited *[]string, stack *[]string, result *ToolsResult) diagnostic.Diagnostic {
+func (p *Program) collectTools(target string, shell *expr.Expr, visited *[]string, stack *[]string, result *ToolsResult) diagnostic.Diagnostic {
 	if slices.Contains(*stack, target) {
 		d := failure(p.Alloc, "DEP_CYCLE", "dependency cycle while checking tools: "+target)
 		d.Target = cloneText(p.Alloc, target)
@@ -88,40 +87,25 @@ func (p *Program) collectTools(target string, visited *[]string, stack *[]string
 	plan := planned.Plan
 	defer plan.Free(p.Alloc)
 	if plan.Rule != nil {
-		for i := range plan.Rule.Body {
-			value := plan.Rule.Body[i].Template
-			if value == nil {
-				continue
-			}
-			for j := range value.Parts {
-				part := value.Parts[j]
-				if part.Kind != template.Tool || hasToolUse(result.Uses, part.Text) {
-					continue
-				}
-				location := p.Eval.LocateSource(p.Parsed.Source.Name, part.Span)
-				use := ToolUse{Name: cloneText(p.Alloc, part.Text), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, *stack)}
+		visitRecipeToolReferences(plan.Rule, func(name string, span source.Span) {
+			if !hasToolUse(result.Uses, name) {
+				location := p.Eval.LocateSource(p.Parsed.Source.Name, span)
+				use := ToolUse{Name: cloneText(p.Alloc, name), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, *stack)}
 				result.Uses = append(result.Uses, use)
 			}
-		}
-		globalKash := false
-		for i := range p.Parsed.Items {
-			definition := p.Parsed.Items[i].Definition
-			if definition != nil && definition.Name == "SHELL" && definition.Expression != nil {
-				globalKash = definition.Expression.Kind == expr.Name && definition.Expression.Text == "kash"
-			}
-		}
-		if ruleSelectsShell(plan.Rule, globalKash, "kash") {
+		})
+		if ruleSelectsKash(plan.Rule, shell) {
 			p.collectKashTools(plan.Rule, target, *stack, result)
 		}
 	}
 	for i := range plan.StaticInputs {
-		if d := p.collectTools(plan.StaticInputs[i], visited, stack, result); d.Code != "" || result.Waiting {
+		if d := p.collectTools(plan.StaticInputs[i], shell, visited, stack, result); d.Code != "" || result.Waiting {
 			*stack = (*stack)[:len(*stack)-1]
 			return d
 		}
 	}
 	for i := range plan.DynamicInputs {
-		if d := p.collectTools(plan.DynamicInputs[i], visited, stack, result); d.Code != "" || result.Waiting {
+		if d := p.collectTools(plan.DynamicInputs[i], shell, visited, stack, result); d.Code != "" || result.Waiting {
 			*stack = (*stack)[:len(*stack)-1]
 			return d
 		}
@@ -133,6 +117,12 @@ func (p *Program) collectTools(target string, visited *[]string, stack *[]string
 
 // Kash recipes are inspected as authored, never evaluated or executed.
 func (p *Program) collectKashTools(r *rule.Rule, target string, stack []string, result *ToolsResult) {
+	p.visitKashRecipeExpressions(r, func(e *expr.Expr) {
+		p.collectKashExpressionTools(e, r, target, stack, result)
+	})
+}
+
+func (p *Program) visitKashRecipeExpressions(r *rule.Rule, visit func(*expr.Expr)) {
 	if len(r.Body) == 0 {
 		return
 	}
@@ -146,16 +136,9 @@ func (p *Program) collectKashTools(r *rule.Rule, target string, stack []string, 
 	parsed := script.ParseKashRuleBody(p.Alloc, "<recipe>", b.String())
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if result == nil {
-			p.declareExpressionTools(item.Expression)
-			if item.Definition != nil {
-				p.declareExpressionTools(item.Definition.Expression)
-			}
-		} else {
-			p.collectKashExpressionTools(item.Expression, r, target, stack, result)
-			if item.Definition != nil {
-				p.collectKashExpressionTools(item.Definition.Expression, r, target, stack, result)
-			}
+		visit(item.Expression)
+		if item.Definition != nil {
+			visit(item.Definition.Expression)
 		}
 	}
 	parsed.Free()
@@ -167,17 +150,11 @@ func (p *Program) collectKashExpressionTools(value *expr.Expr, r *rule.Rule, tar
 		return
 	}
 	if value.Kind == expr.CommandStage {
-		for i := range value.Items {
-			word := value.Items[i]
-			if word.Kind != expr.CommandWord {
-				continue
-			}
-			if len(word.Parts) == 1 && word.Parts[0].Expr == nil && !hasToolUse(result.Uses, word.Parts[0].Text) {
-				start, end := kashToolOffset(r, word.Span.Start), kashToolOffset(r, word.Span.End)
-				location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: start, End: end})
-				result.Uses = append(result.Uses, ToolUse{Name: cloneText(p.Alloc, word.Parts[0].Text), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, stack)})
-			}
-			break
+		word, name := literalStageTool(value)
+		if name != "" && !hasToolUse(result.Uses, name) {
+			start, end := kashToolOffset(r, word.Span.Start), kashToolOffset(r, word.Span.End)
+			location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: start, End: end})
+			result.Uses = append(result.Uses, ToolUse{Name: cloneText(p.Alloc, name), Source: cloneText(p.Alloc, location.Source), Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Target: cloneText(p.Alloc, target), TargetStack: cloneStrings(p.Alloc, stack)})
 		}
 	}
 	for i := range value.Items {
@@ -192,6 +169,27 @@ func (p *Program) collectKashExpressionTools(value *expr.Expr, r *rule.Rule, tar
 	for i := range value.Parts {
 		p.collectKashExpressionTools(value.Parts[i].Expr, r, target, stack, result)
 	}
+}
+
+func literalStageTool(stage *expr.Expr) (*expr.Expr, string) {
+	for _, word := range stage.Items {
+		if word.Kind != expr.CommandWord {
+			continue
+		}
+		if len(word.Parts) != 1 || word.Parts[0].Expr != nil {
+			break
+		}
+		name := word.Parts[0].Text
+		if !stage.Kash {
+			return word, name
+		}
+		if strings.HasPrefix(name, "std/") || name == "out!" || name == "err!" ||
+			name == "cd" || name == "wait" || name == "kill" {
+			break
+		}
+		return word, strings.TrimPrefix(name, "x/")
+	}
+	return nil, ""
 }
 
 func kashToolOffset(r *rule.Rule, offset int) int {

@@ -5,9 +5,9 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-25 Kash recipe deadlines"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
 	test-step "$backend recipe deadlines and failed background-work cleanup"
 	python3 "$CLI_ROOT/tests/recipe-settings.py" "$CLI_ROOT" "$backend" "$CLI_BIN" lifecycle
 	python3 "$CLI_ROOT/tests/kash-recipes.py" "$CLI_ROOT" "$backend" "$CLI_BIN" lifecycle
@@ -15,7 +15,7 @@ for backend in native wasm; do
 	test-step "$backend mixed-session and expression process deadlines"
 	for source in session expression; do
 		if [ "$source" = session ]; then
-			arguments=(--timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default)
+			arguments=(--timeout 250 -l km -c $'task default : second\ntask first\n\tsleep 0.15\ntask second : first\n\tsleep 0.15\n' default)
 		else
 			arguments=(--allow-run -l expr -c '(run! :timeout 0.05 "sleep" "30")')
 		fi

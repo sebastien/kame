@@ -49,9 +49,9 @@ func (p *Program) kashWith(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	if state == nil {
 		state = mem.Alloc[kashWithState](p.Alloc)
-		state.Cwd = owned(p.Alloc, c.Cwd)
-		for i := range c.Environment {
-			state.Environment = append(state.Environment, owned(p.Alloc, c.Environment[i]))
+		state.Cwd = owned(p.Alloc, c.StageDirectory)
+		for _, assignment := range c.StageEnvironment {
+			state.Environment = append(state.Environment, owned(p.Alloc, assignment))
 		}
 		c.SetOperationState(state, freeKashWith)
 	}
@@ -69,7 +69,7 @@ func (p *Program) kashWith(scope *Scope, e *expr.Expr, c *Context) Result {
 		before, paths := len(c.Effects), len(c.WritePaths)
 		previous := c.sequencedOperand
 		c.sequencedOperand = true
-		r := p.commandWord(setup.Items[0], c, "with :"+setup.Text)
+		r := p.commandWord(setup.Items[0], c, "with "+setup.Text+":")
 		c.sequencedOperand = previous
 		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 			return r
@@ -82,7 +82,7 @@ func (p *Program) kashWith(scope *Scope, e *expr.Expr, c *Context) Result {
 				return failure(c.Run, "EXPR_INVALID", setup.Span, "with cwd requires one nonempty scalar without NUL")
 			}
 			mem.FreeString(p.Alloc, state.Cwd)
-			state.Cwd = canonicalPath(p.Alloc, c.Cwd, text)
+			state.Cwd = canonicalPath(p.Alloc, c.commandDirectory(), text)
 			mem.FreeString(c.Run, text)
 		} else {
 			if !validProcessEnvironment(r.Value) {
@@ -106,7 +106,7 @@ func (p *Program) kashWith(scope *Scope, e *expr.Expr, c *Context) Result {
 			}
 			r.Free(c.Run)
 		}
-		if p.DefinitionEffectSink != nil {
+		if c.hasControlOutputSink() {
 			p.streamControlOutput(c, before)
 		}
 		for i := before; i < len(c.Effects); i++ {
@@ -119,11 +119,11 @@ func (p *Program) kashWith(scope *Scope, e *expr.Expr, c *Context) Result {
 		}
 		state.Index++
 	}
-	previousCwd, previousEnvironment := c.Cwd, c.Environment
-	c.Cwd, c.Environment = state.Cwd, state.Environment
+	previousCwd, previousEnvironment := c.StageDirectory, c.StageEnvironment
+	c.StageDirectory, c.StageEnvironment = state.Cwd, state.Environment
 	c.operationStart, c.operationEnd = e.Span.Start, e.Span.End
 	r := p.invokeKashBody(nil, e, scope, c.Args, c)
-	c.Cwd, c.Environment = previousCwd, previousEnvironment
+	c.StageDirectory, c.StageEnvironment = previousCwd, previousEnvironment
 	c.operationStart, c.operationEnd = start, end
 	return r
 }

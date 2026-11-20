@@ -14,9 +14,9 @@ func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 		`result = $(printf %s prefix-(once ())-(async ()).txt)`,
 		`result = $(printf(once ())(async ()) value)`,
 		`result = $(printf value > ./prefix-(once ())-(async ()).txt)`,
-		`result = $(:cwd ./prefix-(once ())-(async ()) printf value)`,
-		`result = $(:timeout ((once ()) + (async ())) printf value)`,
-		`result = $(:MODE prefix-(once ())-(async ()) printf value)`,
+		`result = $(cwd: ./prefix-(once ())-(async ()) printf value)`,
+		`result = $(timeout: ((once ()) + (async ())) printf value)`,
+		`result = $(MODE: prefix-(once ())-(async ()) printf value)`,
 	}
 	for i := range sources {
 		checkMixedWordRetainedFragments(t, sources[i])
@@ -25,7 +25,7 @@ func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 
 func TestInterpolationRetainsCompletedCallsAcrossSuspension(t *testing.T) {
 	sources := []string{
-		`result = "prefix-@{once ()}-@{async ()}.txt"`,
+		`result = "prefix-${once ()}-${async ()}.txt"`,
 		`result = (render "plain" """prefix-@{once ()}-@{async ()}.txt""")`,
 	}
 	for i := range sources {
@@ -36,7 +36,7 @@ func TestInterpolationRetainsCompletedCallsAcrossSuspension(t *testing.T) {
 		state := memoCountState{}
 		registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 		registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-		parsed := script.Parse(a, "interpolation.km", sources[i])
+		parsed := script.ParseKameFile(a, "interpolation.km", sources[i])
 		p := eval.Compile(a, engine, parsed, registry)
 		p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 		node := p.Definition("result")
@@ -67,7 +67,7 @@ func checkMixedWordRetainedFragments(t *testing.T, source string) {
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "words.km", source)
+	parsed := script.ParseKameFile(a, "words.km", source)
 	p := eval.Compile(a, engine, parsed, registry)
 	p.SetGrants([]eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}})
 	p.DryRun = true

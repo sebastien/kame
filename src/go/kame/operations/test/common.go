@@ -15,17 +15,17 @@ func TestRejectedArgumentCallableOwnership(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "ownership.km", "def identity value = value")
+	parsed := script.ParseKameFile(a, "ownership.km", "def identity value = value")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		"(uppercase {f: [(x => x)]})",
 		"(join \",\" [{f: (x => x)}])",
-		"(lt [{f: (x => x)}] [])",
-		"(gt [] [{f: (x => x)}])",
-		"(lte [{f: (x => x)}] [])",
-		"(gte [] [{f: (x => x)}])",
-		"(eq [{f: (x => x)}] [])",
-		"(ne [] [{f: (x => x)}])",
+		"(lt? [{f: (x => x)}] [])",
+		"(gt? [] [{f: (x => x)}])",
+		"(lte? [{f: (x => x)}] [])",
+		"(gte? [] [{f: (x => x)}])",
+		"(eq? [{f: (x => x)}] [])",
+		"(ne? [] [{f: (x => x)}])",
 		"(filter {f: [(x => x)]} [])",
 		"(filter [] [{f: (x => x)}])",
 		"(map {f: [(x => x)]} [])",
@@ -43,13 +43,13 @@ func TestRejectedArgumentCallableOwnership(t *testing.T) {
 		"(subst ./a/{name:*} \"b\" [{f: (x => x)}])",
 		"(resub ./a/{name:~.*} \"b\" [{f: (x => x)}])",
 		"(resub ./{name:*} \"x\" [{f: (x => x)}])",
-		"(capture 0 {captures: (x => x)})",
-		"(capture \"x\" {named: [(x => x)]})",
+		"(regex-group 0 {captures: (x => x)})",
+		"(regex-group \"x\" {named: [(x => x)]})",
 		"(render {f: [(x => x)]} \"unknown\" \"text\")",
 		"((f => (uppercase {f: [f]})) (x => x))",
-		"((f => (eq {f: [f]} [])) (x => x))",
+		"((f => (eq? {f: [f]} [])) (x => x))",
 		"((xs => (uppercase {f: xs})) [identity])",
-		"((xs => (eq xs xs)) [identity])",
+		"((xs => (eq? xs xs)) [identity])",
 		"((xs => (join \",\" [xs])) [identity])",
 		"((xs => (filter xs [xs])) [identity])",
 	}

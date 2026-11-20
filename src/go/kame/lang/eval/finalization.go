@@ -364,7 +364,11 @@ func (p *Program) finishFinalizerEffects(c *Context, success bool) {
 		for i := range c.Effects {
 			effect := c.Effects[i]
 			effect.FinalizationDeadlineNS = deadline
-			p.DefinitionEffectSink(p.DefinitionEffectState, effect)
+			if effect.Kind == EffectOut && c.commandOutput != nil {
+				c.commandOutput.append(effect.Data)
+			} else {
+				p.DefinitionEffectSink(p.DefinitionEffectState, effect)
+			}
 		}
 	}
 	FreeEffects(c.Run, c.Effects)

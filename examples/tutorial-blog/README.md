@@ -1,7 +1,6 @@
 # Build a personal blog with kame
 
-The build file and snippets use `@{ref}` / `@(call)` syntax. Use a CLI built
-from matching sources; older installed versions may use earlier syntax.
+Build the CLI from this checkout to run the build file and the examples below.
 
 In this tutorial we will build a minimalist personal blog — an author
 page, blog posts, and projects — from Markdown files into plain
@@ -72,21 +71,20 @@ description: "Why I switched my blog to plain Markdown and kame."
 ---
 ```
 
-Look at the pattern rule in `Makefile.kmk`:
+Look at the pattern rule in `Makefile.km`:
 
 ```kame
-./build/posts/{name}.html : ./content/posts/{name}.md ./templates/post.html
+rule ./build/posts/{name}.html : ./content/posts/{name}.md ./templates/post.html
 ```
 
 `{name}` captures the page name once and reuses it for the input and
 the output. The recipe renders the page with pandoc:
 
 ```sh
-pandoc @< --template ./templates/post.html -o @>
+x/pandoc $inputs.0 --template ./templates/post.html -o $outputs.0
 ```
 
-`@<` is the first input (the `.md` file), `@>` is the first output
-(the `.html` file). Edit the Markdown body, rebuild, and reload: that page
+`$inputs.0` passes the Markdown path, and `$outputs.0` passes the HTML path. Edit the Markdown body, rebuild, and reload: that page
 and the index rebuild because both depend on the Markdown file. If only the
 body changed, the index's contents remain the same.
 
@@ -131,8 +129,9 @@ that page plus the index, nothing else.
 The index rule declares its inputs with tracked glob expressions:
 
 ```kame
-posts = ./content/posts/*.md
-./build/index.html : @{posts} @{projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
+posts = files ./content/posts/*.md
+projects = files ./content/projects/*.md
+rule ./build/index.html : ${posts} ${projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
 ```
 
 Adding a `.md` file changes the glob result, so the index
@@ -145,7 +144,7 @@ rebuilds. See the full dependency closure with:
 ## 4. Meet the generated helper
 
 The index rows are built by a helper script that lives inside
-`Makefile.kmk` and is materialized as `./build/tools/row.sh`:
+`Makefile.km` and is materialized as `./build/tools/row.sh`:
 
 ```sh
 ../../build/kame.debug do cat ./build/tools/row.sh
@@ -158,16 +157,19 @@ above, not full YAML quoting or multiline values. It escapes `&`, `<`, and `>`
 in all three fields so metadata stays literal HTML text. Use simple page
 filenames (letters, digits, and hyphens): the fixed `posts`/`projects` sections
 and those slugs go directly into link URLs, without general URL/attribute
-encoding. The index recipe calls it once per file and sorts:
+encoding. The Kash index recipe collects the rows in a temporary directory,
+sorts each section in descending date order, and removes the directory with
+`defer`. Each source path is passed to the helper as one argument.
 
-```sh
-for f in @{posts}; do sh ./build/tools/row.sh "$f"; done | sort -r
+```kash
+for post in posts
+	sh ./build/tools/row.sh $post >> $staging/posts
 ```
 
-Kame tracks the helper itself (`./build/tools/row.sh :
-./Makefile.kmk`), so editing the script rebuilds the index. Shell
-quotes stay single-`$` here — unlike Make, kame never expands `$`, so
-`"$f"` is written as-is.
+The helper rule declares `./Makefile.km` as an input, so editing the helper
+rebuilds it and the index. The rule selects `/bin/sh` for the here-document
+and inserts the destination path with `@{outputs.0}`. The quoted here-document
+delimiter keeps expressions such as `"$f"` in the generated script.
 
 Projects work the same way through their own pattern rule. Open
 `content/projects/this-site.md`, change its description, rebuild, and
@@ -179,7 +181,7 @@ notice the index row changes while posts stay untouched.
 column, system font, post list styling. It is copied verbatim:
 
 ```kame
-./build/style.css : ./style.css
+rule ./build/style.css : ./style.css
 ```
 
 Edit the CSS, rebuild, reload. Deleting the output and rebuilding

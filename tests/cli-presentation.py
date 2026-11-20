@@ -98,8 +98,8 @@ def check_host(host: list[str], root: Path, part: str = 'all') -> None:
 	native = len(host) == 1
 	project = root / ("native" if len(host) == 1 else "wasm")
 	project.mkdir()
-	(project / "Makefile.kmk").write_text('type = "debug"\nschema = "v1"\ntask default :\n\tsleep 0.4\n')
-	(project / "source.kmk").write_text("v=42\n")
+	(project / "Makefile.km").write_text('type = "debug"\nschema = "v1"\ntask default :\n\tsleep 0.4\n')
+	(project / "source.km").write_text("v=42\n")
 	(project / "artifact").write_bytes(b"\xff\x00unterminated")
 	large_artifact = bytes(range(256)) * 1024 + b"unterminated"
 	(project / "large-artifact").write_bytes(large_artifact)
@@ -184,12 +184,12 @@ def check_host(host: list[str], root: Path, part: str = 'all') -> None:
 			assert effects.stdout == b'raw-out' and effects.stderr == b"raw-err", effects
 	rows = records(invoke(host, ["do", "cat", "--json", "-c", 'default = "hello"'], project))
 	assert payload(rows, "target-value")["value"] == {"kind": "string", "data": "hello"}
-	rows = records(invoke(host, ["do", "fmt", "--json", "--check", "source.kmk"], project, status=1))
+	rows = records(invoke(host, ["do", "fmt", "--json", "--check", "source.km"], project, status=1))
 	assert payload(rows, "summary")["status"] == "different" and payload(rows, "format-result")["changed"]
 	assert payload(rows, "summary")["completed"] == 1
-	rows = records(invoke(host, ["do", "fmt", "--json", "-n", "source.kmk"], project, status=1))
+	rows = records(invoke(host, ["do", "fmt", "--json", "-n", "source.km"], project, status=1))
 	assert "dryRun" not in rows[0] and payload(rows, "summary")["status"] == "different", rows
-	rows = records(invoke(host, ["do", "fmt", "--json", "--check", "missing.kmk"], project, status=1))
+	rows = records(invoke(host, ["do", "fmt", "--json", "--check", "missing.km"], project, status=1))
 	assert payload(rows, "summary")["status"] == "failure" and payload(rows, "summary")["failed"] == 1, rows
 	for text, changed in [(b"v=42\n", True), (b"v = 42\n", False), (b"", True)]:
 		rows = records(invoke(host, ["do", "fmt", "--json", "--check"], project, text, status=int(changed)))
@@ -200,10 +200,11 @@ def check_host(host: list[str], root: Path, part: str = 'all') -> None:
 		assert result.stdout == (b"<stdin>\n" if changed else b""), result
 	result = invoke(host, ["do", "fmt", "--in-place"], project, b"v=42\n", status=2)
 	assert b"OPT_CONFLICT" in result.stderr and result.stdout == b"", result
-	rows = records(invoke(host, ["do", "fmt", "--json", "--in-place", "source.kmk"], project))
-	assert payload(rows, "format-result")["action"] == "in-place" and (project / "source.kmk").read_bytes() == b"v = 42\n"
+	rows = records(invoke(host, ["do", "fmt", "--json", "--in-place", "source.km"], project))
+	assert payload(rows, "format-result")["action"] == "in-place" and (project / "source.km").read_bytes() == b"v = 42\n"
 	assert payload(records(invoke(host, ["do", "render", "--json", "--check", "-c", "hello"], project)), "render-result")["action"] == "check"
-	assert payload(records(invoke(host, ["do", "tools", "check", "--json", "default"], project)), "tools-check-result")["tools"] == []
+	tools = payload(records(invoke(host, ["do", "tools", "check", "--json", "default"], project)), "tools-check-result")
+	assert tools["tools"] == [{"name": "sleep", "available": True}], tools
 	assert json.loads(invoke(host, ["do", "cache", "list", "--json"], project).stdout) == []
 	assert payload(records(invoke(host, ["do", "cache", "clean", "--json"], project)), "cache-clean-result")["removed"] == 0
 	assert json.loads(invoke(host, ["--json", "--version"], project).stdout)["type"] == "version"
@@ -250,33 +251,33 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 	assert b"\x1b" not in re.sub(rb"\x1b\]9;4;\d;\d+\x1b\\", b"", small), small
 	# Both backends publish actual dispatch before synchronous Kame work, even
 	# when the target never emits process-started.
-	(project / "Makefile.kmk").write_text("task default :\n")
+	(project / "Makefile.km").write_text("task default :\n")
 	pure = terminal(host, project, "ansi")
 	assert b"evaluating" in pure and b"kame" in pure, pure
 	assert re.search(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", pure), pure
-	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
+	(project / "Makefile.km").write_text("task default :\n\tsleep 0.4\n")
 	fallback = invoke(host, ["--output", "ansi", "--force"], project)
 	assert b"started [" not in fallback.stderr and b"process [" not in fallback.stderr and b"info [" not in fallback.stderr, fallback.stderr
-	(project / "Makefile.kmk").write_text("task default : broken\ntask broken :\n\texit 7\n")
+	(project / "Makefile.km").write_text("task default : broken\ntask broken :\n\texit 7\n")
 	failed = invoke(host, ["--output", "ansi", "--color", "always"], project, status=1)
 	assert b"\x1b[35mbroken\x1b[0m" in failed.stderr and b" - \x1b[1;31mfailed\x1b[0m" in failed.stderr, failed.stderr
 	clean = re.sub(rb"\x1b\[[0-9;]*m", b"", failed.stderr)
 	assert clean.count(b"RECIPE_FAIL") == 1 and clean.count(b"status 7") == 1, failed.stderr
 	assert b"error[RECIPE_FAIL]: [broken] recipe exited unsuccessfully" in clean, failed.stderr
 	assert b"started [" not in failed.stderr and b"finished in" not in failed.stderr, failed.stderr
-	(project / "Makefile.kmk").write_text('root : broken\nbroken : ; [shell: kash]\n\t$(sh -c "exit 123")\n')
+	(project / "Makefile.km").write_text('task root : broken\ntask broken :\n\tsh -c "exit 123"\n')
 	for mode in ["ansi", "text"]:
 		for diagnostic_format in ["human", "plain"]:
 			capture = invoke(host, ["--output", mode, "--diagnostic-format", diagnostic_format, "--color", "never", "root"], project, status=1)
 			assert capture.stderr.count(b"RECIPE_FAIL") == 1 and capture.stderr.count(b"status 123") == 1, capture.stderr
 			assert b"error[RECIPE_FAIL]: [broken] command substitution exited unsuccessfully" in capture.stderr, capture.stderr
 			assert b"caused by: process exited (status 123)" in capture.stderr, capture.stderr
-	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
+	(project / "Makefile.km").write_text("task default :\n\tsleep 0.4\n")
 	# A child can own cursor state; once it does, the presenter must stop rewriting.
-	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.15; printf '\\033[31mraw-control' 1>&2; sleep 0.15\n")
+	(project / "Makefile.km").write_text("task default :\n\tsleep 0.15; printf '\\033[31mraw-control' >&err; sleep 0.15\n")
 	raw = terminal(host, project, "ansi")
 	assert b"raw-control" in raw and b"\x1b[1A" not in raw.split(b"raw-control", 1)[1], raw
-	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
+	(project / "Makefile.km").write_text("task default :\n\tsleep 0.4\n")
 	watch = subprocess.Popen(host + ["--json", "--watch"], cwd=project, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENVIRONMENT, bufsize=0)
 	try:
 		rows = []
@@ -290,10 +291,10 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 			assert False, rows
 		wait_idle(1)
 		assert payload(rows, "watch-cycle-finished")["completed"] == 1, rows
-		(project / "Makefile.kmk").write_text("value = [\n")
+		(project / "Makefile.km").write_text("value = [\n")
 		wait_idle(2)
 		assert rows[-1]["status"] == "failure", rows
-		(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.1\n")
+		(project / "Makefile.km").write_text("task default :\n\tsleep 0.1\n")
 		wait_idle(3)
 		assert rows[-1]["status"] == "success", rows
 		assert [row["completed"] for row in rows if row["type"] == "watch-cycle-finished"] == [1, 0, 1], rows

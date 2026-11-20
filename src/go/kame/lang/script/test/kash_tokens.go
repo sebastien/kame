@@ -36,7 +36,7 @@ func TestKashTokensClassifyInteractiveText(t *testing.T) {
 		{"if test -e ./f\n\techo yes", "kw:if cmd:test opt:-e text:./f cmd:echo text:yes"},
 		{"for f in $files\n\techo $f", "kw:for def:f kw:in var:$files cmd:echo var:$f"},
 		{"make 2> ./err.log > out", "cmd:make op:2> text:./err.log op:> text:out"},
-		{":cwd ./src :tty true make", "const::cwd text:./src const::tty text:true cmd:make"},
+		{"cwd: ./src tty: true make", "const:cwd: text:./src const:tty: text:true cmd:make"},
 		{"echo a # note", "cmd:echo text:a comment:# note"},
 		{"echo --path=(dir) x\\ y", "cmd:echo opt:--path= punct:( fn:dir punct:) text:x\\ y"},
 		{"sleep 1 &", "cmd:sleep text:1 op:&"},

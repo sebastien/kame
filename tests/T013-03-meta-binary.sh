@@ -53,9 +53,16 @@ cli_run --dir deterministic-b -- --json ./build/app
 cli_expect_status 0
 cp "$CLI_OUT" events-b.jsonl
 # Independent targets may deliver completions in different orders. Preserve each
-# target's lifecycle ordering and stream payloads, not cross-target interleaving.
-if diff -u <(jq -csS 'group_by(.target) | map(map({type, target, data}))' events-a.jsonl) \
-	<(jq -csS 'group_by(.target) | map(map({type, target, data}))' events-b.jsonl); then
+# target's lifecycle ordering and stream payloads. Effects report absolute paths.
+normalized_events() {
+	jq -csS --arg root "$(realpath "$1")/" '
+		group_by(.target) | map(map({type, target, data} |
+			if .type == "effect" and (.data | type) == "string" then
+				.data |= ltrimstr($root)
+			else . end))' "$2"
+}
+if diff -u <(normalized_events deterministic-a events-a.jsonl) \
+	<(normalized_events deterministic-b events-b.jsonl); then
 	test-ok "normalized event streams match"
 else
 	test-fail "event streams differ between fresh copies"

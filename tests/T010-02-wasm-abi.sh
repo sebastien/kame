@@ -10,8 +10,10 @@ test-start "T010-02 wasm ABI hardening"
 cd "$CLI_ROOT"
 
 test-step "Go reactor imports only its permitted WASI runtime functions"
-make wasm >/dev/null
-export KAME_WASM="${KAME_WASM:-$CLI_ROOT/build/wasm/kame.wasm}"
+if [ -z "${KAME_WASM:-}" ]; then
+	make wasm >/dev/null
+	export KAME_WASM="$CLI_ROOT/build/wasm/kame.wasm"
+fi
 cli=(node ./src/js/kame.js do run --lang expr --allow-read)
 if import_output="$(node tests/wasm/check-imports.mjs "$KAME_WASM")"; then
 	test-ok "$import_output"
@@ -39,7 +41,11 @@ if size="$("${cli[@]}" -c "(stat \"$marker\").size")" && [ "$size" = "1" ]; then
 else
 	test-fail "stat size = ${size:-<error>}"
 fi
-if glob="$("${cli[@]}" -c "(wildcard \"$marker*\")")" && [ "$glob" = "[\"$marker\"]" ]; then
+marker_path="$marker"
+if [[ "$marker" == "$CLI_ROOT/"* ]]; then
+	marker_path="./${marker#"$CLI_ROOT/"}"
+fi
+if glob="$("${cli[@]}" -c "(wildcard (pattern \"$marker*\"))")" && [ "$glob" = "[$marker_path]" ]; then
 	test-ok "glob returns the matching path through the production host"
 else
 	test-fail "glob diagnostic = $glob"
@@ -72,7 +78,7 @@ if (stale === 0n || exports.kame_wasm_instance_free(stale) !== 0 || exports.kame
 // Distinct kinds: stat=5, glob=6, exists=7.
 const kinds = [
   ['(stat "x")', 5],
-  ['(wildcard "*.x")', 6],
+  ['(wildcard ./*.x)', 6],
   ['(exists? "x")', 7],
 ];
 for (const [expression, expected] of kinds) {

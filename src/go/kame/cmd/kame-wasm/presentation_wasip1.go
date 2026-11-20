@@ -75,7 +75,15 @@ func composition(handle uint64, src, length, dst, size, out uint32) uint32 {
 	if !ok {
 		return 4
 	}
-	r := wasm.RunCompositionCondition(mem.System, s)
+	var r wasm.PureResult
+	if i.runtime != nil && i.runtime.Forwarding {
+		r = i.runtime.CompositionCondition(s)
+	} else {
+		r = wasm.RunCompositionCondition(mem.System, s)
+	}
+	if r.HostNeeded {
+		return 6
+	}
 	if r.Code != "" && r.Text != "" {
 		if len(r.Text) > 65536 {
 			i.diagnostic = "NO_MEMORY: composition diagnostic exceeds 65536-byte source capacity"

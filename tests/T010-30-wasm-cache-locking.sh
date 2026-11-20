@@ -10,23 +10,28 @@ test-start "T010-30 forwarded wasm cache locking"
 cd "$CLI_ROOT"
 
 test-step "build wasm and native fixtures"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then
+	wasm_cli="$CLI_ROOT/src/js/kame.js"
+else
+	make dist-wasm >/dev/null
+	wasm_cli="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-cache-lock"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF_MAKE'
-task cached : ; [shell: kash]
+cat >"$project/Makefile.km" <<'EOF_MAKE'
+task cached memoized
 	sleep 0.4
 	echo run >> runs.log
 	(out! "locked-output")
 EOF_MAKE
 
 # Start two independent Node hosts against the same cold identity.
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >"$project/one.out" 2>"$project/one.err" &
+(cd "$project" && node "$wasm_cli" memoized) >"$project/one.out" 2>"$project/one.err" &
 one=$!
 sleep 0.05
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >"$project/two.out" 2>"$project/two.err" &
+(cd "$project" && node "$wasm_cli" memoized) >"$project/two.out" 2>"$project/two.err" &
 two=$!
 lock_path=""
 for _ in $(seq 1 100); do
@@ -53,7 +58,7 @@ test-step "a lock left by a dead owner is reclaimed"
 if [ -n "$lock_path" ]; then
 	mkdir -p "$lock_path"
 	printf '{"pid":2147483647,"token":"stale"}\n' >"$lock_path/owner.json"
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >"$project/reclaimed.out" 2>"$project/reclaimed.err"
+	(cd "$project" && node "$wasm_cli" memoized) >"$project/reclaimed.out" 2>"$project/reclaimed.err"
 	if cmp -s "$project/one.out" "$project/reclaimed.out" && [ ! -e "$lock_path" ]; then
 		test-ok "cache hit reclaims the stale lock and removes it"
 	else
@@ -66,8 +71,8 @@ fi
 test-step "a failed cached recipe releases its forwarded lock"
 failed="$TMPDIR/wasm-cache-lock-failed"
 mkdir -p "$failed"
-printf 'task cached :\n\texit 1\n' >"$failed/Makefile.kmk"
-if (cd "$failed" && node "$CLI_ROOT/dist/kame.js" cached) >"$failed/out" 2>"$failed/err"; then
+printf 'task cached memoized\n\texit 1\n' >"$failed/Makefile.km"
+if (cd "$failed" && node "$wasm_cli" memoized) >"$failed/out" 2>"$failed/err"; then
 	failed_status=0
 else
 	failed_status=$?
@@ -81,11 +86,11 @@ fi
 test-step "interrupting the lock owner releases its forwarded lock"
 cancel="$TMPDIR/wasm-cache-lock-cancel"
 mkdir -p "$cancel"
-cat >"$cancel/Makefile.kmk" <<'EOF_CANCEL'
-task cached :
+cat >"$cancel/Makefile.km" <<'EOF_CANCEL'
+task cached memoized
 	sleep 10
 EOF_CANCEL
-(cd "$cancel" && node "$CLI_ROOT/dist/kame.js" cached) >"$cancel/out" 2>"$cancel/err" &
+(cd "$cancel" && node "$wasm_cli" memoized) >"$cancel/out" 2>"$cancel/err" &
 cancel_pid=$!
 for _ in $(seq 1 200); do
 	if find "$cancel/.kame/cache/locks" -mindepth 1 -type d -name 'host-*.lock' -print -quit 2>/dev/null | grep -q .; then break; fi
@@ -106,19 +111,19 @@ fi
 test-step "an interrupted waiter leaves the lock owner undisturbed"
 waiters="$TMPDIR/wasm-cache-lock-waiters"
 mkdir -p "$waiters"
-cat >"$waiters/Makefile.kmk" <<'EOF_WAITERS'
-task cached : ; [shell: kash]
+cat >"$waiters/Makefile.km" <<'EOF_WAITERS'
+task cached memoized
 	sleep 1
 	echo run >> runs.log
 	(out! "waiter-output")
 EOF_WAITERS
-(cd "$waiters" && node "$CLI_ROOT/dist/kame.js" cached) >"$waiters/owner.out" 2>"$waiters/owner.err" &
+(cd "$waiters" && node "$wasm_cli" memoized) >"$waiters/owner.out" 2>"$waiters/owner.err" &
 owner_pid=$!
 for _ in $(seq 1 200); do
 	if find "$waiters/.kame/cache/locks" -mindepth 1 -type d -name 'host-*.lock' -print -quit 2>/dev/null | grep -q .; then break; fi
 	sleep 0.02
 done
-(cd "$waiters" && node "$CLI_ROOT/dist/kame.js" cached) >"$waiters/waiter.out" 2>"$waiters/waiter.err" &
+(cd "$waiters" && node "$wasm_cli" memoized) >"$waiters/waiter.out" 2>"$waiters/waiter.err" &
 waiter_pid=$!
 sleep 0.1
 kill -TERM "$waiter_pid" 2>/dev/null || true
@@ -135,19 +140,19 @@ else
 fi
 
 test-step "embedding exceptions and watch disposal release acquired leases before reuse"
-if timeout 20 node --input-type=module - "$CLI_ROOT" "$TMPDIR" <<'NODE'
+if timeout 20 node --input-type=module - "$wasm_cli" "$TMPDIR" <<'NODE'
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 // stdin has no filesystem entry point for the importable CLI guard.
 process.argv[1] = undefined;
-const { Kame } = await import(pathToFileURL(join(process.argv[2], 'dist/kame.js')));
+const { Kame } = await import(pathToFileURL(process.argv[2]));
 const directory = join(process.argv[3], 'embedding-cache-cleanup');
 mkdirSync(directory);
 process.chdir(directory);
 const owner = await Kame.create();
-const program = await owner.compile('task cached : ; [shell: kash]\n\t(out! "reused")\n', { name: 'cache.kmk' });
+const program = await owner.compile('task cached memoized\n\t(out! "reused")\n', { name: 'cache.km' });
 const prototype = Object.getPrototypeOf(program.module);
 const dispatch = prototype.dispatch;
 const options = { cwd: directory, grants: [{ capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }, { capability: 'run', names: [] }] };
@@ -170,8 +175,8 @@ try {
     const controller = new AbortController();
     let watch;
     const operation = mode === 'watch'
-      ? (watch = await program.watch('cached', options)).next()
-      : program.build('cached', { ...options, signal: controller.signal });
+      ? (watch = await program.watch('memoized', options)).next()
+      : program.build('memoized', { ...options, signal: controller.signal });
     const settled = operation.catch(() => {});
     await ready;
     assert.equal(acquiredModule.cacheLeases.size, 1, 'gate must hold a real acquired lease');
@@ -188,8 +193,8 @@ try {
     assert.deepEqual(readdirSync(join(directory, '.kame/cache/locks')), [], 'live-PID lease survived cleanup');
     prototype.dispatch = dispatch;
   }
-  const reused = await program.build('cached', options);
-  assert.equal(reused.results[0].target, 'cached');
+  const reused = await program.build('memoized', options);
+  assert.equal(reused.results[0].target, 'memoized');
   assert.deepEqual(readdirSync(join(directory, '.kame/cache/locks')), []);
 
   // A sweep is instance-local even within one module. Acquiring without a

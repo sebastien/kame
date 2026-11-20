@@ -129,12 +129,13 @@ test-step "-j 2 keeps concurrent recipe output line-integral"
 (
 	mkdir -p interleaving
 	cd interleaving
-	cat >Makefile.kmk <<'EOF'
-first:
+	cat >Makefile.km <<'EOF'
+SHELL = "sh"
+task first
 	for n in 1 2 3; do printf 'first-%s\n' "$n"; sleep 0.01; done
-second:
+task second
 	for n in 1 2 3; do printf 'second-%s\n' "$n"; sleep 0.01; done
-default : first second
+task default : first second
 EOF
 	cli_run -- -j 2 default
 	cli_expect_status 0

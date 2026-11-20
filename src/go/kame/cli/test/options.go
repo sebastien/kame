@@ -66,7 +66,7 @@ func TestFormattingOptionsMustApplyToSelectedLanguage(t *testing.T) {
 		}
 		inv.Free()
 	}
-	languages := []string{"km", "kash", "rule", "script"}
+	languages := []string{"km", "kash"}
 	for i := range languages {
 		inv := cli.Parse("fmt", []string{"--lang", languages[i], "--indent-width=2", "--indent=spaces"})
 		if !inv.OK {

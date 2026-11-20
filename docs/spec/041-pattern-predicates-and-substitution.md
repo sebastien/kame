@@ -95,8 +95,12 @@ For a string or `Path` subject:
 For a list subject, every member must be a string or a `Path`. Substitution
 preserves input order and cardinality, rewrites each matching member, and
 retains every nonmatching member unchanged. An empty list produces an empty
-list. A `nil` subject produces `nil`; other subject kinds and other list member
-kinds report `EXPR_INVALID`.
+list. A `nil` subject produces `nil`.
+
+A `PathPattern` subject discovers paths using the same read authority,
+membership tracking, and ordering as `wildcard SUBJECT`. Substitution
+then rewrites that list. Zero matches produce `[]`. Other subject kinds
+and other list member kinds report `EXPR_INVALID`.
 
 The two-argument form returns a callable of arity one and defers expansion until
 each matching invocation. Captures must not leak between invocations or shadow
@@ -112,6 +116,7 @@ subst ./journal/{name:*} ./{name} [./journal/foo, ./other/foo]
 # [./foo, ./other/foo]
 subst ./journal/{name:*} missing ./other/foo
 # ./other/foo
+REPOS = subst ./{path:*}/.jj ./{path} ./*/.jj
 ```
 
 Substitution must propagate matcher budget failures as `PAT_LIMIT`; it must not
@@ -154,6 +159,8 @@ results computed under a different substitution contract are not reused.
 - Direct and callable `subst` preserve nonmatching subjects byte-for-byte and
   kind-for-kind, and list substitution preserves order and length without
   inserting `nil` entries.
+- Direct and callable `subst` discover a path pattern subject with the
+  same dependencies and read authority as `wildcard`.
 - Literal substitution, empty lists, and `nil` subject passthrough retain their
   specified behavior.
 - Unselected expansions are not evaluated; selected capture-scoped expressions

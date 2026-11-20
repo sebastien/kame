@@ -13,7 +13,7 @@ import (
 
 func TestListTargetsCatalogueAndMatching(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "list.kmk", "ROOT = \"./build\"\nVALUE = 42\n@{ROOT}/{name}.o : ./src/{name}.c\n./build/app ./build/app.map : ./missing-input\n\ttouch forbidden\nbuild : missing-target\nbuilder :\nrebuild :\nservice daemon :\ntask test {mode} :\n./café :\ngenerate extra = [{kind: \"task\", target: \"generated\", inputs: [], order-only: [], recipe: []}]\n")
+	parsed := script.ParseKameFile(a, "list.km", "ROOT = \"./build\"\nVALUE = 42\nrule ${ROOT}/{name}.o : ./src/{name}.c\nrule ./build/app ./build/app.map : ./missing-input\n\ttouch forbidden\ntask build : missing-target\ntask builder\ntask rebuild\nservice daemon :\ntask test {mode} :\nrule ./café\ngenerate (task generated)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -49,7 +49,7 @@ func TestListTargetsCatalogueAndMatching(t *testing.T) {
 
 func TestListReportClassifiesWithoutPlanningPrerequisites(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "list.kmk", "build : unknown ; {summary: \"Build project\", custom: \"kept\"}\nservice daemon : ; {summary: \"Run daemon\", kind: \"service\"}\ntask cached {mode} :\ntask out :\n./out : @(out! \"forbidden\")\n./obj/{name}.o : ./src/{name}.c\n")
+	parsed := script.ParseKameFile(a, "list.km", "task build : unknown ; {summary: \"Build project\", custom: \"kept\"}\nservice daemon : ; {summary: \"Run daemon\", kind: \"service\"}\ntask cached cache-check {mode} :\ntask cached out :\nrule ./out : ${out! \"forbidden\"}\nrule ./obj/{name}.o : ./src/{name}.c\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -73,7 +73,7 @@ func TestListReportClassifiesWithoutPlanningPrerequisites(t *testing.T) {
 	expected := []string{
 		`{"name":"build","group":"rules","summary":"Build project","status":""}`,
 		`{"name":"daemon","group":"services","summary":"Run daemon","status":""}`,
-		`{"name":"cached","group":"tasks","status":"unknown"}`,
+		`{"name":"cache-check","group":"tasks","status":"unknown"}`,
 		`{"name":"out","group":"tasks","status":"unknown"}`,
 		`{"name":"./out","group":"artifacts","status":"unknown"}`,
 		`{"name":"./obj/{name}.o","group":"artifacts","status":""}`,
@@ -92,7 +92,7 @@ func TestListReportRefreshesAcceptedTaskAndArtifactProofs(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
 	host.SetFile("seed", []byte("one"))
-	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; {shell: kash}\n\t(out! (text (read ./seed)))\n./result : ./seed ; {shell: kame}\n\t(read ./seed)\n./downstream : ./result ; {shell: kame}\n\t(read ./result)\n./missing : ./seed\n")
+	parsed := script.ParseKameFile(a, "list.km", "task cached checked : ./seed ; {shell: kash}\n\t(out! (text (read ./seed)))\nrule ./result : ./seed = read ./seed\nrule ./downstream : ./result = read ./result\nrule ./missing : ./seed\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}}})
@@ -138,7 +138,7 @@ func TestListReportDisabledTaskCacheDoesNotRequestHostProof(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
 	host.SetFile("seed", []byte("one"))
-	parsed := script.Parse(a, "list.kmk", "task checked : ./seed ; {shell: kash}\n\t(out! \"ok\")\n")
+	parsed := script.ParseKameFile(a, "list.km", "task cached checked : ./seed ; {shell: kash}\n\t(out! \"ok\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}}})
@@ -180,7 +180,7 @@ func TestListReportDisabledTaskCacheDoesNotRequestHostProof(t *testing.T) {
 
 func TestListTargetsDeduplicatesPatternOutputs(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "list.kmk", "./build/{name}.o : ./src/{name}.c\n./build/{name}.o : ./other/{name}.c\n")
+	parsed := script.ParseKameFile(a, "list.km", "rule ./build/{name}.o : ./src/{name}.c\nrule ./build/{name}.o : ./other/{name}.c\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
 	if compiled.Program == nil {

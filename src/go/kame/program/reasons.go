@@ -113,7 +113,7 @@ func (p *Program) observationReason(entry *instance, stored []core.Observation, 
 				code, message = "membership-changed", "dependency membership changed"
 			} else if item.Key.Kind == core.ResourceEnvironment {
 				code, message = "environment-changed", "environment variable changed"
-				if item.Key.Name == eval.ProcessEnvironmentName {
+				if eval.IsProcessEnvironmentObservation(item.Key.Name) {
 					code, message = "process-environment-changed", "process environment changed"
 				}
 			}

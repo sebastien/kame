@@ -30,13 +30,13 @@ def check(command: list[str], source: str, target: str, *,
 	build: bool = False, formatting: bool = False) -> None:
 	with tempfile.TemporaryDirectory() as temporary:
 		project = Path(temporary)
-		(project / 'Makefile.kmk').write_text(source)
+		(project / 'Makefile.km').write_text(source)
 		(project / 'src').mkdir()
 		(project / 'src/demo.c').write_text('computed-output-ok')
 		(project / 'seed').write_text('seed')
-		(project / 'included.kmk').write_text('./out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n')
+		(project / 'included.km').write_text('rule ./out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n')
 		environment = {key: value for key, value in os.environ.items()
-			if not key.startswith('KAME_')}
+			if not key.startswith('KAME_') or key == 'KAME_WASM'}
 
 		def run(arguments: list[str]) -> subprocess.CompletedProcess[str]:
 			return subprocess.run(command + arguments, cwd=project, env=environment,
@@ -49,7 +49,7 @@ def check(command: list[str], source: str, target: str, *,
 			assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
 			assert any(item in result.stdout + result.stderr for item in codes), (code, result.stdout, result.stderr)
 			assert not result.stderr, result.stderr
-			assert any(json.loads(line).get('diagnostic', {}).get('source', '').endswith('Makefile.kmk')
+			assert any(json.loads(line).get('diagnostic', {}).get('source', '').endswith('Makefile.km')
 				for line in result.stdout.splitlines()), result.stdout
 			built = run([*(overrides or []), target])
 			assert built.returncode == 1, (built.returncode, built.stdout, built.stderr)
@@ -60,8 +60,8 @@ def check(command: list[str], source: str, target: str, *,
 					if json.loads(line).get('diagnostic', {}).get('code') == 'TGT_AMBIG']
 				assert diagnostics and diagnostics[0].get('related'), result.stdout
 				assert diagnostics[0]['related'][0].get('source'), result.stdout
-				if source.startswith('(include '):
-					assert diagnostics[0]['related'][0]['source'].endswith('included.kmk'), result.stdout
+				if source.startswith('include '):
+					assert diagnostics[0]['related'][0]['source'].endswith('included.km'), result.stdout
 			if 'PHASE_INVALID' in codes:
 				assert any(json.loads(line).get('diagnostic', {}).get('tips')
 					for line in result.stdout.splitlines()), result.stdout
@@ -77,17 +77,17 @@ def check(command: list[str], source: str, target: str, *,
 				if edge['producer'] == 1 and edge.get('group')] == inputs, plan
 		assert not (project / 'forbidden').exists(), 'planning ran a recipe'
 		if formatting:
-			parsed = run(['do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk'])
+			parsed = run(['do', 'parse', '--json', '--lang', 'km', 'Makefile.km'])
 			assert parsed.returncode == 0, parsed.stderr
 			json.loads(parsed.stdout, object_pairs_hook=uniqueObject)
-			formatted = run(['do', 'fmt', '--lang', 'script', 'Makefile.kmk'])
+			formatted = run(['do', 'fmt', '--lang', 'km', 'Makefile.km'])
 			assert formatted.returncode == 0, formatted.stderr
-			if '@(' in source or '@{' in source:
-				assert '@(' in formatted.stdout or '@{' in formatted.stdout, 'formatter erased computed syntax'
-			(project / 'formatted.kmk').write_text(formatted.stdout)
-			again = run(['do', 'fmt', '--lang', 'script', 'formatted.kmk'])
+			if '${' in source:
+				assert '${' in formatted.stdout, 'formatter erased computed syntax'
+			(project / 'formatted.km').write_text(formatted.stdout)
+			again = run(['do', 'fmt', '--lang', 'km', 'formatted.km'])
 			assert again.returncode == 0 and again.stdout == formatted.stdout, again.stderr
-			replanned = run(['do', 'plan', '--json', '-f', 'formatted.kmk', *(overrides or []), target])
+			replanned = run(['do', 'plan', '--json', '-f', 'formatted.km', *(overrides or []), target])
 			assert replanned.returncode == 0, replanned.stderr
 			replanned_doc = json.loads(replanned.stdout)
 			replanned_resources = {resource['id']: resource for resource in replanned_doc['resources']}
@@ -106,12 +106,12 @@ def check_watch(command: list[str]) -> None:
 		project = Path(temporary)
 		(project / 'seed').write_text('watch-ok')
 		def source(directory: str) -> None:
-			(project / 'Makefile.kmk').write_text(
-				f'ROOT = "./{directory}"\ndefault : @{{ROOT}}/demo.o\n'
-				'@{ROOT}/{name}.o : ./seed\n\tcat @< > @>\n')
+			(project / 'Makefile.km').write_text(
+				f'ROOT = "./{directory}"\ntask default : ${{ROOT}}/demo.o\n'
+				'rule ${ROOT}/{name}.o : ./seed\n\tcat $inputs.0 > $outputs.0\n')
 		source('one')
 		environment = {key: value for key, value in os.environ.items()
-			if not key.startswith('KAME_')}
+			if not key.startswith('KAME_') or key == 'KAME_WASM'}
 		with (project / 'log').open('w+') as log:
 			process = subprocess.Popen(command + ['--watch', 'default'], cwd=project,
 				env=environment, stdout=log, stderr=log, start_new_session=True)
@@ -141,13 +141,13 @@ def check_output_membership(command: list[str]) -> None:
 		project = Path(temporary)
 		(project / 'seed').write_text('owned')
 		(project / 'unrelated').write_text('preserve')
-		environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
+		environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_') or key == 'KAME_WASM'}
 		def source(members: str) -> None:
-			(project / 'Makefile.kmk').write_text(f'OUTPUTS = [{members}]\n@{{OUTPUTS}} : ./seed\n\tfor path in @>*; do cat @< > "$path"; done\n\tprintf x >> runs\n')
+			(project / 'Makefile.km').write_text(f'OUTPUTS = [{members}]\nrule ${{OUTPUTS}} : ./seed\n\tfor path in outputs\n\t\tcat $inputs.0 > $path\n\tprintf x >> runs\n')
 		def build() -> None:
 			result = subprocess.run(command + ['./a'], cwd=project, env=environment, text=True, capture_output=True, timeout=20)
 			assert result.returncode == 0, (result.stdout, result.stderr)
-		source('./a ./b')
+		source('./a, ./b')
 		build()
 		build()
 		assert (project / 'runs').read_text() == 'x'
@@ -158,7 +158,7 @@ def check_output_membership(command: list[str]) -> None:
 		build()
 		assert (project / 'b').read_text() == 'owned'
 		assert (project / 'runs').read_text() == 'xxx'
-		source('./a ./c')
+		source('./a, ./c')
 		build()
 		assert (project / 'c').read_text() == 'owned'
 		assert (project / 'b').read_text() == 'owned', 'removed member was implicitly deleted'
@@ -172,119 +172,119 @@ def main() -> None:
 	part = sys.argv[4] if len(sys.argv) > 4 else 'all'
 	if part not in ('all', 'values', 'watch'):
 		raise SystemExit('expected all, values or watch')
-	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
+	command = [binary] if backend == 'native' else ['node', os.environ.get('KAME_TEST_WASM_WRAPPER', str(Path(root) / 'dist/kame.js'))]
 	if part == 'watch':
 		check_watch(command)
 		print(f'{backend}: computed output watch passed')
 		return
 	cases = [
-		('interpolated capture', 'ROOT = "./build"\n@{ROOT}/{name}.o : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('interpolated capture', 'ROOT = "./build"\nrule ${ROOT}/{name}.o : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)),
-		('arbitrary pure application', '@(str "./build/" "demo.o") : ./src/demo.c\n\tcat @< > @>\n', './build/demo.o',
+		('arbitrary pure application', 'rule ${str "./build/" "demo.o"} : ./src/demo.c\n\tcat $inputs.0 > $outputs.0\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], build=True)),
-		('quoted interpolation', 'ROOT = "./build dir"\n"@{ROOT}/{name}.o" : ./src/{name}.c\n\tcat @< > "@>"\n', './build dir/demo.o',
+		('quoted interpolation', 'ROOT = "./build dir"\nrule "${ROOT}/{name}.o" : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './build dir/demo.o',
 			dict(outputs=['./build dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)),
-		('expression-supplied capture', 'PATTERN = (str "./build/" "{" "name" "}.o")\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('expression-supplied capture', 'PATTERN = (str "./build/" "{" "name" "}.o")\nrule ${PATTERN} : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True)),
-		('pattern value output', 'PATTERN = "./build/{name:*}.o"\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('pattern value output', 'PATTERN = "./build/{name:*}.o"\nrule ${PATTERN} : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True)),
-		('nested list order and omissions', 'OUTPUTS = [./one [./two :nil] []]\n@{OUTPUTS} ./three : ./src/demo.c\n\tcat @< > ./one\n\tcat @< > ./two\n\tcat @< > ./three\n', './two',
+		('nested list order and omissions', 'OUTPUTS = [./one, [./two, nil], []]\nrule ${OUTPUTS} ./three : ./src/demo.c\n\tcat $inputs.0 > ./one\n\tcat $inputs.0 > ./two\n\tcat $inputs.0 > ./three\n', './two',
 			dict(outputs=['./one', './two', './three'], build=True)),
-		('nil beside literal', '@(nop :nil) ./one :\n', './one', dict(outputs=['./one'])),
-		('computed bare task', 'NAME = "chosen"\n@{NAME} :\n\ttouch forbidden\n', 'chosen', dict(outputs=[])),
-		('computed cached task', 'NAME = "chosen"\ntask @{NAME} :\n', 'chosen', dict(outputs=[])),
-		('nil beside cached task', 'task @(nop :nil) chosen :\n', 'chosen', dict(outputs=[])),
-		('pure helper output', '(output name) = (str "./" name)\n@(output "one") :\n', './one', dict(outputs=['./one'])),
-		('computed service', 'NAME = "chosen"\nservice @{NAME} :\n', 'chosen', dict(outputs=[])),
-		('always file', 'ROOT = "./build"\nalways @{ROOT}/demo.o :\n', './build/demo.o', dict(outputs=['./build/demo.o'])),
-		('configured override', 'ROOT = "./old"\n@{ROOT}/{name}.o :\n', './new/demo.o',
+		('nil beside literal', 'rule ${nop nil} ./one :\n', './one', dict(outputs=['./one'])),
+		('computed phony task', 'NAME = "chosen"\ntask ${NAME} :\n\ttouch forbidden\n', 'chosen', dict(outputs=[])),
+		('computed cached task', 'NAME = "chosen"\ntask cached ${NAME} :\n', 'chosen', dict(outputs=[])),
+		('nil beside cached task', 'task cached ${nop nil} chosen :\n', 'chosen', dict(outputs=[])),
+		('pure helper output', 'def output name = str "./" name\nrule ${output "one"} :\n', './one', dict(outputs=['./one'])),
+		('computed service', 'NAME = "chosen"\nservice ${NAME} :\n', 'chosen', dict(outputs=[])),
+		('always file', 'ROOT = "./build"\nrule always ${ROOT}/demo.o :\n', './build/demo.o', dict(outputs=['./build/demo.o'])),
+		('configured override', 'ROOT = "./old"\nrule ${ROOT}/{name}.o :\n', './new/demo.o',
 			dict(outputs=['./new/demo.o'], overrides=['--define', 'ROOT=./new'])),
 	]
-	for name in ('plain', 'out file', 'out"quote', 'out\\slash', 'out\ttab', 'out\nline', 'out@(missing)'):
+	for name in ('plain', 'out file', 'out"quote', 'out\\slash', 'out\ttab', 'out\nline', 'out${missing}'):
 		output = './' + name
-		quoted = json.dumps(output).replace('@', '\\@')
-		cases.append(('quoted literal ' + repr(name), f'SHELL = kash\n{quoted} : ./src/demo.c\n\tcat @< > @>\n', output,
+		quoted = json.dumps(output).replace('${', r'\${')
+		cases.append(('quoted literal ' + repr(name), f'SHELL = kash\nrule {quoted} : ./src/demo.c\n\tcat $inputs.0 > $outputs.0\n', output,
 			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
-	for sibling in ('./second', '@(joinpath ./ "second")'):
+	for sibling in ('./second', '${joinpath ./ "second"}'):
 		cases.append(('quoted grouped output ' + sibling,
-			f'SHELL = kash\n"./out file" {sibling} : ./src/demo.c\n\tcat @< > (nth 0 outputs)\n\tcat @< > (nth 1 outputs)\n',
+			f'SHELL = kash\nrule "./out file" {sibling} : ./src/demo.c\n\tcat $inputs.0 > (nth 0 outputs)\n\tcat $inputs.0 > (nth 1 outputs)\n',
 			'./out file', dict(outputs=['./out file', './second'], build=True, formatting=True)))
-	cases.append(('quoted capture', 'SHELL = kash\n"./out dir/{name}.o" : ./src/{name}.c\n\tcat @< > @>\n', './out dir/demo.o',
+	cases.append(('quoted capture', 'SHELL = kash\nrule "./out dir/{name}.o" : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './out dir/demo.o',
 		dict(outputs=['./out dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 	for prefix in ('./out\\dir/', './out\t', './out\\'):
 		quoted = json.dumps(prefix + '{name}.o')
 		output = prefix + 'demo.o'
 		cases.append(('quoted escaped capture ' + repr(prefix),
-			f'SHELL = kash\n{quoted} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+			f'SHELL = kash\nrule {quoted} : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', output,
 			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
 		cases.append(('computed escaped capture ' + repr(prefix),
-			f'SHELL = kash\nROOT = {json.dumps(prefix.rstrip("/"))}\n"@{{ROOT}}/{{name}}.o" : ./src/{{name}}.c\n\tcat @< > @>\n', prefix.rstrip('/') + '/demo.o',
+			f'SHELL = kash\nROOT = {json.dumps(prefix.rstrip("/"))}\nrule "${{ROOT}}/{{name}}.o" : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', prefix.rstrip('/') + '/demo.o',
 			dict(outputs=[prefix.rstrip('/') + '/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 	cases.append(('computed string capture with backslash',
-		'SHELL = kash\n@(str "./out\\\\dir/" "{" "name" "}.o") : ./src/{name}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+		'SHELL = kash\nrule ${str "./out\\\\dir/" "{" "name" "}.o"} : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './out\\dir/demo.o',
 		dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 	cases.append(('computed pattern capture with backslash',
-		'SHELL = kash\nPATTERN = ./out\\\\dir/{name:*}.o\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+		'SHELL = kash\nPATTERN = ./out\\\\dir/{name:*}.o\nrule ${PATTERN} : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './out\\dir/demo.o',
 		dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
-	for header in ('@{PATTERN}', '"@{PATTERN}"'):
+	for header in ('${PATTERN}', '"${PATTERN}"'):
 		cases.append(('pattern segment provenance ' + header,
-			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}.o\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}.o\nrule {header} : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', './out\\dir/demo.o',
 			dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 		for definition, output in (
-			('ROOT = "./out\\\\dir"\nPATTERN = @{ROOT}/{name:*}.o', './out\\dir/demo.o'),
+			('ROOT = "./out\\\\dir"\nPATTERN = ${ROOT}/{name:*}.o', './out\\dir/demo.o'),
 			('PATTERN = ./out\\dir/{name:*}.o', './outdir/demo.o'),
 		):
 			cases.append(('pattern spelling provenance ' + header + definition,
-				f'SHELL = kash\n{definition}\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+				f'SHELL = kash\n{definition}\nrule {header} : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', output,
 				dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
-	for header in ('@{ROOT}{name}.o', '"@{ROOT}{name}.o"'):
+	for header in ('${ROOT}{name}.o', '"${ROOT}{name}.o"'):
 		cases.append(('literal-only pattern segment ' + header,
-			f'SHELL = kash\nROOT = (pattern "./out\\\\\\\\dir/")\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+			f'SHELL = kash\nROOT = (pattern "./out\\\\\\\\dir/")\nrule {header} : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', './out\\dir/demo.o',
 			dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
-	for header in ('@{PATTERN}@{TAIL}', '"@{PATTERN}@{TAIL}"', '"@{PATTERN}\\\\tail.o"', '"@(nop [PATTERN TAIL])"'):
-		output = './out\\dir/demo' + (' ' if '[PATTERN TAIL]' in header else '') + '\\tail.o'
+	for header in ('${PATTERN}${TAIL}', '"${PATTERN}${TAIL}"', '"${PATTERN}\\\\tail.o"', '"${PATTERN} ${TAIL}"'):
+		output = './out\\dir/demo' + (' ' if ' ' in header else '') + '\\tail.o'
 		cases.append(('mixed pattern and decoded backslashes ' + header,
-			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}\nTAIL = "\\\\tail.o"\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}\nTAIL = "\\\\tail.o"\nrule {header} : ./src/{{name}}.c\n\tcat $inputs.0 > $outputs.0\n', output,
 			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
 	cases.append(('pattern escaped braces remain literal',
-		'SHELL = kash\nPATTERN = ./out\\{literal\\}/{name:*}.o\n"@{PATTERN}" : ./src/{name}.c\n\tcat @< > @>\n', './out{literal}/demo.o',
+		'SHELL = kash\nPATTERN = ./out\\{literal\\}/{name:*}.o\nrule "${PATTERN}" : ./src/{name}.c\n\tcat $inputs.0 > $outputs.0\n', './out{literal}/demo.o',
 		dict(outputs=['./out{literal}/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 	invalid = [
-		('quoted logical output', '"chosen" :\n', 'PARSE_ERR'),
-		('missing explicit prefix', 'ROOT = "build"\n@{ROOT}/{name}.o :\n', 'PARSE_ERR'),
-		('empty list', '@(nop []) :\n', 'EXPR_INVALID'),
-		('nil only', '@(nop :nil) :\n', 'EXPR_INVALID'),
-		('empty string', '@(str "") :\n', 'EXPR_INVALID'),
-		('number', '@(first [42]) :\n', 'EXPR_INVALID'),
-		('record', '@(first [[key: "value"]]) :\n', 'EXPR_INVALID'),
-		('mixed output kinds', '@(nop [./one "chosen"]) :\n', 'PARSE_ERR'),
-		('multiple task outputs', 'task @(nop ["one" "two"]) :\n', 'PARSE_ERR'),
-		('file service', 'service @(str "./one") :\n', 'PARSE_ERR'),
-		('always logical name', 'always @(str "chosen") :\n', 'PARSE_ERR'),
-		('duplicate literal targets', '@(str "./one") :\n./one :\n', 'TGT_AMBIG'),
-		('duplicate within rule', '@(nop [./one ./one]) :\n', 'PARSE_ERR'),
-		('generated collision', '@(str "./one") :\ngenerate batch = [[kind: "file" target: "./one" inputs: [] order-only: [] recipe: ["touch forbidden"]]]\n', 'TGT_AMBIG'),
-		('malformed resolved pattern', '@(str "./" "{" "name") :\n', 'PARSE_ERR'),
-		('malformed mixed resolved pattern', 'PATTERN = ./out\\\\dir/{name:*}\n"@{PATTERN}{bad" :\n', 'PARSE_ERR'),
-		('mixed pattern cleanup after later failure', 'PATTERN = ./out\\\\dir/{name:*}\n"@{PATTERN}" @(first [42]) :\n', 'EXPR_INVALID'),
-		('missing reference', '@{missing} :\n', 'REF_MISSING'),
-		('capture unavailable', 'ROOT = (str "./" name)\n@{ROOT}/{name}.o :\n', 'REF_MISSING'),
-		('definition cycle', 'ROOT = (OTHER)\nOTHER = (ROOT)\n@{ROOT} :\n', 'DEP_CYCLE'),
-		('indirect effect', 'ROOT = (out! "forbidden")\n@{ROOT}/demo.o :\n', 'PHASE_INVALID'),
-		('indirect read', 'ROOT = (read ./seed)\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
-		('indirect process', 'ROOT = (sh! "touch forbidden")\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
-		('indirect write', 'ROOT = (write! ./forbidden "bad")\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('quoted logical output', 'rule "chosen" :\n', 'PARSE_ERR'),
+		('missing explicit prefix', 'ROOT = "build"\nrule ${ROOT}/{name}.o :\n', 'PARSE_ERR'),
+		('empty list', 'rule ${nop []} :\n', 'EXPR_INVALID'),
+		('nil only', 'rule ${nop nil} :\n', 'EXPR_INVALID'),
+		('empty string', 'rule ${str ""} :\n', 'EXPR_INVALID'),
+		('number', 'rule ${first [42]} :\n', 'EXPR_INVALID'),
+		('record', 'rule ${first [{key: "value"}]} :\n', 'EXPR_INVALID'),
+		('mixed output kinds', 'rule ${nop [./one, "chosen"]} :\n', 'PARSE_ERR'),
+		('multiple task outputs', 'task cached ${nop ["one", "two"]} :\n', 'PARSE_ERR'),
+		('file service', 'service ${str "./one"} :\n', 'PARSE_ERR'),
+		('always logical name', 'rule always ${str "chosen"} :\n', 'PARSE_ERR'),
+		('duplicate literal targets', 'rule ${str "./one"} :\nrule ./one :\n', 'TGT_AMBIG'),
+		('duplicate within rule', 'rule ${nop [./one, ./one]} :\n', 'PARSE_ERR'),
+		('generated collision', 'rule ${str "./one"} :\ngenerate [rule ./one]\n', 'TGT_AMBIG'),
+		('malformed resolved pattern', 'rule ${str "./" "{" "name"} :\n', 'PARSE_ERR'),
+		('malformed mixed resolved pattern', 'PATTERN = ./out\\\\dir/{name:*}\nrule "${PATTERN}{bad" :\n', 'PARSE_ERR'),
+		('mixed pattern cleanup after later failure', 'PATTERN = ./out\\\\dir/{name:*}\nrule "${PATTERN}" ${first [42]} :\n', 'EXPR_INVALID'),
+		('missing reference', 'rule ${missing} :\n', 'REF_MISSING'),
+		('capture unavailable', 'ROOT = (str "./" name)\nrule ${ROOT}/{name}.o :\n', 'REF_MISSING'),
+		('definition cycle', 'ROOT = OTHER\nOTHER = ROOT\nrule ${ROOT} :\n', 'DEP_CYCLE'),
+		('indirect effect', 'ROOT = (out! "forbidden")\nrule ${ROOT}/demo.o :\n', 'PHASE_INVALID'),
+		('indirect read', 'ROOT = (read ./seed)\nrule ${ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('indirect process', 'ROOT = (sh! "touch forbidden")\nrule ${ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('indirect write', 'ROOT = (write! ./forbidden "bad")\nrule ${ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
 	]
 	for name, source, code in invalid:
-		cases.append((name, source + 'sentinel :\n\ttouch forbidden\n', 'sentinel', dict(code=code)))
+		cases.append((name, source + 'task sentinel :\n\ttouch forbidden\n', 'sentinel', dict(code=code)))
 	failures = []
 	cases.extend([
-		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\n@{OUTPUTS} :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
-		('included producer location', '(include ./included.kmk)\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
-		('competing source patterns', './out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
-		('canonical duplicate outputs', './out/../same :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
-		('quoted canonical duplicate', '"./out/../same" :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
-		('quoted grouped canonical duplicate', '"./out/../same" ./same :\n\ttouch forbidden\n', 'same', {'code': 'PARSE_ERR'}),
+		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\nrule ${OUTPUTS} :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
+		('included producer location', 'include ./included.km\nrule ./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
+		('competing source patterns', 'rule ./out/{name}.o : ./src/{name}.c\n\ttouch forbidden\nrule ./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
+		('canonical duplicate outputs', 'rule ./out/../same :\n\ttouch forbidden\nrule ./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
+		('quoted canonical duplicate', 'rule "./out/../same" :\n\ttouch forbidden\nrule ./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
+		('quoted grouped canonical duplicate', 'rule "./out/../same" ./same :\n\ttouch forbidden\n', 'same', {'code': 'PARSE_ERR'}),
 	])
 	for name, source, target, options in cases:
 		try:

@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-08 Kash live graph snapshots"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 test-step "native/WASM report waits before completion without capturing stream data"
 if timeout 60 node --input-type=module - "$CLI_BIN" "$TMPDIR" <<'NODE'
@@ -21,13 +22,12 @@ for (const backend of ['native', 'wasm']) for (const overflow of ['', ' :overflo
   const directory = join(process.argv[3], backend + (overflow ? '-lossy' : '-block'));
   mkdirSync(directory);
   writeFileSync(join(directory, 'input'), input);
-  writeFileSync(join(directory, 'Makefile.kmk'), `SHELL = kash
-probe :
-\tresult = ((kash """sh -c "while [ ! -e source ]; do sleep 0.01; done; cat input" |(frame :lines) |(broadcast${overflow}) (sh -c "while [ ! -e sink ]; do sleep 0.01; done; cat" > ./left, sh -c "while [ ! -e sink ]; do sleep 0.01; done; cat" > ./right)"""))
+  writeFileSync(join(directory, 'Makefile.km'), `task probe
+\tlet result = $?(sh -c "while [ ! -e source ]; do sleep 0.01; done; cat input" |(frame :lines) |(broadcast${overflow}) (sh -c "while [ ! -e sink ]; do sleep 0.01; done; cat" > ./left, sh -c "while [ ! -e sink ]; do sleep 0.01; done; cat" > ./right))
 \t(out! (json result.graph))
 `);
-  const command = backend === 'native' ? [process.argv[2]] : [process.execPath, join(process.cwd(), 'dist/kame.js')];
-  const child = spawn(command[0], [...command.slice(1), '--json', '-C', directory, '-f', './Makefile.kmk', 'probe'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const command = backend === 'native' ? [process.argv[2]] : [process.execPath, process.env.KAME_TEST_WASM_WRAPPER];
+  const child = spawn(command[0], [...command.slice(1), '--json', '-C', directory, 'probe'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const deadline = setTimeout(() => {
     writeFileSync(join(directory, 'source'), ''); writeFileSync(join(directory, 'sink'), ''); child.kill('SIGTERM');
   }, 10000);

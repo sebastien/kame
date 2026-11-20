@@ -46,7 +46,7 @@ func setupBoolean(value core.Value, literal bool) (bool, bool) {
 	return false, false
 }
 
-// terminalSetup records one stage's :tty or :foreground. Requesting either
+// terminalSetup records one stage's tty: or foreground:. Requesting either
 // facility needs metadata authority, or an interactive terminal session.
 func (p *Program) terminalSetup(state *captureState, kind expr.SetupKey, value core.Value, literal bool, span source.Span, c *Context) Result {
 	name, granted := "tty", c.Terminal.TTY
@@ -114,6 +114,12 @@ func (p *Program) terminalPayload(state *captureState, payload *core.Value, elig
 	attach := make([]bool, len(state.Setups))
 	for i := range state.Setups {
 		tty, fore := stageFlag(state.Setups[i], "tty"), stageFlag(state.Setups[i], "foreground")
+		if state.Callables[i] != nil {
+			if tty == setupTrue || fore == setupTrue {
+				return failure(c.Run, "KASH_TERMINAL_UNSUPPORTED", span, "callable graph stages require process ports")
+			}
+			continue
+		}
 		explicit = explicit || tty == setupTrue || fore == setupTrue
 		attach[i] = tty == setupTrue || (tty == setupUnset && attachDefault)
 		attached = attached || attach[i]

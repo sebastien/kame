@@ -8,34 +8,58 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 project="$TMPDIR/project"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'KMK'
-default :
-	cat ./input.bin; cat ./input.bin >&2
-failed :
+cat >"$project/Makefile.km" <<'KMK'
+task default
+	cat ./input.bin; cat ./input.bin >&err
+task failed ; {shell: "sh"}
 	cat ./input.bin; cat ./input.bin >&2; exit 3
 KMK
 for vector in nul binary; do
  for mode in human json; do
   test-step "$vector $mode streams exceed transient memory on both hosts"
-  if python3 - "$project" "$CLI_BIN" "$CLI_ROOT/dist/kame.js" "$vector" "$mode" <<'PYTEST'
-import base64, hashlib, json, subprocess, sys
+  if python3 - "$project" "$CLI_BIN" "$wasm_cli" "$vector" "$mode" <<'PYTEST'
+import base64, hashlib, json, os, subprocess, sys, time
 from pathlib import Path
 folder, native, wasm, vector, mode = sys.argv[1:]
 folder = Path(folder)
 unit = b'\0' if vector == 'nul' else b'\xff\0\xfe\x01'
 expected = unit * (8388608 // len(unit))
 (folder / 'input.bin').write_bytes(expected)
+
+def run_streaming(command, stdout, stderr):
+    # Keep a bounded stall check without treating slow output as a deadlock.
+    deadline = time.monotonic() + 180
+    last_progress = time.monotonic()
+    previous = (0, 0)
+    with subprocess.Popen(command, stdout=stdout, stderr=stderr) as child:
+        while True:
+            try:
+                return child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                now = time.monotonic()
+                sizes = (os.fstat(stdout.fileno()).st_size, os.fstat(stderr.fileno()).st_size)
+                if sizes != previous:
+                    previous = sizes
+                    last_progress = now
+                if now >= deadline or now - last_progress >= 40:
+                    child.terminate()
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        child.kill()
+                    raise AssertionError(f'large output exceeded watchdog: {command!r}, bytes={sizes}')
+
 for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
     for target in ['default', 'failed']:
         output = folder / f'{backend}-{vector}-{mode}-{target}.out'
         errors = output.with_suffix('.err')
         command = runner + (['--json'] if mode == 'json' else []) + ['-C', str(folder), target]
         with output.open('wb') as out, errors.open('wb') as err:
-            result = subprocess.run(command, stdout=out, stderr=err, timeout=40)
-        assert result.returncode == (0 if target == 'default' else 1), (backend, errors.read_text(errors='replace'))
+            status = run_streaming(command, out, err)
+        assert status == (0 if target == 'default' else 1), (backend, errors.read_text(errors='replace'))
         if mode == 'human':
             assert output.read_bytes() == expected, (backend, output.stat().st_size)
             assert errors.read_bytes().count(expected) == 1, (backend, errors.stat().st_size)
@@ -64,18 +88,18 @@ PYTEST
  done
 done
 test-step "cached tasks retain and replay bounded prefixes"
-if python3 - "$project" "$CLI_BIN" "$CLI_ROOT/dist/kame.js" <<'PYCACHE'
+if python3 - "$project" "$CLI_BIN" "$wasm_cli" <<'PYCACHE'
 import json, subprocess, sys
 from pathlib import Path
 folder, native, wasm = sys.argv[1:]
 for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
     work = Path(folder) / backend
     work.mkdir()
-    (work / 'Makefile.kmk').write_text('task cached :\n\techo run >> ./runs; head -c 8388608 /dev/zero\n')
+    (work / 'Makefile.km').write_text('task cached cached-output\n\techo run >> ./runs; head -c 8388608 /dev/zero\n')
     for invocation in range(2):
         output = work / f'{invocation}.json'
         with output.open('wb') as out:
-            result = subprocess.run(runner + ['--json', '-C', str(work), 'cached'], stdout=out, stderr=subprocess.PIPE, timeout=40)
+            result = subprocess.run(runner + ['--json', '-C', str(work), 'cached-output'], stdout=out, stderr=subprocess.PIPE, timeout=40)
         assert result.returncode == 0 and not result.stderr, (backend, result.stderr)
         count = 0
         truncated = False
@@ -92,17 +116,17 @@ for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
 PYCACHE
 then test-ok "both hosts replay only the 64 KiB cache prefix with truncation"; else test-fail "bounded cache output retention"; fi
 test-step "configured log limits reach primary builds and sessions"
-if python3 - "$project" "$CLI_BIN" "$CLI_ROOT/dist/kame.js" <<'PYLIMIT'
+if python3 - "$project" "$CLI_BIN" "$wasm_cli" <<'PYLIMIT'
 import json, os, signal, subprocess, sys, time
 from pathlib import Path
 folder, native, wasm = sys.argv[1:]
-source = 'failed :\n\thead -c 8192 /dev/zero; head -c 8192 /dev/zero >&2; exit 3\n'
+source = 'task failed ; {shell: "sh"}\n\thead -c 8192 /dev/zero; head -c 8192 /dev/zero >&2; exit 3\n'
 for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
     work = Path(folder) / f'{backend}-limits'
     work.mkdir()
-    (work / 'Makefile.kmk').write_text(source)
+    (work / 'Makefile.km').write_text(source)
     for invocation in ['primary', 'batch', 'session']:
-        args = (['do', 'run', '--timeout', '5000', '-l', 'kmk', '-c', source, 'failed']
+        args = (['do', 'run', '--timeout', '5000', '-l', 'km', '-c', source, 'failed']
                 if invocation == 'session' else ['failed'] * (2 if invocation == 'batch' else 1))
         for limit in [1024, 16384]:
             options = ['--json', '-C', str(work), '--log-limit', str(limit)]

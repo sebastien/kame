@@ -13,17 +13,13 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-# Standalone rule parsing covers single rules without a leading comment.
-# indent.km carries a leading script comment and is covered as a script fixture.
-for name in cached-task file inputs outputs recipe service task; do
+for name in cached-task file indent inputs outputs recipe service task; do
 	path="$(lang_fixture "rule/rules/$name.km")"
-	cli_run -- do parse --json --lang rule "$path"
+	cli_run -- do parse --json --lang km "$path"
 	cli_expect_status 0 "$name"
-	cli_expect_json_query "$CLI_OUT" '.lang' 'rule'
+	cli_expect_json_query "$CLI_OUT" '.lang' 'km'
+	cli_expect_json_query "$CLI_OUT" '.ast.items | any(.kind == "rule")' 'true'
 	cli_expect_json_query "$CLI_OUT" '.diagnostics | length' '0'
 done
-
-test-step "rule parse excludes the script-level leading comment fixture"
-test_log_message "rule/rules/indent.km parses as a script; kept out of the standalone rule matrix"
 
 test-end

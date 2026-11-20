@@ -5,11 +5,11 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T048-01 Kash stderr routing"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
 	invoke() { "${runner[@]}" do run -C "$work" --allow-run --allow-read --allow-write "$@"; }
 	check() {
 		local expected_out="$1" expected_err="$2" source="$3" status=0
@@ -37,9 +37,9 @@ for backend in native wasm; do
 	check '' '' 'sh -c "printf more >&2" 2>> ./appended'
 	if [ "$(cat "$work/appended")" = oldmore ]; then test-ok "$backend stderr append"; else test-fail "$backend stderr append"; fi
 	check outerr '' 'sh -c "printf out; printf err >&2" 2>&1 | cat'
-	check err '' 'value = $(sh -c "printf err >&2" 2>&1)
+	check err '' 'let value = $(sh -c "printf err >&2" 2>&1)
 printf "%s" $value'
-	check '<>' '' 'value = $(sh -c "printf out; printf err >&2" > ./captured 2>&1)
+	check '<>' '' 'let value = $(sh -c "printf out; printf err >&2" > ./captured 2>&1)
 printf "<%s>" $value'
 	if [ "$(cat "$work/captured")" = outerr ]; then test-ok "$backend file alias is not captured"; else test-fail "$backend file alias capture"; fi
 	test-step "$backend alias follows the reserved channels"
@@ -48,9 +48,9 @@ printf "<%s>" $value'
 	check oe '' 'sh -c "printf o; printf e >&2" >&out 2>&1'
 	check '' oe 'sh -c "printf o; printf e >&2" >&err 2>&1'
 	test-step "$backend capture and ambiguity"
-	check ab '' 'value = $(printf a 2>&1 && printf b 2>&1)
+	check ab '' 'let value = $(printf a 2>&1 && printf b 2>&1)
 printf "%s" $value'
-	reject KASH_AMBIGUOUS_CAPTURE 'value = $((printf a 2>&1, printf b 2>&1))
+	reject KASH_AMBIGUOUS_CAPTURE 'let value = $((printf a 2>&1, printf b 2>&1))
 printf "%s" $value'
 	reject PARSE_ERR 'printf a > ./conflict | cat'
 	check piped '' 'sh -c "printf piped; printf err >&2" 2> ./side | cat'

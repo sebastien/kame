@@ -28,10 +28,10 @@ evaluates '(dirname "c.txt")' '"."'
 test-step "extension helpers"
 evaluates '(ext "a/b/c.txt")' '".txt"'
 evaluates '(ext "a/b/c")' '""'
-evaluates '(splitext "a/b/c.txt")' '["a/b/c" ".txt"]'
-evaluates '(splitext "a.tar.gz")' '["a.tar" ".gz"]'
-evaluates '(splitext "archive")' '["archive" ""]'
-evaluates '(splitext ".hidden")' '[".hidden" ""]'
+evaluates '(splitext "a/b/c.txt")' '["a/b/c", ".txt"]'
+evaluates '(splitext "a.tar.gz")' '["a.tar", ".gz"]'
+evaluates '(splitext "archive")' '["archive", ""]'
+evaluates '(splitext ".hidden")' '[".hidden", ""]'
 
 test-step "joinpath normalizes components"
 evaluates '(joinpath "a" "b")' '"a/b"'

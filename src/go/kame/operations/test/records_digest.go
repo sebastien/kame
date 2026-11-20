@@ -13,18 +13,18 @@ func TestRecordOperationsAndKindPredicates(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "records.km", "")
+	parsed := script.ParseKameFile(a, "records.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
-		`(eq (items {z: 1, a: {inner: [2, nil]}}) [{key: "z", value: 1}, {key: "a", value: {inner: [2, nil]}}])`,
-		`(eq (items (put "z" 3 {z: 1, a: 2})) [{key: "z", value: 3}, {key: "a", value: 2}])`,
-		`(eq (items (put "a" nil {z: 1})) [{key: "z", value: 1}, {key: "a", value: nil}])`,
-		`(eq (merge ()) (parse-json "{}"))`,
-		`(eq (items (merge {z: {one: 1}, a: 2} {z: {two: 2}, b: 3})) [{key: "z", value: {two: 2}}, {key: "a", value: 2}, {key: "b", value: 3}])`,
-		`(eq (apply (get "value" (first (items {f: (x => (str x "!"))}))) ["ok"]) "ok!")`,
-		`(eq (apply (get "f" (put "f" (x => (str x "!")) {f: (x => x)})) ["ok"]) "ok!")`,
-		`(eq (apply (get "f" (merge {f: (x => x)} {f: (x => (str x "!"))})) ["ok"]) "ok!")`,
-		`(eq (apply (get "f" ((n => (put "f" (x => n) {old: (x => x)})) 42)) [nil]) 42)`,
+		`(eq? (items {z: 1, a: {inner: [2, nil]}}) [{key: "z", value: 1}, {key: "a", value: {inner: [2, nil]}}])`,
+		`(eq? (items (put "z" 3 {z: 1, a: 2})) [{key: "z", value: 3}, {key: "a", value: 2}])`,
+		`(eq? (items (put "a" nil {z: 1})) [{key: "z", value: 1}, {key: "a", value: nil}])`,
+		`(eq? (merge ()) (parse-json "{}"))`,
+		`(eq? (items (merge {z: {one: 1}, a: 2} {z: {two: 2}, b: 3})) [{key: "z", value: {two: 2}}, {key: "a", value: 2}, {key: "b", value: 3}])`,
+		`(eq? (apply (get "value" (first (items {f: (x => (str x "!"))}))) ["ok"]) "ok!")`,
+		`(eq? (apply (get "f" (put "f" (x => (str x "!")) {f: (x => x)})) ["ok"]) "ok!")`,
+		`(eq? (apply (get "f" (merge {f: (x => x)} {f: (x => (str x "!"))})) ["ok"]) "ok!")`,
+		`(eq? (apply (get "f" ((n => (put "f" (x => n) {old: (x => x)})) 42)) [nil]) 42)`,
 		`(record? (parse-json "{}"))`, `(list? [])`, `(string? "")`,
 		`(not (record? []))`, `(not (list? nil))`, `(string? "{x:*}")`, `(not (string? (pattern "{x:*}")))`,
 		`(not (record? [(x => x)]))`, `(not (string? {f: (x => x)}))`,
@@ -55,7 +55,7 @@ func TestStandardDigestVectors(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "digests.km", "")
+	parsed := script.ParseKameFile(a, "digests.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{`(digest "sha1" "abc")`, `(digest "sha256" "abc")`, `(digest "sha512" "abc")`}
 	expected := []string{

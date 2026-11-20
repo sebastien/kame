@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/006-runtime.md — Yield and Effects
+# Spec: docs/spec/006-runtime.md — Publication and effects
 # Spec: docs/spec/007-library.md — Build Effects
 # Spec: docs/spec/013-tests.md — T006-09-runtime-yield
 set -euo pipefail
@@ -7,7 +7,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
-test-start "T006-09 runtime yield"
+test-start "T006-09 runtime publication"
 
 test-step "toolchain and binary"
 cli_require_tools
@@ -15,19 +15,19 @@ cli_build
 
 fixture_copy effects yield
 
-test-step "yield writes its declared output"
+test-step "publication writes its declared output"
 (
 	cd yield
-	cli_run -- --json ./yield.out
+	cli_run -- --allow-read --allow-write --allow-run --json ./yield.out
 	cli_expect_status 0
 	cli_expect_file ./yield.out 'declared content'
 	cli_expect_event "$CLI_OUT" target-completed '.target == "./yield.out"'
 )
 
-test-step "yield may compute its content from dynamic dependencies"
+test-step "publication may compute its content from dynamic dependencies"
 (
 	cd yield
-	cli_run -- ./dynamic-yield.out
+	cli_run -- --allow-read --allow-write --allow-run ./dynamic-yield.out
 	cli_expect_status 0
 	cli_expect_file ./dynamic-yield.out '1'
 )
@@ -35,25 +35,25 @@ test-step "yield may compute its content from dynamic dependencies"
 test-step "artifact effects during shell expansion are PHASE_INVALID"
 (
 	cd yield
-	cli_run -- ./conflict.out
+	cli_run -- --allow-read --allow-write --allow-run ./conflict.out
 	cli_expect_status 1
 	cli_expect_stderr_contains 'PHASE_INVALID'
 	cli_expect_printable "$CLI_ERR"
 )
 
-test-step "yield requires one file output"
+test-step "publication requires one file output"
 (
 	cd yield
-	cli_run -- yielded-task
+	cli_run -- --allow-read --allow-write --allow-run yielded-task
 	cli_expect_status 1
 	cli_expect_stderr_contains 'EXPR_INVALID'
 	cli_expect_printable "$CLI_ERR"
 )
 
-test-step "yield never exposes its content on stdout"
+test-step "publication never exposes its content on stdout"
 (
 	cd yield
-	cli_run -- ./yield.out
+	cli_run -- --allow-read --allow-write --allow-run ./yield.out
 	cli_expect_status 0
 	cli_expect_stdout_empty
 )

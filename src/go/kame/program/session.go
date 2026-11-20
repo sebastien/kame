@@ -44,16 +44,24 @@ type SessionWork struct {
 
 // Session owns one compiled program; work is sequenced by its host driver.
 type Session struct {
-	Program        *Program
-	Work           []SessionWork
-	JSON           bool
-	reported       bool
-	active         int
-	JoinExpression expr.Expr
-	Deferred       *eval.DeferScope
-	retained       map[*core.Node]*core.Root
-	Exit           diagnostic.Termination
-	nextStatement  int
+	Program               *Program
+	Work                  []SessionWork
+	JSON                  bool
+	reported              bool
+	active                int
+	JoinExpression        expr.Expr
+	Deferred              *eval.DeferScope
+	retained              map[*core.Node]*core.Root
+	Exit                  diagnostic.Termination
+	nextStatement         int
+	unit                  eval.ExecutionUnit
+	FollowDirectoryGrants bool
+}
+
+func (s *Session) Directory() string { return s.unit.Directory(s.Program.Options.Directory) }
+
+func (s *Session) EnvironmentValue(name string) (string, bool) {
+	return s.unit.EnvironmentValue(s.Program.Options.Environment, name)
 }
 
 // JSON sessions share the build event encoder, including binary-safe streams.
@@ -70,7 +78,7 @@ func DefinitionEventEffect(state any, effect eval.Effect) {
 	kind := Stdout
 	if effect.Kind == eval.EffectErr {
 		kind = Stderr
-	} else if effect.Kind != eval.EffectOut && effect.Kind != eval.EffectYield {
+	} else if effect.Kind != eval.EffectOut {
 		return
 	}
 	p.emit(Event{Kind: kind, Data: slices.Clone(effect.Data), FinalizationDeadlineNS: effect.FinalizationDeadlineNS})
@@ -80,7 +88,7 @@ func DefinitionEventEffect(state any, effect eval.Effect) {
 // Recipe roots already emit their
 // own lifecycle through observeInstances and must not be duplicated here.
 func (s *Session) Observe(h *Handle) {
-	if s.reported || h == nil || !h.Definition {
+	if s.active < 0 || s.reported || h == nil || !h.Definition {
 		return
 	}
 	n := h.Node
@@ -120,8 +128,9 @@ func (s *Session) Observe(h *Handle) {
 }
 
 type SessionCompile struct {
-	Session     *Session
-	Diagnostics []diagnostic.Diagnostic
+	Session             *Session
+	Diagnostics         []diagnostic.Diagnostic
+	RegistrationPending bool
 }
 
 // Free releases the compilation envelope, not the Session. Retain a successful
@@ -204,13 +213,13 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		appendSourceFragment(parsed, part)
 		for j := first; j < len(parsed.Items); j++ {
 			item := parsed.Items[j]
-			if item.Kind == script.Rule {
+			if item.Kind == script.Rule || item.Kind == script.Generate || item.Kind == script.DeclarationFor || item.Kind == script.Composition {
 				ruleFragments = true
 			}
 			if len(f.Entries) == 0 && !f.SkipStatements && item.Kind == script.Definition && item.Definition.Eager {
 				work = append(work, SessionWork{Expression: item.Definition.Expression})
 			}
-			if item.Kind == script.Include || item.Kind == script.Composition {
+			if item.Kind == script.Include {
 				parsed.Diagnostics = append(parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "source composition is required before declaration registration"})
 			}
 			if item.Kind == script.Definition && f.Lang == "km" {
@@ -232,7 +241,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	}
 	compiled := compileSources(a, parsed, registry, options, sources, offsets)
 	p := compiled.Program
-	result := SessionCompile{}
+	result := SessionCompile{RegistrationPending: compiled.RegistrationPending}
 	for i := range compiled.Diagnostics {
 		result.Diagnostics = append(result.Diagnostics, compiled.Diagnostics[i].Clone(a))
 	}
@@ -350,7 +359,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		}
 		if len(result.Diagnostics) == 0 {
 			s := mem.Alloc[Session](a)
-			s.Program, s.Work = p, work
+			s.Program, s.Work, s.active = p, work, -1
 			s.Deferred = p.Eval.NewDeferScope(0, 0)
 			result.Session = s
 		} else {
@@ -404,6 +413,10 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	p := state.Program
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
 	context.Deferred = state.Deferred
+	context.Unit, context.Environment = &state.Session.unit, p.Options.Environment
+	if state.Session.FollowDirectoryGrants {
+		context.DirectoryGrantRoot = p.Options.Directory
+	}
 	context.CloneCallableAST = state.Owned
 	var r eval.Result
 	if !state.Finishing {
@@ -458,11 +471,15 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 		r.Free(c.Allocator())
 		return core.ProducerCompleted
 	}
-	if r.Value.HasTransientCallable() {
+	if r.Value.HasTransientCallable() || r.Value.HasStream() {
+		message := "callable is invocation-scoped; apply it immediately instead of publishing it"
+		if r.Value.HasStream() {
+			message = "a statement cannot publish a stream"
+		}
 		r.Free(c.Allocator())
 		span := state.Expression.Span
 		location := p.Eval.LocateSource(context.Source, span)
-		d := diagnostic.Diagnostic{Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "callable is invocation-scoped; apply it immediately instead of publishing it", Source: location.Source, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}
+		d := diagnostic.Diagnostic{Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: message, Source: location.Source, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}
 		if entry := state.Expression.EntrySource; entry != nil {
 			d.Source, d.SourceText, d.Span = entry.Name, entry.Text, diagnostic.Span{Start: span.Start, End: span.End}
 		}
@@ -485,6 +502,7 @@ func (s *Session) Start(index int) HandleStart {
 		return HandleStart{Diagnostic: failure(s.Program.Alloc, "PHASE_INVALID", "execution session has terminated")}
 	}
 	s.reported = false
+	prior := s.active
 	s.active = index
 	w := SessionWork{}
 	if index < len(s.Work) {
@@ -498,7 +516,10 @@ func (s *Session) Start(index int) HandleStart {
 		return HandleStart{Diagnostic: failure(s.Program.Alloc, "HOST_FAIL", "statement has already been started")}
 	}
 	if w.Expression == nil {
-		return s.Program.Start(w.Target)
+		// Adjacent rule entries from one fragment form a single build request.
+		sharedEpoch := w.entryGroup != 0 && !w.Value && index > 0 && prior == index-1 &&
+			s.Work[prior].entryGroup == w.entryGroup && !s.Work[prior].Value
+		return s.Program.startEntry(w.Target, sharedEpoch)
 	}
 	p := s.Program
 	state := mem.Alloc[statementState](p.Alloc)
@@ -518,6 +539,7 @@ func (s *Session) Start(index int) HandleStart {
 	if w.transient {
 		s.Work[index].Expression = nil
 	}
+	p.Eval.AttachImports(node)
 	h := mem.Alloc[Handle](p.Alloc)
 	h.Program, h.Node, h.Root, h.Target = p, node, p.Engine.RequestRoot(node), cloneText(p.Alloc, "<statement>")
 	h.Definition = true // Value-producing root, not a recipe instance.

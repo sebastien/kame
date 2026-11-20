@@ -13,7 +13,9 @@ type Root struct {
 }
 
 type Engine struct {
-	Alloc         mem.Allocator
+	Alloc mem.Allocator
+	// CanRun optionally limits dispatch without preventing dependency validation.
+	CanRun        func(*Node) bool
 	nodes         []*Node
 	nodeIndex     []nodeIndexEntry
 	roots         []*Root
@@ -430,10 +432,10 @@ func (e *Engine) ready(n *Node) bool {
 			return false
 		}
 	}
-	return n.Requested
+	return n.Requested && (e.CanRun == nil || e.CanRun(n))
 }
 
-func (e *Engine) choose() *Node {
+func (e *Engine) choose(after *Node) *Node {
 	var first *Node
 	var selected *Node
 	for i := range e.nodes {
@@ -444,7 +446,7 @@ func (e *Engine) choose() *Node {
 		if first == nil || lessNode(n, first) {
 			first = n
 		}
-		if e.lastRun != nil && lessNode(e.lastRun, n) && (selected == nil || lessNode(n, selected)) {
+		if after != nil && lessNode(after, n) && (selected == nil || lessNode(n, selected)) {
 			selected = n
 		}
 	}
@@ -471,28 +473,21 @@ func (e *Engine) HasWork() bool {
 	return false
 }
 
-// Ready returns up to capacity ready nodes in deterministic resource-key order.
+// Ready returns up to capacity ready nodes, rotating through resource-key order.
 func (e *Engine) Ready(capacity int) []*Node {
 	if capacity <= 0 {
 		return nil
 	}
 	var nodes []*Node
+	after := e.lastRun
 	for len(nodes) < capacity {
-		var selected *Node
-		for i := range e.nodes {
-			n := e.nodes[i]
-			if !e.ready(n) || n.offered || slices.Contains(nodes, n) {
-				continue
-			}
-			if selected == nil || lessNode(n, selected) {
-				selected = n
-			}
-		}
+		selected := e.choose(after)
 		if selected == nil {
 			break
 		}
 		selected.offered = true
 		nodes = append(nodes, selected)
+		after = selected
 	}
 	return nodes
 }
@@ -511,8 +506,7 @@ func (e *Engine) Dispatch(n *Node) *Node {
 // CanDispatch checks that a host-retained claim still belongs to live work.
 // Unlike Ready, this does not validate dependencies or advance the engine.
 func (e *Engine) CanDispatch(n *Node) bool {
-	_ = e
-	return n != nil && n.offered && n.Interest != 0 && !n.suspended() && n.Requested && (n.State == NodeIdle || n.State == NodeReady)
+	return n != nil && n.offered && n.Interest != 0 && !n.suspended() && n.Requested && (n.State == NodeIdle || n.State == NodeReady) && (e.CanRun == nil || e.CanRun(n))
 }
 
 // DispatchRoot starts a newly requested independent root without reentering
@@ -532,7 +526,7 @@ func (e *Engine) Step() *Node {
 		e.completions = e.completions[:len(e.completions)-1]
 		return e.accept(c)
 	}
-	n := e.choose()
+	n := e.choose(e.lastRun)
 	if n == nil {
 		return nil
 	}
@@ -799,6 +793,18 @@ func (e *Engine) Cancel(n *Node) {
 	if n != nil && n.RequestInterest != 0 {
 		n.RequestInterest = 0
 		e.interest(n, -1)
+	}
+}
+
+// CancelOwned ends an independently owned node even when observers still
+// hold interest in its result.
+func (e *Engine) CancelOwned(n *Node) { e.cancel(n) }
+
+// CancelRequest requests host cancellation while leaving the evaluator live
+// so it can unwind after the host acknowledges the terminal result.
+func (e *Engine) CancelRequest(n *Node) {
+	if n != nil && n.Submitted {
+		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 }
 

@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T007-15 dangling symlink watch"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
 for backend in native wasm; do
 	test-step "$backend detects changes between absent symlink destinations"
 	python3 "$CLI_ROOT/tests/native-data.py" "$CLI_ROOT" "$backend" "$CLI_BIN" watch

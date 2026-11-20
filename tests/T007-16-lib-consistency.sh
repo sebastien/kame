@@ -4,11 +4,12 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T007-16 predicate, sequence and Kash value consistency"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	invoke() { timeout 30 "${runner[@]}" do run -C "$work" "$@"; }
 	if [ "$(timeout 30 "${runner[@]}" do kash -c '(out! "alias")')" = alias ]; then test-ok "$backend Kash runner alias"; else test-fail "$backend Kash runner alias"; fi
 	check() {
@@ -16,22 +17,20 @@ for backend in native wasm; do
 		invoke -l expr -c "$text" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "$want" ]; then test-ok "$backend $text"; else test-fail "$backend $text"; cat "$work/out" "$work/err"; fi
 	}
-	test-step "$backend predicate names, aliases, presence and emptiness"
-	for op in eq? eq is = ==; do check ':true' "($op [1] [1.0])"; done
-	for op in ne? ne '!='; do check ':true' "($op 1 2)"; done
-	for op in in? has?; do check ':true' "($op [x: :nil] [[x: :nil]])"; done
-	check '[:true :true :true :true :true :true :true :true :true :true]' '[(nil? :nil) (bool? :false) (int? 1) (float? 1.5) (number? 1) (number? 1.5) (callable? uppercase) (resource? (resource "mem://test/file")) (pattern? ./{name:*}) (not (nil? uppercase))]'
-	check '[:true :true :true :false :false :false :false :false]' '[(empty? "") (empty? []) (empty? (merge)) (empty? :nil) (empty? 0) (empty? :false) (empty? " ") (empty? uppercase)]'
-	check '[:true :false :nil]' '[(has-key? "x" [x: :nil]) (has-key? "y" [x: :nil]) (if (has-key? "x" [x: :nil]) (get "x" [x: :nil]) (fail! "unselected default"))]'
+	test-step "$backend predicate names, operators, presence and emptiness"
+	check '[true, true, true, true, true, true]' '[eq? [1] [1.0], [1] == [1.0], ne? 1 2, 1 != 2, in? {x: nil} [{x: nil}], not (in? {x: 1} [{x: nil}])]'
+	check '[true, true, true, true, true, true, true, true, true, true]' '[nil? nil, bool? false, int? 1, float? 1.5, number? 1, number? 1.5, callable? uppercase, resource? (resource "mem://test/file"), pattern? ./{name:*}, not (nil? uppercase)]'
+	check '[true, true, true, false, false, false, false, false]' '[empty? "", empty? [], empty? (merge ()), empty? nil, empty? 0, empty? false, empty? " ", empty? uppercase]'
+	check '[true, false, nil]' '[has-key? "x" {x: nil}, has-key? "y" {x: nil}, if (has-key? "x" {x: nil}) then (get "x" {x: nil}) else (fail! "unselected default")]'
 	printf '\0\377' >"$work/bytes"
-	invoke --allow-read -l kash -c '(out! (json [(bytes? (read ./bytes)) (empty? (read ./bytes))]))' >"$work/out"
+	invoke --allow-read -l kash -c '(out! (json [bytes? (read ./bytes), empty? (read ./bytes)]))' >"$work/out"
 	if [ "$(cat "$work/out")" = '[true,false]' ]; then test-ok "$backend binary kind/emptiness"; else test-fail "$backend binary predicates"; fi
 
 	test-step "$backend exact ordering and consistent sequence calls"
-	check '[:true :true :true :true :true :true]' '[(lt? 9007199254740992 9007199254740993) (gt? 9007199254740993 9007199254740992.0) (< -9223372036854775808 9223372036854775807) (< 9223372036854775807 9223372036854775808.0) (> 9223372036854775807 9223372036854774784.0) (< -1 -0.5)]'
-	check '[1 [1 2] "HELLO" 2 "zero"]' '[(apply ([x] x) [1]) (apply ([xs...] xs) [1 2]) (apply uppercase ["hello"]) (apply count [[1 2]]) (apply ([] "zero") [])]'
-	check '["é" :nil :nil]' '[(first "é🙂") (first "") (first [])]'
-	for text in '(apply uppercase [])' '(apply uppercase ["a" "b"])' '(in? 1 [x: 1])' '(success? [status: 0])' '(success? [status: "0" signal: 0])'; do
+	check '[true, true, true, true, true, true]' '[lt? 9007199254740992 9007199254740993, gt? 9007199254740993 9007199254740992.0, -9223372036854775808 < 9223372036854775807, 9223372036854775807 < 9223372036854775808.0, 9223372036854775807 > 9223372036854774784.0, -1 < -0.5]'
+	check '[1, [1, 2], "HELLO", 2, "zero"]' '[apply (x => x) [1], apply (xs... => xs) [1, 2], apply uppercase ["hello"], apply count [[1, 2]], apply (() => "zero") []]'
+	check '["é", nil, nil]' '[first "é🙂", first "", first []]'
+	for text in '(apply uppercase [])' '(apply uppercase ["a", "b"])' '(in? 1 {x: 1})' '(success? {status: 0})' '(success? {status: "0", signal: 0})'; do
 		status=0
 		invoke -l expr -c "$text" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend rejects $text"; else test-fail "$backend accepted $text"; cat "$work/out" "$work/err"; fi
@@ -39,22 +38,21 @@ for backend in native wasm; do
 
 	test-step "$backend leading path atoms and explicit function status tests"
 	cat >"$work/values.kash" <<'KASH'
-root = "./private"
-(base) = root
-path = @{root}/config.json; computed = @(base)/config.json
-(if (eq? path computed) :nil (fail! "path boundary"))
-def probe status
-	return status ?
-if (success? (probe 75))
+def root = "./private"
+def base () = root
+let path = ${root}/config.json; let computed = ${base ()}/config.json
+(if path == computed then nil else (fail! "path boundary"))
+let accepted = $?(accept-exit: [75] sh -c "exit 75")
+if success? accepted
 	(fail! "accepted failure was truthy")
 else
 	(out! "retry\n")
-if (success? (apply probe [0]))
+if success? $?(true)
 	(out! "success\n")
 def collect values...
-	return (count values) ?
-result = (apply collect [1 2 3])
-(out! "arity=" result.status "\n" path "\n")
+	return count values
+let result = apply collect [1, 2, 3]
+(out! "arity=" result "\n" path "\n")
 KASH
 	invoke -l kash "$work/values.kash" >"$work/out" 2>"$work/err"
 	printf 'retry\nsuccess\narity=3\n./private/config.json\n' >"$work/expected"
@@ -64,7 +62,7 @@ KASH
 	invoke -l kash "$work/formatted.kash" >"$work/formatted-out"
 	if cmp -s "$work/formatted.kash" "$work/again.kash" && cmp -s "$work/formatted-out" "$work/expected"; then test-ok "$backend value paths round trip"; else test-fail "$backend value path formatting"; fi
 	status=0
-	invoke -l kash -c $'def fatal\n\treturn 75\nif (success? (fatal))\n\t(out! "unreachable")\n' >"$work/out" 2>"$work/err" || status=$?
+	invoke -l kash -c $'def fatal ()\n\tsh -c "exit 75"\nif success? (fatal ())\n\t(out! "unreachable")\n' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 75 ] && [ ! -s "$work/out" ]; then test-ok "$backend success? cannot accept a failure"; else test-fail "$backend status predicate swallowed failure"; fi
 done
 test-end

@@ -1,169 +1,98 @@
 # String and document templates
 
-Templates evaluate Kame expressions and render values as text. They do not
-parse generated text as Kash or automatically quote shell arguments/escape HTML.
+Templates render Kame values as text. Interpolation leaves HTML and shell
+quoting to the surrounding document.
 
-## Inline expansions and selectors
+## Interpolation
 
-```text
-Hello, @{name}. There are @(count files) files. Version: @(version).
-```
+~~~text
+Hello @{name}. There are @{count files} files. Version @{version ()}.
+~~~
 
-`@{reference}` reads a binding, including fields/indexes/selections. `@` followed
-by a complete parenthesized expression evaluates it: `@(version)` calls without
-arguments, and `@(count files)` calls with an argument. There is no extra wrapper,
-implicit callable invocation or fallback from a noncallable call to a lookup.
-Use `@(nop VALUE)` for another atom, such as a literal list. Lists render with
-one space between items; nil renders empty. Records need explicit JSON encoding
-(`json`); bytes need explicit UTF-8 conversion (`text`) rather than direct
-interpolation. `str` is scalar-only and does not serialize records.
+Use any value expression inside `@{EXPR}`, including field access, calls,
+operators, and value pipes. A bare name reads its value. Write `name ()` to
+call a zero-argument function.
 
-| Rule selector | Meaning |
-| --- | --- |
-| `@<` / `@<*` / `@<#` | First input / all inputs / count. |
-| `@<N` / `@<A..B` | Input index / half-open slice. |
-| `@<?` | Normal file inputs changed by content digest since the accepted file-rule run. |
-| `@>` / `@>*` / `@>#` | First output / all outputs / count. |
-| `@>N` | Output index. |
-
-Function selectors are `@_` (first argument), `@*` (all), `@#` (count), and
-`@N` (index). Indexes are zero-based; negative indexes count from the end.
-Missing context and invalid bounds produce diagnostics, not empty text.
-Literal `@0` in a recipe, such as tar's `--mtime=@0`, collides with an argument
-selector: write `--mtime=\@0`. Shell quotes do not disable template parsing; use
-an `@raw` block for larger literal sections.
-Expression strings use the same reference/call boundaries. Bare `{(...)}` does
-not interpolate; no legacy mode or automatic formatting migration is provided.
-Selectors also work as expression
-atoms when their rule/argument context exists, as in `(dirname @>)`; compact
-selectors inside expression-string text require explicit rendering instead.
-Backslash can escape `@` and `\` in string templates, and `\@`/`\{` keep
-interpolation openers inert in expression strings. Raw regions remain unchanged.
+Strings, numbers, booleans, symbols, and paths render as text. Nil renders as
+empty text. Use `join` for lists, `json` or `fmt` for structured values, and
+`text` for UTF-8 bytes. `@@` emits one at-sign. At the directive position it
+also makes the remainder of that line literal. Use `@raw` for verbatim blocks.
 
 ## Document directives
 
-Document templates add keyword-gated directives in plain text or host-language
-comments. Whole-line directives remove their surrounding whitespace and newline;
-block directives can also appear inline using complete comment wrappers.
-`@if (` and `@ if` are not directives; `@if(...)` is.
+Place each directive on a whole line in plain templates. In HTML, C, and
+PowerShell, a complete block-comment wrapper can also delimit an inline block
+directive. Directive lines disappear with their line endings.
 
-Single-expression `if`, `elif`, `with`, `match`, and `case` directives accept
-application shorthand: `@if(exists? ./file)` equals `@if((exists? ./file))`.
-`@if(enabled)` reads a value; `@if((predicate))` calls without arguments.
-Formatters prefer the shorthand. Multi-argument `for`, `let`, and `include`
-keep explicit slots, so applications there need parentheses:
-`@for([item] (get mode inputs))`, `@let(name (str first last))`, and
-`@include((str ./pages/ name) payload)`. No optional-slot guessing is performed.
-Use a glob directly when no call is needed: `@for([item] ./src/*.c)`.
-
-```html
+~~~html
 <h1>@{title}</h1>
 <ul>
-<!-- @for([post] posts) -->
+<!-- @for post in posts -->
   <li>@{post.title}</li>
-<!-- @end -->
+<!-- @end for -->
 </ul>
-```
+~~~
 
 | Directive | Effect |
 | --- | --- |
-| `@if(TEST)` / `@elif(TEST)` / `@else` | Select one branch using Kame truth (only nil/false are false). |
-| `@for([PARAM...] LIST-OR-RECORD [SEP])` | Render once per value, optionally joining results with `SEP`; exposes zero-based `index` and record `key` (nil for lists). |
-| `@with(RECORD)` | Bind fields in a nested scope. |
-| `@let(NAME EXPR)` | Bind for the rest of the enclosing block; no closing `@end`. |
-| `@include(PATH [PAYLOAD])` | Render another template with current scope or explicit payload. |
-| `@raw` | Emit enclosed text verbatim, without expansions or directive recognition. |
-| `@match(EXPR)` / `@case(PATTERN)` / `@else` | First matching case, with local pattern captures; the first clause must be `@case`. |
-| `@end` / `@end(KIND)` | Close the innermost block; an optional `if`, `for`, `with`, `raw`, or `match` label must agree. |
+| `@if TEST`, `@elif TEST`, `@else` | Select the first true branch. Nil and false are false. |
+| `@for NAME… in EXPR [sep EXPR]` | Render each list element. Multiple parameters or a rest parameter destructure an element list positionally. |
+| `@with RECORD` | Bind fields while rendering the block. |
+| `@let NAME = EXPR` | Bind a value through the end of the enclosing block. |
+| `@include PATH [PAYLOAD]` | Load a template relative to the containing template. Group a path-producing call, as in `@include (str "pages/" name) payload`. |
+| `@raw` | Emit verbatim text through `@end` or `@end raw`. |
+| `@match EXPR`, `@case PATTERN`, `@else` | Render the first matching branch with its named captures in scope. |
+| `@end [LABEL]` | Close the innermost block. A label must match its opening keyword. |
 
-Directive lines, including their line endings, disappear from output. Other
-text is preserved; unknown keywords such as `@media` are ordinary text.
-Use `@@` at a directive position, `\@` in body text, or a raw block for literal
-template-looking syntax. Unbalanced blocks are errors.
-Left/right trim markers (`@-if(TEST)-`, `@else-`, `@end(if)-`) remove adjacent
-ASCII spaces, tabs, CR, and LF at that boundary. Loop parameter names shadow
-implicit `index`/`key` bindings; record iteration follows source key order.
+Use `indexed LIST` for explicit position–value pairs and `items RECORD` for
+explicit key–value records in storage order. Loops bind their declared names.
 
-Styles: `html` (`<!-- -->`), `c` (`/* */` or `//`), `hash` (`#`), `dash` (`--`),
-`semi` (`;`), `percent` (`%`), `powershell` (`#` or `<# #>`), `batch` (`REM` or
-`::`), `plain` (no wrapper), and `none` (expansions only).
-Explicit `auto` uses a known file extension or detects a unique comment style
-from content, falling back to plain; ambiguous content reports `TPL_STYLE`.
-Kash `$name`, `${name}`, and `$(command)` remain literal document text;
-template directives are not Kash meta-programming forms.
+A hyphen after `@` trims whitespace on the left. A standalone trailing hyphen
+trims whitespace on the right. For example, write `@-if ready -` or
+`@end if -`. Use an actual space before the trailing hyphen.
+
+Styles include `html`, `c`, `hash`, `dash`, `semi`, `percent`, `powershell`,
+`batch`, `plain`, and `none`. Style `none` enables interpolation only. Style
+`auto` uses a registered file extension or detects a unique comment style in
+the source.
 
 ## Render with data
 
-```kame
-(render [title: "News" posts: [[title: "Hello"]]] ./page.html)
-(render [title: "News"] "html" ./page.tmpl)
-(render [title: "News"] "html" (read ./page.html))
-```
+~~~kame
+page = render ./page.html {title: "News", posts: [{title: "Hello"}]}
+other = render {title: "News"} "html" ./page.tmpl
+cached = render {title: "News"} "html" (read ./page.html)
+~~~
 
-`(render [PAYLOAD] [STYLE] SOURCE)` returns a string:
+`render SOURCE PAYLOAD?` returns a string. Use `render STYLE SOURCE` or
+`render PAYLOAD STYLE SOURCE` to choose a style. A `Path` loads a template
+under the read capability and registers a file dependency. `String` and
+`Bytes` values provide inline content, with plain style by default. Paths
+infer style from their extension, including `.kmt` for plain templates. An
+explicit style overrides inference. A payload record binds its fields in the
+template scope.
 
-- A string starting with `./`, `../`, or `/` is a file path, read under the read
-  capability and tracked as a dependency. Other strings and bytes are content.
-- File extensions infer style (e.g. HTML/XML/Markdown → `html`, JS/Go/C/CSS →
-  `c`, YAML/Python/TOML → `hash`). Unknown extensions need an explicit style.
-  Content defaults to `plain`; specify a style for host-comment content.
-- Payload must be a record; its fields shadow caller bindings for rendering.
-  The caller's scope remains visible as the parent.
-- With two arguments, a string first argument supplies STYLE instead of PAYLOAD:
-  `(render "html" SOURCE)`. A leading record supplies PAYLOAD instead.
-  Bytes content requires an explicit style; unlike string content, it has no default.
-- Template reads and evaluated `read`, `wildcard`, or `env` calls contribute
-  dynamic dependencies in builds. Recursive includes are diagnosed.
+Triple-quoted literals hold template source until `render` is called.
 
-Store raw templates with a verbatim literal, then explicitly render:
-
-```kame
+~~~kame
 CARD = """
 <h1>@{title}</h1>
 """
 
-default = (render [title: "Hello"] "html" CARD)
-```
+rule ./build/page.html = render {title: "Hello"} "html" CARD
+~~~
 
-Run this value script with `--print-result` or select its `default` entry to
-display the rendered card. The literal's content is untouched until `render`;
-a longer quote delimiter allows triple quotes in its content. `template-cat` is
-the document-rendering lowering primitive (nil is empty and lists join with
-spaces); `text` converts valid UTF-8 bytes to a string.
+Foreign-shell recipes render as plain document templates. Shell expressions
+such as `$name` and `$(command)` pass through to the shell. Kash recipes use
+Kash syntax. [Kash](./kash.md)
 
-To render a file-backed template into a declared build output, return its content:
-
-```kame
-default : ./build/page.html
-
-./build/page.html : ./page.html ; [shell: kame]
-	(render [title: "Hello"] ./page.html)
-```
-
-## Recipes and verification
-
-External-shell recipes are `plain` document templates rendered as one shell
-script. You can use `@if`/`@for` directives there; selected non-directive lines
-remain shell text, with recipe-local state persisting between lines.
-
-Direct Kash recipes (`SHELL = kash` or `[shell: kash]`) are parsed as Kash,
-not expanded as document templates; see [Kash](./kash.md).
-
-```sh
-kame do run --lang expr --allow-read -c '(render [title: "Hello"] ./page.html)'
+~~~sh
+kame do run --lang expr --allow-read -c 'render ./page.html {title: "Hello"}'
 kame do render --define title=Hello ./page.html
 kame do render --check ./page.html
-printf '%s\n' 'Hello @{name}' | kame do parse --lang template
-```
+kame do fmt --lang template --comment html ./page.html
+~~~
 
-`do parse --lang template` handles inline template syntax, not document blocks.
-`do fmt --lang template --comment STYLE` formats document directives while
-preserving all other bytes; the default `script` formatter must not be used on
-host documents. Verbatim literal contents in Kame sources remain raw.
-Where inline expressions are formatted, pipes remain pipes, nested calls remain
-nested calls, and parentheses are not removed as presumed legacy wrappers.
-`@if(enabled)` and `@if((predicate))` keep their separate directive-slot grammar.
-`kame do render` renders documents;
-repeatable `--define NAME=VALUE` supplies literal string payload fields,
-`--comment STYLE` selects the directive comment style, and `--check` validates
-syntax without evaluating directives or opening includes.
+`do render --check` validates syntax without evaluating expressions or opening
+includes. Template formatting canonicalizes directives and interpolated
+expressions while preserving literal text and raw bodies.

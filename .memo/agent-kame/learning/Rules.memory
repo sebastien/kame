@@ -9,14 +9,273 @@ agent_nodes:
     role: guidance
     core: true
     topic: testing
+  validate-composed-lexical-context:
+    role: guidance
+    core: false
+    topic: source-composition
+  verify-inherited-environment-removal:
+    role: guidance
+    core: false
+    topic: testing
+  register-host-process-before-async-launch:
+    role: guidance
+    core: false
+    topic: process-host
+  verify-process-environment-freshness:
+    role: guidance
+    core: false
+    topic: testing
+  verify-missing-module-source-observations:
+    role: guidance
+    core: false
+    topic: testing
+  isolate-declaration-captures-in-freshness-tests:
+    role: guidance
+    core: false
+    topic: testing
+  verify-changed-inputs-through-indirect-consumers:
+    role: guidance
+    core: false
+    topic: testing
+  verify-suspended-declaration-registration:
+    role: guidance
+    core: false
+    topic: testing
+  verify-command-probes-in-kash-loop-fixtures:
+    role: guidance
+    core: false
+    topic: testing
+  drive-closed-pipe-tests-until-closure:
+    role: guidance
+    core: false
+    topic: testing
+  verify-fairness-with-one-ready-slot:
+    role: guidance
+    core: false
+    topic: scheduling
+  verify-borrowed-stdin-handoff-and-cancellation:
+    role: guidance
+    core: false
+    topic: testing
+  preserve-callable-ownership-in-process-outcomes:
+    role: guidance
+    core: false
+    topic: evaluator-ownership
+  verify-deliberate-exit-at-sync-capture-boundary:
+    role: guidance
+    core: false
+    topic: testing
+  verify-standalone-wasm-process-evaluation:
+    role: guidance
+    core: false
+    topic: testing
+  verify-expected-tools-besides-host-parity:
+    role: guidance
+    core: false
+    topic: testing
+  test-absent-and-invalid-host-edge-telemetry:
+    role: guidance
+    core: false
+    topic: testing
+  verify-quiescence-after-latest-watch-idle:
+    role: guidance
+    core: false
+    topic: testing
+  verify-service-restart-readiness-per-generation:
+    role: guidance
+    topic: testing
+    core: false
+  verify-prebuilt-harness-artifact-inputs:
+    role: guidance
+    topic: testing
+    core: false
+  verify-child-output-drains-after-exit:
+    role: guidance
+    topic: process-host
+    core: false
+  verify-pure-operation-registry-coverage:
+    role: guidance
+    topic: testing
+    core: false
+  verify-terminal-handoff-before-cleanup:
+    role: guidance
+    topic: process-host
+    core: false
+  pace-repl-pty-warmup-by-executed-marker:
+    role: guidance
+    topic: testing
+    core: false
+  verify-job-limit-across-host-waits:
+    role: guidance
+    topic: scheduling
+    core: false
+  verify-mixed-recipe-diagnostic-provenance:
+    role: guidance
+    topic: diagnostics
+    core: false
+  preserve-do-kash-unified-runner-alias:
+    role: guidance
+    topic: cli
+    core: false
+  keep-generator-suspension-internal:
+    role: guidance
+    topic: process-outcomes
+    core: false
+  preserve-computed-rule-output-spellings:
+    role: guidance
+    topic: source-composition
+    core: false
+  preserve-newline-collection-separators:
+    role: guidance
+    topic: language-syntax
+    core: false
+  preserve-kash-setup-label-spelling:
+    role: guidance
+    topic: language-syntax
+    core: false
+  preserve-path-pattern-subst-discovery:
+    role: guidance
+    topic: language-syntax
+    core: false
 created: 2026-11-16T01:50:04.405444+00:00
-updated: 2026-11-16T04:17:11.559315+00:00
+updated: 2026-11-21T07:54:18.468610+00:00
 ---
 {
   "version": 1,
   "memory": {
     "root": "root",
     "nodes": {
+      "drive-closed-pipe-tests-until-closure": {
+        "title": "Test downstream closure while a callable writes, yields, or waits",
+        "text": "When testing a callable stage whose downstream reader exits, send bounded chunks one at a time after each acknowledgement until the host reports closure or the test deadline expires. A pipe can accept an initial write while the reader is exiting. After closure, check the stage cancellation and final graph outcome.\n\nAlso test a generator that keeps yielding without writing and a generator blocked in a confirmed-started subprocess or stdin read. Schedule the stdout closure watch independently so it can wake a waiting stage. Cancel an active subprocess request and await its terminal acknowledgement before unwinding. Close borrowed readers through their existing ownership path. On native and WASM, assert aggregate success, cancelled stage outcome, and cleanup separately. Preserve structured completions for configured and topology process requests so the WASM success shortcut cannot discard per-stage outcomes.\n\nTest a consumer that closes stdin and stays alive until the generator cleans up. The Node host can detect reader closure by opening the private FIFO with O_WRONLY | O_NONBLOCK and checking for ENXIO, without writing probe bytes or changing endpoint flags. Keep names only for watched FIFOs. Remove their private directory when the graph joins or launch fails, and check for leftovers after the test.",
+        "children": [],
+        "sources": [
+          "src/go/kame/host/posix/stage_io_test.go",
+          "src/go/kame/host/posix/stage_io.go",
+          "src/go/kame/host/stage_io.go",
+          "tests/T055-02-kash-callable-stages.sh",
+          "src/go/kame/lang/eval/function_stage.go",
+          "src/js/kame.js"
+        ],
+        "review": false
+      },
+      "isolate-declaration-captures-in-freshness-tests": {
+        "title": "Isolate declaration captures in rule freshness tests",
+        "text": "When testing freshness for rules created in declaration blocks, keep the recipe source, target, and ordinary inputs fixed across builds. Change only an input to a declaration-time binding and assert that the rebuilt artifact reflects the new captured value. This exercises the declaration scope signature without relying on cache invalidation from a changed recipe or target.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "src/go/kame/program/declaration_blocks.go",
+          "src/go/kame/program/file_context.go",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "keep-generator-suspension-internal": {
+        "title": "Keep generator suspension internal",
+        "text": "Keep generator suspension internal to the stream runtime. Preserve terminal script-visible outcomes and the existing `.ok` semantics. Use TestGeneratorInvocationState for the suspended state between pulls and T055-01 for the public capture and wait contract.",
+        "children": [],
+        "sources": [
+          "docs/spec/049-process-inspection.md",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "src/go/kame/lang/eval/generator_test.go#TestGeneratorInvocationState",
+          "tests/T055-01-kash-generators.sh"
+        ],
+        "review": false
+      },
+      "pace-repl-pty-warmup-by-executed-marker": {
+        "title": "Pace REPL PTY warm-up by executed markers",
+        "text": "For native REPL latency tests, send many warm-up entries in bounded batches. End each batch with a unique printed marker constructed so the literal marker never appears in the echoed command. Wait for that marker before sending the next batch. This limits PTY input pressure and confirms that the REPL completed the warm-up before latency measurement starts.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/repl_terminal_linux_test.go#TestNativeInteractiveKashPersistentLatency"
+        ],
+        "review": false
+      },
+      "preserve-callable-ownership-in-process-outcomes": {
+        "title": "Preserve callable ownership across outcomes and bindings",
+        "text": "Keep returned lexical closures in evaluator-owned process outcomes, outside process wire metadata and engine-published values. Core Clone and CloneOwned copy value storage without retaining callable wrappers. Use the evaluator's callable borrowing and release helpers when copying or freeing an outcome, and retain async closure snapshots to the end of their script group. Verify the returned closure still works in a fresh scope after capture, command-list selection, and repeated waits.\n\nWhen changing Kash let or set with returned closures, test a binding that owns a closure capturing its descendant scope, including container values and replacement. In the lifetime test, retain an external callable borrow, release the initial scope owners, and verify both scopes stay reachable. Release the last borrow and verify that both scopes clear. Separately invoke a returned callable after rebinding and host suspension.",
+        "children": [],
+        "sources": [
+          "src/go/kame/core/value.go",
+          "src/go/kame/lang/eval/ownership.go",
+          "src/go/kame/lang/eval/process_async.go",
+          "src/go/kame/lang/eval/process_expression.go",
+          "tests/T055-02-kash-callable-stages.sh",
+          "src/go/kame/lang/eval/scope_cycles.go",
+          "src/go/kame/lang/eval/scope_cycles_test.go",
+          "src/go/kame/lang/eval/kash_binding.go",
+          "src/go/kame/lang/eval/test/evaluation.go",
+          "tests/kash-recipes.py",
+          "docs/spec/055-unified-kame-kash-language.md"
+        ],
+        "review": false
+      },
+      "preserve-computed-rule-output-spellings": {
+        "title": "Preserve both computed rule output spellings",
+        "text": "Use `${EXPR}` for full-expression interpolation in Kame double-quoted strings, path atoms and rule headers, and Kash command words, including `${(dirs REPOS)}`. Use `@{EXPR}` in document templates and foreign-shell recipes. Support `(EXPR)` and `${EXPR}` for computed file outputs on explicit `rule` headers. Keep authored declarations and `Rule` constructors on the same output grammar and verify both entry points through T010-27 on native and WASM.\n\nShare text rendering for `${EXPR}` in Kame strings and composed or quoted Kash words. Scalars render as text, nil renders empty, lists render their items recursively with spaces between items, and other values use ordinary display notation. Kash keeps that rendered text within one word. A standalone unquoted substitution retains its typed value through argv conversion and may splice a list. Template `@{EXPR}` uses its own rendering rules.",
+        "children": [],
+        "sources": [
+          "docs/spec/004-language.md",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "tests/T010-27-wasm-generated-declarations.sh",
+          "docs/spec/016-templates.md",
+          "docs/spec/017-kash.md",
+          "docs/ref-kash.md",
+          "docs/skills/kame/ref/rules.md"
+        ],
+        "review": false
+      },
+      "preserve-do-kash-unified-runner-alias": {
+        "title": "Preserve the do kash runner alias",
+        "text": "Keep `kame do kash` as a language-default alias for `kame do run --lang kash` on the shared runner. During CLI changes, exercise the alias through T017-07 on native and WASM.",
+        "children": [],
+        "sources": [
+          "docs/spec/009-cli.md",
+          "docs/spec/013-tests.md",
+          "docs/spec/036-cli_ansi.md",
+          "plan-055.md",
+          "tests/T017-07-cli-run-session.sh"
+        ],
+        "review": false
+      },
+      "preserve-kash-setup-label-spelling": {
+        "title": "Preserve Kash setup labels and expression symbols",
+        "text": "Use `KEY: VALUE` setup labels in raw Kash command stages and `with` headers. Preserve `:name` syntax for standalone expression symbols and setup symbols passed to expression-level `run!` and `capture!`. When changing setup parsing or formatting, exercise both Kash setup contexts, confirm prefix-style setup is rejected before a raw command, and check ordinary argv still retains literal label-like words.\n\nWhen the working directory prevents process startup, name the resolved directory and state why it cannot be used. Check missing and non-directory paths through the real native and WASM launch paths. In a `with` header, use `cwd: $repo` to read the binding. A bare `cwd: repo` supplies a literal word, so any failure should name the resolved literal path.",
+        "children": [],
+        "sources": [
+          "docs/spec/017-kash.md",
+          "docs/spec/048-kash-practical-scripting.md",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "tests/T017-05-eval-setup.sh",
+          "docs/spec/011-diagnostics.md"
+        ],
+        "review": false
+      },
+      "preserve-newline-collection-separators": {
+        "title": "Preserve newline collection separators and application boundaries",
+        "text": "Accept a newline as an alternative separator for list items and record fields. Commas separate same-line items, while same-line juxtaposition within an item remains application. Keep multiline expressions open in nested parentheses or through explicit, operator, and required conditional continuations. The canonical formatter separates expanded list items with newlines alone. Compact lists and expanded records retain commas. Continue to emit explicit backslashes when wrapping an application at collection depth. When changing collection grammar or formatting, verify both separator forms and that a wrapped application still reparses as one item.",
+        "children": [],
+        "sources": [
+          "docs/spec/004-language.md",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "docs/spec/018-source-style.md",
+          "docs/ref-kame-expr.md",
+          "src/go/kame/lang/expr/test/revision2_test.go#TestCollectionNewlineSeparators",
+          "src/go/kame/lang/expr/test/revision2_test.go#TestCollectionLayoutWrapsDelimitedApplications"
+        ],
+        "review": false
+      },
+      "preserve-path-pattern-subst-discovery": {
+        "title": "Preserve PathPattern subjects in pattern substitution",
+        "text": "Accept a PathPattern subject in direct and unary pattern-form subst. Resolve it through tracked wildcard discovery under scoped read authority, then apply existing substitution to the resulting list. Keep literal subst and other pattern operations on their documented input contracts. Use T041-01 to check direct and unary parity, resumed replacement reads, empty discovery, and tracked prerequisites.",
+        "children": [],
+        "sources": [
+          "docs/spec/041-pattern-predicates-and-substitution.md",
+          "tests/T041-01-patterns-predicates-and-substitution.sh"
+        ],
+        "review": false
+      },
       "pty-redraw-assertions": {
         "title": "Assert fresh PTY redraws",
         "text": "When a PTY test asserts the editor's current layout after multiple keys, inspect only a completed redraw beginning at the fresh clear-screen marker (\\x1b[H\\x1b[2J), not all output accumulated since the keys were sent; intermediate redraws can represent transient input states and cause false failures.",
@@ -26,12 +285,55 @@ updated: 2026-11-16T04:17:11.559315+00:00
         ],
         "review": false
       },
+      "register-host-process-before-async-launch": {
+        "title": "Register process requests before asynchronous launch",
+        "text": "In the Node WASM host, register the process group under its instance and request ID before the launch path can yield. Cancellation and signal handlers should await group readiness. Resolve readiness on launch failure or completion without a child so control requests can finish. Exercise immediate control after start and check that a second job remains unaffected.",
+        "children": [],
+        "sources": [
+          "src/js/kame.js",
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "plan-055-phase-4.md"
+        ],
+        "review": false
+      },
       "root": {
         "title": "",
         "text": "",
         "children": [
           "run-native-cli-tests",
-          "pty-redraw-assertions"
+          "pty-redraw-assertions",
+          "validate-composed-lexical-context",
+          "verify-inherited-environment-removal",
+          "register-host-process-before-async-launch",
+          "verify-process-environment-freshness",
+          "verify-missing-module-source-observations",
+          "isolate-declaration-captures-in-freshness-tests",
+          "verify-changed-inputs-through-indirect-consumers",
+          "verify-suspended-declaration-registration",
+          "verify-command-probes-in-kash-loop-fixtures",
+          "drive-closed-pipe-tests-until-closure",
+          "verify-fairness-with-one-ready-slot",
+          "verify-borrowed-stdin-handoff-and-cancellation",
+          "preserve-callable-ownership-in-process-outcomes",
+          "verify-deliberate-exit-at-sync-capture-boundary",
+          "verify-standalone-wasm-process-evaluation",
+          "verify-expected-tools-besides-host-parity",
+          "test-absent-and-invalid-host-edge-telemetry",
+          "verify-quiescence-after-latest-watch-idle",
+          "verify-service-restart-readiness-per-generation",
+          "verify-prebuilt-harness-artifact-inputs",
+          "verify-child-output-drains-after-exit",
+          "verify-pure-operation-registry-coverage",
+          "verify-terminal-handoff-before-cleanup",
+          "pace-repl-pty-warmup-by-executed-marker",
+          "verify-job-limit-across-host-waits",
+          "verify-mixed-recipe-diagnostic-provenance",
+          "preserve-do-kash-unified-runner-alias",
+          "keep-generator-suspension-internal",
+          "preserve-computed-rule-output-spellings",
+          "preserve-newline-collection-separators",
+          "preserve-kash-setup-label-spelling",
+          "preserve-path-pattern-subst-discovery"
         ],
         "sources": [],
         "review": true
@@ -43,6 +345,291 @@ updated: 2026-11-16T04:17:11.559315+00:00
         "sources": [
           "identity==\"kame:observations\" item=99608bfc-677e-4332-bb77-d8cf859aabac",
           "identity==\"kame:observations\" item=k-85274f569b38b5beecf2ac6c2fb3465238a7bae006fc3a5cff9367bbf6409aa7"
+        ],
+        "review": false
+      },
+      "test-absent-and-invalid-host-edge-telemetry": {
+        "title": "Test absent and malformed host edge telemetry separately",
+        "text": "When changing process graph telemetry, exercise both absence and malformed data at the WASM host completion boundary. Remove optional edge metrics and verify unavailable measurements with null counters. Then corrupt a row, counter, or measurement kind and verify that HOST_FAIL reaches the caller even through an inspected process outcome. Keep the ordinary terminal graph parity checks alongside these protocol tests.",
+        "children": [],
+        "sources": [
+          "tests/T042-07-kash-metrics.sh",
+          "src/go/kame/lang/eval/process_metrics.go"
+        ],
+        "review": false
+      },
+      "validate-composed-lexical-context": {
+        "title": "Preserve evaluation context during source composition",
+        "text": "When a static Kash check needs bindings or captures from earlier source fragments, use syntax-only parsing during fragment discovery and validate the composed unit before effects. Test both the valid cross-fragment reference and rejection before effects through the native and WASM entry points, since their preflight paths can differ.\n\nWhen changing Kame source loaders, evaluate a conditional during composition only if it selects included sources at the loader's scope. Leave other conditionals for declaration registration so they retain its evaluation authority. A declaration-local include stays with its enclosing block and is registered in each reached iteration scope even if the source read is shared. Test declaration-phase discovery, ordinary conditional includes, and two iterations that include the same file but use different bindings through the native and WASM paths when supported. When testing list contributions across declaration-local includes, read the same list in a condition between includes and in a recipe registered before the later contribution. This checks both the reached prefix during registration and the final list the recipe consumes.\n\nTest include path validation separately from the source origin. An inline source has no base for a relative include, but it can include an absolute or home-relative path. Pair those successful inline cases with an inline relative rejection, and separately check that an invalid included Kash module reports DEF_INVALID before effects.\n\nWhen testing conditional include selection, place the authored source in a different directory from the evaluation cwd. Under CLI `-C`, verify that a relative path expression in a condition uses the effective working directory while the selected relative include still resolves beside its authoring file.\n\nWhen an early include condition uses `files`, exercise the read-grant check and verify that its membership observation reaches both registration and watch. Add a conflicting declared output and assert overlap at the authored discovery span. Then start watch with a selected include missing and change only discovery membership to make another branch viable. The build should recover without editing the source, and ordinary content reads and effects should still be rejected in conditions.\n\nWhen testing kind-filtered discovery, replace a file with a directory at the same path and verify watch reselects the branch. This exercises kind-sensitive invalidation while the unfiltered path set stays fixed. Check overlap separately with a directory-only scan and an absent matching output. In the embedding test, assert that the forwarded scan carries a plain pattern and a separate kind mask.",
+        "children": [],
+        "sources": [
+          "plan-055-phase-4.md",
+          "src/go/kame/lang/script/kash_assignment.go",
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "src/js/kame.js",
+          "src/go/kame/cmd/kame/source_composition.go",
+          "src/go/kame/lang/script/source_declarations.go",
+          "plan-055.md",
+          "src/go/kame/program/declaration_blocks.go",
+          "src/go/kame/host/wasm/request_test.go",
+          "tests/T048-02-kash-libraries.sh",
+          "tests/T050-01-kash-rule-includes.sh",
+          "tests/declaration-conditions.py",
+          "src/go/kame/program/declaration_predicate.go",
+          "src/go/kame/program/declaration_discovery.go",
+          "src/go/kame/lang/eval/declaration_include.go",
+          "src/go/kame/lang/eval/contributions.go",
+          "tests/wasm/test-memory-reuse.mjs"
+        ],
+        "review": false
+      },
+      "verify-borrowed-stdin-handoff-and-cancellation": {
+        "title": "Preserve callable stdin descriptor handoff",
+        "text": "When changing callable stdin, test both handoff directions between a subprocess and a framed reader. Check the exact unread tail, including when the delimiter arrives after multiple transport chunks. Exercise cancellation with a FIFO whose writer stays open: after a subprocess consumes one byte, let a sibling fail while the callable waits for a record. Require the reader and callable cleanup to finish before closing the writer. Close the active reader before joining the callable.\n\nIn the Node host, keep the inherited pipe descriptor free from eager Socket reads. Opening a Socket early can prefetch bytes the subprocess should receive. When Node needs a nonblocking FIFO reader, use an independent descriptor and lend the blocking descriptor to subprocesses. On Go, spawn can make the shared descriptor blocking; poll with a bounded wait before a framed read so cancellation can still wake it. Verify nested subprocess inheritance and transfers larger than the pipe buffer on both hosts.\n\nFor an invocation timeout test on a blocked FIFO read, budget time for WASM startup and require a marker emitted immediately before the read as well as the deferred cleanup marker and timeout diagnostic. Keep the FIFO writer open and use a separate harness deadline, so a timeout before the read or a stuck cleanup cannot satisfy the fixture.",
+        "children": [],
+        "sources": [
+          "src/go/kame/host/posix/stage_io.go",
+          "src/go/kame/lang/eval/function_stage.go",
+          "src/go/kame/lang/eval/kash_record.go",
+          "src/go/kame/lang/eval/process.go",
+          "src/js/kame.js",
+          "tests/T048-09-kash-stdin-records.sh",
+          "tests/T055-02-kash-callable-stages.sh"
+        ],
+        "review": false
+      },
+      "verify-changed-inputs-through-indirect-consumers": {
+        "title": "Test changed-inputs through an imported helper",
+        "text": "When testing preparation of the changed-inputs snapshot, put its only reference in an imported helper invoked inside an async capture. A direct recipe reference can cause the snapshot to be prepared even if indirect consumers are missed. Verify a first build, a changed normal input, and a forced build with no content changes.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "src/go/kame/program/newer_inputs.go",
+          "src/go/kame/lang/eval/kash_module.go",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-child-output-drains-after-exit": {
+        "title": "Verify child output drains after exit under backpressure",
+        "text": "When changing native child output ownership, block the downstream sink after the first write, let the child emit a final chunk, and verify that it is reaped while the sink stays blocked. Hold the sink past the post-exit pipe timeout, release it, and assert exact output including the final chunk. Keep child reaping independent of the output sink. Bound idle post-exit reads while allowing buffered bytes to drain after sink backpressure clears.",
+        "children": [],
+        "sources": [
+          "src/go/kame/host/posix/command_output_test.go#TestChildOutputDrainsAfterExitUnderBackpressure",
+          "src/go/kame/host/posix/command_output.go",
+          "tests/T012-03-streams-large-output.sh",
+          "tests/T012-02-streams-live-cli.sh"
+        ],
+        "review": false
+      },
+      "verify-command-probes-in-kash-loop-fixtures": {
+        "title": "Verify command probes in migrated Kash loop fixtures",
+        "text": "When migrating a Kash loop fixture whose condition used to run a command, verify the new header inspects an explicit process outcome such as `while $?(./probe).ok`. A legacy `while ./probe` still parses as a truthy path and can hang the harness. Use an external timeout around the CLI invocation and assert the probe ran and the loop terminated.",
+        "children": [],
+        "sources": [
+          "tests/T046-01-kash-scripting.sh",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "docs/spec/013-tests.md"
+        ],
+        "review": false
+      },
+      "verify-deliberate-exit-at-sync-capture-boundary": {
+        "title": "Verify deliberate exit at the synchronous capture boundary",
+        "text": "When changing deliberate exit handling in synchronous Kash captures, exercise both text capture and inspected outcomes. Have a command-list member emit a prefix, a later member exit after registering a defer that emits a second marker, and a skipped member carry a forbidden marker. Assert that the capture retains the prefix and cleanup bytes in order, reports the appropriate text or status, and lets the caller emit a continuation marker. Consume the exit at the synchronous capture unit boundary after cleanup.\n\nInspect a direct pipeline and a pipeline reached in a command list to verify that exit handling preserves per-stage status and terminal graph metadata. Also test an ordinary deferred failure that remains inspectable and a later cleanup CAP_DENIED after an ordinary primary failure. The combined denial must still stop the caller, leave stdout empty, and retain both diagnostic codes.",
+        "children": [],
+        "sources": [
+          "tests/T048-04-kash-exit.sh",
+          "tests/T048-05-kash-with.sh",
+          "tests/T055-02-kash-callable-stages.sh",
+          "src/go/kame/lang/eval/execution_unit.go",
+          "src/go/kame/lang/eval/kash_command_capture.go",
+          "src/go/kame/lang/eval/kash_list.go",
+          "src/go/kame/lang/eval/function_stage.go",
+          "src/go/kame/lang/eval/process.go",
+          "docs/spec/055-unified-kame-kash-language.md",
+          "src/go/kame/lang/eval/defer.go",
+          "src/go/kame/lang/eval/kash_exit.go",
+          "src/go/kame/lang/eval/process_expression.go",
+          "docs/spec/049-process-inspection.md"
+        ],
+        "review": false
+      },
+      "verify-expected-tools-besides-host-parity": {
+        "title": "Check expected tools in both inspection modes",
+        "text": "When changing tool inspection, exercise both global do tools and dependency-scoped do tools check. Assert expected tool names and missing-tool diagnostics in addition to comparing native and WASM output: parity can pass when both omit tools. Include a default Kash body without shell metadata and an explicit x/ command head. Verify the name is reported without its namespace and that a missing tool on a reached dependency carries the selected target stack.\n\nIn `kame do plan`, report statically referenced tools for the selected plan in a dedicated text section and a top-level JSON `tools` array. Report each tool once with its first required execution stage, using one-based stage numbers. Keep tool lists out of individual producer records. Verify the section and the tool names and stage numbers on native and WASM with T037-01.",
+        "children": [],
+        "sources": [
+          "tests/T010-13-wasm-tools.sh",
+          "src/go/kame/program/tools.go",
+          "src/go/kame/program/tool_declarations.go",
+          "docs/spec/037-build-inspection.md",
+          "tests/T037-01-cli-build-inspection.sh"
+        ],
+        "review": false
+      },
+      "verify-fairness-with-one-ready-slot": {
+        "title": "Verify engine fairness with one ready slot",
+        "text": "When changing engine dispatch, keep Ready and Step on the same resource-key rotation. Exercise a one-slot dispatch while a generator keeps becoming ready and another node must complete its parent graph. A scheduler that always picks the first ready key can keep the generator running and starve completion and cleanup.",
+        "children": [],
+        "sources": [
+          "src/go/kame/core/engine.go",
+          "src/go/kame/program/materialize.go",
+          "tests/T055-02-kash-callable-stages.sh"
+        ],
+        "review": false
+      },
+      "verify-inherited-environment-removal": {
+        "title": "Verify environment removals in the launched child",
+        "text": "When changing process environment setup, seed a variable in the parent test environment, remove it in Kash, and assert its absence inside an external child on both the native and WASM hosts. The evaluator can report the variable as absent while a backend still inherits the original value.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "src/go/kame/host/posix/topology.go",
+          "src/js/kame.js",
+          "plan-055-phase-4.md"
+        ],
+        "review": false
+      },
+      "verify-job-limit-across-host-waits": {
+        "title": "Verify build job limits across host waits",
+        "text": "When changing the build job limit, use a single-slot build with two independent recipes that suspend on host work. Assert from process events that one recipe exits before the next starts. Also exercise a recipe that waits for a dynamically discovered producer and then runs a pipeline. It must finish with one slot. Run the discovered-build path on native and WASM. When changing WASM CLI option forwarding, check both the discovered-build and explicit-run descriptors because each carries its own job limit.",
+        "children": [],
+        "sources": [
+          "src/go/kame/program/jobs.go",
+          "src/go/kame/host/wasm/build_sources.go",
+          "src/js/kame.js",
+          "tests/T006-08-runtime-sequenced-inputs.sh"
+        ],
+        "review": false
+      },
+      "verify-missing-module-source-observations": {
+        "title": "Verify module watch dependencies for missing and inactive sources",
+        "text": "When changing authored module lookup, verify what happens when a previously missing candidate appears and when an existing source changes. A missing candidate is a valid source-host completion and must be observed for proof revalidation. For a conditional include, select a branch to load its source, switch away, and edit the now-inactive file. Verify that watch stays idle during the edit and reads the edited file when the branch is selected again. This sequence exercises previously retained source state. For an imported declaration-time constructor, add an unrelated missing import to the fixture and verify registration succeeds while still tracking the sources the constructor reaches transitively. An eager static edge to the missing import would block registration. Keep these checks on the compiler source-loading path so they do not depend on general read grants.",
+        "children": [],
+        "sources": [
+          "src/go/kame/lang/eval/module_import.go",
+          "src/go/kame/lang/eval/kash_module.go",
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "plan-055-phase-4.md",
+          "docs/spec/050-kash-libraries.md",
+          "src/go/kame/host/wasm/request_test.go",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-mixed-recipe-diagnostic-provenance": {
+        "title": "Remap synthetic recipe frames independently",
+        "text": "A Kash recipe failure can already have an authored primary location while an enclosing call still has recipe-local offsets. Remap each synthetic frame using the rule’s source origin, including rules authored in scoped includes. In a cross-file JSON diagnostic test, assert the primary span and each frame against its own source text. For nested or generated declarations, check that iteration frames retain binding names and ordinals without exposing captured values.",
+        "children": [],
+        "sources": [
+          "src/go/kame/program/recipe_settings.go",
+          "src/go/kame/program/declaration_blocks.go",
+          "src/go/kame/program/generated_rule_values.go",
+          "src/go/kame/program/producer_diagnostics.go",
+          "tests/T011-04-diag-language-boundaries.sh"
+        ],
+        "review": false
+      },
+      "verify-prebuilt-harness-artifact-inputs": {
+        "title": "Verify artifact prerequisites for prebuilt harness runs",
+        "text": "When a harness fixture uses additional build or release artifacts, check every Kamefile task that runs it with `KAME_TEST_PREBUILT`. The harness skips its prebuild in that mode, so a populated local `dist` can hide missing task prerequisites. Compare the fixture's artifact inputs with each caller's declared dependencies, and verify the task's input plan or run it in a clean workspace.",
+        "children": [],
+        "sources": [
+          "Kamefile",
+          "tests/harness.sh",
+          "tests/T015-04-dist-signed-release.sh"
+        ],
+        "review": false
+      },
+      "verify-process-environment-freshness": {
+        "title": "Verify recipe reuse and reruns through primary builds",
+        "text": "Use the primary build invocation when proving recipe freshness. Explicit do run recipe execution requests forced runs and cannot establish a warm cache hit. A primary build with explicit grants can still take the unified runner path. If that fixture needs to prove cache reuse without data input, supply terminal stdin through a PTY so an inherited nonterminal descriptor does not become an opaque input. Count actual recipe executions as well as checking output, since identical output can come from either a cache hit or a needless rerun. To prove downstream invalidation, choose an upstream edit that changes the bytes of the intermediate artifact and verify that the consumer reruns. A comment-only C edit may rerun compilation while leaving object bytes unchanged and allowing the link step to reuse its result.\n\nWhen testing process environment freshness, first vary ambient values hidden by unit or stage overrides and removals and check that the build is reused. Then change a value inherited by the child and check that the build reruns.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/execution_native_test.go",
+          "plan-055-phase-4.md",
+          "docs/spec/051-kash-session-authority.md",
+          "tests/T017-17-eval-process-expressions.sh",
+          "tests/T006-10-runtime-environment-watch.sh",
+          "tests/recipe-settings.py",
+          "tests/kash-recipes.py",
+          "docs/skills/kame/ref/make-migration.md",
+          "docs/skills/kame/ref/rules.md",
+          "plan-055.md",
+          "tests/T006-06-runtime-environment.sh",
+          "docs/spec/048-kash-practical-scripting.md"
+        ],
+        "review": false
+      },
+      "verify-pure-operation-registry-coverage": {
+        "title": "Exercise each registered pure operation with host requests enabled",
+        "text": "When adding or reclassifying a pure operation, add a working example to TestPureOperations. The inventory checks which operations actually run against the registry, including operations reached inside examples. Keep direct host requests and the usual effect grants enabled so the test can detect implicit host requests, dependency observations, effects, or publication attempts.",
+        "children": [],
+        "sources": [
+          "src/go/kame/operations/test/operations.go#TestPureOperations",
+          "src/go/kame/operations/registry.go",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-quiescence-after-latest-watch-idle": {
+        "title": "Wait for the latest watch cycle before asserting quiescence",
+        "text": "Before asserting that a watch log stays unchanged, parse only complete JSON lines and wait until the latest event is watch-idle for at least the required cycle. Also verify the expected output and that the watcher is alive. An earlier idle event can coexist with visible writes from an active later cycle. Read the log through a separate handle so the test does not move the writer's file offset.",
+        "children": [],
+        "sources": [
+          "tests/computed-paths.py",
+          "tests/T038-05-lang-computed-paths.sh",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-service-restart-readiness-per-generation": {
+        "title": "Test readiness for each service generation",
+        "text": "When testing whether a dependent resumes after a service health restart, trigger the first health failure only after the dependent has started. If readiness is represented by a filesystem marker, retire the old marker before reporting failure and have the replacement publish its own readiness. Verify that the dependent starts again after replacement readiness. A stale marker can let the readiness probe succeed before the replacement process starts.",
+        "children": [],
+        "sources": [
+          "src/go/kame/program/test/runtime_execution.go#TestServiceHealthFailureRestartsAndResumesConsumer",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-standalone-wasm-process-evaluation": {
+        "title": "Verify process evaluation through the standalone WASM API",
+        "text": "When changing WASM evaluation of process expressions, exercise KameProgram.evaluate directly. The standalone evaluator needs the shared host tool-resolution request and portable capture default even when no CLI session is compiled. Test captured stdout, inspected exit status, a lazily evaluated definition, caller cwd, missing-tool fallback, and denial without run grants.\n\nWhen running `tests/wasm/test-memory-reuse.mjs` against a freshly built module, set `KAME_WASM` to that module's path. The script selects the binary from that variable or falls back to `build/wasm/kame.wasm`. Positional arguments have no effect on binary selection.\n\nWhen changing source-backed evaluation in the JavaScript API, compile with an absolute source name and test `KameProgram.evaluate` against a relative authored import. Vary the evaluation cwd independently, verify the imported module retains its own file provenance, and check that a general read of the same file is denied when compile grants only scoped source access. A separately parsed evaluation AST needs the compiled program’s lexical source origin alongside its expression diagnostic location.",
+        "children": [],
+        "sources": [
+          "src/go/kame/host/wasm/runtime.go",
+          "src/go/kame/host/wasm/session.go",
+          "src/go/kame/lang/eval/tool.go",
+          "src/js/kame.js",
+          "tests/T010-32-wasm-embedding-js.sh",
+          "tests/wasm/test-memory-reuse.mjs",
+          "src/go/kame/lang/eval/provenance.go",
+          "docs/ref-embedding.md"
+        ],
+        "review": false
+      },
+      "verify-suspended-declaration-registration": {
+        "title": "Verify declaration registration across forwarded completions",
+        "text": "When changing declaration work that can suspend on a forwarded host request, drive prepare, request, and completion separately. Check that suspension and failure leave no partial program installed. Count repeated requests during replay, and verify that an unsuccessful registration retains the observations needed for watch to recover.",
+        "children": [],
+        "sources": [
+          "src/go/kame/host/wasm/request_test.go",
+          "src/go/kame/host/wasm/declaration_discovery.go",
+          "src/go/kame/host/wasm/build_sources.go",
+          "plan-055.md"
+        ],
+        "review": false
+      },
+      "verify-terminal-handoff-before-cleanup": {
+        "title": "Verify terminal handoff at the host boundary",
+        "text": "For a native terminal handoff regression, synchronize on child startup and deferred-cleanup markers. Check the actual PTY foreground process group while the child is active and again while cleanup is held. Require the child to be reaped and the CLI foreground group restored before releasing cleanup. For the same configured command path on a host without handoff, require FEATURE_UNSUP with no process-started event or child side effect. Exercise configured argv through host serialization so losing terminalRequired cannot silently allow a spawn.",
+        "children": [],
+        "sources": [
+          "src/go/kame/cmd/kame/repl_terminal_linux_test.go#TestNativeRecipeTerminalRestoresForegroundGroup",
+          "tests/T017-16-kash-environment.sh",
+          "src/go/kame/host/payload.go",
+          "src/js/kame.js"
         ],
         "review": false
       }

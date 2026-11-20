@@ -45,7 +45,7 @@ func TestModuleDeclarationsRoundTrip(t *testing.T) {
 func TestModuleDeclarationOperandsAndPlacement(t *testing.T) {
 	bad := []string{
 		"import \"./lib\"",
-		"import ./lib/@{name}",
+		"import ./lib/${name}",
 		"import ./lib/*.km",
 		"import ./lib extra",
 		"import ./lib as",
@@ -61,6 +61,41 @@ func TestModuleDeclarationOperandsAndPlacement(t *testing.T) {
 			parsed := script.ParseFragment(nil, authored, language, 0, len(text))
 			if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
 				t.Errorf("%s accepted invalid module declaration %q: %v", language, text, parsed.Diagnostics)
+			}
+			parsed.Free()
+			authored.Free(nil)
+		}
+	}
+}
+
+func TestModuleNamespacesRequireValidUnreservedAliases(t *testing.T) {
+	tests := []struct {
+		text string
+		code string
+	}{
+		{"import ./lib/x", "DEF_INVALID"},
+		{"import ./lib/env.kame", "DEF_INVALID"},
+		{"import ./lib/std.kash", "DEF_INVALID"},
+		{"import ./lib/module.ksh", "DEF_INVALID"},
+		{"import ./lib/words as std", "DEF_INVALID"},
+		{"import ./lib/two\\ words.km", "DEF_INVALID"},
+		{"import ./lib/page.kmt as page", "RES_INVALID"},
+		{"from ./lib/page.kmt import thing", "RES_INVALID"},
+		{"import ./lib/two\\ words.km as words", ""},
+		{"import ./lib/x.kash as external-tools", ""},
+		{"from ./lib/values import thing as std", ""},
+		{"import ./lib/archive.kash", ""},
+	}
+	for _, language := range []string{"km", "kash"} {
+		for _, test := range tests {
+			authored := source.New(nil, "modules.km", test.text)
+			parsed := script.ParseFragment(nil, authored, language, 0, len(test.text))
+			got := ""
+			if len(parsed.Diagnostics) != 0 {
+				got = parsed.Diagnostics[0].Code
+			}
+			if got != test.code {
+				t.Errorf("%s %q produced %q, want %q", language, test.text, got, test.code)
 			}
 			parsed.Free()
 			authored.Free(nil)

@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/internal/mem"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/template"
 )
@@ -36,7 +37,7 @@ func (p *Program) Plan(target string) PlanResult {
 	plan := Plan{Tools: p.plannedTools(), Configuration: cloneStrings(p.Alloc, p.Configuration), Target: cloneText(p.Alloc, target), Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Arguments: cloneArguments(p.Alloc, selected.Arguments), Freshness: Unknown}
 	for i := range p.GeneratedRuleMeta {
 		if p.GeneratedRuleMeta[i].Rule == selected.Rule {
-			plan.Generator = cloneText(p.Alloc, p.GeneratedRuleMeta[i].Name)
+			plan.Generator = cloneText(p.Alloc, "generate")
 			plan.GeneratorDependencies = cloneStrings(p.Alloc, p.GeneratedRuleMeta[i].Dependencies)
 			break
 		}
@@ -80,7 +81,9 @@ func (p *Program) Plan(target string) PlanResult {
 				d := failure(p.Alloc, "TGT_AMBIG", "grouped output selects another producer: "+plan.Outputs[i])
 				if owner.Rule != nil {
 					d.Free(p.Alloc)
-					d = p.producerAmbiguity(plan.Outputs[i], selected.Rule.Outputs[i], owner.Output)
+					d = p.producerAmbiguity(plan.Outputs[i],
+						producerCandidate{Rule: selected.Rule, Output: selected.Rule.Outputs[i]},
+						producerCandidate{Rule: owner.Rule, Output: owner.Output})
 				}
 				plan.Free(p.Alloc)
 				return PlanResult{Diagnostic: d}
@@ -302,8 +305,10 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	state := planResolverState{Program: p}
-	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
-	scope := p.ruleScope(context, plan.Captures, plan.Arguments)
+	captures := captureValues(p.Alloc, plan.Captures)
+	defer freeValues(p.Alloc, captures)
+	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, Captures: captures}}}
+	scope := p.ruleScope(context, plan.Rule, plan.Captures, plan.Arguments)
 	context.Scope = scope
 	result := p.evaluateInput(input, context)
 	scope.Free()
@@ -376,5 +381,18 @@ func (p *Program) evaluateInput(input rule.Input, context *eval.Context) eval.Re
 	if input.Kind == rule.InputString {
 		return p.Eval.Render(p.Alloc, input.Template, context.Scope, context)
 	}
-	return p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
+	expression := input.Template.Parts[0].Expr
+	value := p.Eval.EvaluateWith(expression, context)
+	if value.Value.Kind != core.PathPattern {
+		return value
+	}
+	defer value.Free(p.Alloc)
+	name := &expr.Expr{Kind: expr.Name, Text: "std/wildcard", Span: expression.Span}
+	callee := p.Eval.EvaluateWith(name, context)
+	if callee.Diagnostic.Code != "" {
+		return callee
+	}
+	defer callee.Free(p.Alloc)
+	context.Span = expression.Span
+	return context.Call(callee.Value, []core.Value{value.Value})
 }

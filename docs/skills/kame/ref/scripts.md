@@ -1,51 +1,32 @@
-# Scripts and source composition
+# Programs and source composition
 
-Scripts compose existing parsers rather than inventing another value language.
+A Kame program (`.km`) contains definitions, rules, tasks, services, and
+declaration-time control flow. A Kash script (`.kash` or `.ksh`) is an action
+block. Both use the same expressions. Inline Kame fragments supplied with
+`-c` can also evaluate expressions against the loaded program.
 
-| Mode | Source contents |
-| --- | --- |
-| `km` / `.km` | Comments, includes, lazy definitions, top-level expressions; no rules. |
-| `kmk` / `.kmk` | Rule program with definitions and recipes. |
-| `script` | General composite parse/format grammar; not a `do run` language name. |
-
-Whole-line `#` and `//` comments are accepted. Balanced expressions may span
-lines. In `kmk`/`script`, indentation without a preceding rule is invalid; `km`
-accepts leading statement indentation. Rule programs execute selected targets,
-not top-level expressions as an alternate entry mechanism.
-
-## Definitions are lazy
+## Definitions
 
 ```kame
 VERSION = "1.2.3"
-FLAGS = ["-Wall" "-Wextra"]
+FLAGS = ["-Wall", "-Wextra"]
 SOURCES = ./src/*.c
-(greet name) = (str "Hello, " name)
-default = (greet "Ada")
+
+def greet name = str "Hello, " name
+default = greet "Ada"
 ```
 
-A value header is `NAME = RHS`; a function header is `(NAME PARAM...) = RHS`.
-A final `rest...` parameter collects remaining arguments. Definitions are
-demanded on reference, not executed as sequential shell assignments.
-`NAME ?= RHS` supplies a lazy default if the name is not already configured;
-`?=` must be contiguous. `--define NAME=VALUE` overrides a declared definition
-with literal string data, not expression source; `--set NAME=LITERAL` supplies
-closed typed data without evaluating it.
+`NAME = EXPR` defines a lazy, memoized value. It can refer to definitions that
+appear later. `def NAME PARAM… = EXPR` defines a function, and an indented
+action block can supply its body. Define a zero-argument function with
+`def NAME () = EXPR` and call it with `NAME ()`. A final `rest...` parameter
+collects remaining arguments. A lazy value can also use an indented block
+following `NAME =`, with `return` supplying the value.
 
-Every RHS is one expression: `alias = other` references a value, `number = 42`
-is numeric, text requires quotes, and lists require brackets. This applies to
-function bodies too. Kash retains its reference wrappers and value recovery.
-Parse failures never fall back to text; unused definitions remain unevaluated.
-
-To migrate, quote bare textual values and bracket word lists. Explicit paths
-such as `./file` remain valid atoms. Quoted values now use expression-string
-escapes/interpolation and pattern syntax; use verbatim strings for inert data.
-`SHELL = kash` remains the
-built-in constructor reference; use `SHELL = "bash"` or
-`SHELL = ["/bin/bash" "-euc"]` for external shells. An argv list must include the
-interpreter's command-text flag (`-c` here); a string shell adds it automatically.
-CLI overrides remain literal.
-
-## Declarative contributions
+`NAME ?= EXPR` supplies a configurable default. `--define NAME=VALUE` or
+`NAME=VALUE` passes literal text, while `--set NAME=LITERAL` passes typed
+data. Configuration defaults can use an authorized environment value.
+Use an explicit `env/NAME` expression to read an environment variable.
 
 ```kame
 CHECKS ?= []
@@ -54,131 +35,68 @@ CHECKS += EXTRA_CHECKS
 EXTRA_CHECKS = [./tests/smoke]
 ```
 
-In `.km`/`.kmk`, `+=` lazily concatenates lists in source/include/session order,
-without flattening nested items or removing duplicates. An earlier `=`/`?=` is
-the base; otherwise the base is `[]`. Later `?=` is skipped, and later `=` is
-still a duplicate error. Non-list bases/contributions fail `EXPR_INVALID`.
-String CLI/environment overrides replace the whole aggregate with string data;
-`--set` replaces it with typed literal data, so a list override remains a list.
-Self/indirect references to the final aggregate fail `DEP_CYCLE` when demanded;
-there is no previous-accumulator value. Functions and Kash do not support `+=`.
+`+=` lazily concatenates lists in source order, preserving nested items and
+duplicates. With no earlier base, the base is `[]`. A CLI or environment
+override replaces the aggregate. A contribution that depends on its own
+final value causes a dependency cycle.
 
-## Value entry points
+## Include declarations or import names
 
 ```kame
-name = "Ada"
-(out! (str "Hello, " name))
-```
+include ./values.km
+include ./rules/common.km
+include? ./local.km
 
-```sh
-kame ./greet.km
-kame do run ./greet.km name
-kame do run --print-result -c 'name = "Ada"' -c '(uppercase name)'
-```
-
-Without named entries, `.km` runs expression statements in source order but
-emits only explicit output effects, such as `out!`/`err!`. `--print-result` opts
-into final value display, independent of whether an output operation ran. `expr`
-retains result display. Named entries display the selected definitions and skip unrelated
-statements; selecting a function value does not implicitly call it.
-A definitions-only value session falls back to the combined `default` when
-there is no other executable work; without it, it reports `TGT_NO_DEFAULT`.
-A definitions-only fragment may simply supply bindings for a later fragment.
-An implicit `default` is evaluated but not displayed unless `--print-result`
-is selected. To migrate machine-readable utilities, use `(out! VALUE)` rather
-than suppressing an implicit result with `(nop OPERATION "")`.
-
-## File-backed includes
-
-```kame
-(include ./values.km)
-(include "./rules/common.kmk")
-
-default : ./build/app
-```
-
-Each operand is a literal explicit path atom or noninterpolated double-quoted
-string (escapes are decoded). Empty paths, NUL, globs/patterns, interpolation and
-computed operands are invalid. Paths resolve relative to the containing file,
-not evaluation cwd. Included text inherits the caller's outer language, not its
-filename suffix. Includes expand depth-first at their declaration position and
-share scope and source order.
-Active-ancestry cycles are errors (lexical path identity, not physical realpath).
-Repeated nonrecursive includes expand again; ordinary registration still rejects
-duplicate declarations. Inline `-c` sources have no include base and cannot
-include files. Value programs cannot introduce rules through includes; this
-directive does not provide Kash inclusion.
-
-`(include? PATH)` skips only a missing file, not other loading errors. Only
-selected includes are loaded, tracked or cycle-checked; selected missing optional
-paths remain tracked for later creation.
-
-```kame
 mode ?= "debug"
-(if (eq? mode "debug")
-  (include ./debug.kmk)
-  (include ./release.kmk))
-  (if (eq? mode "local") (include? "local.kmk"))
+if mode == "debug"
+	include ./debug.km
+else
+	include ./release.km
+
+import ./lib/toolchain as tools
+from ./lib/config import mode-name as configured-mode
 ```
 
-A top-level `if` containing an include is composition-only: every body must be
-an include, nested composition `if`, or `:nil`. Multiple test/body pairs and an
-optional else use ordinary `if` syntax; no else is required. Only nil and false
-are false, including in composition conditions. Put branch definitions/rules in
-the selected files, not inside the `if` itself. Ordinary value-only `if` stays a
-runtime expression.
+Use literal explicit paths relative to the source containing the statement.
+Includes share the caller's scope and register declarations at the include
+site. Optional includes tolerate missing files. Repeated includes register
+again, and active include and import cycles report a dependency cycle.
 
-Conditions see only earlier selected definitions/contributions and explicit
-defines or authorized environment configuration. They cannot use host reads,
-processes, writes, globs or rule-local bindings, even indirectly through helpers;
-runtime grants do not broaden selection authority. Final runtime definitions
-still support lazy forward references. Include heads are reserved structurally
-and rejected in value positions, even unused definitions or inactive branches.
+Imports load a module's exported names. The module declares its public
+bindings with `export NAME, …`. A plain import uses the source stem as a
+namespace, and `as` sets the namespace explicitly. Use `tools/name` to
+access a namespaced binding. A selective `from` import binds names directly
+and can rename them. Imported rules are available to the caller through
+exported functions returning rule values, which `generate` can register.
 
-Legacy line `include`/`include?` and `when`/`otherwise`/`end` are migration errors.
-Parenthesize includes and extract legacy branch declarations into branch files.
-Template `@include` is unchanged. Typed rule generation
-uses `generate NAME = EXPRESSION`; see
-[Generated declarations](../../../spec/025-generated-declarations.md).
+Top-level Kame conditionals and loops run during declaration. Use an
+indented block for declarations and conditional includes. This phase
+applies restrictions on process and filesystem effects. A Kash source
+used as a module may declare `def`, imports, exports, and unconditional
+includes of Kash modules.
 
-## Shared execution sessions
+## Run one or more sources
 
 ```sh
-kame do run ./values.km ./functions.km -c '(report version)'
-kame do run ./Makefile.kmk check -c '(out! VERSION)'
-kame do run --lang kmk -f ./custom.build --lang km -c '(out! VERSION)'
+kame do run --print-result ./greet.km
+kame do run ./greet.km --entry VERSION
+kame do run ./greet.km -c '(out! (greet "Lin"))'
+kame do run --lang expr -c '1 + 2'
+kame do run -c '(out! (json args))' -- 'one two' --help
 ```
 
-Use the unified runner where supported:
+Here `greet.km` contains the definitions in the first example. A value
+program can provide `default` or expose a named entry. Use
+`--print-result` to display the final value of Kame work. An explicit
+value entry or an `expr` fragment displays its result.
 
-- Repeat/mix files, `-f`, and `-c` in execution order. File suffixes select each
-  parser; inline/stdin defaults to `km`, regardless of the preceding file.
-- `--lang` is forward-scoped until changed. It does not change authority.
-- Parse/register all fragments before effects; retain each source's parser and
-  spans. Fragments cannot split an expression, recipe, or control block.
-- Share one scope/engine and invocation policy. Forward references are valid;
-  duplicate top-level definitions are errors, not reassignment.
-- Entries belong to the preceding `km`/`kmk` fragment; use `--entry NAME` for
-  an entry resembling a source filename. Kash/expr fragments have no entries.
-- Arguments after `--` bind the shared `args` list (`@*`), with indexed access
-  through `args.0`. Function/Kash-call arguments temporarily supply the nearest
-  argument frame. Builds with no operands expose `[]`. Recipe-local `cd`, shell
-  variables, or stage environment overrides never mutate the parent session.
-- Relative source filenames and resource paths resolve under the selected `-C`
-  directory, regardless of option order; includes remain source-relative.
-  Do not assume execution changes directory to the source file's location.
+File suffixes select the parser. Use `--lang km`, `--lang kash`, or
+`--lang expr` to select a mode explicitly for following sources. Each
+fragment must contain complete statements. Fragments share the execution
+session and its definitions. Put literal operands after `--` to bind the
+`args` list. The selected `-C` directory supplies the operation's root,
+and include and import paths still use the source directory.
 
-## Verify
-
-```sh
-kame do run ./greet.km
-kame do parse --lang script ./Makefile.kmk
-kame do fmt --lang script -n ./Makefile.kmk
-```
-
-Parse/format tools accept `km`, `kmk`, and `script`, including value-program
-expression statements. Use `--lang km` to inspect a value-only program and
-`--lang expr` for an individual expression; execution still uses the runner.
-
-For rule execution, follow [Rules](./rules.md); for command statements, follow
-[Kash](./kash.md). See [CLI](./cli.md) for defaults and backend support caveats.
+Inspect programs with `kame do parse --lang km FILE` and check canonical
+formatting with `kame do fmt --lang km -n FILE`.
+[CLI](./cli.md) · [Rules](./rules.md) · [Kash](./kash.md)

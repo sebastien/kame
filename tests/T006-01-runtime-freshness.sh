@@ -91,9 +91,9 @@ test-step "a missing output rebuilds"
 )
 
 test-step "legacy-equivalent file build skips its fresh output"
-fixture_copy legacy-runtime legacy-runtime
+fixture_copy runtime-copy runtime-copy
 (
-	cd legacy-runtime
+	cd runtime-copy
 	cli_run --
 	cli_expect_status 0
 	cli_expect_file ./dist/kame "legacy executable payload
@@ -111,7 +111,7 @@ test-step "dynamic body dependencies re-render before freshness"
 (
 	mkdir -p dynamic/src
 	cd dynamic
-	printf 'task default : ./list.out\n./list.out :\n\tprintf "%%s\\n" @(wildcard ./src/*) > @>\n' >Makefile.kmk
+	printf 'task default : ./list.out\nrule ./list.out\n\tlet paths = wildcard ./src/*\n\tprintf "%%s\\n" $...paths > $outputs.0\n' >Makefile.km
 	cli_run -- ./list.out
 	cli_expect_status 0
 	cli_expect_file ./list.out

@@ -42,19 +42,19 @@ for nested in (False, True):
     for malformed in (False, True):
         with tempfile.TemporaryDirectory(prefix='kame-watch-module-repair-') as directory:
             project = Path(directory)
-            (project / 'Makefile.kmk').write_text('SHELL = kash\nmodule = (kash ./main.kash)\nchosen :\n\t(write! ./output module.value)\n')
+            (project / 'Makefile.km').write_text('import ./main.kash as helpers\ntask chosen\n\t(write! ./output helpers/value)\n')
             if nested:
-                (project / 'main.kash').write_text('(include ./helper.kmk)\nvalue = helper\n')
-            broken = project / ('helper.kmk' if nested else 'main.kash')
+                (project / 'main.kash').write_text('include ./helper.kash\ndef value = helper\nexport value\n')
+            broken = project / ('helper.kash' if nested else 'main.kash')
             if malformed:
-                broken.write_text('value = (\n')
+                broken.write_text('def value = (\n')
             error = project / 'stderr'
             with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
                 process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
                 try:
                     code = 'PARSE_ERR' if malformed else 'FS_ERR'
                     wait_for(process, lambda: code in error.read_text() and 'waiting for changes' in error.read_text(), error, 'failed module source watch readiness')
-                    broken.write_text(('helper' if nested else 'value') + ' = "recovered"\n')
+                    broken.write_text('def helper = "recovered"\n' if nested else 'def value = "recovered"\nexport value\n')
                     wait_for(process, lambda: read(project / 'output') == 'recovered', error, 'module source repair without build source edit')
                     cases += 1
                 finally:
@@ -64,10 +64,10 @@ for nested in (False, True):
 with tempfile.TemporaryDirectory(prefix='kame-watch-module-') as directory:
     project = Path(directory)
     (project / 'input').write_text('input')
-    (project / 'Makefile.kmk').write_text('SHELL = kash\nmodule = (kash ./main.kash)\n./output : ./input\n\t(write! ./output module.value)\n')
-    (project / 'main.kash').write_text('(include ./helper.kmk)\nvalue = helper\n')
-    helper = project / 'helper.kmk'
-    helper.write_text('helper = "alpha"\n')
+    (project / 'Makefile.km').write_text('import ./main.kash as helpers\nrule ./output : ./input\n\t(write! ./output helpers/value)\n')
+    (project / 'main.kash').write_text('include ./helper.kash\ndef value = helper\nexport value\n')
+    helper = project / 'helper.kash'
+    helper.write_text('def helper = "alpha"\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
@@ -75,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-module-') as directory:
             output = project / 'output'
             wait_for(process, lambda: read(output) == 'alpha', error, 'module watch initial build')
             stamp = helper.stat()
-            helper.write_text('helper = "bravo"\n')
+            helper.write_text('def helper = "bravo"\n')
             os.utime(helper, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
             wait_for(process, lambda: read(output) == 'bravo', error, 'module watch reached helper edit')
             cases += 1
@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-module-') as directory:
 if os.name != 'nt':  # Angle brackets are valid POSIX filename bytes, not Windows names.
     with tempfile.TemporaryDirectory(prefix='kame-watch-source-kind-') as directory:
         project = Path(directory)
-        (project / 'Makefile.kmk').write_text('(include "<command>")\nchosen :\n\tprintf %s @{MARK} >> source-log\n')
+        (project / 'Makefile.km').write_text('include ./<command>\ntask chosen ; {shell: "sh"}\n\tprintf %s @{MARK} >> source-log\n')
         included = project / '<command>'
         included.write_text('MARK = "alpha"\n')
         error = project / 'stderr'
@@ -107,9 +107,9 @@ if os.name != 'nt':  # Angle brackets are valid POSIX filename bytes, not Window
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
     project = Path(directory)
-    source = project / 'Makefile.kmk'
-    included = project / 'values.kmk'
-    source.write_text('(include "values.kmk")\nchosen :\n\tprintf %s @{MARK} >> source-log\n')
+    source = project / 'Makefile.km'
+    included = project / 'values.km'
+    source.write_text('include ./values.km\ntask chosen ; {shell: "sh"}\n\tprintf %s @{MARK} >> source-log\n')
     included.write_text('MARK = "alpha"\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
             included.write_text('MARK = "gamma"\n')
             wait_for(process, lambda: read(log) == 'alphabravogamma', error, 'recovery after source repair')
             cases += 1
-            source.write_text('(include "values.kmk")\nchosen : added\n\tprintf %s @{MARK} >> source-log\nadded :\n\tprintf dependency >> source-log\n')
+            source.write_text('include ./values.km\ntask chosen : added ; {shell: "sh"}\n\tprintf %s @{MARK} >> source-log\ntask added :\n\tprintf dependency >> source-log\n')
             wait_for(process, lambda: read(log) == 'alphabravogammadependencygamma', error, 'changed source graph')
             cases += 1
         finally:
@@ -136,9 +136,9 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
     project = Path(directory)
-    source = project / 'Makefile.kmk'
-    values = project / 'modules.kmk'
-    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join "" (list "touch generated-" module)))]) MODULES)\nchosen : @(map ([module] module) MODULES)\n\tprintf x >> runs\n')
+    source = project / 'Makefile.km'
+    values = project / 'modules.km'
+    source.write_text('include ./modules.km\ndef make-task name =\n\ttask ${name}\n\t\ttouch generated-$name\ngenerate map make-task MODULES\ntask chosen : ${MODULES}\n\tprintf x >> runs\n')
     values.write_text('MODULES = ["alpha"]\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
 with tempfile.TemporaryDirectory(prefix='kame-input-warning-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text('./output : ./input\n\tcp @< ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @>\n')
+    (project / 'Makefile.km').write_text('rule ./output : ./input ; {shell: "sh"}\n\tcp @{inputs.0} ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @{outputs.0}\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--json', './output'], stdout=stdout, stderr=stderr)
@@ -188,7 +188,7 @@ with tempfile.TemporaryDirectory(prefix='kame-input-warning-') as directory:
 with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text('./output : ./input\n\tcp @< ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @>; printf x >> runs\n')
+    (project / 'Makefile.km').write_text('rule ./output : ./input ; {shell: "sh"}\n\tcp @{inputs.0} ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @{outputs.0}; printf x >> runs\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
@@ -209,7 +209,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
 with tempfile.TemporaryDirectory(prefix='kame-watch-debounce-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text('./output : ./input\n\tprintf x >> runs; cp @< @>\n')
+    (project / 'Makefile.km').write_text('rule ./output : ./input ; {shell: "sh"}\n\tprintf x >> runs; cp @{inputs.0} @{outputs.0}\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch=300', './output'], stdout=stdout, stderr=stderr)
@@ -229,9 +229,9 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-debounce-') as directory:
 with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-change-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text(
-        './output : ./input\n'
-        '\tprintf x >> runs; if [ ! -e started ]; then touch started; sleep 60 & echo $! > child-pid; wait; fi; cp @< @>\n'
+    (project / 'Makefile.km').write_text(
+        'rule ./output : ./input ; {shell: "sh"}\n'
+        '\tprintf x >> runs; if [ ! -e started ]; then touch started; sleep 60 & echo $! > child-pid; wait; fi; cp @{inputs.0} @{outputs.0}\n'
     )
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -269,8 +269,8 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-change-') as director
 with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-async-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text(
-        './output : ./input ; [shell: kash]\n'
+    (project / 'Makefile.km').write_text(
+        'rule ./output : ./input\n'
         '\t/bin/sh -c "printf x >> runs; if [ ! -e started ]; then echo \\$\\$ > child-pid; touch started; exec sleep 60; fi" &\n'
         '\t/bin/cp ./input ./output\n'
     )
@@ -303,7 +303,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-async-') as directory
 with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-definitions-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
-    (project / 'Makefile.kmk').write_text(
+    (project / 'Makefile.km').write_text(
         'A = (sh! (str "printf %s " (text (read ./input)) " > observed"))\n'
         'B = (sh! "printf x >> runs; if [ ! -e started ]; then touch started; sleep 60; fi")\n'
     )
@@ -330,7 +330,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-glob-') as directory:
     project = Path(directory)
     (project / 'inputs').mkdir()
     (project / 'inputs/a.txt').write_text('a')
-    (project / 'Makefile.kmk').write_text('./joined : ./inputs/*.txt\n\tcat @<* > @>\n')
+    (project / 'Makefile.km').write_text('rule ./joined : ./inputs/*.txt\n\tcat $...inputs > $outputs.0\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', './joined'], stdout=stdout, stderr=stderr)
@@ -352,7 +352,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
         try:
             wait_for(process, lambda: 'BUILD_NO_SOURCE' in error.read_text() and 'waiting for changes' in error.read_text(), error, 'missing source diagnostic and watch readiness')
-            (project / 'Makefile.kmk').write_text('chosen :\n\tprintf appeared > source-created\n')
+            (project / 'Makefile.km').write_text('task chosen :\n\tprintf appeared > source-created\n')
             wait_for(process, lambda: read(project / 'source-created') == 'appeared', error, 'creation of discovered source')
             cases += 1
         finally:
@@ -361,13 +361,13 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-optional-include-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('(include? ./optional.kmk)\nchosen : configured\n\tprintf chosen >> watch-log\n')
+    (project / 'Makefile.km').write_text('include? ./optional.km\ntask chosen : configured\n\tprintf chosen >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
         try:
             wait_for(process, lambda: 'TGT_NO_RULE' in error.read_text(), error, 'missing optional include dependency')
-            (project / 'optional.kmk').write_text('configured :\n\tprintf configured >> watch-log\n')
+            (project / 'optional.km').write_text('task configured :\n\tprintf configured >> watch-log\n')
             wait_for(process, lambda: read(project / 'watch-log') == 'configuredchosen', error, 'optional include creation and root recovery')
             time.sleep(.5)
             assert read(project / 'watch-log') == 'configuredchosen', 'idle watcher repeated settled tasks'
@@ -383,14 +383,14 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-obsolete-input-') as directo
     output = project / 'joined'
     runs = project / 'runs'
     old_input.write_text('old')
-    source = project / 'Makefile.kmk'
-    source.write_text('./joined : ./old\n\tcat @< > @>; printf x >> runs\n')
+    source = project / 'Makefile.km'
+    source.write_text('rule ./joined : ./old ; {shell: "sh"}\n\tcat @{inputs.0} > @{outputs.0}; printf x >> runs\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', './joined'], stdout=stdout, stderr=stderr)
         try:
             wait_for(process, lambda: read(output) == 'old' and read(runs) == 'x', error, 'initial observed input')
-            source.write_text('./joined : ./new\n\tcat @< > @>; printf x >> runs\n')
+            source.write_text('rule ./joined : ./new ; {shell: "sh"}\n\tcat @{inputs.0} > @{outputs.0}; printf x >> runs\n')
             new_input.write_text('new')
             wait_for(process, lambda: read(output) == 'new' and read(runs) == 'xx', error, 'replacement input graph')
             old_input.write_text('obsolete')
@@ -405,7 +405,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-obsolete-input-') as directo
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-shared-roots-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('shared :\n\tprintf s >> shared-log\nalpha : shared\n\tprintf a > alpha-out\nbeta : shared\n\tprintf b > beta-out\n')
+    (project / 'Makefile.km').write_text('task shared :\n\tprintf s >> shared-log\ntask alpha : shared\n\tprintf a > alpha-out\ntask beta : shared\n\tprintf b > beta-out\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'alpha', 'beta'], stdout=stdout, stderr=stderr)
@@ -422,8 +422,8 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-shared-roots-') as directory
 with tempfile.TemporaryDirectory(prefix='kame-watch-scoped-env-') as directory:
     project = Path(directory)
     (project / 'input').write_text('first')
-    source = project / 'Makefile.kmk'
-    source.write_text('chosen : ./input ; [env: [WATCH_SCOPED: "scoped"]]\n\tprintf %s "$WATCH_SCOPED" >> watch-log\n')
+    source = project / 'Makefile.km'
+    source.write_text('task chosen : ./input ; {shell: "sh", env: {WATCH_SCOPED: "scoped"}}\n\tprintf %s "$WATCH_SCOPED" >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--env', 'WATCH_SCOPED=invocation', '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -432,7 +432,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-scoped-env-') as directory:
             wait_for(process, lambda: read(log) == 'scoped', error, 'initial scoped environment')
             (project / 'input').write_text('second')
             wait_for(process, lambda: read(log) == 'scopedscoped', error, 'scoped environment after input invalidation')
-            source.write_text('chosen : ./input ; [env: [WATCH_SCOPED: "scoped"]]\n\tprintf %s "$WATCH_SCOPED" >> watch-log; : # source reload\n')
+            source.write_text('task chosen : ./input ; {shell: "sh", env: {WATCH_SCOPED: "scoped"}}\n\tprintf %s "$WATCH_SCOPED" >> watch-log; : # source reload\n')
             wait_for(process, lambda: read(log) == 'scopedscopedscoped', error, 'scoped environment after source reload')
             (project / 'input').write_text('third')
             wait_for(process, lambda: read(log) == 'scopedscopedscopedscoped', error, 'scoped environment after reloaded graph invalidation')
@@ -443,7 +443,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-scoped-env-') as directory:
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-active-cancel-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('chosen :\n\tsleep 60 & echo $! > child-pid; touch ready; wait\n')
+    (project / 'Makefile.km').write_text('task chosen ; {shell: "sh"}\n\tsleep 60 & echo $! > child-pid; touch ready; wait\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -469,7 +469,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-active-cancel-') as director
 with tempfile.TemporaryDirectory(prefix='kame-watch-output-pressure-') as directory:
     project = Path(directory)
     (project / 'emit.py').write_text("import os,pathlib\npathlib.Path('ready').touch()\nfor _ in range(128): os.write(1,b'Z'*65536)\npathlib.Path('done').touch()\n")
-    (project / 'Makefile.kmk').write_text('chosen :\n\tpython3 emit.py\n')
+    (project / 'Makefile.km').write_text('task chosen :\n\tpython3 emit.py\n')
     error = project / 'stderr'
     with error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=subprocess.PIPE, stderr=stderr)
@@ -497,7 +497,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-output-pressure-') as direct
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @{MARK} >> watch-log\n')
+    (project / 'Makefile.km').write_text('MARK = (text (read ./input))\ntask chosen ; {shell: "sh"}\n\tprintf %s @{MARK} >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -512,11 +512,11 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
     project = Path(directory)
-    source = project / 'Makefile.kmk'
+    source = project / 'Makefile.km'
     secret = project / 'secret'
     other = project / 'other'
     secret.write_text('first')
-    source.write_text('MARK = (text (read ./secret))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
+    source.write_text('MARK = (text (read ./secret))\ntask chosen : ./secret ; {shell: "sh"}\n\tprintf %s @{MARK} >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -525,11 +525,11 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
             wait_for(process, lambda: read(log) == 'first', error, 'granted initial read')
             secret.write_text('second')
             wait_for(process, lambda: read(log) == 'firstsecond', error, 'granted input invalidation')
-            source.write_text('MARK = (text (read ../secret))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
+            source.write_text('MARK = (text (read ../secret))\ntask chosen : ./secret ; {shell: "sh"}\n\tprintf %s @{MARK} >> watch-log\n')
             wait_for(process, lambda: 'CAP_DENIED' in error.read_text(), error, 'denied read after source reload')
             assert read(log) == 'firstsecond', 'denied read ran the recipe'
             other.write_text('third')
-            source.write_text('MARK = (text (read ./other))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
+            source.write_text('MARK = (text (read ./other))\ntask chosen : ./secret ; {shell: "sh"}\n\tprintf %s @{MARK} >> watch-log\n')
             wait_for(process, lambda: read(log) == 'firstsecondthird', error, 'grant preserved after source reload')
             cases += 1
         finally:
@@ -540,16 +540,16 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-siblings-') as directory:
     project = Path(directory)
     (project / 'variable').write_text('A1')
     (project / 'constant').write_text('B')
-    (project / 'Makefile.kmk').write_text('''SHELL = kash
-default : ./consumeA ./consumeB
-./A ./B : ./variable ./constant
-	cp ./variable @>
+    (project / 'Makefile.km').write_text('''SHELL = kash
+task default : ./consumeA ./consumeB
+rule ./A ./B : ./variable ./constant
+	cp ./variable $outputs.0
 	cp ./constant ./B
-./consumeA : ./A
-	cp @< @>
+rule ./consumeA : ./A
+	cp $inputs.0 $outputs.0
 	printf x >> consumeA.log
-./consumeB : ./B
-	cp @< @>
+rule ./consumeB : ./B
+	cp $inputs.0 $outputs.0
 	printf x >> consumeB.log
 ''')
     error = project / 'stderr'
@@ -579,7 +579,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-preserved-input-') as direct
 	project = Path(directory)
 	input_file = project / 'input'
 	input_file.write_text('alpha')
-	(project / 'Makefile.kmk').write_text('chosen : ./input\n\tcat @< > copy; printf x >> runs\n')
+	(project / 'Makefile.km').write_text('task chosen : ./input\n\tcat $inputs.0 > copy; printf x >> runs\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -622,7 +622,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as direct
 	input_file = project / 'input'
 	input_file.write_text('unchanged')
 	input_file.chmod(0o600)
-	(project / 'Makefile.kmk').write_text('MODE = (get "mode" (stat ./input))\nchosen :\n\tprintf %s @{MODE} > mode; printf x >> runs\n')
+	(project / 'Makefile.km').write_text('MODE = (get "mode" (stat ./input))\ntask chosen ; {shell: "sh"}\n\tprintf %s @{MODE} > mode; printf x >> runs\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -636,7 +636,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as direct
 			# Neither symlink target exists: only the no-follow view can change.
 			link = project / 'link'
 			link.symlink_to('absent')
-			(project / 'Makefile.kmk').write_text('LINK = (readlink ./link)\nchosen :\n\tprintf %s @{LINK} > seen\n')
+			(project / 'Makefile.km').write_text('LINK = (readlink ./link)\ntask chosen ; {shell: "sh"}\n\tprintf %s @{LINK} > seen\n')
 			wait_for(process, lambda: read(project / 'seen') == 'absent', error, 'initial dangling symlink observation')
 			time.sleep(.5)
 			link.unlink()
@@ -657,7 +657,7 @@ if sys.platform == 'linux':
 		size = 1024 * 1024
 		tool.write_bytes(binary + b'x' * (size - len(binary)))
 		tool.chmod(0o755)
-		(project / 'Makefile.kmk').write_text('SHELL = kash\nserver :\n\t./tool\n')
+		(project / 'Makefile.km').write_text('SHELL = kash\ntask server :\n\t./tool\n')
 		error = project / 'stderr'
 		with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 			process = subprocess.Popen([*runner, '-C', directory, '--watch', 'server'], stdout=stdout, stderr=stderr)
@@ -687,7 +687,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-notification-tree-') as dire
 	project = Path(directory)
 	(project / 'src').mkdir()
 	(project / 'src' / 'first.txt').write_text('first')
-	(project / 'Makefile.kmk').write_text('chosen : ./src/**/*.txt\n\tcat @<* > joined; printf x >> runs\n')
+	(project / 'Makefile.km').write_text('task chosen : ./src/**/*.txt\n\tcat $...inputs > joined; printf x >> runs\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -716,7 +716,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-notification-tree-') as dire
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-notification-missing-') as directory:
 	project = Path(directory)
-	(project / 'Makefile.kmk').write_text('chosen : ./missing/nested/input\n\tcat @< > copy\n')
+	(project / 'Makefile.km').write_text('task chosen : ./missing/nested/input\n\tcat $inputs.0 > copy\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -739,7 +739,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-notification-link-') as dire
 	outside.mkdir()
 	target = outside / 'input'
 	(project / 'input').symlink_to(target)
-	(project / 'Makefile.kmk').write_text('chosen : ./input\n\tcat @< > copy\n')
+	(project / 'Makefile.km').write_text('task chosen : ./input\n\tcat $inputs.0 > copy\n')
 	error = project / 'stderr'
 	grants = [f'--allow-read={directory}', f'--allow-write={directory}', '--allow-run']
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -769,10 +769,10 @@ if sys.platform == 'linux':
 			source = '# ' + 'x' * (16 * 1024) + '\n'
 			if fallback:
 				source += 'MARK = (exists? (resource "mem://watch/missing"))\n'
-				source += 'chosen : ./input\n\tprintf %s @{MARK} > exists; cat @< > copy\n'
+				source += 'task chosen : ./input ; {shell: "sh"}\n\tprintf %s @{MARK} > exists; cat @{inputs.0} > copy\n'
 			else:
-				source += 'chosen : ./input\n\tcat @< > copy\n'
-			(project / 'Makefile.kmk').write_text(source)
+				source += 'task chosen : ./input\n\tcat $inputs.0 > copy\n'
+			(project / 'Makefile.km').write_text(source)
 			error = project / 'stderr'
 			grants = [f'--allow-read={directory}', '--allow-read=mem://watch/', f'--allow-write={directory}', '--allow-run'] if fallback else []
 			with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -794,8 +794,8 @@ if sys.platform == 'linux':
 						fds = Path(f'/proc/{process.pid}/fd')
 						before_fds = len(list(fds.iterdir()))
 						for generation in range(6):
-							reloaded = source.replace('cat @< > copy', f'cat @< > copy; printf {generation} > generation')
-							(project / 'Makefile.kmk').write_text(reloaded)
+							reloaded = source.replace('cat $inputs.0 > copy', f'cat $inputs.0 > copy; printf {generation} > generation')
+							(project / 'Makefile.km').write_text(reloaded)
 							wait_for(process, lambda: read(project / 'generation') == str(generation), error, 'subscription refresh on source reload')
 							time.sleep(.2)
 						assert len(list(fds.iterdir())) <= before_fds + 4, 'source reload leaked notification descriptors'

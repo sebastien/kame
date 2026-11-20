@@ -1,0 +1,14 @@
+# Cached-task fixture. Records live under .kame/cache.
+task cached report : ./config.txt
+	echo report >> ./runs.log
+	cat $inputs.0
+
+task default : report
+
+task cached env-report
+	echo (str "env=" env/CACHE_VALUE) >> ./runs.log
+	(out! (str "env=" env/CACHE_VALUE "\n"))
+
+task cached alt-report : ./config.txt
+	echo alt >> ./runs.log
+	(out! "alt\n")

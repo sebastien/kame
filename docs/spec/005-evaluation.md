@@ -45,7 +45,7 @@ unit (055 §5.3, §8.4): the script, a rule body, a `$(…)`/`$?(…)` capture, 
 interactive entry's session. A unit inherits both from its parent when it starts.
 `cd` and `set env/NAME = EXPR` change them for later statements, lookups and
 processes of the same unit, including after the function that performed the
-change returns, and never reach the parent unit. Per-command `:env` and `:cwd`
+change returns, and never reach the parent unit. Per-command `env:` and `cwd:`
 overrides apply to one command and leave the store unchanged. Writing the store
 is not a host environment mutation and needs no environment-write grant.
 
@@ -225,7 +225,7 @@ source:
 ```kame
 version = "1.0"
 sources = files ./src/**/*.c
-def greeting name = "Hello @{name}!"
+def greeting name = "Hello ${name}!"
 ```
 
 `NAME = EXPR` declares a **lazy, memoized**, order-independent value. First
@@ -402,7 +402,7 @@ evaluation uses the same expression parser and evaluation context directly.
 Path atoms evaluate to typed values (`014-patterns.md`): a `Path`, a
 `PathPattern`, or a `PathTemplate`. Evaluating a path atom never reads the
 filesystem; a `PathPattern` such as `./src/**/*.c` is a value and does not
-enumerate files. `@{…}` interpolations inside a path atom evaluate, left to
+enumerate files. `${…}` interpolations inside a path atom evaluate, left to
 right, when the atom is evaluated.
 
 `files PATTERN` is the discovery operation. It evaluates through the shared
@@ -435,17 +435,16 @@ value selected as a target) it uses the canonical source notation of `fmt`
 | nil | `nil` |
 | boolean | `true` / `false` |
 | integer | decimal digits, with a leading `-` when negative |
-| float | shortest `%g`; negative zero is written `0` |
-| string | double-quoted, with `\"`, `\\`, `\n`, `\r`, and `\t` escapes and `@` written `@@` |
+| float | shortest `%g`, with `.0` appended if it has no decimal point or exponent |
+| string | double-quoted, with `\"`, `\\`, `\n`, `\r`, and `\t` escapes and `@` written `@` |
 | symbol | `:name` |
 | path, path pattern, path template | the canonical path atom, or `pattern "TEXT"` for rootless patterns |
 | list | `[ITEM, ...]` |
 | record | `{KEY: VALUE, ...}`; keys that are not names are quoted; `{}` when empty |
 
 For representable values, evaluating the displayed text and displaying the
-result again yields the same bytes, and value kinds are preserved: paths stay
-paths and patterns stay patterns. An integral float re-evaluates as an integer.
-Non-finite numbers have no numeric literal and are outside the round-trip
+result again yields the same bytes and preserves value kinds, including integral
+floats and signed zero. Non-finite numbers have no numeric literal and are outside the round-trip
 guarantee. Use `json` for JSON-compatible data or typed API results.
 
 Bytes are written raw and resources as their name; the grammar has no literal
@@ -582,9 +581,9 @@ evaluated and their dependencies and effects do not run.
 
 ```kame
 def object-path source = match source
-	./src/{path:**}.c => ./build/@{path}.o
-	./gen/{name}.c    => ./build/gen/@{name}.o
-	else              => fail "not a source: @{source}"
+	./src/{path:**}.c => ./build/${path}.o
+	./gen/{name}.c    => ./build/gen/${name}.o
+	else              => fail "not a source: ${source}"
 ```
 
 The subject must be a string, a `Path`, or a literal value (number, boolean,
@@ -657,8 +656,8 @@ that `??` recovers; invalid indexes are `SEL_INDEX_INVALID`.
 
 ## Interpolation
 
-`@{EXPR}` segments in strings, path atoms, templates and foreign-shell recipes
-evaluate in source order, in value context, and concatenate into an owned
+`${EXPR}` segments in strings and path atoms and `@{EXPR}` segments in
+templates and foreign-shell recipes evaluate in source order, in value context, and concatenate into an owned
 string or path. Scalars and paths render as text. Lists, records and other
 non-scalars are `EXPR_INVALID` unless an explicit operation (`join`, `json`,
 `fmt`) renders them. `nil` renders as an empty string. Interpolation never

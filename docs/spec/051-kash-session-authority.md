@@ -84,7 +84,7 @@ It is a statement only at statement start; a quoted or escaped `set`, or
 `x/set`, is a command.
 
 ```kash
-set env/PATH = join ":" ["@{run}/bin", PATH]
+set env/PATH = join ":" ["${run}/bin", PATH]
 set env/AWS_ACCESS_KEY_ID = nil
 set env/AWS_SECRET_ACCESS_KEY = nil
 set env/AWS_SESSION_TOKEN = nil
@@ -112,8 +112,8 @@ reference to either fails with `ENV_VAR_MISSING`. An unauthorized read or
 removal is `CAP_DENIED` before the overlay changes and before any child
 launches. Denial is not recoverable by `CMD ?` acceptance or `??`.
 
-Stage `:env` and `:KEY` overrides are unchanged. They apply to one stage, do
-not modify the overlay, and do not authorize a later read. `with :env` merges
+Stage `env:` and `KEY:` overrides apply to one stage. They do
+not modify the overlay, and do not authorize a later read. `with env:` merges
 its record over the overlay already in force for that block's stages only.
 
 The overlay belongs to the process-like unit that owns it (`055` §5.3, §8.4):
@@ -139,12 +139,12 @@ grant.
 
 Executable lookup in command position uses the overlay's `PATH` (`055` §6).
 Until the unit writes `PATH`, that is the invocation `PATH`, so resolution is
-the startup `PATH` and `--tool` overrides. Stage `:PATH` still affects only that
+the startup `PATH` and `--tool` overrides. Stage `PATH:` still affects only that
 child, not resolution of that stage's executable.
 
 After the unit sets or removes `PATH`, bare-name resolution for commands
 reached later in that unit uses the effective `PATH`. `--tool NAME=PATH` still wins. Resolution happens before stage
-environment overrides are applied to the child, so a stage `:PATH` does not
+environment overrides are applied to the child, so a stage `PATH:` does not
 select the executable. Track the resolved executable by the existing tool
 observation. An overlay does not make a scoped run grant accept bare names;
 scoped run grants continue to require explicit executable paths.
@@ -155,12 +155,12 @@ Terminal handoff is opt-in per recipe. The default spawn contract remains
 separate stdout and stderr pipes, a new process group, and no controlling
 terminal. Interactive data stdin is not a handoff.
 
-When the metadata authorizes `tty` and no stage in the recipe sets `:tty`, each
+When the metadata authorizes `tty` and no stage in the recipe sets `tty:`, each
 sequential foreground process graph of that attempt is a handoff. When any
-stage sets `:tty`, metadata only authorizes: a stage attaches if and only if it
-sets `:tty true`. `:tty false` opts that stage out. The same rule applies to
-`:foreground`. A stage that requests either facility without metadata
-authorization is `CAP_DENIED` before launch. A stage `:foreground true` whose
+stage sets `tty:`, metadata only authorizes: a stage attaches if and only if it
+sets `tty: true`. `tty: false` opts that stage out. The same rule applies to
+`foreground:`. A stage that requests either facility without metadata
+authorization is `CAP_DENIED` before launch. A stage `foreground: true` whose
 effective tty is false is `EXPR_INVALID` before launch.
 
 A handoff applies to the unique foreground graph of one statement. Pipeline
@@ -200,16 +200,16 @@ primitive and remains available.
 
 Where the contract above leaves a choice open:
 
-- "Any stage in the recipe sets `:tty`" (or `:foreground`) is decided from the
+- "Any stage in the recipe sets `tty:`" (or `foreground:`) is decided from the
   recipe's own Kash text. Stages inside library functions it calls are covered
   by the metadata default and their explicit settings, not by that scan.
 - Stages keep separate process groups, as the existing containment contract
   kills a group when its leader is reaped. At most one stage per graph takes the
-  foreground: the stage setting `:foreground true`, otherwise the last attached
+  foreground: the stage setting `foreground: true`, otherwise the last attached
   stage writing to the terminal, otherwise the first attached stage reading it.
-  Only that stage reads the terminal. Two `:foreground true` stages in one
+  Only that stage reads the terminal. Two `foreground: true` stages in one
   graph, or a foreground stage without effective tty, are `EXPR_INVALID`.
-- An explicit `:tty true` or `:foreground true` on a capture, background
+- An explicit `tty: true` or `foreground: true` on a capture, background
   graph, cleanup, or record-fed graph is `EXPR_INVALID`.
 - The previous foreground group is the terminal's foreground group when the
   handoff opens, which need not be Kame's own group. Terminal modes saved at
@@ -219,7 +219,7 @@ Where the contract above leaves a choice open:
   `FEATURE_UNSUP` at planning; a rule without a body ignores it.
 - The interactive session of `052-kash-interactive.md` lends the terminal to
   foreground statements without metadata, keeps pipes when no terminal exists,
-  and accepts stage `:tty`/`:foreground` without metadata.
+  and accepts stage `tty:`/`foreground:` without metadata.
 
 ## Freshness
 
@@ -287,6 +287,6 @@ weaker handoff.
 | Policy shape | Missing keys, empty lists, duplicate names, invalid names, unknown keys, non-booleans, foreground without tty, planning-time environment read denied, prerequisites not started after a malformed policy. |
 | Grants | Additive to build read/write/run; no effect on another rule; direct session removal and tty denied; `--allow-env` does not authorize removal or attach a terminal and still replaces the default set when explicit. |
 | Overlay | Computed `set env/NAME` without a read grant; prepend requires read; `set env/NAME = nil` without observing the value; empty string is present; unauthorized removal changes nothing; non-scalar values rejected; function writes visible to the caller after return; capture writes do not escape the capture; host environment and a later recipe are unchanged; dry-run performs none of these effects. |
-| Lookup | A written `PATH` selects the bare name for later commands in the unit; startup `PATH` remains in other units; stage `:PATH` does not select the executable; `--tool` wins; scoped run grants still reject bare names. |
-| Handoff | Metadata applies only when no stage sets `:tty`; explicit stage request requires authority; capture, background, and cleanup do not attach; missing terminal is `HOST_FAIL` with no child; group restored after success, failure, and cancellation; parent process remains; no terminal-attribute claim. |
+| Lookup | A written `PATH` selects the bare name for later commands in the unit; startup `PATH` remains in other units; stage `PATH:` does not select the executable; `--tool` wins; scoped run grants still reject bare names. |
+| Handoff | Metadata applies only when no stage sets `tty:`; explicit stage request requires authority; capture, background, and cleanup do not attach; missing terminal is `HOST_FAIL` with no child; group restored after success, failure, and cancellation; parent process remains; no terminal-attribute claim. |
 | Freshness | Invocation read recorded; reading a self-written value records no external value; remove-then-read does not persist the removed value; process digest changes when a name is removed; diagnostic text contains no value. |

@@ -71,7 +71,7 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 			d.Text(c.Grants[i].Names[j])
 		}
 	}
-	environment := p.environmentDigest(c.Environment)
+	environment := p.environmentDigest(c.CommandEnvironment())
 	d.Write(environment.Digest[:])
 	d.Uint64(uint64(len(c.RenderStack)))
 	for i := range c.RenderStack {
@@ -107,6 +107,14 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 		d.Write(inputs.Digest[:])
 		d.Write(outputs.Digest[:])
 		d.Write(newer.Digest[:])
+		if len(frame.Captures) != 0 {
+			captures := core.ValueSignature(core.Value{Kind: core.List, List: frame.Captures})
+			if !captures.Equal(captures) {
+				return core.Signature{}
+			}
+			d.Text("captures")
+			d.Write(captures.Digest[:])
+		}
 	}
 	for current := scope; current != nil; current = current.Parent {
 		if current == p.Scope {
@@ -231,10 +239,10 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 }
 
 func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span) argumentResult {
-	return p.argumentValuesMode(scope, arguments, c, span, false, "")
+	return p.argumentValuesMode(scope, arguments, nil, c, span, false, "")
 }
 
-func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span, deferReplacement bool, operation string) argumentResult {
+func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, lexical []*Scope, c *Context, span source.Span, deferReplacement bool, operation string) argumentResult {
 	effects, paths := len(c.Effects), len(c.WritePaths)
 	// Lowered wrappers (e.g. template-cat and render) can share one source span.
 	state := p.findArgumentMemo(c, span, operation)
@@ -276,7 +284,11 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			if c.Engine != nil {
 				facts = len(c.Engine.AcceptedObservations())
 			}
-			r := p.evaluate(c.Engine, scope, argument, c)
+			operandScope := scope
+			if lexical != nil {
+				operandScope = lexical[i]
+			}
+			r := p.evaluate(c.Engine, operandScope, argument, c)
 			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 				if r.Waiting && i != 0 && p.retainArguments(scope, c, span, operation, values, i, facts, effects, completedEffects, paths, completedPaths) {
 					return argumentResult{Result: r}
@@ -297,11 +309,20 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			}
 			first = first.List[0]
 		}
-		if position == 0 && first.Kind == core.Pattern {
+		if position == 0 && first.Kind == core.PathTemplate {
+			freeValuesWithCallables(c.Run, values)
+			return argumentResult{Result: failure(c.Run, "PAT_INVALID", argument.Span, "substitution requires a matching pattern")}
+		}
+		if position == 0 && (first.Kind == core.Pattern || first.Kind == core.PathPattern) {
 			firstPattern = true
 			if i >= next {
-				pattern := expr.ParsePatternText(c.Run, first.Text, argument.Span.Start)
-				invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
+				var pattern expr.PatternParse
+				if first.Kind == core.PathPattern {
+					pattern = expr.ParsePathPatternText(c.Run, first.Text)
+				} else {
+					pattern = expr.ParsePatternText(c.Run, first.Text, argument.Span.Start)
+				}
+				invalid := len(pattern.Diagnostics) != 0 || (pattern.Pattern.Matchers == 0 && pattern.Pattern.Globs == 0) || pattern.Pattern.References != 0
 				pattern.Pattern.Free(c.Run)
 				mem.FreeSlice(nil, pattern.Diagnostics)
 				if invalid {

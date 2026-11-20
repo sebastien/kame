@@ -7,29 +7,32 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 project="$TMPDIR/project"
 mkdir -p "$project"
 printf source >"$project/input"
-cat >"$project/Makefile.kmk" <<'KMK'
-always ./output : ./input
-	cp @< @>; printf x >> ./runs
-left : ./output
-right : ./output
-root : left right
-always ./one ./two : ./input
-	cp @< ./one; cp @< ./two; printf m >> ./multi-runs
-always ./capture/{name}.txt : ./input
-	printf %s @{name} > @>; printf c >> ./capture-runs
-always ./yielded : ./input ; [shell: kame]
-	"constant"
-always ./missing : ./input
+cat >"$project/Makefile.km" <<'KM'
+rule always ./output : ./input
+	cp $inputs.0 $outputs.0
+	printf x >> ./runs
+task left : ./output
+task right : ./output
+task root : left right
+rule always ./one ./two : ./input
+	cp $inputs.0 $outputs.0
+	cp $inputs.0 $outputs.1
+	printf m >> ./multi-runs
+rule always ./capture/{name}.txt : ./input
+	printf %s $name > $outputs.0
+	printf c >> ./capture-runs
+rule always ./yielded : ./input = "constant"
+rule always ./missing : ./input
 	true
-always :
+task always
 	printf ordinary
-KMK
+KM
 for backend in native wasm; do
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+ if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "${KAME_TEST_WASM_WRAPPER:-$CLI_ROOT/dist/kame.js}"); fi
  test-step "$backend reruns always files and deduplicates shared prerequisites"
  # Distinct public outputs and counters keep native artifacts from masking WASM.
  if [ -e "$project/runs" ]; then mv "$project/runs" "$project/native-runs.saved"; fi
@@ -64,16 +67,16 @@ PYTIME
  then test-ok "$backend always yields bypass content freshness"; else test-fail "$backend equal always yield was skipped"; fi
  test-step "$backend preserves planning and authored syntax"
  "${runner[@]}" do plan -C "$project" --json ./output >"$project/plan" 2>"$project/err"
-  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/err"
- "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/formatted" 2>"$project/err"
- if jq -e '.producers[0].always == true and [.resources[] | select(.roles | index("artifact")) | .display] == ["./output"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.always? == true)' "$project/ast" >/dev/null && rg -q '^always ./one ./two :' "$project/formatted"; then test-ok "$backend plan, AST and formatter preserve always"; else test-fail "$backend always inspection"; fi
+  "${runner[@]}" do parse --json --lang km "$project/Makefile.km" >"$project/ast" 2>"$project/err"
+ "${runner[@]}" do fmt --lang km "$project/Makefile.km" >"$project/formatted" 2>"$project/err"
+ if jq -e '.producers[0].always == true and [.resources[] | select(.roles | index("artifact")) | .display] == ["./output"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.always? == true)' "$project/ast" >/dev/null && rg -q '^rule always ./one ./two :' "$project/formatted"; then test-ok "$backend plan, AST and formatter preserve always"; else test-fail "$backend always inspection"; fi
  test-step "$backend still verifies output publication"
  if "${runner[@]}" --json -C "$project" ./missing >"$project/out" 2>"$project/err"; then test-fail "$backend accepted missing output"; elif rg -q OUTPUT_MISSING "$project/out"; then test-ok "$backend missing output is diagnosed"; else test-fail "$backend missing-output diagnostic"; fi
  test-step "$backend preserves the ordinary target named always"
  "${runner[@]}" -C "$project" always >"$project/out" 2>"$project/err"
  if [ "$(cat "$project/out")" = ordinary ]; then test-ok "$backend ordinary always target works"; else test-fail "$backend reserved name regression"; fi
  test-step "$backend rejects always on named tasks before effects"
- printf 'always named :\n\ttouch forbidden\n' >"$project/bad.kmk"
- if "${runner[@]}" -C "$project" -f bad.kmk named >"$project/out" 2>"$project/err"; then test-fail "$backend accepted invalid always task"; elif rg -q PARSE_ERR "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend invalid always declaration has no effects"; else test-fail "$backend always declaration preflight"; fi
+ printf 'rule always named :\n\ttouch forbidden\n' >"$project/bad.km"
+ if "${runner[@]}" -C "$project" -f bad.km named >"$project/out" 2>"$project/err"; then test-fail "$backend accepted invalid always task"; elif rg -q PARSE_ERR "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend invalid always declaration has no effects"; else test-fail "$backend always declaration preflight"; fi
 done
 test-end

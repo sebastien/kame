@@ -17,7 +17,8 @@ with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
     host = project / 'kame.mjs'
     host.write_text(source)
-    environment = dict(os.environ, KAME_WASM=str(root / 'build/wasm/kame.wasm'))
+    environment = dict(os.environ)
+    environment.setdefault('KAME_WASM', str(root / 'build/wasm/kame.wasm'))
     for backend in ['recipe', 'argv']:
         for channel in [1, 2]:
             pid_file = project / 'pid'
@@ -26,7 +27,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 "import os,pathlib\n"
                 "pathlib.Path('pid').write_text(f'{os.getpid()} {os.getpgrp()}')\n"
                 f"while True: os.write({channel}, b'Z'*65536)\n")
-            (project / 'Makefile.kmk').write_text('emit :\n\tpython3 emit.py\n')
+            (project / 'Makefile.km').write_text('task emit\n\tpython3 emit.py\n')
             arguments = (['-C', str(project), 'emit'] if backend == 'recipe' else
                 ['do', 'run', '-C', str(project), '-l', 'kash', '-c', 'python3 emit.py'])
             try:

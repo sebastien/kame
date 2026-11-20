@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-10 Kash graph failure policy parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/failure-policy"
 mkdir -p "$work"
@@ -18,7 +19,7 @@ run_case() {
 }
 expect() { local name="$1"; shift; if "$@"; then test-ok "$backend $name"; else test-fail "$backend $name"; fi; }
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	output="$work/$backend-result"
 	marker="$work/$backend-joined"
 	test-step "$backend: ordinary exits are collected without accepting success"
@@ -76,18 +77,18 @@ for backend in native wasm; do
 	test-step "$backend: accepted Result retains every failure and deterministic aggregate"
 	directory="$work/$backend-result-record"
 	mkdir -p "$directory"
-	cat >"$directory/Makefile.kmk" <<'KMK'
-SHELL = kash
-probe :
-	result = ((kash """(sh -c "sleep 0.1; exit 7", sh -c "exit 9") |(merge :failure collect) cat > ./output ?"""))
-	(out! (json result))
-KMK
-	if timeout 20 "${command[@]}" -C "$directory" -f ./Makefile.kmk probe >"$directory/result.json" 2>"$directory/error" && node --input-type=module - "$directory/result.json" <<'NODE'
+	cat >"$directory/Makefile.km" <<'KM'
+task probe
+	let result = $?((sh -c "sleep 0.1; exit 7", sh -c "exit 9") |(merge :failure collect) cat > ./output ?)
+	(out! (json {status: result.status, signal: result.signal, effectiveStatus: result.effectiveStatus, graph: result.graph}))
+KM
+	if timeout 20 "${command[@]}" -C "$directory" probe >"$directory/result.json" 2>"$directory/error" && node --input-type=module - "$directory/result.json" <<'NODE'
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const result = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 assert.equal(result.status, 9, 'last failing prepared stage, not last observed exit');
 assert.equal(result.signal, 0);
+assert.equal(result.effectiveStatus, 0);
 assert.equal(result.graph.failure, 'collect');
 assert.ok(result.graph.nodes.some((node) => node.state === 'failed' && node.status === 7));
 assert.ok(result.graph.nodes.some((node) => node.state === 'failed' && node.status === 9));
@@ -104,11 +105,11 @@ import { mkdtempSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
-const { Kame } = await import('./dist/kame.js');
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
 const directory = mkdtempSync(join(tmpdir(), 'kame-collect-')), output = join(directory, 'output');
 writeFileSync(output, 'preserve');
-const kame = await Kame.create();
-const program = await kame.compile(`SHELL = kash\nprobe :\n\t(printf a, printf b) |(merge :failure collect) cat > ${JSON.stringify(output)}\n`);
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
+const program = await kame.compile(`task probe\n\t(printf a, printf b) |(merge :failure collect) cat > ${JSON.stringify(output)}\n`);
 const prototype = Object.getPrototypeOf(program.module), dispatch = prototype.dispatch, spawn = childProcess.spawn;
 let mutate, calls = 0, launches = 0;
 prototype.dispatch = function (...args) {

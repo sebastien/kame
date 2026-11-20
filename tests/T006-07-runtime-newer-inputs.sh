@@ -7,41 +7,42 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+ if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
  printf a > "$project/a"
  printf b > "$project/b"
  printf ordered > "$project/order"
- cat > "$project/Makefile.kmk" <<'KMK'
-(newer UNUSED) = @<?
-(kash-newer UNUSED) = (if (read "./order") @<? @<?)
-KASH_NEWER = (kash-newer :nil)
-./out : ./a ./b ./a | ./order ; env "MODE=stable"
-	printf '%s\n' @(newer :nil) > selected; cat @<* > @>; printf x >> runs
-./multi-a ./multi-b : ./a ./b
-	printf '%s\n' @<? > multi-selected; touch ./multi-a ./multi-b
-./empty : | ./order
-	printf '%s' @(count @<?) > @>
-./force : ./a ./b
-	printf '%s' @(count @<?) > @>
-./guard : ./a ./b
-	printf '%s' @(count @<?) > @>
-always ./always : ./a ./b
-	printf '%s' @(count @<?) > @>
-./unrecorded : ./a named ./b ./a | ./order
-	printf '%s\n' @<? > @>
-named :
+ cat > "$project/Makefile.km" <<'KMK'
+def newer () = changed-inputs
+def kash-newer ()
+	let ordered = read ./order
+	return changed-inputs
+rule ./out : ./a ./b ./a | ./order ; {env: {MODE: "stable"}}
+	printf '%s\n' (newer ()) > selected; cat $...inputs > $outputs.0; printf x >> runs
+rule ./multi-a ./multi-b : ./a ./b
+	printf '%s\n' $...changed-inputs > multi-selected; touch ./multi-a ./multi-b
+rule ./empty : | ./order
+	printf '%s' (count changed-inputs) > $outputs.0
+rule ./force : ./a ./b
+	printf '%s' (count changed-inputs) > $outputs.0
+rule ./guard : ./a ./b
+	printf '%s' (count changed-inputs) > $outputs.0
+rule always ./always : ./a ./b
+	printf '%s' (count changed-inputs) > $outputs.0
+rule ./unrecorded : ./a named ./b ./a | ./order
+	printf '%s\n' $...changed-inputs > $outputs.0
+task named
 	true
-./kash-out : ./a ./b ./a | ./order ; [shell: kash]
-	printf "%s\n" $KASH_NEWER > ./kash-selected
+rule ./kash-out : ./a ./b ./a | ./order
+	printf "%s\n" (kash-newer ()) > ./kash-selected
 	touch ./kash-out
-./capture/{stem}.out : ./a
-	printf '%s\n' @{stem} @(dirname @>) @(dirname @<) > @>
-bad-task :
-	printf '%s' @<?
+rule ./capture/{stem}.out : ./a
+	printf '%s\n' $stem (dirname outputs.0) (dirname inputs.0) > $outputs.0
+task bad-task
+	printf '%s' $...changed-inputs
 KMK
  test-step "$backend selects unique normal file inputs for missing outputs"
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
@@ -52,12 +53,12 @@ KMK
   if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend selector transition preserves scoped freshness"; else test-fail "$backend selector caused redundant rebuild"; fi
 	 test-step "$backend retains input digests across a source-guard miss"
 	 "${runner[@]}" -C "$project" ./guard > "$project/log" 2> "$project/err"
-	 python3 - "$project/Makefile.kmk" <<'PYGUARD'
+	 python3 - "$project/Makefile.km" <<'PYGUARD'
 import pathlib, sys
 source = pathlib.Path(sys.argv[1])
 text = source.read_text()
-old = "./guard : ./a ./b\n\tprintf '%s' @(count @<?) > @>"
-new = "./guard : ./a ./b\n\tprintf 'guard-change' >&2; printf '%s' @(count @<?) > @>"
+old = "rule ./guard : ./a ./b\n\tprintf '%s' (count changed-inputs) > $outputs.0"
+new = "rule ./guard : ./a ./b\n\terr! 'guard-change'; printf '%s' (count changed-inputs) > $outputs.0"
 assert old in text
 source.write_text(text.replace(old, new))
 PYGUARD
@@ -122,7 +123,7 @@ PYTIMES
   printf changed > "$project/b"
  test-step "$backend carries force through mixed runner sessions"
  printf session > "$project/force"
- "${runner[@]}" do run -C "$project" --allow-run --allow-read=. --allow-write=. --force -c 'ignored = :nil' Makefile.kmk ./force > "$project/log" 2> "$project/err"
+ "${runner[@]}" do run -C "$project" --allow-run --allow-read=. --allow-write=. --force -c 'def ignored = nil' Makefile.km ./force > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/force")" = 0 ]; then test-ok "$backend mixed session forwards forced execution"; else test-fail "$backend mixed session lost force"; fi
  test-step "$backend handles empty normal inputs"
  "${runner[@]}" -C "$project" ./empty > "$project/log" 2> "$project/err"
@@ -134,10 +135,10 @@ PYTIMES
  test-step "$backend rejects newer selection outside file recipes"
  if "${runner[@]}" -C "$project" bad-task > "$project/log" 2> "$project/err"; then test-fail "$backend task accepted newer selector"; elif rg -q SEL_NO_CONTEXT "$project/err"; then test-ok "$backend task newer selector rejected"; else test-fail "$backend task newer diagnostic"; fi
  test-step "$backend rejects newer selection while resolving rule inputs"
-  printf './invalid : @(nop @<?)\n\ttouch forbidden\n' > "$project/invalid.kmk"
- if "${runner[@]}" -C "$project" -f invalid.kmk ./invalid > "$project/log" 2> "$project/err"; then test-fail "$backend input phase accepted newer selector"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend input phase rejects before effects"; else test-fail "$backend input-phase diagnostic"; fi
+  printf 'rule ./invalid : ${changed-inputs}\n\ttouch forbidden\n' > "$project/invalid.km"
+ if "${runner[@]}" -C "$project" -f invalid.km ./invalid > "$project/log" 2> "$project/err"; then test-fail "$backend input phase accepted newer selector"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend input phase rejects before effects"; else test-fail "$backend input-phase diagnostic"; fi
  test-step "$backend preserves newer syntax during formatting"
- "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
- if rg -Fq '@<?' "$project/fmt"; then test-ok "$backend formatter preserves selector"; else test-fail "$backend selector formatting"; fi
+ "${runner[@]}" do fmt --lang km "$project/Makefile.km" > "$project/fmt" 2> "$project/err"
+ if rg -Fq 'changed-inputs' "$project/fmt"; then test-ok "$backend formatter preserves selector"; else test-fail "$backend selector formatting"; fi
 done
 test-end

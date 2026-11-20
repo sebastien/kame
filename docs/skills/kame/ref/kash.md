@@ -1,94 +1,73 @@
 # Kash process scripts
 
-Kash (`.kash`, or equivalent `.ksh`) is a process language, not a system shell
-or KornShell. It embeds Kame expressions and values without converting them
-to shell text. `.kmk` recipes default to shell scripts; `SHELL = kash` or
-header metadata `; [shell: kash]` selects direct Kash parsing, without a
-document-template pass.
-
-Native and WASM execution implement definitions, command words, substitutions,
-pipelines, redirections, stage setup, control blocks, sequential command lists,
-reserved output ports, recovery, and invocation-owned async graphs. Both use the
-unified `do run` runner.
+Kash runs process graphs with typed values and explicit argv construction.
+Files use `.kash` or `.ksh`. Indented Kame recipes use Kash by default.
+Use `; {shell: "sh"}` to select a foreign shell and render the body as a
+document template. Native and WASM share the `do run` runner.
+[Project Kash reference](../../../ref-kash.md)
 
 ```kash
-name = "Ada Lovelace"
-files = [./one.txt ./two.txt]
-revision = $(git rev-parse --short HEAD)
+def name = "Ada Lovelace"
+def files = [./one.txt, ./two.txt]
+let revision = line $(git rev-parse --short HEAD)
 
 echo "Hello, $name"
-cat $files | wc -l
+cat $...files | wc -l
 echo revision=$revision
 ```
 
-Value and expression-bodied function definitions are lazy. Their right-hand
-sides use `.km`/`.kmk` expression grammar, plus Kash `??` compositions. Native
-`def` functions instead have directly parsed, indented Kash bodies.
-Statements run in source order; newlines or `;` separate them. Word-start `#`
-introduces a comment; `//` is literal. Branch-local definitions do not escape.
+A statement beginning with `(EXPRESSION)` evaluates it for effects.
+Command words use the typed expansion rules below. Statements may end at
+a newline or a semicolon. Word-start `#` begins a comment.
+Use `$command` as a computed executable head.
 
-A statement beginning with `(EXPRESSION)` evaluates for effects, discards its
-result, and propagates failure. Nil, records, and process-result records are not
-executables and do not print implicitly. There is no `do (EXPRESSION)` form.
-For a computed executable, bind its value and use `$command` at command position.
-
-## Eager immutable bindings
+## Eager bindings
 
 ```kash
-let workspace = (line $(mktemp -d))
+let workspace = line $(mktemp -d)
 defer rm -rf $workspace
 printf "%s\n" $workspace
 ```
 
-`let NAME = VALUE` evaluates its initializer when execution reaches the statement,
-even if the name is never read. The immutable value is retained across suspension;
-completed initializer work is not replayed. Ordinary `NAME = VALUE` remains lazy.
-Each function call, selected branch, and loop iteration has fresh local bindings.
+`let NAME = VALUE` evaluates its initializer when reached and retains the
+value across suspension. A subsequent `set NAME = VALUE` updates that
+binding within the same invocation. `def NAME = VALUE` supplies a lazy
+value. Each function call, selected branch, and loop iteration has fresh
+local bindings.
 
-Eager names are reserved throughout their lexical scope. Reading one before its
-statement is reached, including through a lazy definition or function, raises
-protected `BINDING_UNINITIALIZED`: it neither finds an outer name nor triggers the
-initializer, and recovery cannot hide it. Duplicate local declarations, parameter
-collisions, and reassignment are errors. `--define`, `--set`, and assignment-shaped
-configuration cannot override eager bindings; environment defaults do not replace
-them. Dry-run skips initializers and defers reads without effects.
-
-Eager declarations are executable statements, so included definition-only libraries
-cannot contain them at top level; their function bodies may use them.
+Eager names reserve their binding throughout the lexical scope. Reading
+one before initialization reports `BINDING_UNINITIALIZED`, including
+through a function or a lazy definition. CLI configuration cannot override
+a `let`. Dry-run skips initializer effects. An included definition-only
+library may use `let` inside its function bodies.
 
 ## Native functions
 
 ```kash
 def probe workspace
-	if test -f "${workspace}/ready"
-		return 0
-	touch "${workspace}/ready"
-	return 75 ?
+	if $?(test -f "${workspace}/ready").ok
+		return true
+	return false
 
-result = (probe workspace)
+let ready = probe ./workspace
 ```
 
-Headers use `def NAME PARAMETER...` and may have no parameters or one final
-`rest...` parameter. Indentation ends the body: no braces or `end`. Call through
-ordinary Kame applications, not raw command lookup. Functions capture lexical
-bindings; each call gets fresh locals, arguments, and its own async/cleanup
-lifetime under the caller's grants and limits. Defining a function runs nothing.
+The header uses `def NAME PARAMETER…`. A zero-parameter header uses `()`.
+A final `rest...` collects remaining arguments. An indented action block
+or `= EXPRESSION` provides the body. Each call uses its own arguments,
+locals, async work, and deferred cleanup.
 
-`return STATUS` exits only its function, even from nested branches or loops, and
-runs deferred cleanup before resuming the caller. Status must be an integer from
-0 through 255. Nonzero is a process-exit failure; `return 75 ?` explicitly accepts
-that status and returns an inspectable Result without launching a process.
-Acceptance never hides earlier failures, invalid statuses, or cleanup failures.
-`return` outside `def` and deferred returns are invalid. Fallthrough keeps the
-ordinary Kash final-statement behavior.
+Functions can be used as command heads or evaluated for their return value.
+A command invocation discards an ordinary returned value. Its stdout and
+stderr stay connected to the process graph. `return VALUE` ends the function
+and runs its deferred cleanup. A function's process status comes from its
+completion, failure, or cancellation.
 
-Test statuses with `if (success? (probe workspace))`, not `if (probe workspace)`:
-an accepted nonzero Result is still a truthy record. `success?` validates integer
-`status` and `signal` fields; it does not catch an unaccepted failure. Raw command
-lookup, pipelines, and process operators do not implicitly invoke functions.
-
-Use native functions for authored multi-command bodies. `(kash TEXT)` remains
-available when deliberately constructing script text is necessary.
+A function with `yield VALUE` returns a lazy stream. `for` and `collect!`
+consume its values. A bare `return` ends a generator. An early stop cancels
+its invocation and runs pending cleanup. Stream values and stdout travel
+through separate channels.
+[Generator streams](../../../spec/012-streams.md#generator-streams)
 
 ## Deliberate script exit
 
@@ -96,7 +75,7 @@ available when deliberately constructing script text is necessary.
 execution boundary. Status must be an integer from 0 through 255. There is no
 implicit last status, acceptance `?`, process operator, or redirection.
 
-Unlike `return`, exit passes through functions, constructed scripts, branches,
+Exit passes through functions, branches,
 and loops. In an ordered runner session it also skips later fragments. In a Kash
 recipe it ends only that attempt; a successful file recipe still verifies and
 publishes its outputs. Embeddings receive a typed termination outcome, never an
@@ -115,8 +94,8 @@ is also invalid. Dry-run does not evaluate exit operands or request termination.
 ## Owned execution scopes
 
 ```kash
-exports = [MODE: "release"]
-with :cwd ./project :env $exports
+let exports = {MODE: "release"}
+with cwd: ./project env: $exports
 	defer rm -f ./scratch
 	configure
 	compile
@@ -124,22 +103,22 @@ verify-elsewhere
 ```
 
 `with` starts a nonempty indented body with fresh locals and its own async/cleanup
-lifetime. Its header occupies its own line and accepts optional `:cwd VALUE` and
-`:env VALUE` pairs, each once, in either order. Values use the same scalar cwd and
+lifetime. Its header occupies its own line and accepts optional `cwd: VALUE` and
+`env: VALUE` pairs, each once, in either order. Values use the same scalar cwd and
 typed environment-record grammar as process stage setup. Unknown setup keys and
-block timeouts are not supported. Kame's expression `(with ...)` is unchanged.
+block timeouts are not supported. Document templates have their own scoped directives.
 
 Setup evaluates left to right, once across suspension, in the enclosing context;
 all values are validated before entering the body. Relative cwd resolves against
 the enclosing cwd. Environment records override inherited child environment
 entries without granting environment-read access or changing startup tool lookup.
 Calls and deferred expressions inherit the effective context. A stage override
-such as `:cwd ./build pwd` inside `with :cwd ./project` uses `./project/build`.
+such as `cwd: ./build pwd` inside `with cwd: ./project` uses `./project/build`.
 Neither the host's global cwd nor its environment is mutated.
 
 Each block joins its own work before normal completion, successful return, or
 successful exit, then runs its defers in LIFO order. Failure and unsuccessful
-return/exit cancel and reap that work first. Defers reached in ordinary branches
+exit cancel and reap that work first. Defers reached in ordinary branches
 or iterations belong to the enclosing execution scope, not to that iteration.
 Nested functions and `with` blocks retain their own lifetimes. Borrowed outer
 process handles are not adopted. Cleanup cannot restart an active cleanup budget.
@@ -195,7 +174,7 @@ Bodies run sequentially with fresh locals and closed default command stdin;
 explicit independent file inputs remain valid. `break` stops without draining,
 `continue` advances, and readers close on completion, transfer, failure, or
 cancellation. Completed per-record operation and finished cleanup-scope state is
-retired. Invocation-owned values, process handles, constructed callables and
+retired. Invocation-owned values, process handles, callables and
 outer-scope defers retain their existing lifetimes. Results are not collected.
 Use `with` or a callable for cleanup that must finish per record.
 
@@ -211,131 +190,86 @@ reading. Interactive terminal input remains closed.
 
 ## Local libraries and source identity
 
-File-backed scripts can compose shared definitions without executing a second
-runner or generating source:
-
 ```kash
-(include ./lib/checks.kash)
-config = (joinpath (source-dir) "defaults.json")
-(check-config config)
+include ./lib/checks.kash
+include? ./lib/local.kash
+import ./lib/archive.km as archive
+def config = joinpath module/dir "defaults.json"
+check-config $config
+archive/create ./dist/app.tgz
 ```
 
-Includes are literal, required, top-level forms, resolved relative to their
-containing source. Included files use Kash grammar regardless of suffix and may
-contain comments, lazy definitions, `def` functions, and nested includes only.
-Inclusion does not demand definitions or run function bodies. All sources are
-parsed and validated before execution; definitions share the including namespace
-and forward visibility. Repeated inclusion expands again, so repeated declarations
-are errors. Cycles are rejected and include frames retain authored locations.
+Includes bind definitions in the caller's scope. Relative paths resolve
+against the containing source. Kash files include Kash libraries. A
+loaded library may contain definitions, imports, exports, and includes.
+Repeated includes expand again, and conflicting definitions and active
+cycles are errors. Imports expose the declared exports of a module.
+Choose a namespace with `as`, or bind selected names through `from`.
 
-`(source-dir)` returns the absolute lexical directory of the file containing the
-authored call, including inside an included function invoked from another source.
-It does not inspect cwd, resolve symlinks, or require a filesystem grant. Later
-asset reads retain their normal grants. Inline, stdin, and constructed source
-without file-backed metadata report `SEL_NO_CONTEXT`; a display label alone does
-not provide that metadata.
-
-Includes cannot appear inside functions, branches, or value expressions, or in
-inline/stdin/constructed source. Optional/computed includes, source search paths,
-namespaces, and load-time commands are not provided. Execution authority and
-ordinary cwd-relative paths are unchanged.
+`module/dir` and `module/file` use the authored source path, including inside
+an included function. Lexical symlink spelling is preserved. A relative
+include or import in inline or stdin input needs a file-backed source.
+Source loading retains the invocation's existing effect grants.
+[Modules](../../../spec/050-kash-libraries.md)
 
 ## Explicit boundaries and argv
 
 | Form | Meaning |
 | --- | --- |
-| `$name`, `$project.name`, `${name}` | Look up a Kame reference. |
-| `$...name`, `$...{project.command}` | Explicitly spread a flat argv list, including the executable at command position. |
-| `(EXPRESSION)` | Evaluate a parenthesized Kame expression, standalone or as an unquoted scalar word fragment. |
-| `$(COMMAND)` | Execute a Kash graph or sequential list and capture its output sink. |
-| `$env.NAME` | Explicit lazy environment lookup, requiring an env grant. |
+| `$name`, `$project.name`, `${EXPR}` | Substitute a Kame value. |
+| `$...name`, `$...{project.command}` | Spread a flat list, including an executable at command position. |
+| `(EXPRESSION)` | Evaluate an argument or a scalar fragment of a mixed word. |
+| `$(COMMAND)` | Capture exact UTF-8 stdout from a graph or sequential list. |
+| `${env/NAME}` | Read a permitted environment variable. |
+| `'…'` and `"…"` | Group a literal word or a word with `$` substitutions respectively. |
 
-`$PATH` is a Kame binding, never an implicit environment lookup. Use braces to
-terminate a reference before a suffix: `${name}.c` appends `.c`, whereas
-`$name.c` looks up field `c`.
+A scalar contributes one argument regardless of whitespace. A standalone
+`nil` contributes no argument. In a quoted or mixed word, `${EXPR}`
+renders the value as text, with spaces between list items and empty text
+for `nil`. Use a spread to pass a list as separate arguments. Raw `*.c`
+stays literal.
 
-Kash executes argv directly:
-
-- Scalar expansions contribute one argument even with whitespace. There is no
-  implicit splitting, shell reparsing, or globbing; raw `*.c` is literal.
-- A standalone unquoted list expansion splices scalar items: `$files` or
-  `(wildcard ./src/*.c)`. Empty lists contribute no arguments.
-  In a definition, `files = ./src/*.c` already evaluates the glob; the call
-  wrapper is useful at a command argument boundary, where raw paths stay literal.
-- `$...name` requires a flat list. At command position it must be nonempty, with
-  a nonempty string/path executable first and initial arguments afterward.
-  Following words append arguments; an empty command list is an error. Ordinary
-  `$name` still requires a scalar executable. Explicit spreads are standalone,
-  unquoted argv words, never definition/setup values or redirection paths.
-- Quoted or mixed words require scalars; `"$files"` is invalid for a list.
-- Nil reads as empty text in quoted or mixed words and contributes no argument
-  as a standalone word, like an unset shell variable.
-- Bytes, records, nested lists, callables, and process/results are not argv.
-- Double quotes group words and allow references/process captures; parentheses
-  inside them stay literal. Empty quotes preserve an empty argument. Single
-  quotes are reserved and rejected.
-- Legacy unquoted `@(...)`, `\@(...)`, and template directives are errors.
-  Quoted argument data containing `@(...)` remains literal. Expression strings
-  and explicit document templates retain their interpolation rules.
-
-Mixed words compose directly, without `str` workarounds:
+Use braces to separate a reference from a suffix. `${name}.c` appends a
+suffix and `$name.c` accesses a field. An unbraced reference ends at `/`.
+Use `${lib/name}` for a qualified name. A missing uppercase binding can fall
+back to a permitted environment read.
 
 ```kash
 biome --config-path=(js-biome-config)
 emit prefix-(name)-suffix (name).json
-:cwd ./build/(variant) :MODE release-(variant) tool > ./out/(name).txt
+cwd: ./build/(variant) MODE: release-(variant) tool > ./out/(name).txt
 tool < (input-name).txt
 ```
 
-Each mixed word requires scalar fragments and produces one value, preserving
-spaces and empty text. A standalone `(modules)` may splice its list result in
-argv; `--modules=(modules)` rejects a list. The same composition applies to
-redirection paths and scalar setup values, including `:cwd` and `:timeout`, with
-their ordinary path/type checks. Typed `:env` records and definition RHSs keep
-their value grammar. Calls/effects retain completed values across suspension;
-results are never reparsed as words or source.
+Mixed words evaluate each fragment once. The same syntax applies to
+stage settings and redirection paths. Parentheses inside quotes stay
+text, and `"Repos ${(dirs REPOS)}"` renders the directory list in one
+argument. Foreign-shell and document templates use `@{EXPR}`.
 
-`"--config-path=(js-biome-config)"` is literal, not a call. Quote or escape literal
-parentheses. Bare braces do not substitute values. In a delegated Kame
-expression, path interpolation still uses `@{ref}` / `@(call)`, not raw-word
-fragments. Formatting preserves calls versus literal parentheses, list-splicing
-boundaries, and authored value pipes rather than converting them to nested calls.
-
-The entire body is parsed before execution, including unselected branches.
-Generated Kash is explicit: construct `(kash TEXT)`, optionally using `render`
-to deliberately generate that text, then call the resulting callable. Argument
-values and captured stdout are never reparsed. Use references and typed
-expressions directly; JSON serialization and escaping helpers are unnecessary.
-
-### Migrating recipes
-
-When switching from external-shell templates, replace `@{name}` with `$name`,
-and call expansions such as `@(join ":" files)` with `(join ":" files)`.
-Replace document `@if`/`@for` generation with Kash control or explicit source
-construction. For an argv list, explicitly spread the executable and arguments:
+### Recipe arguments and templates
 
 ```kame
-SHELL = kash
-command = ["printf" "<%s>" """@(literal)""" "two words"]
-show :
+command = ["printf", "<%s>", "two words"]
+task show
 	$...command
 ```
 
-Do not serialize argv back into source. Keep `@{ref}` / `@(call)` in system-shell
-recipes, document templates and expression strings where interpolation is intended.
+A default Kash recipe reads `$name` and supplies a computed argument with
+`(EXPR)`. Foreign-shell recipes interpolate values with `@{EXPR}` and
+apply shell quoting to their rendered text.
+[Rules and recipes](./rules.md)
 
 ## Executable dependencies
 
 Every reached Kash stage automatically resolves and tracks its executable,
 including literal/dynamic command heads, pipelines, captures, and async work.
-Bare names use the driver's startup `PATH` and `--tool NAME=PATH` overrides
-(interactive/login sessions instead use the current session PATH);
-explicit paths resolve from the stage working directory. Stage environment
+Bare names use the current unit's `PATH` and `--tool NAME=PATH` overrides.
+Explicit paths resolve from the stage working directory. Stage environment
 `PATH` overrides affect the child, not this lookup. Missing/non-executable heads
 report `TOOL_MISSING`. Run grants still apply; internal executable checks do
 not grant user filesystem-read authority.
 
-`aws ...`, `$x/aws ...`, and `${x/aws} ...` use the same named tool resolver;
+`aws ...`, `x/aws ...`, and `${x/aws} ...` use the same named tool resolver;
 `(tool "aws")` obtains a tracked executable value outside command position.
 Unreached branches acquire no runtime tool dependencies. External-shell command
 names remain shell-resolved unless explicitly rendered through `@{x/NAME}`.
@@ -349,7 +283,7 @@ files as inputs when their contents affect the result.
 ```kash
 cat < ./input.txt | sort > ./output.txt
 echo done >> ./log.txt
-:cwd ./build :timeout (nop 10) :NODE_ENV production npm test
+cwd: ./build timeout: (nop 10) NODE_ENV: production npm test
 ```
 
 Process `|` streams stdout with bounded backpressure; value pipes inside
@@ -363,14 +297,14 @@ file. `2>&1` copies stdout's destination at that point, so `> file 2>&1` merges
 both into the file and `2>&1 > file` leaves stderr on the previous stdout.
 `3>`, `1>&2`, and heredocs are not defined.
 
-`:accept-exit [1 7]` accepts only those ordinary nonzero exits for that stage;
+`accept-exit: [1, 7]` accepts only those ordinary nonzero exits for that stage;
 the list must contain distinct integers from 1 through 255. It also works on
 `run!`. Empty lists accept nothing extra. Validation precedes graph launch and
 output opening. Raw Result status stays unchanged, while `effectiveStatus`,
 conditions, joins and failure policy reflect acceptance. Accepted exits never
 hide an unaccepted peer/worker failure, signal, deadline, launch or transport error.
 
-Setup pairs precede the executable. `:cwd` sets stage cwd, `:timeout` is in
+Setup pairs precede the executable. `cwd:` sets stage cwd, `timeout:` is in
 seconds (unlike CLI `--timeout` in milliseconds), and other valid keys override
 stage environment entries. An ordinary filename argument does not declare a
 dependency; an input redirection does. Grants do not sandbox an executable's
@@ -379,7 +313,7 @@ internal filesystem access.
 ### Typed capture
 
 ```kash
-let result = (capture! [stdout: :true stderr: :true stderrLimit: 4096] :accept-exit [1] "checker" "--report")
+let result = (capture! {stdout: true, stderr: true, stderrLimit: 4096} :accept-exit [1] "checker" "--report")
 printf %s (text result.stdout)
 ```
 
@@ -396,7 +330,7 @@ not also published; unselected streams stay live. Use `text` for explicit UTF-8
 decoding, which can fail separately. NUL and trailing newlines remain intact.
 Each stream is drained concurrently within its own limit; overflow cancels owned
 work and reports `CAPTURE_LIMIT`, never successful truncation. Failure acceptance
-is explicit through `:accept-exit`; signals and fatal errors remain failures.
+is explicit through `accept-exit:`; signals and fatal errors remain failures.
 Default input is closed. Pipelines, async capture and graph capture are not
 supported. See [Process inspection](../../../spec/049-process-inspection.md).
 
@@ -428,16 +362,16 @@ because replaying output cannot reproduce consumption of a borrowed stream.
 
 ### Stage environments
 
-`:env $EXPORTS` or `:env (EXPRESSION)` supplies a typed environment record,
+`env: $EXPORTS` or `env: (EXPRESSION)` supplies a typed environment record,
 also accepted by `(run! :env EXPORTS ...)`. Keys must match
 `[A-Za-z_][A-Za-z0-9_]*`; values must be strings without NUL. Empty strings are
 valid, and an empty record (for example `(parse-json "{}")`) leaves inheritance
 unchanged. No scalar conversion or list splicing is performed. The entire record
 is validated before launch, with diagnostics that omit evaluated values.
 
-Record assignments and ordinary `:KEY` overrides apply in authored order, last
+Record assignments and ordinary `KEY:` overrides apply in authored order, last
 assignment wins. They affect only that stage, not sibling stages, later commands,
-Kame's `env` namespace, or tool lookup through startup PATH. Record evaluation
+the unit's environment store or its tool lookup. Record evaluation
 occurs only on reached runtime stages; dry-run defers it, and ordinary read/env/run
 grants still apply. Effects and completed values survive suspension without replay.
 Computed values are excluded from normal diagnostics/lifecycle traces, but callers
@@ -465,13 +399,13 @@ later statements.
 ```kash
 compile && verify && publish
 probe || use-cache
-message = $(printf "payload" >&out && printf "progress\n" >&err)
+let message = $(printf "payload" >&out && printf "progress\n" >&err)
 printf "captured=%s\n" $message
 ```
 
 Here `message` is `payload`; `progress` is forwarded to the error sink. Sequential
 capture shares one limit and keeps failed-operand bytes if `||` runs a fallback.
-`?` accepts a nonzero or signal exit; an accepted result can continue through
+`?` accepts an ordinary nonzero exit. An accepted result can continue through
 `&&` without erasing its recorded status. For explicit `do run`, unhandled executable exits
 preserve their status through nested runners; signal exits use `128 + signal`.
 Successful acceptance or recovery exits zero.
@@ -661,7 +595,7 @@ stdin redirections cannot be used on the template. For parallelism, use explicit
 Workers use normal grants, failures, recovery, cancellation, and async ownership.
 `:failure collect` lets later records run after ordinary nonzero exits, retaining
 the last nonzero status for the worker node. Signals and launch/transport errors
-are still fatal. A template `:timeout` covers the whole operator lifetime. There
+are still fatal. A template `timeout:` covers the whole operator lifetime. There
 is no unbounded per-record status history or implicit retry.
 
 ### Live stream arguments
@@ -692,7 +626,7 @@ truncating output files.
 Graph Result records have a `graph` field with terminal nodes and edges:
 
 ```kash
-result = ((kash """printf "a\nb\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)"""))
+let result = $?(printf "a\nb\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right))
 (out! (json result.graph))
 ```
 
@@ -717,59 +651,51 @@ I/O interest, not deadlock detection.
 
 ## Named execution context
 
-| Name | Compact form | Value |
-| --- | --- | --- |
-| `inputs` | `@<*` | Normal rule inputs, without order-only inputs. |
-| `outputs` | `@>*` | Declared output identities, including named task outputs. |
-| `inputs/changed` | `@<?` | Changed normal file inputs in a file recipe. |
-| `args` | `@*` | Nearest function/Kash-call arguments or script operands. |
+| Name | Value |
+| --- | --- |
+| `inputs` | Normal rule inputs. |
+| `outputs` | Declared output identities. |
+| `changed-inputs` | Changed normal file inputs in a file recipe. |
+| `captures` | Captured output segments in source order. |
+| `args` | Arguments of the current script or function. |
 
-These are typed lists with the same frame and availability rules as the compact
-forms. Lexical definitions/parameters may shadow the ordinary names. Empty
-available lists are valid; unavailable context reports `SEL_NO_CONTEXT`.
-`inputs/changed` is unavailable in task/service frames and during planning or
-resolution (`PHASE_INVALID`). `args` is empty for a build with no operands; named
-target parameters remain their own bindings. Index with `args.0` or
-`inputs/changed.0`. Slash-separated references are names, not paths: filesystem
-paths require `/`, `./`, or `../`.
+Use ordinary field and index access, such as `inputs.0` or `args.0`.
+Named captures and target arguments also bind in a recipe. Lexical bindings
+can shadow context names. Order-only prerequisites stay outside the normal
+input list.
 
 ```kame
-SHELL = kash
-./output : ./input
-	cat $inputs > (first outputs)
+rule ./output : ./input
+	cat $...inputs > $outputs.0
 ```
 
 ## Control, recovery, and ownership
 
 ```kash
-if test -f ./output.txt
+if $?(test -f ./output.txt).ok
 	echo exists
-elif (nop options.release)
+elif options.release
 	echo release
 else
 	echo missing
 
-match $target
-	case ./src/{name:*}.c
+match target
+	./src/{name:*}.c =>
 		echo $name
-	else
+	else =>
 		echo unknown
 ```
 
-Indent nested bodies consistently; keywords occupy their own lines. Command
-conditions are true on effective success and false on an eligible final process
-exit; other failures propagate. They may contain sequential lists. Expression
-conditions use Kame truth. `$(...)` is not an `if` condition. Only selected
-branches execute; `match` captures are scoped to the selected arm.
+Indent each body consistently. Conditions use Kame truthiness. Test a command
+with `$?(COMMAND).ok` or use `.state == :completed` to count accepted exits.
+Only selected branches execute. A `match` arm binds captures in its body.
 
-- `CMD ?` accepts a nonzero or signal exit but leaves live stderr visible.
+- `CMD ?` accepts an ordinary nonzero exit while leaving live stderr visible.
 - `CMD ? FALLBACK` runs a fallback process on recoverable command failure.
-- `LEFT ?? RIGHT` recovers a nil/failed value in Kash RHSs, not raw commands or
-  inside Kame expressions. It is distinct from Kame's missing-lookup `?` form,
-  which handles only unprotected `REF_MISSING` and `TOOL_MISSING` failures.
+- `LEFT ?? RIGHT` uses the fallback when the value is nil or a
+  lookup is missing. Inspect `$?(COMMAND)` for process failures.
 - Recovery never suppresses capability denial or cancellation.
-- Shell subshell grouping and single-quoted shell strings are not supported. Use
-  Kash control statements or Kame special forms for compound value logic.
+- Use Kash blocks for action control and Kame conditionals for value logic.
 
 ### List and conditional loops
 
@@ -778,20 +704,20 @@ for source in fonts
 	converter $source
 	verifier $source
 
-while probe --pending
+while $?(probe --pending).ok
 	worker --one
 ```
 
-`for NAME in EXPRESSION` evaluates one list once, visits typed items in order,
+`for NAME in EXPRESSION` evaluates a list or stream and visits typed items in order,
 and returns nil without collecting results. Each iteration has a fresh lexical
 scope; local lazy definitions and the item binding do not escape. Empty lists do
-nothing. Redeclaring the item in its body is invalid. No assignment, `break`,
-`continue`, destructuring, loop `else`, or implicit parallelism is provided.
+nothing. The body may use `break` or `continue` in its own invocation. Use
+`set` only for an eligible eager binding.
 
-`while` accepts the same command/expression conditions as `if` and tests before
+`while` accepts the same expression conditions as `if` and tests before
 each iteration. Each condition visit invokes fresh work, but looking up an outer
 lazy definition still returns its memoized value. Re-evaluation does not imply
-fresh filesystem observations; use a command condition for live external probes.
+fresh filesystem observations; use an outcome capture for live external probes.
 Even pure loops yield to the host for cancellation and deadline checks.
 
 Failures stop iteration under the ordinary recovery rules. Suspended bodies
@@ -809,8 +735,8 @@ or computed command head to run external programs with those names.
 
 - Terminal `&` starts the entire graph asynchronously; normal session completion
   joins outstanding work. It is not daemonization or detachment.
-- To bind a handle, use `job = (run! :async :true "worker")`, then demand
-  `(await job)` as appropriate. Definitions remain lazy.
+- Bind a handle with `let job = $&(worker)`. Read its outcome with
+  `$?(wait $job)`.
 - Expression-level `(run! "command" args...)` and `(pipe! (run! ...) (run! ...))`
   use the same graph executor. Synchronous results expose `status`, `signal`,
   `stages`, `stdoutCaptured`, and `stderrCaptured`; streams are live, not retained.
@@ -820,7 +746,7 @@ or computed command head to run external programs with those names.
 ### Deferred cleanup
 
 ```kash
-directory = (line $(mktemp -d ./workspace.XXXXXX))
+let directory = line $(mktemp -d ./workspace.XXXXXX)
 defer rm -rf $directory
 defer (out! "finishing\n")
 ```
@@ -835,7 +761,7 @@ Expressions keep normal laziness: an undemanded resource definition may first
 run during cleanup; commands can demand it while snapshotting. Demanded
 top-level lazy values persist through the invocation, not per statement.
 
-The enclosing recipe, constructed callable or top-level runner invocation owns a
+The enclosing recipe, function or runner invocation owns a
 LIFO stack; branches do not create a cleanup lifetime. Normal exit joins user work
 first. Failure/cancellation cancels and reaps it first. Cleanup expressions also
 join async work they start. Deferred commands cannot end in `&` or use a direct
@@ -899,9 +825,9 @@ kash -lc 'echo hello'             # login profile, then noninteractive command
 kame do run -i --allow-run
 ```
 
-Entries share one session: `let` and `def` rebind, lazy names cannot be
-redefined, and a failure ends only its entry. Whole-line `cd`, `export`, and
-`unset` change the session directory and child environment. Foreground
+Entries share one session and a failure ends only its entry. `let` and
+`def` bind names, and `set` updates eligible local bindings. Use `cd`
+and `set env/NAME = VALUE` to update session state. Foreground
 commands receive the terminal; Ctrl-C reaches only them. A second interrupt
 while an interrupted entry settles kills its processes and ends the session
 with 130, skipping cleanup. On a terminal, entries are jobs: Ctrl-Z stops one
@@ -911,17 +837,17 @@ final `&` line starts one in the background; a background read of the
 terminal stops it until `fg`. On a terminal, a command's unsuccessful exit
 is not reported beyond its own output and status; `explain` shows the latest
 failure's full diagnostic. Use `let x = $(...)` to run a capture now;
-`x = $(...)` is lazy and runs only when `x` is used.
+`def x = $(...)` is lazy and runs when `x` is used.
 
 The startup file `$KASH_INIT` (default `$XDG_CONFIG_HOME/kash/init.kash` or
 `~/.config/kash/init.kash`; empty disables) runs as entries before the first
-prompt. A `kash-prompt` function receives `[status: dir: name: jobs:]` and
+prompt. A `kash-prompt` function receives a record with `status`, `dir`, `name`, and `jobs` fields and
 returns the prompt string; `kash-rprompt` receives the same record and returns
 a right prompt, drawn at the right edge of the entry's last line:
 
 ```kash
-(kash-prompt info) = (str info.name (if (= info.status 0) "" " !") " $ ")
-(kash-rprompt info) = (if (= info.jobs 0) "" (str "[" info.jobs " jobs]"))
+def kash-prompt info = str info.name (if info.status == 0 then "" else " !") " $ "
+def kash-rprompt info = if info.jobs == 0 then "" else str "[" info.jobs " jobs]"
 ```
 
 Login invocation (`-kash` as argv[0], or standalone `kash -l`/`--login`) loads
@@ -933,8 +859,8 @@ Standalone `kash -l` means login; use `--lang` for explicit language selection.
 
 Define interactive shortcuts as typed argv prefixes, invoked by bare name:
 
-```kash
-alias ll = ["ls" "-lah"]
+```kash-repl
+alias ll = ["ls", "-lah"]
 ll ./src | head -n 10
 alias ll                         # show one; alias alone lists all
 unalias ll
@@ -943,19 +869,14 @@ unalias ll
 Prefixes are nonempty literal string lists, expanded once without shell-text
 reparsing; caller arguments retain their boundaries. Computed command heads and
 explicit paths bypass aliases. Put declarations in initialization or a login
-profile; they are session commands, not script/recipe syntax. Whole-line aliases
-of `cd`, `export`, and `unset` work, with the same whole-line-only limitation.
-The Kash parser/formatter understands these declarations, including multiline
-lists: `kame do fmt --lang kash -i ~/.config/kash/init.kash`. Batch execution
-still rejects session commands with `FEATURE_UNSUP`, without executing earlier
-statements.
+profile. An alias whose prefix starts with `cd` invokes that builtin.
+Format startup files with `kame do fmt --lang kash -i ~/.config/kash/init.kash`.
+Alias declarations in ordinary scripts report `PARSE_ERR`.
 
-Interactive and login sessions use the current session PATH for command and
-`tool`/`x/NAME` lookup. `export PATH=...`, `unset PATH`, and `cd` affect later
-lookups without restarting running jobs; `--tool` overrides and run grants
-remain effective. Relative and empty PATH entries are relative to the lookup
-directory. Stage-local environment records do not change session lookup;
-ordinary scripts and recipes retain startup-PATH lookup.
+Use `set env/PATH = VALUE` to update later command and tool lookup or
+`set env/PATH = nil` to remove PATH. Relative and empty PATH entries use
+the lookup directory. Tool overrides and run grants stay in effect.
+Stage-local environment records leave the unit's lookup unchanged.
 
 The editor follows Readline conventions (emacs or vi, `~/.inputrc` with
 `$if kash`) and edits a whole multi-line entry; Tab indents at line start.

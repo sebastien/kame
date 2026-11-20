@@ -9,8 +9,8 @@ import (
 
 func TestDocumentLetTransfersBranchConditionsAndPatterns(t *testing.T) {
 	inputs := []string{
-		"@if(true)\n@let(x 1)\nyes\n@elif(false)\nno\n@end(if)\n",
-		"@match(x)\n@case(1)\n@let(y 2)\nyes\n@case(2)\nno\n@end(match)\n",
+		"@if true\n@let x = 1\nyes\n@elif false\nno\n@end if\n",
+		"@match x\n@case 1\n@let y = 2\nyes\n@case 2\nno\n@end match\n",
 	}
 	for i := range inputs {
 		doc := template.ParseDocument(t.Allocator(), "let.tmpl", inputs[i], "plain")
@@ -22,15 +22,15 @@ func TestDocumentLetTransfersBranchConditionsAndPatterns(t *testing.T) {
 }
 
 func TestDocumentLetRetainsEndLabelDiagnostic(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(true)\n@let(x 1)\nyes\n@end(for)\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if true\n@let x = 1\nyes\n@end for\n", "plain")
 	defer doc.Free()
-	if len(doc.Diagnostics) != 1 || doc.Diagnostics[0].Code != "TPL_BLOCK" || doc.Diagnostics[0].Message != "template block end label does not match opening directive" || !sameSpan(doc.Diagnostics[0].Span, 24, 33) {
+	if len(doc.Diagnostics) != 1 || doc.Diagnostics[0].Code != "TPL_BLOCK" || doc.Diagnostics[0].Message != "template block end label does not match opening directive" || !sameSpan(doc.Diagnostics[0].Span, 24, 32) {
 		t.Error("let discarded the end label or diagnostic span")
 	}
 }
 
 func TestDocumentLetTransfersTerminatorRightTrim(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if(true)\n@let(x 1)\nyes\n@elif(false)-\n no\n@end(if)-\n tail\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "let.tmpl", "@if true\n@let x = 1\nyes\n@elif false -\n no\n@end if -\n tail\n", "plain")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 || doc.Root == nil || len(doc.Root.Items) < 3 {
 		t.Fatal("trimmed let document did not lower")
@@ -43,7 +43,7 @@ func TestDocumentLetTransfersTerminatorRightTrim(t *testing.T) {
 	if doc.Root.Items[2].Kind != expr.Application || len(doc.Root.Items[2].Items) != 2 || doc.Root.Items[2].Items[0].Text != "template-trim-start" {
 		t.Error("end right trim was not retained")
 	}
-	ending := template.ParseDocument(t.Allocator(), "end-trim.tmpl", "@if(true)\n@let(x 1)\nyes\n@end(if)-\n tail\n", "plain")
+	ending := template.ParseDocument(t.Allocator(), "end-trim.tmpl", "@if true\n@let x = 1\nyes\n@end if -\n tail\n", "plain")
 	defer ending.Free()
 	if len(ending.Diagnostics) != 0 || len(ending.Root.Items) != 3 || ending.Root.Items[2].Kind != expr.Application || len(ending.Root.Items[2].Items) != 2 || ending.Root.Items[2].Items[0].Text != "template-trim-start" {
 		t.Error("let discarded end right trim")
@@ -51,27 +51,38 @@ func TestDocumentLetTransfersTerminatorRightTrim(t *testing.T) {
 }
 
 func TestDocumentRecoveryFreesDiscardedTrees(t *testing.T) {
-	inputs := []string{"hello @(name", "@match(x)\n@case(1)\nyes\n@else\nno\n", "@match(x)\n@case(1)\nyes\n@else\nno\n@case(2)\n"}
+	inputs := []string{"hello @{name", "@match x\n@case 1\nyes\n@else\nno\n", "@match x\n@case 1\nyes\n@else\nno\n@case 2\n"}
 	for i := range inputs {
 		doc := template.ParseDocument(t.Allocator(), "recovery.tmpl", inputs[i], "plain")
-		if i != 0 && len(doc.Diagnostics) == 0 {
+		if len(doc.Diagnostics) == 0 {
 			t.Error("invalid match fallback was accepted")
 		}
 		doc.Free()
 	}
+	doc := template.ParseDocument(t.Allocator(), "recovery.tmpl", "@{unclosed\nlater @{str \"ok\"}\n", "plain")
+	defer doc.Free()
+	if len(doc.Diagnostics) != 1 || doc.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(doc.Diagnostics[0].Span, 0, 2) {
+		t.Error("an unclosed interpolation lost its diagnostic at the opener")
+	}
+	for _, item := range doc.Root.Items {
+		if item.Kind == expr.Application && len(item.Items) == 2 && item.Items[0].Text == "str" {
+			return
+		}
+	}
+	t.Error("an unclosed interpolation consumed the next complete interpolation")
 }
 
 func TestDocumentNewerInputSelectorRetainsSuffix(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "selector.tmpl", "@<?", "plain")
 	defer doc.Free()
-	if len(doc.Diagnostics) != 0 || len(doc.Root.Items) != 2 || doc.Root.Items[1].Kind != expr.Selector || doc.Root.Items[1].Text != "@<?" || !sameSpan(doc.Root.Items[1].Span, 0, 3) {
-		t.Error("document changed the newer-input selector into a first-input selector")
+	if len(doc.Diagnostics) != 0 || len(doc.Root.Items) != 2 || doc.Root.Items[1].Kind != expr.String || len(doc.Root.Items[1].Parts) != 1 || doc.Root.Items[1].Parts[0].Text != "@<?" || !sameSpan(doc.Root.Items[1].Span, 0, 3) {
+		t.Error("document interpreted a legacy selector as an interpolation")
 	}
 }
 
 func TestStringRangeBoundsSelectorsAndExpressions(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{"@<123", "@(name) outside", "@(f name) outside"}
+	inputs := []string{"@<123", "@{name} outside", "@{f name} outside"}
 	ends := []int{2, 4, 5}
 	for i := range inputs {
 		s := source.New(a, "range.tmpl", inputs[i])

@@ -10,7 +10,7 @@ test-start "T010-06 wasm JavaScript CLI"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+if [ "${KAME_TEST_SKIP_BUILD:-0}" != 1 ]; then make dist-wasm >/dev/null; fi
 cli_build
 
 work="$(mktemp -d)"
@@ -25,17 +25,17 @@ run() {
 
 test-step "-C resolves relative explicit files in both option orders"
 mkdir -p "$work/project"
-cat > "$work/project/Makefile.kmk" <<'EOF'
-task default : ; [shell: kash]
+cat > "$work/project/Makefile.km" <<'EOF'
+task default
 	(out! "directory-ok\n")
 EOF
 for args in first last absolute discover plan; do
 	case "$args" in
-	first) invocation=(-C "$work/project" -f Makefile.kmk default) ;;
-	last) invocation=(-f Makefile.kmk -C "$work/project" default) ;;
-	absolute) invocation=(-C "$work/project" -f "$work/project/Makefile.kmk" default) ;;
+	first) invocation=(-C "$work/project" -f Makefile.km default) ;;
+	last) invocation=(-f Makefile.km -C "$work/project" default) ;;
+	absolute) invocation=(-C "$work/project" -f "$work/project/Makefile.km" default) ;;
 	discover) invocation=(-C "$work/project" default) ;;
-	plan) invocation=(do plan -C "$work/project" -f Makefile.kmk default) ;;
+	plan) invocation=(do plan -C "$work/project" -f Makefile.km default) ;;
 	esac
 	run "${invocation[@]}"
 	wasm_status=$status
@@ -52,11 +52,11 @@ for args in first last absolute discover plan; do
 done
 
 test-step "misplaced typed inspection options cannot run build targets"
-cat >"$work/project/Makefile.kmk" <<'EOF'
+cat >"$work/project/Makefile.km" <<'EOF'
 NAME = 0
-do :
+task do
 	touch ./misexecuted
-plan :
+task plan
 	touch ./misexecuted
 EOF
 for option in '--set NAME=1 do plan' '--set=NAME=1 do plan' '--set NAME=1 --set=NAME=2 do plan' '--set NAME=1 do -j 2 plan' 'do plan --set NAME=1' 'do plan --set NAME=1 --'; do
@@ -130,7 +130,7 @@ const parent = join(root, 'PROVENANCE.json');
 const local = join(directory, 'PROVENANCE.json');
 copyFileSync(source, wrapper);
 writeFileSync(module, 'not a WebAssembly module');
-writeFileSync(join(root, 'Makefile.kmk'), 'default :\n\ttouch forbidden\n');
+writeFileSync(join(root, 'Makefile.km'), 'task default\n\ttouch forbidden\n');
 const metadata = {
   schema: 1, version: '0.3.0', sourceRevision: 'a'.repeat(40), created: '2026-10-17T00:00:00Z',
   subjects: [['kame.js', wrapper], ['kame.wasm', module]].map(([name, path]) => ({ name, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') })),
@@ -195,7 +195,7 @@ query(false);
 const human = spawnSync(process.execPath, [wrapper, '--version'], { encoding: 'utf8', env: { ...process.env, KAME_VERSION: 'label-only', KAME_WASM: '' }, timeout: 5000 });
 assert.equal(human.status, 0, human.stderr);
 assert.equal(human.stdout, 'kame label-only (runtime=WASM)\n');
-assert.deepEqual(readdirSync(root).sort(), ['Makefile.kmk', 'PROVENANCE.json', 'override.wasm', 'wasm']);
+assert.deepEqual(readdirSync(root).sort(), ['Makefile.km', 'PROVENANCE.json', 'override.wasm', 'wasm']);
 console.log('matching, unavailable and mismatched provenance preserve fast, read-only version reporting');
 JS
 test-ok "local identity is distinct from version selectors and publisher authentication"
@@ -218,7 +218,7 @@ else
 fi
 
 test-step "do run --lang expr matches native output byte-for-byte"
-for expression in '(count [1 2 3])' '(join ":" ["a" "b"])' '(uppercase "kame")' '(let [a 10] (out! "hello" a))' '(yield! "generated")'; do
+for expression in '(count [1, 2, 3])' '(join ":" ["a", "b"])' '(uppercase "kame")' '((a => out! "hello" a) 10)' '(out! "generated")'; do
 	node "$CLI_ROOT/dist/kame.js" do run --lang expr -c "$expression" >"$work/wasm.out"
 	"$CLI_BIN" do run --lang expr -c "$expression" >"$work/native.out"
 	if cmp -s "$work/wasm.out" "$work/native.out"; then
@@ -237,21 +237,21 @@ if [ "$wasm_status" = 0 ] && cmp -s "$work/wasm.err-effect.out" "$work/native.er
 else
 	test-fail "err parity: wasm-out=$(cat "$work/wasm.err-effect.out") wasm-err=$(cat "$work/wasm.err-effect.err") native-out=$(cat "$work/native.err-effect.out") native-err=$(cat "$work/native.err-effect.err")"
 fi
-printf '(join "-" ["wasm" "source"])\n' >"$work/expression.kmk"
-node "$CLI_ROOT/dist/kame.js" do run --lang expr "$work/expression.kmk" >"$work/wasm.expr"
-"$CLI_BIN" do run --lang expr "$work/expression.kmk" >"$work/native.expr"
+printf '(join "-" ["wasm", "source"])\n' >"$work/expression.km"
+node "$CLI_ROOT/dist/kame.js" do run --lang expr "$work/expression.km" >"$work/wasm.expr"
+"$CLI_BIN" do run --lang expr "$work/expression.km" >"$work/native.expr"
 if cmp -s "$work/wasm.expr" "$work/native.expr" && [ "$(cat "$work/wasm.expr")" = '"wasm-source"' ]; then
 	test-ok "do run --lang expr FILE reads an expression file and matches native"
 else
 	test-fail "do run --lang expr FILE: wasm=$(cat "$work/wasm.expr") native=$(cat "$work/native.expr")"
 fi
 
-test-step "--shell selects the recipe shell on the wasm host"
-cat >"$work/Shell.kmk" <<'EOF'
-task shell-choice :
+test-step "rule metadata selects the recipe shell on the wasm host"
+cat >"$work/Shell.km" <<'EOF'
+task shell-choice ; {shell: "./missing-shell"}
 	echo should-not-run
 EOF
-run -C "$work" --shell "$work/missing-shell" --shell -c -f "$work/Shell.kmk" shell-choice
+run -C "$work" -f "$work/Shell.km" shell-choice
 if [ "$status" = 1 ] && grep -q 'spawn .*missing-shell.*ENOENT' "$work/err"; then
 	test-ok "recipe execution uses the selected shell"
 else
@@ -272,7 +272,7 @@ else
 	test-fail "read with grant failed: status=$status out=$(cat "$work/out")"
 fi
 run do run --lang expr --allow-run -c '(sh! "printf run-ok")'
-if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '[status: 0 stdout: run-ok stderr:  signal: 0 effectiveStatus: 0 effectiveSignal: 0]' ]; then
+if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '{status: 0, stdout: run-ok, stderr: , signal: 0, effectiveStatus: 0, effectiveSignal: 0}' ]; then
 	test-ok "shell with --allow-run succeeds"
 else
 	test-fail "shell with grant failed: status=$status out=$(cat "$work/out")"

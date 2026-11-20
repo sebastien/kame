@@ -9,47 +9,34 @@ import (
 )
 
 func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context) Result {
-	var result Result
-	glob := expr.PathHasGlob(expression.Text)
 	if len(expression.Parts) != 0 {
-		result = p.pathValue(scope, expression, c)
-		glob = false
-		for i := range expression.Parts {
-			if expression.Parts[i].Expr == nil && expr.PathHasGlob(expression.Parts[i].Text) {
-				glob = true
-			}
-		}
-	} else if !expression.LiteralPath && (strings.Contains(expression.Text, "\\") || strings.Contains(expression.Text, "@@")) {
-		text, pattern := strings.Builder{}, strings.Builder{}
+		return p.pathValue(scope, expression, c)
+	}
+	if expression.Pattern != nil {
+		return Result{Value: pathPatternValue(c.Run, expression.Pattern)}
+	}
+	if expression.PathGlob {
+		text := core.NewString(c.Run, expression.Text)
+		text.Kind = core.PathPattern
+		return Result{Value: text}
+	}
+	if strings.Contains(expression.Text, "\\") {
+		var text, pattern strings.Builder
 		expr.AppendPathText(&text, expression.Text, false)
 		expr.AppendPathText(&pattern, expression.Text, true)
-		result.Value = core.NewString(c.Run, text.String())
-		result.Value.GlobPattern = owned(c.Run, pattern.String())
-	} else {
-		result.Value = core.NewString(c.Run, expression.Text)
+		value := core.NewPath(c.Run, text.String())
+		value.GlobPattern = owned(c.Run, pattern.String())
+		return Result{Value: value}
 	}
-	if result.Waiting || result.Diagnostic.Code != "" || result.Value.Kind == core.Pattern || !glob || expression.LiteralPath {
-		return result
+	return Result{Value: core.NewPath(c.Run, expression.Text)}
+}
+
+func pathPatternValue(a mem.Allocator, pattern *expr.Pattern) core.Value {
+	kind := core.PathPattern
+	if pattern.References != 0 {
+		kind = core.PathTemplate
 	}
-	if p.Registry == nil {
-		result.Free(c.Run)
-		return failure(c.Run, "OP_UNKNOWN", expression.Span, "glob expressions require wildcard")
-	}
-	operation := p.Registry.lookup("wildcard")
-	if operation == nil {
-		result.Free(c.Run)
-		return failure(c.Run, "OP_UNKNOWN", expression.Span, "glob expressions require wildcard")
-	}
-	ready := p.prepareOperation(operation, 1, c, expression.Span)
-	if ready.Waiting || ready.Diagnostic.Code != "" {
-		result.Free(c.Run)
-		return ready
-	}
-	values := make([]core.Value, 1)
-	values[0] = result.Value
-	output := p.invokeOperation(operation, values, nil, c, expression.Span)
-	freeValues(c.Run, values)
-	return output
+	return core.Value{Kind: kind, Text: expr.CanonicalPathPattern(a, pattern)}
 }
 
 func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Result {
@@ -75,11 +62,10 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 	for i := range expression.Parts {
 		part := expression.Parts[i]
 		if part.Expr == nil {
-			if expression.LiteralPath {
-				text.WriteString(part.Text)
+			expr.AppendPathText(&text, part.Text, false)
+			if expression.PathGlob {
 				pattern.WriteString(part.Text)
 			} else {
-				expr.AppendPathText(&text, part.Text, false)
 				expr.AppendPathText(&pattern, part.Text, true)
 			}
 			// Only authored bytes can open or close a glob character class.
@@ -103,12 +89,15 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 		}
 		value := operands.Values[next]
 		next++
-		if value.Kind != core.String || strings.IndexByte(value.Text, 0) >= 0 {
+		if !value.IsPathText() || strings.IndexByte(value.Text, 0) >= 0 {
 			return failure(c.Run, "EXPR_INVALID", part.Span, "path interpolation requires text without NUL")
 		}
 		text.WriteString(value.Text)
 		for j := 0; j < len(value.Text); j++ {
 			b := value.Text[j]
+			if expression.PathGlob && (b == '{' || b == '}') {
+				pattern.WriteByte('\\')
+			}
 			if b == '*' || b == '?' || b == '[' || b == '\\' || (characterClass && (b == ']' || b == '-' || b == '!' || b == '^')) {
 				pattern.WriteByte('\\')
 			}
@@ -129,12 +118,14 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 			part.Kind = expr.PatternLiteral
 			part.Text = owned(c.Run, operands.Values[part.Index].Text)
 		}
-		canonical := expr.CanonicalPattern(c.Run, instantiated)
-		value := core.NewPattern(c.Run, canonical)
-		mem.FreeString(c.Run, canonical)
+		return Result{Value: pathPatternValue(c.Run, instantiated)}
+	}
+	if expression.PathGlob {
+		value := core.NewString(c.Run, pattern.String())
+		value.Kind = core.PathPattern
 		return Result{Value: value}
 	}
-	value := core.NewString(c.Run, name)
+	value := core.NewPath(c.Run, name)
 	value.GlobPattern = owned(c.Run, pattern.String())
 	return Result{Value: value}
 }

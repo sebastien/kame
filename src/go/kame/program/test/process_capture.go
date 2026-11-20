@@ -32,13 +32,13 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 			} else if scope == 2 {
 				definition, value = "probe = "+value+"\n", "probe"
 			}
-			body := "\tlet captured = " + value + "\n"
+			body := "\tlet captured = " + value + "\n\t/bin/sh -c \"printf x >> recipe-log\"\n"
 			if kind == 0 {
-				body += "\t(yield! captured)\n"
+				body += "\treturn captured\n"
 			} else {
-				body += "\t(yield! captured.stdout)\n"
+				body += "\treturn captured.stdout\n"
 			}
-			source := definition + "./output : ./input ; {shell: kash}\n" + body + "\t/bin/sh -c \"printf x >> recipe-log\"\n"
+			source := definition + "rule ./output : ./input\n" + body
 			captureLog, recipeLog := "", ""
 			phases := 4
 			if scope == 2 {
@@ -53,7 +53,7 @@ func TestRecipeCapturesReuseDeclaredInputsAcrossInvocations(t *testing.T) {
 					t.Fatal("input write failed")
 					return
 				}
-				parsed := script.Parse(a, "capture.kmk", source)
+				parsed := script.ParseKameFile(a, "capture.km", source)
 				registry := eval.NewRegistry(a)
 				operations.Register(registry)
 				compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, ResolveTool: posix.ResolveTool, Grants: []eval.Grant{{Capability: eval.Run}, {Capability: eval.Read, Names: []string{"."}}, {Capability: eval.Write, Names: []string{"."}}}})
@@ -93,7 +93,7 @@ func TestTypedCaptureRepeatedCompletionOwnsBothStreams(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "capture.km", "probe = (capture! {stdout: true, stderr: true} :accept-exit [1] \"/bin/sh\" \"-c\" \"printf out; printf err >&2; exit 1\")\n")
+	parsed := script.ParseKameFile(a, "capture.km", "probe = (capture! {stdout: true, stderr: true} :accept-exit [1] \"/bin/sh\" \"-c\" \"printf out; printf err >&2; exit 1\")\n")
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Grants: []eval.Grant{{Capability: eval.Run}}})
 	if compiled.Program == nil {
 		t.Fatal("compile typed capture")

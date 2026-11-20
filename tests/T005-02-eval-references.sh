@@ -28,27 +28,29 @@ diag() { # EXPR CODE
 }
 
 test-step "field and index references"
-evaluates '(let [r [a: 1 b: 2]] r.a)' '1'
-evaluates '(let [r [a: 1 b: 2]] r.b)' '2'
-evaluates '(let [l [10 20 30]] l.0)' '10'
-evaluates '(let [l [10 20 30]] l.2)' '30'
-evaluates '(let [l [10 20 30]] l.-1)' '30'
+evaluates '(r => r.a) {a: 1, b: 2}' '1'
+evaluates '(r => r.b) {a: 1, b: 2}' '2'
+evaluates '(l => l.0) [10, 20, 30]' '10'
+evaluates '(l => l.2) [10, 20, 30]' '30'
+evaluates '(l => l.-1) [10, 20, 30]' '30'
 
-test-step "slice references"
-evaluates '(let [l [1 2 3]] l.1..3)' '[2 3]'
-evaluates '(let [s "abc"] s.1..3)' '"bc"'
-evaluates '(let [l [1 2 3]] l.0..0)' '[]'
+test-step "slices use the slice operation"
+evaluates 'slice 1 3 [1, 2, 3]' '[2, 3]'
+evaluates 'slice 1 3 "abc"' '"bc"'
+evaluates 'slice 0 0 [1, 2, 3]' '[]'
+diag '(l => l.1..3) [1, 2, 3]' 'PARSE_ERR'
 
-test-step "selection references"
-evaluates '(let [r [host: "x" port: 80]] r.{host,port})' '[host: "x" port: 80]'
-evaluates '(let [r [host: "x" port: 80]] r.{port})' '[port: 80]'
+test-step "selected fields can form a record"
+evaluates '(r => {host: r.host, port: r.port}) {host: "x", port: 80}' '{host: "x", port: 80}'
+evaluates '(r => {port: r."port number"}) {"port number": 80}' '{port: 80}'
+diag '(r => r.{port}) {host: "x", port: 80}' 'PARSE_ERR'
 
 test-step "reference diagnostics"
-diag '(let [l [1 2 3]] l.nope)' 'REF_MISSING'
-diag '(let [r [a: 1]] r.b)' 'REF_MISSING'
-diag '(let [l [1 2 3]] l.9)' 'SEL_INDEX_INVALID'
+diag '(l => l.nope) [1, 2, 3]' 'REF_MISSING'
+diag '(r => r.b) {a: 1}' 'REF_MISSING'
+diag '(l => l.9) [1, 2, 3]' 'SEL_INDEX_INVALID'
 diag 'unknown-symbol' 'REF_MISSING'
-diag '(@<)' 'SEL_NO_CONTEXT'
-evaluates '(join "-" @*)' '""'
+diag 'captures' 'SEL_NO_CONTEXT'
+evaluates 'join "-" args' '""'
 
 test-end

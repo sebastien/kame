@@ -5,7 +5,8 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-07 Kash terminal graph telemetry parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/metrics"
 mkdir -p "$work"
@@ -13,13 +14,12 @@ mkdir -p "$work"
 run_graph() {
 	local name="$1" body="$2" directory="$work/$backend-$1" status=0
 	mkdir -p "$directory"
-	cat >"$directory/Makefile.kmk" <<KMK
-SHELL = kash
-probe :
-	result = ((kash """$body"""))
+	cat >"$directory/Makefile.km" <<KM
+task probe
+	let result = \$?($body)
 	(out! (json result.graph))
-KMK
-	timeout 30 "${command[@]}" -C "$directory" -f ./Makefile.kmk probe >"$directory/graph.json" 2>"$directory/error" || status=$?
+KM
+	timeout 30 "${command[@]}" -C "$directory" probe >"$directory/graph.json" 2>"$directory/error" || status=$?
 	if [ "$status" -eq 0 ]; then test-ok "$backend $name completed"; else test-fail "$backend $name status $status: $(cat "$directory/error")"; fi
 	if node --input-type=module - "$directory/graph.json" "$name" <<'NODE'
 import assert from 'node:assert/strict';
@@ -76,7 +76,7 @@ NODE
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	test-step "$backend: terminal node outcomes and payload-only counters"
 	run_graph lossless 'printf "a\nbb\nlast" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)'
 	run_graph direct '(printf abc | cat, printf def) |(merge) cat > ./output'
@@ -93,11 +93,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmdirSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const { Kame } = await import('./dist/kame.js');
+const { Kame } = await import(process.env.KAME_TEST_WASM_WRAPPER);
 const directory = mkdtempSync(join(tmpdir(), 'kame-metrics-'));
-const kame = await Kame.create();
-const source = 'SHELL = kash\nprobe :\n\tresult = ((kash """printf "x\\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)"""))\n\t(out! (json result.graph))\n';
-const program = await kame.compile(source, { name: 'metrics.kmk' });
+const kame = await Kame.create({ wasmPath: process.env.KAME_WASM });
+const source = 'task probe\n\tlet result = $?(printf "x\\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right))\n\t(out! (json result.graph))\n';
+const program = await kame.compile(source, { name: 'metrics.km' });
 const prototype = Object.getPrototypeOf(program.module), complete = prototype.completeJSON;
 let mutate, calls = 0;
 prototype.completeJSON = function (instance, request, value) {

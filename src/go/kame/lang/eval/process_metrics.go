@@ -52,7 +52,9 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 	}
 	if !valid {
 		result.Free(a)
-		return failure(a, "HOST_FAIL", graph.Span, "host returned invalid process edge telemetry")
+		invalid := failure(a, "HOST_FAIL", graph.Span, "host returned invalid process edge telemetry")
+		invalid.Diagnostic.Protected = true
+		return invalid
 	}
 	var nodes, edges []core.Value
 	stages := host.PayloadStages(completion)

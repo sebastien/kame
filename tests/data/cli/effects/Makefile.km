@@ -1,0 +1,14 @@
+# Publication and effect fixtures (specs 006 and 007).
+rule ./yield.out = "declared content"
+rule ./dynamic-yield.out = str (count (wildcard ./src/*.c))
+
+rule ./conflict.out ; {shell: "/bin/sh"}
+	@{write! ./conflict.out "declared"}
+	echo command
+
+rule ./write.out
+	(write! ./generated.txt "written payload")
+	(write! (first outputs) "done\n")
+
+task yielded-task
+	return "not allowed"

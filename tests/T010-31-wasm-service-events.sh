@@ -10,28 +10,68 @@ test-start "T010-31 service lifecycle event parity"
 cd "$CLI_ROOT"
 
 test-step "build native and wasm CLIs"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then
+	wasm_cli="$CLI_ROOT/src/js/kame.js"
+else
+	make dist-wasm >/dev/null
+	wasm_cli="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
-cat >"$work/Makefile.kmk" <<'EOF_MAKE'
-service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000] health: [argv: ["true"] interval-ms: 50 failures: 2] restart: [attempts: 1 backoff-ms: 10] stop: [grace-ms: 0]]
-	if [ ! -f first-start ]; then touch first-start; exit 1; fi; touch ready-marker; while :; do sleep 1; done
-consumer : daemon
+work="$TMPDIR/service-events"
+mkdir -p "$work"
+cat >"$work/Makefile.km" <<'EOF_MAKE'
+service daemon {marker=ready-marker} ; {
+	shell: "sh",
+	ready: {argv: ["test", "-f", marker], interval-ms: 10, timeout-ms: 3000},
+	health: {argv: ["true"], interval-ms: 50, failures: 2},
+	restart: {attempts: 1, backoff-ms: 10},
+	stop: {grace-ms: 0},
+}
+	if [ ! -f first-start ]; then touch first-start; exit 1; fi; touch @{marker}; while :; do sleep 1; done
+task consumer : daemon
 	sleep 0.2
+EOF_MAKE
+
+invalid="$work/invalid"
+mkdir -p "$invalid"
+cat >"$invalid/Makefile.km" <<'EOF_MAKE'
+task prepare :
+	touch forbidden-prepare
+service daemon : prepare ; {ready: {argv: ["true"], interval-ms: true}}
+	touch forbidden-service
+task default : daemon
 EOF_MAKE
 
 for host in native wasm; do
 	if [ "$host" = native ]; then
 		cli=("$CLI_BIN")
 	else
-		cli=(node "$CLI_ROOT/dist/kame.js")
+		cli=(node "$wasm_cli")
+	fi
+	(cd "$work" && "${cli[@]}" do plan --json daemon marker=alternate-ready) >"$work/$host.plan"
+	if jq -e 'any(.producers[]; .arguments.marker == "alternate-ready")' "$work/$host.plan" >/dev/null && [ ! -e "$work/alternate-ready" ]; then
+		test-ok "$host exposes the service argument override without starting the service"
+	else
+		test-fail "$host service argument planning"
 	fi
 	rm -f "$work/first-start" "$work/ready-marker"
 	(cd "$work" && timeout 10 "${cli[@]}" --json consumer) >"$work/$host.jsonl" 2>"$work/$host.json.err"
 	rm -f "$work/first-start" "$work/ready-marker"
 	(cd "$work" && timeout 10 "${cli[@]}" consumer) >"$work/$host.out" 2>"$work/$host.human.err"
+	status=0
+	(cd "$invalid" && timeout 10 "${cli[@]}" --json default) >"$work/$host.invalid.jsonl" 2>"$work/$host.invalid.err" || status=$?
+	if [ "$status" = 1 ] && [ ! -e "$invalid/forbidden-prepare" ] && [ ! -e "$invalid/forbidden-service" ] &&
+		jq -es --rawfile source "$invalid/Makefile.km" '
+			all(.[]; .type != "process-started") and
+			any(.[]; .type == "diagnostic" and (.diagnostic | .code == "EXPR_INVALID" and
+				(.source | endswith("Makefile.km")) and
+				(.span as $span | $source[$span.start:$span.end] | contains("interval-ms: true"))))
+		' "$work/$host.invalid.jsonl" >/dev/null; then
+		test-ok "$host rejects invalid settings at the authored span before provisioning"
+	else
+		test-fail "$host invalid service settings: status=$status $(cat "$work/$host.invalid.err")"
+	fi
 done
 
 for host in native wasm; do

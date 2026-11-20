@@ -7,7 +7,7 @@ test-step "build native and WASM runners"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 status=0
 for backend in native wasm; do
 	test-step "$backend computed output acceptance"

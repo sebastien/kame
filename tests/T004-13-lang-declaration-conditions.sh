@@ -7,7 +7,7 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 for backend in native wasm; do
  test-step "$backend selects declarations before loading includes or effects"
  if python3 "$CLI_ROOT/tests/declaration-conditions.py" "$CLI_ROOT" "$backend" "$CLI_BIN"; then

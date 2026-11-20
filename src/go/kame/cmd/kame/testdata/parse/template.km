@@ -1,1 +1,7 @@
+@if name
 hello @{name}
+@else
+@raw
+hello @{name}
+@end raw
+@end if

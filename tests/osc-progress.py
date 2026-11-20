@@ -64,14 +64,14 @@ def run(root: Path, runner: list[str], args: list[str], *, terminal: bool = True
 def check(root: Path, runner: list[str]) -> None:
 	root.mkdir()
 	(root / 'seed').write_text('seed')
-	(root / 'Makefile.kmk').write_text('''default : ./one ./two
-./one : ./seed
-	sleep .5; cp @< @>
-./two : ./seed
-	sleep .5; cp @< @>
-fail :
+	(root / 'Makefile.km').write_text('''task default : ./one ./two
+rule ./one : ./seed
+	sleep .5; cp $inputs.0 $outputs.0
+rule ./two : ./seed
+	sleep .5; cp $inputs.0 $outputs.0
+task fail :
 	sleep .1; exit 1
-wait :
+task wait :
 	sleep 60
 ''')
 	status, output, cold = run(root, runner, ['default'])

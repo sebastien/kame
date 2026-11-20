@@ -126,7 +126,7 @@ func (p *Program) selectRule(target string) selection {
 					if file {
 						mem.FreeString(p.Alloc, target)
 					}
-					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[k].Output, output)}
+					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[k], producerCandidate{Rule: r, Output: output})}
 				}
 			}
 			candidates = append(candidates, producerCandidate{Rule: r, Output: output, Captures: cloneCaptures(p.Alloc, match.Captures)})
@@ -154,7 +154,7 @@ func (p *Program) selectRule(target string) selection {
 			continue
 		}
 		if winner >= 0 && (candidates[winner].Rule != candidates[i].Rule || !sameCaptures(candidates[winner].Captures, candidates[i].Captures)) {
-			return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[winner].Output, candidates[i].Output)}
+			return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[winner], candidates[i])}
 		}
 		winner = i
 	}

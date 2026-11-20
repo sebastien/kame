@@ -7,8 +7,7 @@ CLI build; older installed versions may use earlier syntax.
 commands?
 
 This project publishes two notes as uppercase text pages, each with a shared
-banner, and assembles them into an index. It needs only `mkdir`, `cat`, `tr`,
-`echo`, and `grep`; no publishing toolchain or downloaded dependencies.
+banner, and assembles them into an index. Its recipes use `cat`, `tr`, `echo`, and `grep`.
 
 Run these commands from this directory with `kame` on PATH, or substitute the
 absolute path to the repository's `build/kame.debug`.
@@ -42,7 +41,7 @@ kame check
 ```
 
 The first build prints `rendered` for the remaining page and `assembled` for
-the index. The second build prints neither: file outputs are current. The bare
+the index. The second build prints neither: file outputs are current. The named
 `check` task runs whenever requested, while its file prerequisite can stay fresh.
 
 **Understand:** `./public/hello.txt` is a file artifact; `check` is an action.
@@ -62,20 +61,19 @@ The examples' regression test performs these experiments in temporary copies.
 `notes/index.txt` is reserved: its output would collide with the assembled
 `public/index.txt`. The `pages` definition rejects it with an explicit error.
 
-`sources` is a value. `pages` transforms that value. The index's rule header
-uses the result as dependencies. `{name}` connects each output to its source;
-`@<` and `@>` supply the first input and first output. The index also evaluates
-`@{pages}` in its recipe, so changes to the page set change the rendered command
-as well as the declared dependencies. `@<*` is the shorthand for all inputs;
-the explicit value here makes the changing set part of the recipe too.
+`sources` is a value. `pages` transforms that value. In the index's `rule`
+header, `(index-path)` computes the output and `${pages}` expands the path list
+into dependencies. `{name}` connects
+each output to its source. In a Kash recipe, `$inputs.0` and `$outputs.0` pass
+the first input and output paths. The index passes every dependency to `cat`
+with `$...inputs`, so adding a page changes both the graph and the command's
+argument list.
 
 **Understand:** A computed value can determine the shape of the work graph.
 
 ## The language boundary
 
-Rule recipes currently run as one ordinary shell script. They are not Kash.
-`@{ref}` reads a binding and `@(function args...)` evaluates a call; shell
-redirection and `tr` remain
-shell operations. See [Kash](../../kash/README.md) for the independent process
-language, or [composition](../../composition/publication/README.md) for the
-shared value program and rule file.
+The rule headers describe dependencies, and the Kash recipes describe the
+commands that produce the files. See [Kash](../../kash/README.md) for standalone
+process lessons, or [composition](../../composition/publication/README.md) to
+share the publication definitions with a rule file.

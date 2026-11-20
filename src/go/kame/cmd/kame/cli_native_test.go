@@ -28,7 +28,7 @@ func (in *input) Read(out []byte) (int, error) {
 func TestParseASTGoldens(t *testing.T) {
 	// The partial AST error envelope is checked directly in compiled native
 	// code; the public CLI intentionally emits a diagnostic event on failure.
-	tests := []struct{ lang, name string }{{"expr", "expr"}, {"template", "template"}, {"rule", "rule"}, {"script", "script"}}
+	tests := []struct{ lang, name string }{{"expr", "expr"}, {"template", "template"}, {"km", "rule"}, {"kash", "action"}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			text, readErr := os.ReadFile("testdata/parse/" + test.name + ".km")
@@ -81,8 +81,8 @@ func TestParseASTPreservesTemplateAndExpressionSpans(t *testing.T) {
 	tests := []struct {
 		lang, text, want string
 	}{
-		{"rule", "rule \"./{x}\" : input", "\"span\":{\"start\":8,\"end\":11}"},
-		{"script", "value = \"\"", "\"expression\":{\"kind\":\"string\",\"span\":{\"start\":8,\"end\":10},\"parts\":[]}"},
+		{"km", "rule \"./{x}\" : input", "\"span\":{\"start\":8,\"end\":11}"},
+		{"km", "value = \"\"", "\"expression\":{\"kind\":\"string\",\"span\":{\"start\":8,\"end\":10},\"parts\":[]}"},
 	}
 	for _, test := range tests {
 		t.Run(test.lang, func(t *testing.T) {
@@ -145,12 +145,12 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "hello @if(true)yes@end world"}, &out, &errOut); status != 0 || out.String() != "hello @if(true)yes@end(if) world" || errOut.Len() != 0 {
+	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "hello @if true yes@end world"}, &out, &errOut); status != 0 || out.String() != "hello @if true yes@end world" || errOut.Len() != 0 {
 		t.Errorf("template format stdin status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "ok\n@end(if)"}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "<stdin>:2:1") || !strings.Contains(errOut.String(), "error[TPL_BLOCK]:") {
+	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "ok\n@end if"}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "<stdin>:2:1") || !strings.Contains(errOut.String(), "error[TPL_BLOCK]:") {
 		t.Errorf("template format diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -204,7 +204,7 @@ func TestPlanProducerDetailsAreConciseUnlessVerbose(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "plan", "--verbose", "-c", source, "./out"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), "freshness: unknown") || !strings.Contains(out.String(), "captures") || !strings.Contains(out.String(), "tools") {
+	if status := runNativeCLI(t, []string{"do", "plan", "--verbose", "-c", source, "./out"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), "freshness: unknown") || !strings.Contains(out.String(), "captures") || strings.Contains(out.String(), "tools") {
 		t.Errorf("verbose plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -232,7 +232,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" @*)", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" args)", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
 		t.Errorf("expr args status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -247,8 +247,9 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(yield! \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generatednil" || errOut.Len() != 0 {
-		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	removed := "yield" + "!"
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", removed + " \"generated\""}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "OP_UNKNOWN") {
+		t.Errorf("unknown operation status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
 
@@ -402,7 +403,7 @@ func TestJSONDiagnosticUsesStdout(t *testing.T) {
 func TestSpanExpandReportsExpressionInputs(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	source := "SOURCE = ./input\ntask build : @{SOURCE}\n\ttrue\n"
+	source := "SOURCE = ./input\ntask build : ${SOURCE}\n\ttrue\n"
 	if status := runNativeCLI(t, []string{"do", "span", "--json", "--expand", "-c", source, "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"static":{"inputs":[],"outputs":["build"]}`) || !strings.Contains(out.String(), `"dynamic":["./input"]`) || !strings.Contains(out.String(), `"expanded":true`) {
 		t.Errorf("expanded span status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -470,11 +471,11 @@ func TestRepeatedNativeCLICommandResults(t *testing.T) {
 		{[]string{"-c", "task first\ntask second"}, 1},
 		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
 		{[]string{"do", "plan", "-c", "task build\n\techo ignored", "build"}, 0},
-		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @{SOURCE}\n\ttrue", "build"}, 0},
+		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : ${SOURCE}\n\ttrue", "build"}, 0},
 		{[]string{"do", "fmt", "--lang", "expr"}, 0},
 		{[]string{"--shell", "/bin/sh", "--env", "KM_TEST=value", "--unknown"}, 2},
 		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "--unknown"}, 2},
-		{[]string{"do", "fmt", "-i", "-n", "source.kmk"}, 2},
+		{[]string{"do", "fmt", "-i", "-n", "source.km"}, 2},
 		{[]string{"do", "inputs", "build", "--depth", "invalid"}, 2},
 	}
 	for iteration := 0; iteration < 64; iteration++ {
@@ -484,5 +485,115 @@ func TestRepeatedNativeCLICommandResults(t *testing.T) {
 				t.Fatalf("iteration %d args=%q status=%d want=%d stdout=%q stderr=%q", iteration, test.args, status, test.status, out.String(), errOut.String())
 			}
 		}
+	}
+}
+
+func TestTemplateRenderDispatchAndRelativeIncludes(t *testing.T) {
+	dir := t.TempDir()
+	pageDir := filepath.Join(dir, "pages")
+	if err := os.MkdirAll(filepath.Join(pageDir, "parts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(dir, "row.html"), "wrong directory")
+	nativeCLIWrite(t, filepath.Join(pageDir, "row.html"), "@{name}")
+	nativeCLIWrite(t, filepath.Join(pageDir, "parts", "nested.html"), "<!-- @include ../row.html -->")
+	nativeCLIWrite(t, filepath.Join(pageDir, "page.kmt"), `@include (str "parts/" "nested.html") {name: "Ada"}`)
+	nativeCLIWrite(t, filepath.Join(pageDir, "cycle.kmt"), "@include ./parts/../cycle.kmt")
+	nativeCLIWrite(t, filepath.Join(dir, "inline.txt"), "./pages/row.html")
+	nativeCLIWrite(t, filepath.Join(dir, "invalid.txt"), "\xff")
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+		code string
+	}{
+		{"path-looking string", []string{"run", "--lang", "expr", "-c", `render "./pages/row.html"`}, `"./pages/row.html"`, ""},
+		{"bytes default to plain", []string{"run", "--lang", "expr", "--allow-read", "-c", `render (read ./inline.txt)`}, `"./pages/row.html"`, ""},
+		{"invalid bytes", []string{"run", "--lang", "expr", "--allow-read", "-c", `render (read ./invalid.txt)`}, "", "EXPR_INVALID"},
+		{"path with nested includes", []string{"run", "--lang", "expr", "--allow-read", "-c", `render ./pages/page.kmt`}, `"Ada"`, ""},
+		{"file entered through do render", []string{"render", "--allow-read", "./pages/page.kmt"}, "Ada", ""},
+		{"path needs read permission", []string{"run", "--lang", "expr", "-c", `render ./pages/page.kmt`}, "", "CAP_DENIED"},
+		{"cycle through normalized path", []string{"run", "--lang", "expr", "--allow-read", "-c", `render ./pages/cycle.kmt`}, "", "TPL_CYCLE"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			status := runNativeCLIIn(t, dir, append([]string{"do"}, test.args...), nil, &out, &errOut)
+			if test.code != "" {
+				if status != 1 || !strings.Contains(errOut.String(), test.code) || out.Len() != 0 {
+					t.Fatalf("status %d, stdout %q, stderr %q, want %s", status, out.String(), errOut.String(), test.code)
+				}
+			} else if status != 0 || out.String() != test.want {
+				t.Fatalf("status %d, stdout %q, stderr %q, want %q", status, out.String(), errOut.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestLibraryValueSourceRoundTripsAndEvalAuthority(t *testing.T) {
+	dir := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(dir, "sample"), "contents")
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), "rule ./output = eval 'out! \"blocked\"'\n")
+	cases := []struct {
+		name   string
+		source string
+		want   string
+		code   string
+	}{
+		{"nested values", `eval (fmt {name: [nil, true, -3, 2.0], "two words": {"": "value"}}) == {name: [nil, true, -3, 2.0], "two words": {"": "value"}}`, "true", ""},
+		{"float kind", `float? (eval (fmt 2.0))`, "true", ""},
+		{"negative zero kind", `float? (eval (fmt -0.0))`, "true", ""},
+		{"literal interpolation spelling", `eval (fmt '${missing} @ \ \"') == '${missing} @ \ \"'`, "true", ""},
+		{"path punctuation", `eval (fmt ./${"file[1]{?} @(test)"}) == ./${"file[1]{?} @(test)"}`, "true", ""},
+		{"rootless path", `eval (fmt (joinpath "base" ../name)) == (joinpath "base" ../name)`, "true", ""},
+		{"rooted path pattern", `get "name" (capture (eval (fmt ./src/{name:*}.c)) ./src/read.c) == "read"`, "true", ""},
+		{"rootless path pattern", `get "name" (capture (eval (fmt (pattern "{name:*}.c"))) "read.c") == "read"`, "true", ""},
+		{"path template", `bind (eval (fmt ./out/{name}.c)) {name: "read"} == ./out/read.c`, "true", ""},
+		{"qualified lexical eval", `(x => std/eval "x + 1") 41`, "42", ""},
+		{"returned closure retains generated AST", `(eval '(x => x + 1)') 41`, "42", ""},
+		{"nested runtime value", `fmt {item: [(x => x)]}`, "", "EXPR_INVALID"},
+		{"runtime rule value", `fmt (rule ./generated = 1)`, "", "EXPR_INVALID"},
+		{"declaration rejected", `eval 'let x = 1'`, "", "PARSE_ERR"},
+		{"second expression rejected before effects", `eval "out! \"unreached\"\n42"`, "", "PARSE_ERR"},
+		{"bare names never launch a command", `eval 'printf "unreached"'`, "", "OP_UNKNOWN"},
+		{"read grants retained", `eval 'read ./sample'`, "", "CAP_DENIED"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			args := []string{"do", "run", "--lang", "expr", "-c", test.source}
+			status := runNativeCLIIn(t, dir, args, nil, &out, &errOut)
+			if test.code != "" {
+				if status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), test.code) {
+					t.Fatalf("status %d, stdout %q, stderr %q, want %s", status, out.String(), errOut.String(), test.code)
+				}
+			} else if status != 0 || out.String() != test.want {
+				t.Fatalf("status %d, stdout %q, stderr %q, want %q", status, out.String(), errOut.String(), test.want)
+			}
+		})
+	}
+
+	var out, errOut bytes.Buffer
+	args := []string{"do", "run", "--lang", "expr", "--allow-read", "-c", `eval 'str (out! "once") (text (read ./sample))'`}
+	if status := runNativeCLIIn(t, dir, args, nil, &out, &errOut); status != 0 || out.String() != `once"oncecontents"` {
+		t.Fatalf("suspended read: status %d, stdout %q, stderr %q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLIIn(t, dir, []string{"./output"}, nil, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "PHASE_INVALID") {
+		t.Fatalf("rendering authority: status %d, stdout %q, stderr %q", status, out.String(), errOut.String())
+	}
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), "if true\n\tlet n = eval '40 + 2'\n\trule ./output = str n\n")
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLIIn(t, dir, []string{"./output"}, nil, &out, &errOut); status != 0 || nativeCLIRead(filepath.Join(dir, "output")) != "42" {
+		t.Fatalf("declaration evaluation: status %d, stdout %q, stderr %q", status, out.String(), errOut.String())
+	}
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), "if true\n\tlet content = eval 'read ./sample'\n\trule ./output = content\n")
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLIIn(t, dir, []string{"--allow-read", "./output"}, nil, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "PHASE_INVALID") {
+		t.Fatalf("declaration authority: status %d, stdout %q, stderr %q", status, out.String(), errOut.String())
 	}
 }

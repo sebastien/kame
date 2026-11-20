@@ -18,20 +18,20 @@ evaluates() {
 test-step "direct argv, quoting, typed expansions and nested parser boundaries"
 evaluates '$(printf "%s" "John Smith")' '"John Smith"'
 evaluates '$(printf "[%s]" "" "*.go" "a; echo injected")' '"[][*.go][a; echo injected]"'
-evaluates '(let [files ["a b" "c"]] $(printf "[%s]" $files))' '"[a b][c]"'
-evaluates '(let [name "unit"] $(printf "%s" ${name}.c))' '"unit.c"'
+evaluates '((files => $(printf "[%s]" $...files)) ["a b", "c"])' '"[a b][c]"'
+evaluates '((name => $(printf "%s" ${name}.c)) "unit")' '"unit.c"'
 evaluates '$(printf "%s" (str "a" "b"))' '"ab"'
-evaluates '$(printf "[%s]" (nop ["a b" "c"]))' '"[a b][c]"'
-evaluates '$(printf "%s" ("a" | uppercase))' '"A"'
+evaluates '((files => $(printf "[%s]" $...files)) (concat ["a b"] ["c"]))' '"[a b][c]"'
+evaluates '$(printf "%s" ("a" |> uppercase))' '"A"'
 evaluates '$(printf "%s" $(printf nested))' '"nested"'
 evaluates '(str $(printf a) $(printf b))' '"ab"'
 evaluates '(str (eval "$(printf a)") (eval "$(printf b)"))' '"ab"'
-evaluates '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' '"ab"'
-evaluates '(map ([x] $(printf "%s" $x)) ["a" "b"])' '["a" "b"]'
-evaluates '[name: $(printf record)]' '[name: "record"]'
+evaluates '((f => str (f "a") (f "b")) (x => $(printf "%s" $x)))' '"ab"'
+evaluates '(map (x => $(printf "%s" $x)) ["a", "b"])' '["a", "b"]'
+evaluates '{name: $(printf record)}' '{name: "record"}'
 evaluates '"$(printf literal)"' '"$(printf literal)"'
-evaluates '(if :false $(no-such-executable-kash) "selected")' '"selected"'
-evaluates '$(printf "one\ntwo\n")' '"one\ntwo\n"' 
+evaluates '(if false then $(no-such-executable-kash) else "selected")' '"selected"'
+evaluates '$(printf "one\ntwo\n")' '"one\ntwo\n"'
 evaluates '$(printf "")' '""'
 evaluates $'$(printf "[%s]" a \\\n b)' '"[a][b]"'
 
@@ -47,7 +47,7 @@ cli_expect_stderr_contains RECIPE_FAIL
 cli_run -- do run --lang expr --allow-run -c '$(no-such-executable-kash)'
 cli_expect_status 1
 cli_expect_stderr_contains TOOL_MISSING
-cli_run -- do run --lang expr --allow-run -c '(let [files ["a"]] $(printf "%s" "$files"))'
+cli_run -- do run --lang expr --allow-run -c '((files => $(printf "%s" "$files")) ["a"])'
 cli_expect_status 1
 cli_expect_stderr_contains EXPR_INVALID
 cli_run -- do run --lang expr --allow-run -c '$(printf "\\377")'
@@ -95,18 +95,18 @@ marker="$TMPDIR/capture-marker"
 expression="(str \$(sh -c \"printf x >> '$marker'; printf a\") \$(printf b))"
 evaluates "$expression" '"ab"'
 if [ "$(cat "$marker")" = x ]; then test-ok "completed substitution was not replayed"; else test-fail "substitution was replayed"; fi
-expression="(map ([x] \$(sh -c \"printf x >> '$marker'; printf a\")) [1 1])"
-evaluates "$expression" '["a" "a"]'
+expression="(map (x => \$(sh -c \"printf x >> '$marker'; printf a\")) [1, 1])"
+evaluates "$expression" '["a", "a"]'
 if [ "$(cat "$marker")" = xxx ]; then test-ok "identical callback arguments have distinct executions"; else test-fail "callback execution identity was lost"; fi
 
 test-step "leading substitution RHS is a lazy Kame definition"
-source_file="$TMPDIR/capture.kmk"
+source_file="$TMPDIR/capture.km"
 printf '%s\n' 'revision = $(printf revision)' 'unused = $(no-such-executable-kash)' >"$source_file"
-cli_run -- -f "$source_file" revision
+cli_run -- --allow-run -f "$source_file" revision
 cli_expect_status 0
 cli_expect_stdout '"revision"'
 cli_expect_stderr_empty
-cli_run -- --capture-limit=3 -f "$source_file" revision
+cli_run -- --allow-run --capture-limit=3 -f "$source_file" revision
 cli_expect_status 1
 cli_expect_stdout ''
 cli_expect_stderr_contains CAPTURE_LIMIT

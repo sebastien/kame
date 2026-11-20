@@ -4,11 +4,11 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-22 Kash deferred cleanup"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_cli"); fi
 	check() {
 		local expected="$1" text="$2" code="${3:-}" status=0
 		timeout -k 2 15 "${runner[@]}" do run -C "$work" --allow-run --allow-read --allow-write -l kash -c "$text" >"$work/out" 2>"$work/err" || status=$?
@@ -22,22 +22,22 @@ for backend in native wasm; do
 	check bodyAB 'defer (printf A, sh -c "sleep .05; printf B") |(merge :buffer 1) cat; printf body'
 	check bodyAA 'defer printf A |(broadcast) (cat, cat); printf body'
 	check $'bodyA\n' 'defer printf "A\n" |(frame :lines) |(each) cat; printf body'
-	check $'bodyA\n' 'defer printf "A\n" |(frame :lines) |(filter :true | cat) | cat; printf body'
+	check $'bodyA\n' 'defer printf "A\n" |(frame :lines) |(filter true | cat) | cat; printf body'
 	check bodyA $'stream cleanup\ndefer (printf A >&cleanup, &cleanup | cat)\nprintf body'
 	check bodyA 'defer cat <(printf A); printf body'
-	check 'bodybranchlast' $'defer printf last\nif true\n  value = "branch"\n  defer (out! value)\nelse\n  defer printf forbidden\nprintf body'
-	check bodyinnerafterouter 'nested = (kash "defer printf inner; printf body"); defer printf outer; (nested); printf after'
+	check 'bodybranchlast' $'defer printf last\nif true\n  let value = "branch"\n  defer (out! value)\nelse\n  defer printf forbidden\nprintf body'
+	check bodyinnerafterouter $'def nested ()\n\tdefer printf inner\n\tprintf body\ndefer printf outer\n(nested ())\nprintf after'
 	check AB 'defer printf "%s" (str $(printf A) $(printf B))'
-	check once 'defer (let [] (out! "once") (run! :async :true "true"))'
-	check bodyfinallyafterouter 'defer printf outer; (finally! ([] (out! "body")) ([] (out! "finally"))); printf after'
-	check bodykashfinallyouter 'nested = (kash "defer printf kash; printf body"); defer printf outer; (finally! ([] (nested)) ([] (out! "finally")))'
+	check once $'def once ()\n\tout! "once"\n\t(run! :async true "true")\ndefer (once ())'
+	check bodyfinallyafterouter 'defer printf outer; (finally! (() => out! "body") (() => out! "finally")); printf after'
+	check bodykashfinallyouter $'def nested ()\n\tdefer printf kash\n\tprintf body\ndefer printf outer\n(finally! nested (() => out! "finally"))'
 	printf previous >"$work/redirection"
 	check previous 'defer printf replaced > ./redirection; cat < ./redirection'
 	if [ "$(cat "$work/redirection")" = replaced ]; then test-ok "$backend redirection opens only at cleanup"; else test-fail "$backend deferred redirection"; fi
 	printf before >"$work/value"
 	check afterbefore 'defer printf "%s" (text (read ./value)); defer (out! (text (read ./value))); (write! ./value "after")'
 	# printenv adds an LF; compare exactly rather than stripping captures.
-	check $'parentchild\n' 'defer :MODE child printenv MODE; printf parent'
+	check $'parentchild\n' 'defer MODE: child printenv MODE; printf parent'
 	check cleanup 'defer printf cleanup; false' RECIPE_FAIL
 	check last 'defer printf last; defer false' RECIPE_FAIL
 	check last 'defer printf last; defer (fail! "cleanup failure"); (fail! "primary failure")' USER_ERROR
@@ -57,16 +57,15 @@ for backend in native wasm; do
 	check backgroundcleanup 'defer printf cleanup; sh -c "sleep .05; printf background" &'
 	test-step "$backend temporary cleanup preserves unrelated files"
 	printf keep >"$work/unrelated"
-	check '' 'unused = $(mktemp -d ./owned.XXXXXX)'
-	check '' 'directory = (strip $(mktemp -d ./owned.XXXXXX)); defer rm -rf $directory; touch ${directory}/partial; false' RECIPE_FAIL
+	check '' 'def unused = $(mktemp -d ./owned.XXXXXX)'
+	check '' 'let directory = (strip $(mktemp -d ./owned.XXXXXX)); defer rm -rf $directory; touch ${directory}/partial; false' RECIPE_FAIL
 	if [ "$(cat "$work/unrelated")" = keep ] && ! compgen -G "$work/owned.*" >/dev/null; then test-ok "$backend removes only authored temporary workspace"; else test-fail "$backend temporary ownership example"; fi
 	test-step "$backend deferred cleanup in direct Kash recipes"
-	cat >"$work/Makefile.kmk" <<'KMK'
-SHELL = kash
-good :
+	cat >"$work/Makefile.km" <<'KMK'
+task good
 	defer printf cleanup
 	printf body
-bad :
+task bad
 	defer (write! ./recipe-cleaned "yes")
 	false
 KMK

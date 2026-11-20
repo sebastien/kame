@@ -16,12 +16,9 @@ type forwardEffectsState struct {
 	Commands   string
 	Effects    []eval.Effect
 	WritePaths []string
-	Yielded    []byte
 	Index      int
 	WriteIndex int
 	Pending    bool
-	YieldSent  bool
-	HasYield   bool
 }
 
 func (p *Program) freeForwardEffects(state *forwardEffectsState) {
@@ -31,7 +28,6 @@ func (p *Program) freeForwardEffects(state *forwardEffectsState) {
 	mem.FreeString(p.Alloc, state.Commands)
 	eval.FreeEffects(p.Alloc, state.Effects)
 	freeStrings(p.Alloc, state.WritePaths)
-	mem.FreeSlice(nil, state.Yielded)
 	mem.Free(p.Alloc, state)
 }
 
@@ -70,35 +66,30 @@ func (p *Program) continueForwardEffects(c *core.EngineContext, index int) core.
 					p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, effect.Data, p.Options.CacheRetainBytes)
 				}
 			}
-		} else if effect.Kind == eval.EffectYield {
-			for i := range effect.Data {
-				state.Yielded = append(state.Yielded, effect.Data[i])
+		} else if effect.Kind == eval.EffectWrite || effect.Kind == eval.EffectPublication {
+			var name string
+			if effect.Kind == eval.EffectPublication {
+				name = entry.Plan.Outputs[0]
+			} else {
+				if state.WriteIndex >= len(state.WritePaths) {
+					p.freeForwardEffects(state)
+					entry.ForwardEffects = nil
+					p.failRule(c, index, failure(p.Alloc, "FS_ERR", "missing write path"))
+					return core.ProducerFailed
+				}
+				name = state.WritePaths[state.WriteIndex]
+				state.WriteIndex++
 			}
-		} else if effect.Kind == eval.EffectWrite {
-			if state.WriteIndex >= len(state.WritePaths) {
-				p.freeForwardEffects(state)
-				entry.ForwardEffects = nil
-				p.failRule(c, index, failure(p.Alloc, "FS_ERR", "missing write path"))
-				return core.ProducerFailed
-			}
-			name := state.WritePaths[state.WriteIndex]
-			state.WriteIndex++
 			p.submitEffectWrite(c, name, effect.Data)
 			state.Pending = true
 			return core.ProducerSubmitted
 		}
 	}
-	if state.HasYield && !state.YieldSent {
-		state.YieldSent = true
-		state.Pending = true
-		p.submitEffectWrite(c, entry.Plan.Outputs[0], state.Yielded)
-		return core.ProducerSubmitted
-	}
-	commands, yielded := state.Commands, state.HasYield
+	commands := state.Commands
 	state.Commands = ""
 	p.freeForwardEffects(state)
 	entry.ForwardEffects = nil
-	return p.finishRecipe(c, index, commands, yielded)
+	return p.finishRecipe(c, index, commands)
 }
 
 func (p *Program) submitEffectWrite(c *core.EngineContext, name string, data []byte) {

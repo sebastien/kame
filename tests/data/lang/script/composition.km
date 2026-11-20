@@ -3,7 +3,7 @@ SOURCES = [./src/a.c, ./src/b.c]
 
 task default : ./app
 
-rule ./app : @{wildcard ./src/*.c}
+rule ./app : ${wildcard ./src/*.c}
 	cc -o $outputs.0 $...inputs
 
 def version () = VERSION

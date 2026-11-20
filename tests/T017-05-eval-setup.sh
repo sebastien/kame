@@ -6,7 +6,8 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-05 Kash stage setup parity"
 test-step "build artifacts"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/setup"
 mkdir -p "$work/left" "$work/right" "$work/left/bin"
@@ -30,59 +31,68 @@ check() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_wrapper"); fi
 	test-step "$backend: independent directories, environment and PATH"
-	check "\$(:cwd \"$work/left\" pwd)" 0 "\"$work/left\\n\"" ''
-	check "\$(:cwd \"$work/left\" cat < input | :cwd \"$work/right\" cat > output)" 0 '""' ''
+	check "\$(cwd: \"$work/left\" pwd)" 0 "\"$work/left\\n\"" ''
+	check "\$(cwd: \"$work/left\" cat < input | cwd: \"$work/right\" cat > output)" 0 '""' ''
 	if [ "$(cat "$work/right/output")" = left ]; then test-ok "$backend uses each endpoint cwd"; else test-fail "$backend ignored stage cwd"; fi
-	check "\$(< input :cwd \"$work/right\" cat)" 0 '"right"' ''
-	check "(let [dir \"$work/left\"] \$(:cwd \$dir :PATH bin ./bin/stage-print found))" 0 '"found"' ''
-	check '$(:KASH_SETUP_VALUE hello /usr/bin/printenv KASH_SETUP_VALUE)' 0 '"hello\n"' ''
-	check '$(:KASH_SETUP_VALUE left /usr/bin/printenv KASH_SETUP_VALUE | :KASH_SETUP_VALUE right /bin/sh -c "cat; printenv KASH_SETUP_VALUE")' 0 '"left\nright\n"' ''
-	check '(str $(:KASH_SETUP_VALUE one printenv KASH_SETUP_VALUE) $(:KASH_SETUP_VALUE two printenv KASH_SETUP_VALUE))' 0 '"one\ntwo\n"' ''
-	check '$(:KASH_SETUP_VALUE (nop :false) printenv KASH_SETUP_VALUE)' 0 '"false\n"' ''
-	check '$(:KASH_SETUP_VALUE "" printenv KASH_SETUP_VALUE)' 0 '"\n"' ''
-	check '$(printf "%s" :cwd :timeout :KASH_SETUP_VALUE)' 0 '":cwd:timeout:KASH_SETUP_VALUE"' ''
+	check "\$(< input cwd: \"$work/right\" cat)" 0 '"right"' ''
+	check "((dir => \$(cwd: \$dir PATH: bin ./bin/stage-print found)) \"$work/left\")" 0 '"found"' ''
+	check '$(KASH_SETUP_VALUE: hello /usr/bin/printenv KASH_SETUP_VALUE)' 0 '"hello\n"' ''
+	check '$(KASH_SETUP_VALUE: left /usr/bin/printenv KASH_SETUP_VALUE | KASH_SETUP_VALUE: right /bin/sh -c "cat; printenv KASH_SETUP_VALUE")' 0 '"left\nright\n"' ''
+	check '(str $(KASH_SETUP_VALUE: one printenv KASH_SETUP_VALUE) $(KASH_SETUP_VALUE: two printenv KASH_SETUP_VALUE))' 0 '"one\ntwo\n"' ''
+	check '$(KASH_SETUP_VALUE: (nop false) printenv KASH_SETUP_VALUE)' 0 '"false\n"' ''
+	check '$(KASH_SETUP_VALUE: "" printenv KASH_SETUP_VALUE)' 0 '"\n"' ''
+	check '$(printf "%s " cwd: timeout: KASH_SETUP_VALUE: :cwd)' 0 '"cwd: timeout: KASH_SETUP_VALUE: :cwd "' ''
 
 	test-step "$backend: validation and unchanged grants"
-	for expression in '$(:cwd "" pwd)' '$(:timeout 0 true)' '$(:timeout -1 true)' '$(:timeout NaN true)' '$(:timeout Infinity true)' '$(:timeout (nop [1]) true)' '$(:X (nop [1]) true)'; do
+	for expression in '$(cwd: "" pwd)' '$(timeout: 0 true)' '$(timeout: -1 true)' '$(timeout: NaN true)' '$(timeout: Infinity true)' '$(timeout: (nop [1]) true)' '$(X: (nop [1]) true)'; do
 		check "$expression" 1 '' EXPR_INVALID
 	done
-	for expression in '$(:cwd . :cwd . pwd)' '$(:X a :X b true)' '$(:async true true)'; do check "$expression" 1 '' PARSE_ERR; done
-	check "\$(:cwd \"$work/left\" cat < /etc/passwd > output)" 1 '' CAP_DENIED
+	for expression in '$(cwd: . cwd: . pwd)' '$(X: a X: b true)' '$(async: true true)'; do check "$expression" 1 '' PARSE_ERR; done
+	check '$(:cwd . pwd)' 1 '' PARSE_ERR
+	check "\$(cwd: \"$work/left\" cat < /etc/passwd > output)" 1 '' CAP_DENIED
 	printf '%s' sentinel >"$work/protected"
-	check "\$(:cwd \"$work/missing\" printf invalid > \"$work/protected\")" 1 '' HOST_FAIL
+	check "\$(cwd: \"$work/missing\" printf invalid > \"$work/protected\")" 1 '' HOST_FAIL
+	if grep -Fq "working directory \"$work/missing\" does not exist" "$work/stderr"; then test-ok "$backend names the missing stage directory"; else test-fail "$backend missing cwd diagnostic: $(cat "$work/stderr")"; fi
 	if [ "$(cat "$work/protected")" = sentinel ]; then test-ok "$backend validates cwd before truncation"; else test-fail "$backend truncated output on invalid cwd"; fi
-	printf '%s\n' 'result = (nop $(:timeout 100 sleep 5))' >"$work/policy.kmk"
+	check "\$(cwd: \"$work/protected\" pwd)" 1 '' HOST_FAIL
+	if grep -Fq "working directory \"$work/protected\" is not a directory" "$work/stderr"; then test-ok "$backend distinguishes a file from a missing cwd"; else test-fail "$backend file cwd diagnostic: $(cat "$work/stderr")"; fi
+	status=0
+	"${command[@]}" do run -C "$work" --allow-run --lang kash -c $'let repo = ./left\nwith cwd: repo\n\tpwd' >"$work/stdout" 2>"$work/stderr" || status=$?
+	if [ "$status" = 1 ] && grep -Fq "working directory \"$work/repo\" does not exist" "$work/stderr"; then test-ok "$backend diagnoses a literal scope cwd"; else test-fail "$backend scope cwd diagnostic: $(cat "$work/stderr")"; fi
+	"${command[@]}" do run -C "$work" --allow-run --lang kash -c $'let repo = ./left\nwith cwd: $repo\n\tpwd' >"$work/stdout" 2>"$work/stderr"
+	if [ "$(cat "$work/stdout")" = "$work/left" ]; then test-ok "$backend resolves a scope cwd reference"; else test-fail "$backend scope cwd reference"; fi
+	printf '%s\n' 'result = (nop $(timeout: 100 sleep 5))' >"$work/policy.km"
 	set +e
-	"${command[@]}" --timeout 50 -f "$work/policy.kmk" result >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" --allow-run --timeout 50 -f "$work/policy.km" result >"$work/stdout" 2>"$work/stderr"
 	status=$?
 	set -e
 	if [ "$status" = 1 ] && grep -q RECIPE_TIMEOUT "$work/stderr"; then test-ok "$backend preserves caller timeout"; else test-fail "$backend relaxed caller timeout"; fi
-	check '$(:timeout 0.05 sleep 5 | cat)' 1 '' RECIPE_TIMEOUT
-	check '$(:timeout 0.05 printf ok | sleep 0.15)' 0 '""' ''
-	check '$(:timeout 999999999 true)' 0 '""' ''
-	check '$(:timeout 1 printf abc)' 1 '' CAPTURE_LIMIT --capture-limit 2
+	check '$(timeout: 0.05 sleep 5 | cat)' 1 '' RECIPE_TIMEOUT
+	check '$(timeout: 0.5 printf ok | sleep 0.75)' 0 '""' ''
+	check '$(timeout: 999999999 true)' 0 '""' ''
+	check '$(timeout: 1 printf abc)' 1 '' CAPTURE_LIMIT --capture-limit 2
 
 	test-step "$backend: stage cwd cannot broaden scoped executable grants"
 	set +e
-	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf -c "\$(:cwd \"$work/left\" ./bin/stage-print denied > output)" >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf -c "\$(cwd: \"$work/left\" ./bin/stage-print denied > output)" >"$work/stdout" 2>"$work/stderr"
 	status=$?
 	set -e
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/stderr"; then test-ok "$backend preserves caller run roots"; else test-fail "$backend broadened run grants"; fi
 
 	test-step "$backend: timeout reaps the entire configured graph"
-	check "\$(:timeout 0.15 \"$work/linger\" \"$work/$backend.first.pid\" | \"$work/linger\" \"$work/$backend.second.pid\")" 1 '' RECIPE_TIMEOUT
+	check "\$(timeout: 0.15 \"$work/linger\" \"$work/$backend.first.pid\" | \"$work/linger\" \"$work/$backend.second.pid\")" 1 '' RECIPE_TIMEOUT
 	for file in "$work/$backend.first.pid" "$work/$backend.second.pid"; do
 		if [ -s "$file" ] && ! kill -0 "$(cat "$file")" 2>/dev/null; then test-ok "$backend stage reaped"; else test-fail "$backend stage was not launched or reaped"; fi
 	done
 done
 
 test-step "setup parsing and formatting parity"
-printf '%s\n' '$(:cwd ${directory} :timeout (nop 0.1) :MODE production cat | :MODE test cat :ordinary)' >"$work/expression.km"
+printf '%s\n' '$(cwd: ${directory} timeout: (nop 0.1) MODE: production cat | MODE: test cat :ordinary)' >"$work/expression.km"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" --lang expr "$work/expression.km" >"$work/native"
-	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm"
+	node "$wasm_wrapper" do "$operation" --lang expr "$work/expression.km" >"$work/wasm"
 	if cmp -s "$work/native" "$work/wasm"; then test-ok "$operation setup parity"; else test-fail "$operation setup parity"; fi
 done
 test-end

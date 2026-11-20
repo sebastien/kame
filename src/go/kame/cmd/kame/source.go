@@ -7,6 +7,7 @@ import (
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/internal/mem"
+	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/program"
@@ -35,16 +36,20 @@ type sourceFile struct {
 }
 
 type buildSource struct {
-	Files   []sourceFile
-	Parts   []program.CompileSource
-	Missing bool
-	Status  int
-	JSON    bool
+	Files       []sourceFile
+	Parts       []program.CompileSource
+	Missing     bool
+	Status      int
+	JSON        bool
+	RuleWork    bool
+	Discoveries []program.DeclarationSnapshot
 	// Borrowed configuration used only while expanding includes/branches.
 	SelectionPrefix      []program.CompileSource
 	SelectionDefines     []string
 	SelectionEnvironment []string
 	SelectionDirectory   string
+	SelectionGrants      []eval.Grant
+	SelectionNoDefault   bool
 }
 
 func freeBuildSource(source *buildSource) {
@@ -61,6 +66,10 @@ func freeBuildSource(source *buildSource) {
 	}
 	mem.FreeSlice(nil, source.Files)
 	mem.FreeSlice(nil, source.Parts)
+	for i := range source.Discoveries {
+		source.Discoveries[i].Free(mem.System)
+	}
+	mem.FreeSlice(nil, source.Discoveries)
 	posix.FreeEnvironment(mem.System, source.SelectionEnvironment)
 	*source = buildSource{}
 }
@@ -74,15 +83,15 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 	defines := selectionOverrides(options.Defines, options.Parameters)
 	defer mem.FreeSlice(nil, defines)
 	if options.Command != "" {
-		return inlineRunSource("<command>", options.Command, "km", options.JSON, defines, options.Environment, errOut, prefix, options.Directory)
+		return inlineRunSource("<command>", options.Command, "km", options, defines, errOut, prefix)
 	}
 	if options.File != "" {
 		name := options.File
 		if path.IsAbs(name) {
-			return readRunSourceConfigured(name, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
+			return readRunSourceConfigured(name, errOut, "km", options, defines, prefix)
 		}
 		name = path.Join(options.Directory, name)
-		result := readRunSourceConfigured(name, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
+		result := readRunSourceConfigured(name, errOut, "km", options, defines, prefix)
 		mem.FreeString(mem.System, name)
 		return result
 	}
@@ -91,7 +100,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 		candidate := path.Join(options.Directory, candidates[i])
 		_, statErr := os.Stat(candidate)
 		if statErr == nil {
-			result := readRunSourceConfigured(candidate, errOut, "km", options.JSON, defines, options.Environment, prefix, options.Directory)
+			result := readRunSourceConfigured(candidate, errOut, "km", options, defines, prefix)
 			mem.FreeString(mem.System, candidate)
 			return result
 		}
@@ -150,15 +159,15 @@ func sourceError(out io.Writer, code string, message string, json bool) {
 	emitDiagnostic(out, diagnostic.Diagnostic{Code: code, Message: message, Severity: diagnostic.Error}, true, nil)
 }
 
-func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bool, defines []string, environment []string, prefix []program.CompileSource, directory string) buildSource {
+func readRunSourceConfigured(name string, errOut io.Writer, lang string, inv cli.Invocation, defines []string, prefix []program.CompileSource) buildSource {
 	canonical := path.Clean(name)
 	data, readErr := os.ReadFile(canonical)
 	if readErr != nil {
-		sourceError(errOut, "FS_ERR", "cannot read source: "+canonical, json)
+		sourceError(errOut, "FS_ERR", "cannot read source: "+canonical, inv.JSON)
 		mem.FreeString(mem.System, canonical)
 		return buildSource{Status: 1}
 	}
-	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
+	result := newCompositionSource(inv, defines, prefix)
 	result.Files = append(result.Files, sourceFile{Name: canonical, Text: string(data), SourceDirectory: fileSourceDirectory(canonical), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
 	if lang == "template" {
 		result.Parts = append(result.Parts, program.CompileSource{Name: canonical, Text: string(data), Lang: lang, SourceDirectory: result.Files[0].SourceDirectory})
@@ -186,7 +195,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	parsed := script.ParseFragment(mem.System, authored, parseLang, 0, len(file.Text))
 	defer parsed.Free()
 	if lang == "kash" && file.Parent >= 0 {
-		script.ValidateKashLibrary(parsed)
+		script.ValidateKashModule(parsed)
 	}
 	if len(parsed.Diagnostics) != 0 {
 		for i := range parsed.Diagnostics {
@@ -198,7 +207,8 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	start := 0
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if item.Kind != script.Include && item.Kind != script.Composition {
+		if item.Kind != script.Include && (item.Kind != script.Composition || !script.CompositionLoadsSources(item.Branches) || script.CompositionBindsLocals(item.Branches)) {
+			s.RuleWork = s.RuleWork || declaresRuleWork(item)
 			continue
 		}
 		s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Lang: lang, Signature: signature, SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})

@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,7 @@ type running struct {
 	host          *Host
 	id            int64
 	handoff       *terminalHandoff
+	callables     map[int]*callableStage
 	timers        []*pausableTimer
 	suspended     bool
 	paused        bool
@@ -176,8 +178,22 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	if r.InputMode == "invocation" && (h.StdinRecord != 0 || r.InputFD < 0 || r.InputRoot < 0 || r.InputRoot >= len(stages) || r.Input != "" || len(r.Stages) == 0) {
 		return false
 	}
+	var parent *running
+	var stage *callableStage
+	if r.StageParent.Graph == 0 && r.StageParent != (host.ProcessStageParent{}) {
+		return false
+	}
+	if route := r.StageParent; route.Graph != 0 {
+		parent = h.running(route.Graph)
+		if parent != nil {
+			stage = parent.callables[route.Index]
+		}
+		if stage == nil || stage.ended.Load() || (route.Input && (r.InputMode == "invocation" || r.InputRoot < 0 || r.InputRoot >= len(stages))) {
+			return false
+		}
+	}
 	if r.Topology {
-		return h.startTopology(r)
+		return h.startTopology(r, parent, stage)
 	}
 	run := &running{done: make(chan struct{}), stopped: make(chan struct{}), host: h, id: r.ID}
 	run.stopIO = func() { run.halt.Do(func() { close(run.stopped) }) }
@@ -191,6 +207,13 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	h.native.mu.Unlock()
 	out := &streamWriter{h: h, id: r.ID, kind: host.ProcessStdout, limit: r.RetainBytes, stopped: run.stopped}
 	errout := &streamWriter{h: h, id: r.ID, kind: host.ProcessStderr, limit: r.RetainBytes, stopped: run.stopped}
+	var stdout, stderr io.Writer = out, errout
+	if r.StageParent.Stdout {
+		stdout = inheritedStageWriter{stage, stage.stdout, true}
+	}
+	if r.StageParent.Stderr {
+		stderr = inheritedStageWriter{stage, stage.stderr, stage.stderr == stage.stdout}
+	}
 	if len(r.Argv) > 0 || len(r.Stages) > 0 {
 		out.onTruncate = func() { h.Stop(r.ID, 100) }
 	}
@@ -203,6 +226,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 			f.Close()
 		}
 	}
+	failureMessage := "cannot start process"
 	fail := func() bool {
 		run.stopIO()
 		for _, cmd := range run.cmds {
@@ -217,7 +241,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		h.native.mu.Lock()
 		delete(h.native.processes, r.ID)
 		h.native.mu.Unlock()
-		h.reject(r.ID, "cannot start process")
+		h.reject(r.ID, failureMessage)
 		h.pending[0].StdoutTruncated, h.pending[0].StderrTruncated = out.truncated, errout.truncated
 		h.pending[0].Stages = make([]host.ProcessStageResult, len(stages))
 		for i := range h.pending[0].Stages {
@@ -240,17 +264,15 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		} else {
 			cmd = stageCommand(r, s)
 		}
+		if message := processDirectoryFailure(cmd.Dir); message != "" {
+			failureMessage = message
+			return fail()
+		}
 		if cmd.Err != nil {
 			return fail()
 		}
-		if cmd.Dir != "" {
-			info, e := os.Stat(cmd.Dir)
-			if e != nil || !info.IsDir() {
-				return fail()
-			}
-		}
-		cmd.Stderr = errout
-		cmd.Stdout = out
+		cmd.Stderr = stderr
+		cmd.Stdout = stdout
 		if previous != nil {
 			cmd.Stdin = previous
 		}
@@ -265,6 +287,11 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 			}
 			resources = append(resources, f)
 			cmd.Stdin = f
+		}
+		if r.StageParent.Input && i == r.InputRoot && input == "" && previous == nil {
+			if f := stage.inputFile(); f != nil {
+				cmd.Stdin = f
+			}
 		}
 		if r.InputMode == "invocation" && i == r.InputRoot {
 			fd, e := syscall.Dup(r.InputFD)
@@ -309,7 +336,7 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		case host.StderrStdout:
 			cmd.Stderr = cmd.Stdout
 		case host.StderrPresentation:
-			cmd.Stderr = out
+			cmd.Stderr = stdout
 			if i < len(stages)-1 {
 				cmd.Stderr = cmd.Stdout
 			}
@@ -358,16 +385,21 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		}
 	}
 	if inline != nil {
+		run.followStageParent(parent)
 		h.startBuiltin(r, run, commands[0], stages[0], inline, closeAll, out, errout)
 		return true
 	}
 	for i, cmd := range commands {
 		if run.startCommand(cmd) != nil {
+			if message := processDirectoryFailure(cmd.Dir); message != "" {
+				failureMessage = message
+			}
 			return fail()
 		}
 		run.stageTimeout(cmd, stages[i].TimeoutMS)
 	}
 	closeAll()
+	run.followStageParent(parent)
 	h.pending = append(h.pending, host.ProcessEvent{Kind: host.ProcessStarted, ID: r.ID, PID: int64(run.cmds[0].Process.Pid), PGID: int64(run.cmds[0].Process.Pid)})
 	var timer *pausableTimer
 	if timeout := processTimeout(r); timeout > 0 {
@@ -444,6 +476,28 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 	return true
 }
 func killGroup(pid int, s syscall.Signal) { syscall.Kill(-pid, s) }
+
+func processDirectoryFailure(directory string) string {
+	if directory == "" {
+		return ""
+	}
+	info, err := os.Stat(directory)
+	if err == nil && info.IsDir() {
+		return ""
+	}
+	prefix := "cannot start process: working directory " + strconv.Quote(directory)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return prefix + " does not exist"
+	case errors.Is(err, syscall.ENOTDIR), err == nil:
+		return prefix + " is not a directory"
+	case errors.Is(err, os.ErrPermission):
+		return prefix + " is not accessible: permission denied"
+	default:
+		return prefix + " could not be inspected: " + err.Error()
+	}
+}
+
 func (h *Host) reject(id int64, message string) {
 	h.pending = append([]host.ProcessEvent{{Kind: host.ProcessTerminal, ID: id, Outcome: host.ProcessFailed, Diagnostic: host.ProcessDiagnostic{Code: DiagnosticHostFailure, Message: message}}}, h.pending...)
 }
@@ -505,6 +559,14 @@ func (h *Host) Signal(id int64, signal int) bool {
 		r.signal(syscall.Signal(signal))
 	}
 	return r != nil
+}
+
+func (h *Host) SignalNamed(id int64, name string) bool {
+	n, err := strconv.Atoi(name)
+	if err != nil {
+		n = int(unix.SignalNum(name))
+	}
+	return n > 0 && h.Signal(id, n)
 }
 func (h *Host) Stop(id, grace int64) bool { return h.cancel(id, grace) }
 func (h *Host) cancel(id, grace int64) bool {

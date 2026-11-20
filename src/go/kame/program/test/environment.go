@@ -20,9 +20,18 @@ func TestRuleEnvironmentsInheritOverrideAndDoNotLeak(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "environment.kmk", "root : child local ; env \"MODE=first\" \"MODE=debug\"\nchild :\n\tprintf %s \"$MODE\" >> child-log\nlocal : ; env \"MODE=release\"\n\tprintf %s \"$MODE\" >> local-log\nother : child ; env \"MODE=release\"\nplain :\n\tprintf %s \"$MODE\" > plain-log\n")
+	parsed := script.ParseKameFile(a, "environment.km", `SHELL = "/bin/sh"
+task root : child local ; {env: {MODE: "debug"}}
+task child
+	printf %s "$MODE" >> child-log
+task local ; {env: {MODE: "release"}}
+	printf %s "$MODE" >> local-log
+task other : child ; {env: {MODE: "release"}}
+task plain
+	printf %s "$MODE" > plain-log
+`)
 	registry := eval.NewRegistry(a)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}, Grants: []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatal("compile failed")
 		return
@@ -68,9 +77,14 @@ func TestCachedScopedEnvironmentChangesBetweenRoots(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "cache-environment.kmk", "debug : cached ; env \"MODE=debug\"\nrelease : cached ; env \"MODE=release\"\ntask cached :\n\tprintf %s \"$MODE\" >> runs\n")
+	parsed := script.ParseKameFile(a, "cache-environment.km", `SHELL = "/bin/sh"
+task debug : workload ; {env: {MODE: "debug"}}
+task release : workload ; {env: {MODE: "release"}}
+task cached workload
+	printf %s "$MODE" >> runs
+`)
 	registry := eval.NewRegistry(a)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}, Grants: []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatal("compile failed")
 		return
@@ -103,7 +117,7 @@ func TestSharedDynamicReadPreservesSuspendedKashEnvironment(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "shared-environment.kmk", "SHELL = kash\ndefault : ./value reader\n./value :\n\tsleep 0.05\n\tprintenv MODE > ./value\nreader :\n\t(out! (text (read ./value)))\n")
+	parsed := script.ParseKameFile(a, "shared-environment.km", "task default : ./value reader\nrule ./value\n\tsleep 0.05\n\tprintenv MODE > ./value\ntask reader\n\t(out! (text (read ./value)))\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()

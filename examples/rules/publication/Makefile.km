@@ -1,0 +1,22 @@
+# Calculated paths become dependencies.
+sources = files ./notes/*.txt
+index-path = ./public/index.txt
+pages =
+	if in? ./notes/index.txt sources then fail! "notes/index.txt is reserved for the publication index" else subst ./notes/{name:*}.txt ./public/{name}.txt sources
+
+task default : ./public/index.txt
+
+# One rule describes every corresponding source/output pair.
+rule ./public/{name}.txt : ./notes/{name}.txt ./banner.txt
+	cat ./banner.txt > $outputs.0
+	tr '[:lower:]' '[:upper:]' < $inputs.0 >> $outputs.0
+	echo rendered $outputs.0
+
+# The output and the discovered prerequisites come from definitions.
+rule (index-path) : ${pages}
+	cat $...inputs > $outputs.0
+	echo assembled $outputs.0
+
+task check : ./public/index.txt
+	grep -q 'LITTLE PUBLICATION' $inputs.0
+	echo publication checked

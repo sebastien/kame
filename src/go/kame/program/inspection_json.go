@@ -8,8 +8,8 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"kame/lang/template"
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -128,7 +128,7 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.EndArray()
 		// Retain established single-producer plan details, not its old untyped
 		// input/output arrays or a claim of established freshness.
-		encodeInspectionDetails(g.Program, &e, &plan)
+		encodeInspectionDetails(g.Program, &e, &plan, kind != "plan")
 		e.EndObject()
 	}
 	e.EndArray()
@@ -179,6 +179,9 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.EndObject()
 	}
 	e.EndArray()
+	if kind == "plan" {
+		g.writeTools(&e)
+	}
 	e.Str("deferred")
 	e.BeginArray()
 	for i := range g.Deferred {
@@ -227,7 +230,57 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 	io.WriteString(out, "\n")
 }
 
-func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
+func (g *inspectionGraph) writeTools(e *json.Encoder) {
+	p := g.Program
+	shell := authoredShell(p.Parsed)
+	firstStage := make(map[string]int)
+	for _, producer := range g.Producers {
+		if producer.Stage <= 0 {
+			continue
+		}
+		visit := func(name string, _ source.Span, _ bool) {
+			if name != "" && (firstStage[name] == 0 || producer.Stage < firstStage[name]) {
+				firstStage[name] = producer.Stage
+			}
+		}
+		if producer.Plan.Rule != nil {
+			p.visitRuleTools(producer.Plan.Rule, shell, visit)
+		} else {
+			for _, definition := range p.Eval.Definitions {
+				if definition.Name == producer.Plan.Target {
+					visitExpressionTools(definition.Expression, visit)
+					break
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(firstStage))
+	for name := range firstStage {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		left, right := firstStage[names[i]], firstStage[names[j]]
+		if left != right {
+			return left < right
+		}
+		return names[i] < names[j]
+	})
+	e.Str("tools")
+	e.BeginArray()
+	for _, name := range names {
+		e.BeginObject()
+		e.Str("name")
+		e.Str(name)
+		e.Str("path")
+		e.Str(p.ResolveTool(name))
+		e.Str("stage")
+		e.Int(int64(firstStage[name]))
+		e.EndObject()
+	}
+	e.EndArray()
+}
+
+func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan, includeTools bool) {
 	e.Str("freshness")
 	e.Str("unknown")
 	e.Str("captures")
@@ -262,7 +315,7 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 			}
 			literal := expr.Parse(p.Alloc, "<set>", override.Text)
 			value := p.Eval.Evaluate(p.Alloc, literal.Expr, p.Eval.Scope)
-			core.EncodeValueJSON(p.Alloc, e, value.Value)
+			core.EncodeLiteralJSON(p.Alloc, e, value.Value)
 			value.Free(p.Alloc)
 			literal.Free()
 		}
@@ -322,14 +375,6 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 		e.Str(metadata)
 		mem.FreeString(p.Alloc, metadata)
 	}
-	if len(plan.Rule.Environment) != 0 {
-		e.Str("environment")
-		e.BeginArray()
-		for i := range plan.Rule.Environment {
-			e.Str(plan.Rule.Environment[i].Value)
-		}
-		e.EndArray()
-	}
 	if plan.Rule.Always {
 		e.Str("always")
 		e.Bool(true)
@@ -349,7 +394,10 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 	default:
 		e.Str("always")
 	}
-	// Retain established tool mappings without rendering recipe expressions.
+	if !includeTools {
+		return
+	}
+	// Inventories retain their existing producer details.
 	e.Str("tools")
 	e.BeginObject()
 	var names []string
@@ -358,21 +406,13 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 		e.Str(plan.Tools[i].Name)
 		e.Str(plan.Tools[i].Path)
 	}
-	for i := range plan.Rule.Body {
-		t := plan.Rule.Body[i].Template
-		if t == nil {
-			continue
+	visitRecipeToolReferences(plan.Rule, func(name string, _ source.Span) {
+		if !slices.Contains(names, name) {
+			appendUniqueString(p.Alloc, &names, name)
+			e.Str(name)
+			e.Str(p.ResolveTool(name))
 		}
-		for j := range t.Parts {
-			part := t.Parts[j]
-			if part.Kind != template.Tool || slices.Contains(names, part.Text) {
-				continue
-			}
-			appendUniqueString(p.Alloc, &names, part.Text)
-			e.Str(part.Text)
-			e.Str(p.ResolveTool(part.Text))
-		}
-	}
+	})
 	freeStrings(p.Alloc, names)
 	e.EndObject()
 }

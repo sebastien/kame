@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/006-runtime.md — Yield and Effects
+# Spec: docs/spec/006-runtime.md — Publication and effects
 # Spec: docs/spec/007-library.md — Build Effects
 # Spec: docs/spec/013-tests.md — T006-05-runtime-effects
 set -euo pipefail
@@ -18,12 +18,11 @@ fixture_copy effects effects
 test-step "out and err effects keep their streams and order"
 (
 	cd effects
-	cli_run -- -f Effects.kmk default
+	cli_run -- -f Effects.km default
 	cli_expect_status 0
-	# Direct Kash runs commands before publishing deferred effects in source order.
-	cli_expect_stdout "command-last
-first
+	cli_expect_stdout "first
 third
+command-last
 "
 	cli_expect_stderr_contains 'second-error'
 )
@@ -31,7 +30,7 @@ third
 test-step "dry-run suppresses effects without running the command"
 (
 	cd effects
-	cli_run -- -n -f Effects.kmk default
+	cli_run -- -n -f Effects.km default
 	cli_expect_status 0
 	if grep -q 'command-last' "$CLI_OUT"; then
 		test-fail "dry-run executed the recipe command"

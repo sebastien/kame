@@ -297,10 +297,7 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 			}
 		}
 		g.configuration(i+1, 1)
-		if result.Plan.Rule != nil && len(result.Plan.Rule.Body) != 0 {
-			g.deferred(i+1, 0, "runtime-discovery")
-			g.deferred(i+1, 0, "opaque-process-io")
-		}
+		g.deferRuleBody(i+1, result.Plan.Rule)
 	}
 	if g.ConsumerCursor < len(g.Resources) && len(g.Resources) <= 16384 {
 		return g.discoverConsumers()

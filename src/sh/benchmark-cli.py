@@ -29,18 +29,19 @@ def main():
         root = Path(tmp)
         workloads = {}
 
-        expression = root / 'rules-512.kmk'
-        expression.write_text(''.join(f'v{i} = {i}\n' for i in range(512)) + 'task default :\n\t@(out! "ok")\n')
-        workloads['parse-512-definitions'] = (['do', 'parse', '--json', '--lang', 'script', str(expression)], lambda p: b'v511' in p.stdout)
+        expression = root / 'rules-512.km'
+        expression.write_text(''.join(f'v{i} = {i}\n' for i in range(512)) + 'task default\n\tout! ok\n')
+        workloads['parse-512-definitions'] = (['do', 'parse', '--json', '--lang', 'km', str(expression)], lambda p: b'v511' in p.stdout)
 
-        wide = ' '.join(f'v{i} {i}' for i in range(1000))
-        workloads['scope-wide-1000'] = (['do', 'run', '--lang', 'expr', '-c', f'(let [{wide}] v999)'], lambda p: p.stdout == b'999')
-        deep = '(let [v0 0] ' * 16 + 'v0' + ')' * 16
+        wide = root / 'scope-1000.km'
+        wide.write_text(''.join(f'v{i} = {i}\n' for i in range(1000)))
+        workloads['scope-wide-1000'] = (['-f', str(wide), 'v999'], lambda p: p.stdout == b'999')
+        deep = '(item => ' * 16 + 'item' + ') 0' * 16
         workloads['scope-deep-16'] = (['do', 'run', '--lang', 'expr', '-c', deep], lambda p: p.stdout == b'0')
 
-        graph = root / 'graph-512.kmk'
-        graph.write_text(''.join(f'task target{i} :\n\t@(out! "ok")\n' for i in range(512)))
-        workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: json.loads(p.stdout)['targets'] == ['target511'])
+        graph = root / 'graph-512.km'
+        graph.write_text(''.join(f'task target{i}\n\tout! ok\n' for i in range(512)))
+        workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: [producer['target'] for producer in json.loads(p.stdout)['producers']] == ['target511'])
 
         tree = root / 'tree'
         for i in range(128):
@@ -48,7 +49,7 @@ def main():
             sibling.mkdir(parents=True)
             (sibling / ('hit.txt' if i == 127 else 'noise.txt')).write_text('x')
         pattern = str(tree / '*' / 'hit.txt')
-        invocation = ['do', 'run', '--lang', 'expr', '--allow-read', '-c', f'(count (wildcard {pattern}))']
+        invocation = ['do', 'run', '--lang', 'expr', '--allow-read', '-c', f'count (files {pattern})']
         workloads['glob-selective-128-siblings'] = (invocation, lambda p: p.stdout == b'1')
 
         for host, command in [('native', [str(native)]), ('wasm', ['node', str(wrapper)])]:

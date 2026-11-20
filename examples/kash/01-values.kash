@@ -1,19 +1,20 @@
 #!/usr/bin/env -S kame do kash
-# Requires Kame with the Kash runner specified in docs/spec/017-kash.md.
-title = "Little publication"
-names = ["hello world.txt" "second.txt"]
-arguments = ["" "two words" "a; echo surprise"]
-(label name) = (uppercase name)
+let title = "Little publication"
+let names = ["hello world.txt", "second.txt"]
+let arguments = ["", "two words", "a; echo surprise"]
+def label name = uppercase name
+let labels = map label names
 
 echo $title
-printf "[%s]\n" $names
-printf "[%s]\n" (map label names)
+printf "[%s]\n" $...names
+printf "Names: [%s]\n" "${names}"
+printf "[%s]\n" $...labels
 
-# Capture is a value; strip explicitly removes its preserved trailing newline.
-greeting = $(printf "hello\n")
+# Capture keeps trailing newlines. Strip removes surrounding whitespace.
+let greeting = $(printf "hello\n")
 echo (uppercase (strip greeting))
 
-# Empty arguments and shell-looking text remain data, not executable source.
-printf "<%s>\n" $arguments
-# Discovery is explicit; a raw *.txt command argument would be literal.
-printf "source=%s\n" (wildcard ./sample.txt)
+# Empty and shell-looking arguments stay separate.
+printf "<%s>\n" $...arguments
+let sources = wildcard (pattern "./sample.txt")
+printf "source=%s\n" $...sources

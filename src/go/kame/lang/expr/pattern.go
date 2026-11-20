@@ -4,6 +4,7 @@ package expr
 import (
 	"kame/internal/mem"
 	"kame/lang/source"
+	"path"
 
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ const (
 	// PatternInterpolation indexes an expression operand owned by Expr.Parts.
 	// It exists only in computed path ASTs, never in runtime pattern text.
 	PatternInterpolation
+	PatternGlob
 )
 
 // PatternPart is one pattern segment. Text holds decoded literal text or a
@@ -41,6 +43,7 @@ type Pattern struct {
 	Names      []string
 	Matchers   int
 	References int
+	Globs      int
 }
 
 // Free releases pattern storage owned by allocator a.
@@ -76,7 +79,7 @@ func (p *Pattern) Clone(a mem.Allocator) *Pattern {
 	for i := range p.Names {
 		copy.Names = append(copy.Names, ownedText(a, p.Names[i]))
 	}
-	copy.Matchers, copy.References = p.Matchers, p.References
+	copy.Matchers, copy.References, copy.Globs = p.Matchers, p.References, p.Globs
 	return copy
 }
 
@@ -139,6 +142,43 @@ func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
 	return PatternParse{Pattern: pattern, Diagnostics: p.diags}
 }
 
+// ParsePathPatternText reads canonical runtime path pattern or template text.
+func ParsePathPatternText(a mem.Allocator, text string) PatternParse {
+	return ParsePathPatternParts(a, []StringPart{{Text: text, Span: source.Span{End: len(text)}}})
+}
+
+// NormalizePathPatternRoot resolves the fixed leading directory as path space.
+// Matcher syntax and the part of the first component before a matcher stay literal.
+func NormalizePathPatternRoot(a mem.Allocator, pattern *Pattern, cwd string) {
+	var leading string
+	literal := len(pattern.Parts) != 0 && pattern.Parts[0].Kind == PatternLiteral
+	if literal {
+		leading = pattern.Parts[0].Text
+	}
+	cut := strings.LastIndexByte(leading, '/') + 1
+	directory := leading[:cut]
+	if path.IsAbs(directory) {
+		directory = path.Clean(directory)
+	} else {
+		directory = path.Join(cwd, directory)
+	}
+	defer mem.FreeString(a, directory)
+	if directory == "." || directory == "" {
+		leading = leading[cut:]
+	} else {
+		leading = strings.TrimSuffix(directory, "/") + "/" + leading[cut:]
+	}
+	text := ownedText(a, leading)
+	if literal {
+		mem.FreeString(a, pattern.Parts[0].Text)
+		pattern.Parts[0].Text = text
+	} else if text != "" {
+		pattern.Parts = append(pattern.Parts, PatternPart{})
+		copy(pattern.Parts[1:], pattern.Parts[:len(pattern.Parts)-1])
+		pattern.Parts[0] = PatternPart{Kind: PatternLiteral, Text: text}
+	}
+}
+
 func (p *patternParser) fail(start int, end int, message string) {
 	p.diags = append(p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: p.offset + start, End: p.offset + end}, Message: message})
 }
@@ -156,7 +196,7 @@ func countGroups(pattern *Pattern) (int, int) {
 	return matchers, references
 }
 
-func (p *Pattern) promoteNamedCaptures() (source.Span, bool) {
+func (p *Pattern) PromoteNamedCaptures() (source.Span, bool) {
 	for _, part := range p.Parts {
 		if part.Kind == PatternReference && part.Text == "" {
 			return part.Span, false
@@ -196,9 +236,34 @@ func (p *patternParser) parse(pattern *Pattern) {
 			p.pos += 2
 			continue
 		}
-		if p.path && b == '@' && strings.HasPrefix(p.text[p.pos:], "@@") {
-			literal.WriteByte('@')
-			p.pos += 2
+		if p.path && (b == '*' || b == '?' || b == '[') {
+			p.flushLiteral(pattern, &literal, literalStart, p.pos)
+			start := p.pos
+			p.pos++
+			if b == '*' && p.pos < len(p.text) && p.text[p.pos] == '*' {
+				p.pos++
+			}
+			if b == '[' {
+				for p.pos < len(p.text) && p.text[p.pos] != ']' {
+					if p.text[p.pos] == '\\' && p.pos+1 < len(p.text) {
+						p.pos++
+					}
+					p.pos++
+				}
+				if p.pos == len(p.text) {
+					p.fail(start, p.pos, "unclosed path glob class")
+					return
+				}
+				if !validGlobClass(p.text[start+1 : p.pos]) {
+					p.fail(start, p.pos+1, "invalid glob character class")
+					return
+				}
+				p.pos++
+			}
+			pattern.Parts = append(pattern.Parts, PatternPart{Kind: PatternGlob, Text: ownedText(p.a, p.text[start:p.pos]),
+				Span: source.Span{Start: p.offset + start, End: p.offset + p.pos}})
+			pattern.Globs++
+			literalStart = p.pos
 			continue
 		}
 		if b == '{' {
@@ -401,17 +466,30 @@ func validPatternName(name string) bool {
 // braces and backslashes are re-escaped so the text round-trips. Computed path
 // placeholders must first be instantiated as PatternLiteral parts.
 func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
+	return canonicalPattern(a, pattern, false)
+}
+
+func CanonicalPathPattern(a mem.Allocator, pattern *Pattern) string {
+	return canonicalPattern(a, pattern, true)
+}
+
+func canonicalPattern(a mem.Allocator, pattern *Pattern, path bool) string {
 	var b strings.Builder
 	b = strings.Builder{}
 	defer b.Reset()
 	for i := range pattern.Parts {
 		part := pattern.Parts[i]
+		if part.Kind == PatternGlob {
+			b.WriteString(part.Text)
+			continue
+		}
 		if part.Kind == PatternLiteral {
 			for j := 0; j < len(part.Text); j++ {
-				if part.Text[j] == '\\' || part.Text[j] == '{' || part.Text[j] == '}' {
+				ch := part.Text[j]
+				if strings.IndexByte("\\{}", ch) >= 0 || path && strings.IndexByte(" *?[](),;#\t", ch) >= 0 {
 					b.WriteByte('\\')
 				}
-				b.WriteByte(part.Text[j])
+				b.WriteByte(ch)
 			}
 			continue
 		}
@@ -439,6 +517,31 @@ func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 
 // HasGroups reports whether the pattern contains any group.
 func HasGroups(pattern *Pattern) bool { return pattern.Matchers != 0 || pattern.References != 0 }
+
+// MayCrossSlash reports whether a matching part can consume a path separator.
+func (part PatternPart) MayCrossSlash(a mem.Allocator) bool {
+	if part.Kind == PatternGlob {
+		return part.Text == "**"
+	}
+	if part.Kind != PatternMatcher {
+		return false
+	}
+	if part.Regex {
+		compiled := compileRegex(a, part.Pattern)
+		defer compiled.Program.Free(a)
+		if !compiled.Valid {
+			return true
+		}
+		for _, instruction := range compiled.Program.Instructions {
+			if regexInstructionMatches(compiled.Program.Text, instruction, '/') {
+				return true
+			}
+		}
+		return false
+	}
+	// Character classes may include a separator by range or negation.
+	return strings.Contains(part.Pattern, "**") || strings.ContainsAny(part.Pattern, "/[")
+}
 
 // MatchResult carries positional capture texts and the match outcome.
 type MatchResult struct {
@@ -540,6 +643,9 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 		}
 		return p.match(a, subject, part+1, offset+len(current.Text), slots, programs, budget)
 	}
+	if current.Kind == PatternGlob {
+		return p.matchPathGlob(a, subject, part, offset, slots, programs, budget)
+	}
 	if current.Kind == PatternReference {
 		return false, false
 	}
@@ -591,9 +697,35 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 	return false, false
 }
 
+func (p *Pattern) matchPathGlob(a mem.Allocator, subject string, part, offset int, slots *[]string, programs []*regexProgram, budget *int) (bool, bool) {
+	glob := p.Parts[part].Text
+	if glob == "?" || strings.HasPrefix(glob, "[") {
+		if offset == len(subject) || subject[offset] == '/' {
+			return false, false
+		}
+		matched, limited := MatchGlobBudget(glob, subject[offset:offset+1], budget)
+		if !matched || limited {
+			return false, limited
+		}
+		return p.match(a, subject, part+1, offset+1, slots, programs, budget)
+	}
+	for end := offset + 1; end <= len(subject); end++ {
+		if !ChargeMatchStep(budget) {
+			return false, true
+		}
+		if glob == "*" && subject[end-1] == '/' {
+			break
+		}
+		if matched, limited := p.match(a, subject, part+1, end, slots, programs, budget); matched || limited {
+			return matched, limited
+		}
+	}
+	return false, false
+}
+
 // Expansion carries the expanded text and the name of the first missing
-// reference. An empty Missing means every reference resolved. Text and
-// Missing are owned by the allocator.
+// reference. An empty Missing means every reference resolved. Text and Missing
+// are owned by the allocator.
 type Expansion struct {
 	Text    string
 	Missing string
@@ -703,7 +835,7 @@ func matchGlobAt(pattern string, value string, pi int, vi int, budget *int) bool
 			if !ChargeMatchStep(budget) {
 				return false
 			}
-			end++
+			_, end = globClassByte(pattern, end)
 		}
 		return end < len(pattern) && vi < len(value) && classMatches(pattern[pi+1:end], value[vi], budget) && matchGlobAt(pattern, value, end+1, vi+1, budget)
 	}
@@ -719,22 +851,24 @@ func classMatches(class string, value byte, budget *int) bool {
 		if !ChargeMatchStep(budget) {
 			return false
 		}
-		if i+2 < len(class) && class[i+1] == '-' {
-			if value >= class[i] && value <= class[i+2] {
-				matched = true
-			}
-			i += 3
+		first, next := globClassByte(class, i)
+		if next+1 < len(class) && class[next] == '-' {
+			last, after := globClassByte(class, next+1)
+			matched = matched || (value >= first && value <= last)
+			i = after
 		} else {
-			if value == class[i] {
-				matched = true
-			}
-			i++
+			matched = matched || value == first
+			i = next
 		}
 	}
-	if invert {
-		return !matched
+	return matched != invert
+}
+
+func globClassByte(text string, offset int) (byte, int) {
+	if text[offset] == '\\' && offset+1 < len(text) {
+		offset++
 	}
-	return matched
+	return text[offset], offset + 1
 }
 
 // ValidGlob reports whether a capture glob has valid escapes and character classes.
@@ -762,7 +896,7 @@ func ValidGlob(pattern string) bool {
 				return false
 			}
 			for end < len(pattern) && pattern[end] != ']' {
-				end++
+				_, end = globClassByte(pattern, end)
 			}
 			if end == len(pattern) {
 				return false
@@ -778,17 +912,22 @@ func ValidGlob(pattern string) bool {
 
 func validGlobClass(class string) bool {
 	start := 0
-	if class[0] == '!' {
+	if len(class) != 0 && class[0] == '!' {
 		start = 1
 	}
+	if start == len(class) {
+		return false
+	}
 	for i := start; i < len(class); {
-		if i+2 < len(class) && class[i+1] == '-' {
-			if class[i] > class[i+2] {
+		first, next := globClassByte(class, i)
+		if next+1 < len(class) && class[next] == '-' {
+			last, after := globClassByte(class, next+1)
+			if first > last {
 				return false
 			}
-			i += 3
+			i = after
 		} else {
-			i++
+			i = next
 		}
 	}
 	return true

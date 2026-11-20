@@ -6,7 +6,6 @@ import (
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"path"
 	"slices"
 
 	"strconv"
@@ -33,7 +32,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return p.shortCircuitValue(scope, expression, context)
 	}
 	head := expression.Items[0]
-	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "eval" || head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" || head.Text == "await") {
+	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" || head.Text == "await") {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", expression.Span, "stream predicates require pure, nonblocking computations")
 	}
 	if head.Kind == expr.Name {
@@ -45,9 +44,6 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		}
 		if head.Text == "let" {
 			return p.let(scope, expression.Items[1:], context, expression.Span)
-		}
-		if head.Text == "eval" {
-			return p.evalText(scope, expression.Items[1:], context, expression.Span)
 		}
 		if head.Text == "if" {
 			return p.conditional(scope, expression.Items[1:], context, expression.Span)
@@ -104,32 +100,9 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		kind := callee.Value.Kind
 		freeCallables(context.Run, &callee.Value)
 		callee.Value.Free(context.Run)
-		result := failure(context.Run, "EXPR_INVALID", head.Span, "application head is "+core.KindName(kind)+", not callable")
-		if expression.Expansion == "@(" && len(expression.Items) == 1 && (head.Kind == expr.Name || head.Kind == expr.Reference) {
-			name := expr.Compact(context.Run, head)
-			result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(context.Run, "Use @{"+name+"} for lookup, rather than calling it."))
-			mem.FreeString(context.Run, name)
-		}
-		return result
+		return failure(context.Run, "EXPR_INVALID", head.Span, "application head is "+core.KindName(kind)+", not callable")
 	}
 	function := callee.Value.Callable.(*Function)
-	if function == p.kashSelector && len(expression.Items) == 2 && expression.Items[1].Kind == expr.Path {
-		operand := expression.Items[1]
-		freeCallables(context.Run, &callee.Value)
-		callee.Value.Free(context.Run)
-		if operand.Pattern != nil || len(operand.Parts) != 0 || strings.ContainsAny(operand.Text, "\x00*?[]{}\\") || (!strings.HasPrefix(operand.Text, "./") && !strings.HasPrefix(operand.Text, "../") && !strings.HasPrefix(operand.Text, "/")) || (!strings.HasSuffix(operand.Text, ".kash") && !strings.HasSuffix(operand.Text, ".ksh")) {
-			return failure(context.Run, "EXPR_INVALID", operand.Span, "Kash module requires a literal .kash or .ksh path without patterns or interpolation")
-		}
-		base := context.SourceDirectory()
-		if base.Diagnostic.Code != "" {
-			return base
-		}
-		resolved := path.Join(base.Value.Text, operand.Text)
-		base.Free(context.Run)
-		result := p.loadKashModule(resolved, context, expression.Span)
-		mem.FreeString(context.Run, resolved)
-		return result
-	}
 	context.Scope = scope
 	if retained == nil && p.Scope.replaceBindings && context.Engine != nil &&
 		function.Kind != FunctionOperation && function.Kind != FunctionInterpreter && function.NativeCall == nil {
@@ -236,7 +209,7 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		}
 	}
 	effects, paths := len(context.Effects), len(context.WritePaths)
-	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement, operation.Name)
+	operands := p.argumentValuesMode(scope, arguments, nil, context, span, operation.DeferredReplacement, operation.Name)
 	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
@@ -307,13 +280,6 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 
 // EvaluateReplacement evaluates a retained operand in a match-local scope.
 func (c *Context) EvaluateReplacement(value core.Value, captures core.Value, parent *Scope) Result {
-	if c.ReserveEnv {
-		for i := range captures.Record {
-			if captures.Record[i].Key == "env" {
-				return failure(c.Run, "DEF_INVALID", c.Span, "env is reserved in Kash")
-			}
-		}
-	}
 	function := value.Callable.(*Function)
 	child := RenderChildScope(c, parent, captures)
 	if child == nil {
@@ -343,9 +309,18 @@ func ReleaseCallable(a mem.Allocator, value *core.Value) { freeCallables(a, valu
 
 func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
 	_ = p
+	failureOnly := operation.Category == ControlOperation && operation.Behavior == RaisesFailure
+	trackedDeclarationRead := operation.Name == "files" || operation.Name == "dirs" || operation.Name == "wildcard" || operation.Name == "env"
+	if context.DeclarationFiles != nil && context.Phase == PlanningPhase && operation.HasContract() && operation.Category != PureOperation && !failureOnly && !trackedDeclarationRead {
+		context.MarkPhaseInvalid()
+		if context.SourceSelection && len(operation.Capabilities) != 0 {
+			return failure(context.Run, "CAP_DENIED", span, "operation is outside source-selection authority")
+		}
+		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid during declaration registration")
+	}
 	if context.Phase == RenderingPhase && (operation.Category == OutputOperation || operation.Category == ProcessOperation || operation.Category == VolatileOperation) {
 		context.MarkPhaseInvalid()
-		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; return artifact content with {shell: kame} or execute actions in Kash")
+		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; use an action block to perform effects")
 	}
 	if context.PurePredicate && operation.Category != PureOperation {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
@@ -399,7 +374,7 @@ func (p *Program) invokeOperation(operation *Operation, values []core.Value, arg
 		result.Diagnostic.Free(context.Run)
 		result.Diagnostic = owned
 	}
-	// Legacy/custom operations can return a source-neutral diagnostic. Supply
+	// Registered operations can return a source-neutral diagnostic. Supply
 	// the call site only when no authored primary location has been established.
 	if result.Diagnostic.Code != "" && result.Diagnostic.Source == "" {
 		if result.Diagnostic.Span.Start == 0 && result.Diagnostic.Span.End == 0 {
@@ -475,10 +450,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	}
 	if function.Kind == FunctionInterpreter {
 		discardCallValues(context.Run, values)
-		if function == p.kashSelector {
-			return failure(context.Run, "EXPR_INVALID", span, "use a def block to author Kash actions")
-		}
-		return failure(context.Run, "EXPR_INVALID", span, "kame selects a value-producing recipe; it is not callable")
+		return failure(context.Run, "EXPR_INVALID", span, "use a def block to author Kash actions")
 	}
 	if function.NativeCall != nil {
 		if len(values) != function.Arity {
@@ -538,6 +510,20 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	if function.AST != nil || function.ExpressionOwned {
 		context.CloneCallableAST = true
 	}
+	previousRuleFrames := context.ruleCallFrames
+	if context.TrackRuleCalls {
+		label := "function"
+		if function.Definition != nil {
+			label = function.Definition.Name
+		}
+		location := context.Program.LocateSource(context.Source, span)
+		if origin := context.SourceOrigin; origin > 0 && origin <= len(p.SourceParts) {
+			part := p.SourceParts[origin-1]
+			location = Location{Source: part.Name, Span: source.Span{Start: span.Start - part.Start + part.Offset, End: span.End - part.Start + part.Offset}}
+		}
+		context.ruleCallFrames = append(context.ruleCallFrames, diagnostic.Frame{Kind: "call", Label: label,
+			Source: location.Source, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}})
+	}
 	previousCallPath := context.CallPath
 	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
 	context.Args, context.HasArgs = values, true
@@ -549,6 +535,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	} else {
 		result = p.body(child, function.Body, context)
 	}
+	context.ruleCallFrames = previousRuleFrames
 	context.Args, context.Scope, context.HasArgs = previousArgs, previousScope, previousHasArgs
 	context.CloneCallableAST = previousClone
 	mem.FreeString(context.Run, context.CallPath)
@@ -638,7 +625,7 @@ func functionAritySpan(function *Function, context *Context, fallback source.Spa
 	}
 	if context != nil && context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
 		part := context.Program.SourceParts[context.SourceOrigin-1]
-		if part.Module || start < part.Start || end > part.End {
+		if part.Module || part.Included != nil || start < part.Start || end > part.End {
 			return fallback
 		}
 	}

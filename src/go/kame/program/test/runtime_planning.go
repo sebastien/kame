@@ -13,7 +13,7 @@ import (
 
 func TestLiteralSelectionAndFreshness(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./out/result : ./input\n\tprintf result > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/result : ./input ; {shell: \"/bin/sh\"}\n\tprintf result > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -33,7 +33,7 @@ func TestLiteralSelectionAndFreshness(t *testing.T) {
 
 func TestAmbiguousPatternsReportBothProducers(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "collision.kmk", "./out/{name}.o : ./src/{name}.c\n\ttrue\n./out/{name}.o : ./src/{name}.cpp\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "collision.km", "rule ./out/{name}.o : ./src/{name}.c\n\ttrue\nrule ./out/{name}.o : ./src/{name}.cpp\n\ttrue\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -50,7 +50,7 @@ func TestAmbiguousPatternsReportBothProducers(t *testing.T) {
 		t.Error("ambiguity lost target or competing producer")
 		return
 	}
-	if plan.Diagnostic.Source != "collision.kmk" || plan.Diagnostic.Related[0].Source != "collision.kmk" || plan.Diagnostic.Span.Start <= plan.Diagnostic.Related[0].Span.Start {
+	if plan.Diagnostic.Source != "collision.km" || plan.Diagnostic.Related[0].Source != "collision.km" || plan.Diagnostic.Span.Start <= plan.Diagnostic.Related[0].Span.Start {
 		t.Error("ambiguity lost distinct declaration locations")
 	}
 }
@@ -72,7 +72,7 @@ func TestTemplateCapturesRenderInputsAndOutputs(t *testing.T) {
 		t.Fatal("source write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./out/{name} : ./src/{name}\n\tcp @< @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/{name} : ./src/{name} ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -97,7 +97,7 @@ func TestTemplateCapturesRenderInputsAndOutputs(t *testing.T) {
 
 func TestMatchingTemplatesAreAmbiguous(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./out/{name} :\n\ttrue\n./out/{other} :\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/{name} :\n\ttrue\nrule ./out/{other} :\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -129,7 +129,7 @@ func TestExistingFileNeedsNoRule(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "")
+	parsed := script.ParseKameFile(a, "test.km", "")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -160,7 +160,7 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "SRC = ./input\n./output : @{SRC}\n\tcp @< @>\n\tprintf x >> recipe-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "SRC = ./input\nrule ./output : ${SRC} ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf x >> recipe-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -192,7 +192,7 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 
 func TestBuildEffectInExpressionInputIsPhaseInvalid(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "NAME = ./input\n./output : @(out! NAME)\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "NAME = ./input\nrule ./output : ${out! NAME}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -216,7 +216,7 @@ func TestBuildEffectInExpressionInputIsPhaseInvalid(t *testing.T) {
 
 func TestMissingBareInputFails(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run : missing\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run : missing\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -236,7 +236,7 @@ func TestMissingBareInputFails(t *testing.T) {
 
 func TestRenderedDuplicateOutputsAreRejected(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./out/{name} ./out/{name} :\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/{name} ./out/{name} :\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -257,7 +257,7 @@ func TestRenderedDuplicateOutputsAreRejected(t *testing.T) {
 
 func TestPlanFlattensComputedInputExpression(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC (list OTHER nil))\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "SRC = ./src\nOTHER = ./other\nrule ./output : ${list SRC (list OTHER nil)}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -281,7 +281,7 @@ func TestPlanFlattensComputedInputExpression(t *testing.T) {
 
 func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\n./output : @(SRC ?? missing)\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "SRC = ./src\nrule ./output : ${SRC ?? missing}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -301,7 +301,7 @@ func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 
 func TestPlanDefersHostBackedInputWithoutPhaseFailure(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./source/*)\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ${files ./source/*}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -336,7 +336,7 @@ func TestExpandPlanResolvesHostBackedInputsWithoutRunningRecipe(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.c)\n\tfalse\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ${files ./src/*.c}\n\tfalse\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -371,7 +371,7 @@ func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.txt)\n\tprintf expanded > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ${files ./src/*.txt} ; {shell: \"/bin/sh\"}\n\tprintf expanded > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -414,7 +414,7 @@ func TestExpandPlanDoesNotMaterializeRuleDependency(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./generated:\n\tprintf ./input > @>\n./output : @(read \"./generated\")\n\tprintf output > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./generated: ; {shell: \"/bin/sh\"}\n\tprintf ./input > @{outputs.0}\nrule ./output : ${read \"./generated\"} ; {shell: \"/bin/sh\"}\n\tprintf output > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -454,7 +454,7 @@ func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.txt)\n\tcat @< > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ${files ./src/*.txt} ; {shell: \"/bin/sh\"}\n\tcat @{inputs.0} > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -492,7 +492,7 @@ func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "sources = [\"source-a\", \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @(map (s => s) sources)\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "sources = [\"source-a\", \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : ${map (s => s) sources}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -536,7 +536,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 		t.Fatal("source write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "sources = [\"./src/a.c\", \"./src/b.c\"]\nobjects = (subst ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @{objects}\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "sources = [\"./src/a.c\", \"./src/b.c\"]\nobjects = (subst ./src/{name:*}.c ./build/{name}.o sources)\nrule ./build/marker : ${objects} ; {shell: \"/bin/sh\"}\n\tcat @{join \" \" (map std/str inputs)} > @{outputs.0}\nrule ./build/{name}.o : ./src/{name}.c ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -565,7 +565,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 
 func TestPlanReportsDefinitionCycleInInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "A = \"@{B}\"\nB = \"@{A}\"\n./output : @{A}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "A = \"${B}\"\nB = \"${A}\"\nrule ./output : ${A}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -587,8 +587,8 @@ func TestPlanReportsDefinitionCycleInInput(t *testing.T) {
 func TestCompileManyQualifiesDiagnostics(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
-	compiled := program.CompileMany(a, []program.CompileSource{{Name: "first.kmk", Text: "value = \"ok\""}, {Name: "second.kmk", Text: "(broken"}}, registry, program.Options{Host: posix.New(a), Directory: "."})
-	if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Source != "second.kmk" {
+	compiled := program.CompileMany(a, []program.CompileSource{{Name: "first.km", Text: "value = \"ok\""}, {Name: "second.km", Text: "(broken"}}, registry, program.Options{Host: posix.New(a), Directory: "."})
+	if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Source != "second.km" {
 		t.Error("multi-source diagnostic lost its source name")
 	}
 	if compiled.Program != nil {
@@ -607,7 +607,7 @@ func TestBlankRecipeLinesCompileMaterializeAndRender(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./build/marker :\n\tprintf one > @>\n\n\tprintf two >> @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./build/marker : ; {shell: \"/bin/sh\"}\n\tprintf one > @{outputs.0}\n\n\tprintf two >> @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {

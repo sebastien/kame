@@ -40,6 +40,10 @@ const (
 	// RequestLoadSource reads evaluator-validated authored source paths.
 	// A missing file completes with nil. Other read failures carry diagnostics.
 	RequestLoadSource
+	// RequestProcessSignal targets a process request owned by an async handle.
+	RequestProcessSignal
+	// RequestProcessStageIO advances one evaluator-owned stage in a process graph.
+	RequestProcessStageIO
 )
 
 // Request owns Payload until it is popped or the queue is freed.

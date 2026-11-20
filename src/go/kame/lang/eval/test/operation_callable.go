@@ -13,7 +13,7 @@ func TestOperationValuesSupportCallbacksAliasesAndContainers(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "operations.km", "callback = count\ncallbacks = [count, uppercase]\nrecord = {callback: count}\nresult = [(callback [1, 2]), (map count [[1], [2, 3]]), (reduce str \"\" [\"a\", \"b\"])]\n")
+	parsed := script.ParseKameFile(a, "operations.km", "callback = count\ncallbacks = [count, uppercase]\nrecord = {callback: count}\nresult = [(callback [1, 2]), (map count [[1], [2, 3]]), (reduce str \"\" [\"a\", \"b\"])]\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)
@@ -62,7 +62,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "operations.km", "")
+	parsed := script.ParseKameFile(a, "operations.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	sources := []string{"((f => (f ())) count)", "(map count [1])", "((f => (f missing)) read)", "(map read [\"blocked\"])", "run!", "unknown", "(unknown ())"}
 	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "CAP_DENIED", "CAP_DENIED", "EXPR_INVALID", "REF_MISSING", "OP_UNKNOWN"}
@@ -73,7 +73,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 		}
 		r.Free(a)
 	}
-	specialForms := []string{"let", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await"}
+	specialForms := []string{"let", "if", "and", "or", "with", "match", "run!", "pipe!", "await"}
 	for i := range specialForms {
 		if !eval.IsSpecialForm(specialForms[i]) || registry.Add(eval.Operation{Name: specialForms[i], Call: countOperation}) {
 			t.Errorf("special form accepted as operation: %s", specialForms[i])
@@ -97,7 +97,7 @@ func TestOperationCallableRejectsForeignInvocation(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "operations.km", "")
+	parsed := script.ParseKameFile(a, "operations.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	other := eval.Compile(a, engine, parsed, registry)
 	r := evaluate(t, p, "count")

@@ -500,9 +500,8 @@ func (s *replSession) end() (int, bool) {
 	return 0, false
 }
 
-// jobCommand runs jobs, fg, bg, and kill %N on a terminal session. It
-// reports false for other entries; kill without a %N operand runs the
-// external command.
+// jobCommand handles terminal job selectors and lets ordinary handle
+// operands reach the evaluator.
 func (s *replSession) jobCommand(text string) (bool, int, bool) {
 	if !s.jobControl || strings.ContainsRune(text, '\n') {
 		return false, 0, false
@@ -549,7 +548,9 @@ func (s *replSession) jobCommand(text string) (bool, int, bool) {
 	case "kill":
 		return s.kill(fields[1:])
 	case "wait":
-		return s.wait(fields[1:])
+		if len(fields) == 1 || strings.HasPrefix(fields[1], "%") {
+			return s.wait(fields[1:])
+		}
 	}
 	return false, 0, false
 }

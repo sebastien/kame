@@ -9,7 +9,6 @@ import (
 	"kame/lang/rule"
 	"path"
 	"slices"
-	"strings"
 )
 
 // File reuse and publication use one accepted signature record. The host only
@@ -61,7 +60,7 @@ func appendAcceptedObservation(a mem.Allocator, values []core.Observation, item 
 }
 
 func (p *Program) collectAcceptedInputs(node *core.Node, values *[]core.Observation, seen *[]*core.Node) {
-	if slices.Contains(*seen, node) {
+	if slices.Contains(*seen, node) || eval.IsModuleLoad(node) {
 		return
 	}
 	*seen = append(*seen, node)
@@ -112,7 +111,7 @@ func (p *Program) fileHasMaterialInputs(entry *instance) bool {
 		if key.Kind == core.ResourceFile && item.Aspect == core.ObservationValue && p.isToolPath(key.Name) {
 			continue
 		}
-		if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob || key.Kind == core.ResourceDefinition || (key.Kind == core.ResourceEnvironment && key.Name != eval.ProcessEnvironmentName) {
+		if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob || key.Kind == core.ResourceDefinition || (key.Kind == core.ResourceEnvironment && eval.IsExternalEnvironmentObservation(key.Name)) {
 			return true
 		}
 	}
@@ -141,6 +140,13 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 	var sink hashSink
 	sink.state = core.NewDigest()
 	sink.appendText("kame-file-signatures-v3")
+	if scope, ok := p.RuleDeclarations[entry.Rule]; ok {
+		if scope.Signature.Mode != core.SignatureContent {
+			return core.Signature{}
+		}
+		sink.appendText("declaration-scope")
+		sink.state.Write(scope.Signature.Digest[:])
+	}
 	sink.appendText(entry.Executor)
 	sink.appendText(entry.ExecutorVersion)
 	sink.appendU64(uint64(len(entry.Shell)))
@@ -153,10 +159,8 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 	for i := range entry.MetadataEnvironment {
 		sink.appendText(entry.MetadataEnvironment[i])
 	}
-	sink.appendU64(uint64(len(entry.Rule.Environment)))
-	for i := range entry.Rule.Environment {
-		sink.appendText(entry.Rule.Environment[i].Value)
-	}
+	// Preserve the reserved empty assignment count in the file fingerprint.
+	sink.appendU64(0)
 	// Inherited rule-authored overrides remain explicit execution inputs.
 	var assignments []string
 	for i := range entry.Environment {
@@ -188,8 +192,11 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 		}
 		if entry.Kash && rendered.Commands != "" && (unsigned || len(p.Configuration) != 0) {
 			// Signed sources prove file identity, but not configured predicate values.
-			context := p.fileGuardWithImplementation(entry, core.Signature{})
-			sink.state.Write(context.Digest[:])
+			source := p.sourceSignature()
+			sink.state.Write(source.Digest[:])
+			if !p.appendFileContext(&sink, entry) {
+				return core.Signature{}
+			}
 		}
 	} else {
 		sink.appendText(rendered.Commands)
@@ -402,25 +409,8 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 				continue
 			}
 			if item.Key.Kind == core.ResourceEnvironment {
-				if item.Key.Name == eval.ProcessEnvironmentName {
-					environment := p.Instances[index].Environment
-					if p.Instances[index].Executor != "" && p.Instances[index].Executor != "local" {
-						environment = p.Instances[index].MetadataEnvironment
-					}
-					c.ObserveAspect(item.Key, item.Aspect, eval.ProcessEnvironmentSignature(p.Alloc, environment))
-					state.Index++
-					continue
-				}
-				value := core.Value{Kind: core.Nil}
-				for i := range p.Instances[index].Environment {
-					assignment := p.Instances[index].Environment[i]
-					equal := strings.IndexByte(assignment, '=')
-					if equal >= 0 && assignment[:equal] == item.Key.Name {
-						value = core.Value{Kind: core.String, Text: assignment[equal+1:]}
-						break
-					}
-				}
-				c.ObserveAspect(item.Key, item.Aspect, core.ValueSignature(value))
+				entry := &p.Instances[index]
+				c.ObserveAspect(item.Key, item.Aspect, p.environmentObservationSignature(entry, item.Key.Name))
 				state.Index++
 				continue
 			}
@@ -509,6 +499,14 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 	// The same output observer is used before reuse and after execution.
 	entry.VerifyIndex, entry.VerifyPending = 0, false
 	return p.observeFileOutputs(c, index, false)
+}
+
+func (p *Program) environmentObservationSignature(entry *instance, name string) core.Signature {
+	environment := entry.Environment
+	if eval.IsProcessEnvironmentObservation(name) && entry.Executor != "" && entry.Executor != "local" {
+		environment = entry.MetadataEnvironment
+	}
+	return eval.EnvironmentObservationSignature(p.Alloc, name, environment)
 }
 
 func (p *Program) finishFileContext(c *core.EngineContext, index int) core.ProducerResult {

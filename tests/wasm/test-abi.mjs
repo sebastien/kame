@@ -19,17 +19,17 @@ const stats = metadata.map((value) => ({ kind: 30, path: value.name, value }));
 const malformed = 'HOST_FAIL: host completion is not valid canonical JSON';
 const invalidKind = 'HOST_FAIL: wildcard kind filtering requires normalized lstat regular, dir and link fields';
 const pathCases = [
-  { name: 'glob dispatch', expression: '(wildcard "./*")', requests: [glob], result: paths },
+  { name: 'glob dispatch', expression: '(wildcard ./*)', requests: [glob], result: paths },
   ...stats.map((request) => ({ name: `lstat ${request.path}`, expression: `(lstat ${request.path})`, requests: [request], result: request.value })),
   { name: 'readlink dispatch', expression: '(readlink ./link)', requests: [{ kind: 31, path: './link', value: '../target' }], result: '../target' },
   { name: 'compiled readlink helper', source: 'op = {readlink: readlink}\n', expression: '(op.readlink ./link)', requests: [{ kind: 31, path: './link', value: '../target' }], result: '../target' },
   ...[['+files', ['./file']], ['+dir', ['./dir']], ['+symlinks', ['./link']], ['-symlinks', ['./dir', './file']]].map(([mask, result]) => ({
-    name: `glob normalized no-follow ${mask}`, expression: `(wildcard "${mask}" "./*")`, requests: [glob, ...stats], result,
+    name: `glob normalized no-follow ${mask}`, expression: `(wildcard "${mask}" ./*)`, requests: [glob, ...stats], result,
   })),
-  { name: 'glob normalized kind is not inferred from mode', expression: '(wildcard "+symlinks" "./*")',
+  { name: 'glob normalized kind is not inferred from mode', expression: '(wildcard "+symlinks" ./*)',
     requests: [{ ...glob, value: ['./link'] }, { kind: 30, path: './link', value: { ...metadata[2], mode: 0o100644 } }], result: ['./link'] },
   ...[6, 30, 31].map((kind) => ({
-    name: `kind ${kind} malformed JSON`, expression: kind === 6 ? '(wildcard "./*")' : kind === 30 ? '(lstat ./x)' : '(readlink ./x)',
+    name: `kind ${kind} malformed JSON`, expression: kind === 6 ? '(wildcard ./*)' : kind === 30 ? '(lstat ./x)' : '(readlink ./x)',
     requests: [{ kind, path: kind === 6 ? './*' : './x', raw: '{', status: 5 }], diagnostic: malformed,
   })),
   ...[
@@ -38,7 +38,7 @@ const pathCases = [
     { regular: true, dir: 0, link: false },
     { regular: true, dir: false, link: null },
   ].map((fields, index) => ({
-    name: `glob malformed normalized metadata ${index}`, expression: '(wildcard "+files" "./*")',
+    name: `glob malformed normalized metadata ${index}`, expression: '(wildcard "+files" ./*)',
     requests: [{ ...glob, value: ['./file'] }, { kind: 30, path: './file', value: { name: './file', mode: 0o100644, ...fields } }], diagnostic: invalidKind,
   })),
 ];
@@ -73,7 +73,10 @@ for (const test of ['instance identity', 'failure input lifetime', 'malformed JS
     } else {
       assert.equal(e.kame_wasm_source_compile(handle, 0, 0), 0);
     }
-    assert.equal(e.kame_wasm_expression_begin(handle, ...write(pathCase ? `(json ${pathCase.expression})` : '(exists? "x")')), 0);
+    const expression = pathCase?.requests[0]?.kind === 6
+      ? `(map std/str ${pathCase.expression})`
+      : pathCase?.expression;
+    assert.equal(e.kame_wasm_expression_begin(handle, ...write(pathCase ? `(json ${expression})` : '(exists? "x")')), 0);
     if (pathCase) {
       let state = 0;
       for (let i = 0; i < 100 && state === 0; i++) state = e.kame_wasm_step(handle);

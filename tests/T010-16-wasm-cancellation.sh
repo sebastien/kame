@@ -11,13 +11,17 @@ test-start "T010-16 wasm signal cancellation"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-cancel"
 mkdir -p "$project"
-cat >"$project/Makefile.kmk" <<'EOF'
-./slow.txt :
+cat >"$project/Makefile.km" <<'EOF'
+rule ./slow.txt ; {shell: "/bin/sh"}
 	printf '%s\n' "$$" > recipe.pid; sleep 30 & printf '%s\n' "$!" > child.pid; printf started > started.txt; wait; printf done > done.txt
 EOF
 
@@ -25,7 +29,7 @@ run_and_signal() {
 	local signal="$1"
 	local recipe_pid="" child_pid=""
 	rm -f "$project/started.txt" "$project/done.txt" "$project/recipe.pid" "$project/child.pid"
-	env -C "$project" node "$CLI_ROOT/dist/kame.js" ./slow.txt >/dev/null 2>&1 &
+	env -C "$project" node "$wasm_runner" ./slow.txt >/dev/null 2>&1 &
 	local pid=$!
 	# This function runs in a command-substitution subshell; leave the harness traps intact.
 	trap "kill -KILL '$pid' 2>/dev/null || true; wait '$pid' 2>/dev/null || true" EXIT

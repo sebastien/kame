@@ -19,6 +19,7 @@ type RecordReaderCloser interface {
 }
 
 type Program struct {
+	generators map[*generator]struct{}
 	// CommandAlias supplies driver-owned argv prefixes for literal command heads.
 	// Prefixes are expanded once, before normal executable lookup and authorization.
 	CommandAlias      func(any, string) []string
@@ -27,13 +28,18 @@ type Program struct {
 	// dependency tracking, so changing PATH never invalidates running jobs.
 	SessionTool      func(any, mem.Allocator, string, string) string
 	SessionToolState any
+	ToolOverrides    []string // Borrowed invocation configuration.
 	// ExitBoundary is enabled only by a host runtime establishing an execution boundary.
 	ExitBoundary       bool
 	StreamStates       []*captureState
 	OperationFunctions []*Function
 	kashSelector       *Function
 	Modules            []*kashModule
-	kameSelector       *Function
+	ConstructedRules   []*ConstructedRule
+	authoredImports    []*authoredImport
+	sourceRequests     map[string]bool
+	ModuleEnvironment  []string // Borrowed invocation configuration used for home-relative imports.
+	ModuleWatch        bool
 	NextScriptGroup    int64
 	DeferScopes        []*DeferScope
 	DeferStopping      bool
@@ -51,7 +57,10 @@ type Program struct {
 	Script             *script.Script
 	Registry           *Registry
 	Requests           *host.Queue
+	commandOutputs     map[int64]*commandOutput
 	Scope              *Scope
+	declarationScopes  []*Scope
+	declarationValues  map[string]definition.Override
 	// Explicit CLI definition overrides take precedence over target KAME_NAME values.
 	explicitDefinitionOverrides []string
 	// Definitions is the canonical lookup list, borrowing authored ASTs, aggregates,
@@ -72,6 +81,7 @@ type Program struct {
 	processEnvironmentValue core.Signature
 	OperationMemos          []*operationMemo
 	Processes               []*processTask
+	callableProcessOutcomes map[*ProcessHandle]struct{}
 	nextProcess             int
 	// ProcessStarted attributes a new async graph before it can complete.
 	ProcessStarted     func(int64, *ProcessHandle)
@@ -133,10 +143,21 @@ func (r *CompileResult) Free(a mem.Allocator) {
 
 // CompileChecked performs registration preflight before adding engine nodes.
 func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script, registry *Registry) CompileResult {
+	return compileChecked(a, engine, parsed, registry, false)
+}
+
+// CompileCheckedForProgram leaves imports and declaration blocks for the
+// program to register after it installs source identities and configuration.
+func CompileCheckedForProgram(a mem.Allocator, engine *core.Engine, parsed *script.Script, registry *Registry) CompileResult {
+	return compileChecked(a, engine, parsed, registry, true)
+}
+
+func compileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script, registry *Registry, programDeclarations bool) CompileResult {
 	result := CompileResult{}
 	if parsed == nil {
 		return result
 	}
+	captured := parsed.ValidateAssignments()
 	for i := range parsed.Diagnostics {
 		if parsed.Diagnostics[i].Severity != source.Error {
 			continue
@@ -149,7 +170,7 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		if item.Kind == script.SessionCommand {
 			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "session commands require interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
-		if item.Module != nil || item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+		if unresolvedSourceDeclaration(item, programDeclarations) {
 			result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 			continue
 		}
@@ -164,6 +185,9 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			}
 		}
 		if previous != nil {
+			if item.Definition.Eager && previous.Eager {
+				continue
+			}
 			if item.Definition.Default && !previous.Eager {
 				continue
 			}
@@ -179,7 +203,10 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 	if len(result.Diagnostics) != 0 {
 		return result
 	}
-	result.Program = Compile(a, engine, parsed, registry)
+	result.Program = compile(a, engine, parsed, registry, programDeclarations)
+	if result.Program != nil {
+		result.Program.retainCapturedLets(captured)
+	}
 	return result
 }
 
@@ -189,6 +216,10 @@ type definitionNode struct {
 }
 
 func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, registry *Registry) *Program {
+	return compile(a, engine, parsed, registry, false)
+}
+
+func compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, registry *Registry, programDeclarations bool) *Program {
 	if engine == nil || parsed == nil {
 		return nil
 	}
@@ -211,7 +242,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			p.Valid = false
 			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "session commands require interactive initialization or a login profile", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
-		if item.Module != nil || item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+		if unresolvedSourceDeclaration(item, programDeclarations) {
 			p.Valid = false
 			p.Diagnostics = append(p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
@@ -229,7 +260,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			p.registerContribution(d)
 			continue
 		}
-		if existing := p.Scope.lookup(d.Name); existing != nil {
+		if existing := p.Scope.lookup(d.Name); existing != nil && !(d.Eager && existing.Kind == bindingEager) {
 			if d.Default && existing.Kind != bindingEager {
 				continue
 			}
@@ -244,7 +275,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			continue
 		}
 		if d.Eager {
-			p.Scope.reserveEager(d.Name)
+			p.Scope.reserveEager(d.Expression, false)
 			continue
 		}
 		if d.Function {
@@ -254,6 +285,13 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 		p.registerLazy(d)
 	}
 	return p
+}
+
+func unresolvedSourceDeclaration(item script.ScriptItem, programDeclarations bool) bool {
+	if item.Kind == script.Include {
+		return true
+	}
+	return !programDeclarations && (item.Module != nil || (item.Kind == script.Composition && script.CompositionLoadsSources(item.Branches)))
 }
 
 func (p *Program) registerFunction(d *definition.Definition) *Function {
@@ -292,6 +330,9 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	for generator := range p.generators {
+		generator.releaseCapture()
+	}
 	for i := range p.finalizers {
 		freeFinalizer(p.Alloc, p.finalizers[i])
 	}
@@ -307,6 +348,14 @@ func (p *Program) Free() {
 	}
 	mem.FreeSlice(nil, p.Processes)
 	p.Processes = nil
+	for handle := range p.callableProcessOutcomes {
+		freeValueWithCallables(mem.System, &handle.outcome)
+	}
+	p.callableProcessOutcomes = nil
+	for _, scope := range p.declarationScopes {
+		scope.Free()
+	}
+	mem.FreeSlice(nil, p.declarationScopes)
 	p.Scope.Free()
 	p.Requests.Free()
 	for i := range p.Nodes {
@@ -325,12 +374,14 @@ func (p *Program) Free() {
 		p.freeOperationMemo(p.OperationMemos[i])
 	}
 	mem.FreeSlice(nil, p.OperationMemos)
+	for _, rule := range p.ConstructedRules {
+		rule.free(p.Alloc)
+	}
 	for i := range p.Modules {
 		p.Modules[i].Free()
 	}
 	mem.FreeSlice(nil, p.Modules)
 	mem.Free(p.Alloc, p.kashSelector)
-	mem.Free(p.Alloc, p.kameSelector)
 	for i := range p.OperationFunctions {
 		mem.Free(p.Alloc, p.OperationFunctions[i])
 	}
@@ -469,6 +520,7 @@ func freeDefinitionState(a mem.Allocator, value any) {
 		freeValues(a, state.RuleFrames[i].Inputs)
 		freeValues(a, state.RuleFrames[i].Outputs)
 		freeValues(a, state.RuleFrames[i].NewerInputs)
+		freeValues(a, state.RuleFrames[i].Captures)
 	}
 	mem.FreeSlice(nil, state.RuleFrames)
 	mem.Free(a, state)
@@ -523,6 +575,13 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 	}
 	if result.Completed {
 		return core.PollWaiting
+	}
+	if result.Value.HasStream() {
+		span := definition.Definition.Expression.Span
+		result.Free(state.Alloc)
+		atom.Kind = core.AtomFailed
+		atom.Diagnostic = failure(state.Alloc, "EXPR_INVALID", span, "a definition cannot publish a stream").Diagnostic
+		return core.PollEmitted
 	}
 	if result.Value.HasTransientCallable() {
 		freeCallables(state.Alloc, &result.Value)

@@ -6,8 +6,6 @@ import (
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/rule"
-
-	"strings"
 )
 
 type inspectionStatusState struct {
@@ -294,20 +292,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 				signature = node.Signature
 			}
 		} else if item.Key.Kind == core.ResourceEnvironment {
-			if item.Key.Name == eval.ProcessEnvironmentName {
-				signature = eval.ProcessEnvironmentSignature(p.Alloc, entry.Environment)
-			} else {
-				value := core.Value{Kind: core.Nil}
-				for i := range entry.Environment {
-					assignment := entry.Environment[i]
-					equal := strings.IndexByte(assignment, '=')
-					if equal >= 0 && assignment[:equal] == item.Key.Name {
-						value = core.Value{Kind: core.String, Text: assignment[equal+1:]}
-						break
-					}
-				}
-				signature = core.ValueSignature(value)
-			}
+			signature = p.environmentObservationSignature(entry, item.Key.Name)
 		} else if item.Key.Kind == core.ResourceFile || item.Key.Kind == core.ResourceGlob {
 			toolMetadata := false
 			if item.Aspect == core.ObservationValue {

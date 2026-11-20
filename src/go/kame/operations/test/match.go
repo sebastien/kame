@@ -17,10 +17,11 @@ func TestMatchAndSub(t *testing.T) {
 		t.Fatal("registration failed")
 		return
 	}
-	parsed := script.Parse(a, "test", "")
+	parsed := script.ParseKameFile(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	cases := []string{
 		`(match? ./{*}.{*} "./foo.txt")`,
+		`((match? (pattern "plain")) "plain")`,
 		`(not (match? ./{*}.{*} "./foo"))`,
 		`(not (match? ./{*}.{*} "./.txt"))`,
 		`((match? ./{*}.{*}) "./foo.txt")`,
@@ -29,17 +30,17 @@ func TestMatchAndSub(t *testing.T) {
 		`(match? ./{prefix:**}/{name:*} "./a/b/c")`,
 		`(match? (pattern "{name:*}-{name:*}") "a-a")`,
 		`(not (match? (pattern "{name:*}-{name:*}") "a-b"))`,
-		`(eq (map (match? ./{*}.{*}) ["./foo", "./foo.txt"]) [false, true])`,
-		`(eq (filter-out (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo"])`,
-		`(eq (filter (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo.txt"])`,
-		`(eq (filter-out (match? ./{*}.{*}) (map (subst ./journal/{name:*} ./{name}) ["./journal/foo", "./journal/bar.txt"])) ["./foo"])`,
-		`(eq (subst ./journal/{name:*} missing "./other/foo") "./other/foo")`,
-		`(eq (subst ./journal/{name:*} ./{name} ["./journal/foo", "./other/foo"]) ["./foo", "./other/foo"])`,
-		`(eq (subst "a" "b" "banana") "bbnbnb")`,
-		`(eq (subst (pattern "{name:*}.c") (pattern '{name}.o') ["a.c", "b.h"]) ["a.o", "b.h"])`,
-		`(eq (subst (pattern "{*}.c") "x" []) [])`,
-		`(eq (subst (pattern "{*}.c") "x" nil) nil)`,
-		`((name => (nop (match? (pattern "{name:*}") "inner") (eq name "outer"))) "outer")`,
+		`(eq? (map (match? ./{*}.{*}) ["./foo", "./foo.txt"]) [false, true])`,
+		`(eq? (filter-out (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo"])`,
+		`(eq? (filter (match? ./{*}.{*}) ["./foo", "./foo.txt"]) ["./foo.txt"])`,
+		`(eq? (filter-out (match? ./{*}.{*}) (map (subst ./journal/{name:*} ./{name}) ["./journal/foo", "./journal/bar.txt"])) [./foo])`,
+		`(eq? (subst ./journal/{name:*} missing "./other/foo") "./other/foo")`,
+		`(eq? (subst ./journal/{name:*} ./{name} ["./journal/foo", "./other/foo"]) [./foo, "./other/foo"])`,
+		`(eq? (subst "a" "b" "banana") "bbnbnb")`,
+		`(eq? (subst (pattern "{name:*}.c") (pattern '{name}.o') ["a.c", "b.h"]) ["a.o", "b.h"])`,
+		`(eq? (subst (pattern "{*}.c") "x" []) [])`,
+		`(eq? (subst (pattern "{*}.c") "x" nil) nil)`,
+		`((name => (nop (match? (pattern "{name:*}") "inner") (eq? name "outer"))) "outer")`,
 	}
 	for i := range cases {
 		result := evaluate(t, program, cases[i])
@@ -55,7 +56,6 @@ func TestMatchAndSub(t *testing.T) {
 		`((match? (pattern "{*}")) 42)`,
 		`((match? (pattern "{*}")) "a" "b")`,
 		`(match? (pattern '{name}') "a")`,
-		`(match? (pattern "plain"))`,
 		`(subst (pattern "{*}.c") "x" ["a.c", nil])`,
 	}
 	for i := range rejections {

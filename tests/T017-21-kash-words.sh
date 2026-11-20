@@ -6,12 +6,13 @@ test-start "T017-21 mixed Kash expression words"
 test-step "build native and WASM artifacts"
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
-	mkdir -p "$work/build/debug dir" "$work/out"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	mkdir -p "$work/build/debug dir" "$work/out" "$work/repos/alpha" "$work/repos/beta repo"
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	check() {
 		local expected="$1"; shift
 		if "${runner[@]}" do run -C "$work" --allow-run --allow-read --allow-write --lang kash -c "$1" >"$work/stdout" 2>"$work/stderr" && [ "$(cat "$work/stdout")" = "$expected" ]; then
@@ -22,34 +23,37 @@ for backend in native wasm; do
 		fi
 	}
 	test-step "$backend composition, quoting and standalone list splicing"
-	check '<--config-path=a b.json><name=a b><a b.json>' $'(name) = "a b"\nprintf "<%s>" --config-path=(name).json name=(name) (name).json'
-	check '<prefix-a b-3-true-suffix><{a b}>' $'(name) = "a b"\nprintf "<%s>" prefix-(name)-(nop 3)-(nop :true)-suffix {(name)}'
+	check '<--config-path=a b.json><name=a b><a b.json>' $'def name = "a b"\nprintf "<%s>" --config-path=(name).json name=(name) (name).json'
+	check '<prefix-a b-3-true-suffix><{a b}>' $'def name = "a b"\nprintf "<%s>" prefix-(name)-(nop 3)-(nop true)-suffix {(name)}'
 	check '<--config-path=(missing)><(literal)><[x]>' 'printf "<%s>" "--config-path=(missing)" \(literal\) "[x]"'
-	check '<><two words><tail>' $'(modules) = ["" "two words"]\nprintf "<%s>" (modules) tail'
-	check '<value><captured><empty->' $'head = "printf"\n${head}(nop "") "<%s>" ("value" | str) (str $(printf captured)) empty-(nop "")'
+	check '<><two words><tail>' $'def modules = ["", "two words"]\nprintf "<%s>" $...modules tail'
+	check '<value><captured><empty->' $'def head = "printf"\n${head}(nop "") "<%s>" ("value" |> str) (str $(printf captured)) empty-(nop "")'
 	check '<quoted suffix>' 'printf "<%s>" (nop "quoted")" suffix"'
-	check '<$(touch forbidden) | ; > @{}>' $'data = """$(touch forbidden) | ; > @{}"""\nprintf "<%s>" (nop data)'
-	check '<a><><z>' $'b = :nil\nprintf "<%s>" a "$b" z'
-	check '<a><z><x-><-y>' $'b = :nil\nprintf "<%s>" a $b (nop :nil) z x-(nop :nil) "-$b"y'
+	check '<one two/docs><prefix-ONE TWO-suffix>' $'def REPOS = "one two"\ndef dirs repo = str repo "/docs"\nprintf "<%s>" ${(dirs REPOS)} "prefix-${uppercase REPOS}-suffix"'
+	check '<Repos ./repos/alpha ./repos/beta repo><./repos/alpha><./repos/beta repo>' $'def REPOS = ./repos/*\nprintf "<%s>" "Repos ${(dirs REPOS)}" ${(dirs REPOS)}'
+	check '<Value a 2 true {key: "text"}><empty=><record={key: 1}><callable=<callable>>' 'printf "<%s>" "Value ${["a", [2, true], {key: "text"}]}" empty=${[]} "record=${{key: 1}}" "callable=${x => x}"'
+	check '<$(touch forbidden) | ; > ${}>' $'def data = """$(touch forbidden) | ; > ${}"""\nprintf "<%s>" (nop data)'
+	check '<a><><z>' $'def b = nil\nprintf "<%s>" a "$b" z'
+	check '<a><z><x-><-y>' $'def b = nil\nprintf "<%s>" a $b (nop nil) z x-(nop nil) "-$b"y'
 
 	test-step "$backend scalar setup and redirection destinations"
-	check 'release-debug' $'(variant) = "debug"\n:MODE release-(variant) printenv MODE'
-	check 'cwd' $'(variant) = "debug dir"\n:cwd ./build/(variant) :timeout (nop 1).5 printf cwd'
-	check 'artifact' $'(name) = "a b"\nprintf artifact > ./out/(name).txt\ncat < (str "./out/" (name)).txt'
-	check 'typed' $'exports = [MODE: "typed"]\n:env $exports printenv MODE'
-	check '' $'if (nop :false)\n  printf forbidden-(missing)'
+	check 'release-debug' $'def variant = "debug"\nMODE: release-(variant) printenv MODE'
+	check 'cwd' $'def variant = "debug dir"\ncwd: ./build/(variant) timeout: (1 + 0.5) printf cwd'
+	check 'artifact' $'def name = "a b"\nprintf artifact > ./out/(name).txt\ncat < (str "./out/" (name)).txt'
+	check 'typed' $'def settings = {MODE: "typed"}\nenv: $settings printenv MODE'
+	check '' $'if (nop false)\n  printf forbidden-(missing)'
 
 	test-step "$backend invalid scalars fail before launch or truncation"
-	for operand in 'prefix-(nop [1])' '(nop [secret: "never-print-this"]).txt' '(nop ([x] x)).txt'; do
+	for operand in 'prefix-(nop [1])' '(nop {secret: "never-print-this"}).txt' '(nop (x => x)).txt'; do
 		for destination in argument head redirect cwd timeout environment; do
 			printf unchanged >"$work/protected"
 			case "$destination" in
 				argument) source="printf forbidden $operand > ./protected"; guidance=argument ;;
 				head) source="prefix-$operand > ./protected"; guidance='command head' ;;
 				redirect) source="printf forbidden > $operand"; guidance=redirection ;;
-				cwd) source=":cwd $operand printf forbidden > ./protected"; guidance='setup :cwd' ;;
-				timeout) source=":timeout $operand printf forbidden > ./protected"; guidance='setup :timeout' ;;
-				environment) source=":MODE $operand printf forbidden > ./protected"; guidance='setup :MODE' ;;
+				cwd) source="cwd: $operand printf forbidden > ./protected"; guidance='setup cwd:' ;;
+				timeout) source="timeout: $operand printf forbidden > ./protected"; guidance='setup timeout:' ;;
+				environment) source="MODE: $operand printf forbidden > ./protected"; guidance='setup MODE:' ;;
 			esac
 			status=0
 			"${runner[@]}" do run --json -C "$work" --allow-run --allow-write --lang kash -c "$source" >"$work/error.jsonl" 2>"$work/stderr" || status=$?
@@ -64,7 +68,7 @@ for backend in native wasm; do
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend result bytes remain inert"; else test-fail "$backend result bytes executed"; fi
 
 	test-step "$backend format preserves words and expression boundaries"
-	printf '%s\n' '(name) = "a b"' 'printf "<%s>" --config=(name).json (name)" suffix" "literal(parentheses)" ("a" | str)' >"$work/source.kash"
+	printf '%s\n' 'def name = "a b"' 'printf "<%s>" --config=(name).json (name)" suffix" "literal(parentheses)" ("a" |> str) "list=${[1, 2]}" list=${[1, 2]}' >"$work/source.kash"
 	"${runner[@]}" do fmt --lang kash "$work/source.kash" >"$work/formatted.kash"
 	"${runner[@]}" do fmt --lang kash "$work/formatted.kash" >"$work/again.kash"
 	"${runner[@]}" do run --allow-run "$work/source.kash" >"$work/before"

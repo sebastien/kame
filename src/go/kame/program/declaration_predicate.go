@@ -15,8 +15,10 @@ import (
 )
 
 type PredicateResult struct {
-	Selected   bool
-	Diagnostic diagnostic.Diagnostic
+	Selected    bool
+	Pending     bool
+	Diagnostic  diagnostic.Diagnostic
+	Discoveries []DeclarationSnapshot
 }
 
 type configurationConditionRequest struct {
@@ -30,6 +32,7 @@ type configurationConditionRequest struct {
 	Origins         []CompileSource
 	PredicateOffset int
 	Located         bool
+	Discovery       *Options
 }
 
 func configurationDiagnostic(a mem.Allocator, value diagnostic.Diagnostic, located bool) diagnostic.Diagnostic {
@@ -86,13 +89,19 @@ func CompositionCondition(a mem.Allocator, name string, prefix string, predicate
 // predicate. Text and inclusion paths stay borrowed until the query returns.
 // Directory is the caller's evaluation cwd, not a source-relative include base.
 func CompositionConditionSources(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string) PredicateResult {
+	return TrackedCompositionCondition(a, sources, condition, defines, environment, directory, nil)
+}
+
+// TrackedCompositionCondition evaluates a file selection using the declaration
+// discovery host and grants. Its snapshots also belong to the final program.
+func TrackedCompositionCondition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options) PredicateResult {
 	b := strings.Builder{}
 	defer b.Reset()
 	for i := range sources {
 		b.WriteString(sources[i].Text)
 		b.WriteByte('\n')
 	}
-	result := configurationCondition(a, configurationConditionRequest{Name: condition.Name, Prefix: b.String(), Predicate: condition.Text, Defines: defines, Environment: environment, Directory: directory, Origins: sources, PredicateOffset: condition.Offset, Located: true})
+	result := configurationCondition(a, configurationConditionRequest{Name: condition.Name, Prefix: b.String(), Predicate: condition.Text, Defines: defines, Environment: environment, Directory: directory, Origins: sources, PredicateOffset: condition.Offset, Located: true, Discovery: discovery})
 	if result.Diagnostic.Code == "" {
 		return result
 	}
@@ -116,7 +125,7 @@ func CompositionConditionSources(a mem.Allocator, sources []CompileSource, condi
 	return result
 }
 
-func configurationCondition(a mem.Allocator, request configurationConditionRequest) PredicateResult {
+func configurationCondition(a mem.Allocator, request configurationConditionRequest) (answer PredicateResult) {
 	parseName := request.Name
 	if request.Located {
 		parseName = "<configuration>"
@@ -153,7 +162,12 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	defer registry.Free()
-	compiled := Compile(a, parsed, registry, Options{Defines: known, Environment: request.Environment, Directory: request.Directory})
+	options := Options{Defines: known, Environment: request.Environment, Directory: request.Directory}
+	if request.Discovery != nil {
+		options.Host = request.Discovery.Host
+		options.Grants = request.Discovery.Grants
+	}
+	compiled := Compile(a, parsed, registry, options)
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		if len(compiled.Diagnostics) != 0 {
@@ -206,10 +220,24 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	state := planResolverState{Program: p}
 	defer mem.FreeSlice(nil, state.Resolving)
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: a, Cwd: request.Directory, Source: parseName, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state}
+	if request.Discovery != nil {
+		p.Options.DeclarationRead, p.Options.DeclarationHost = request.Discovery.DeclarationRead, request.Discovery.DeclarationHost
+		declared := &generatedEvaluation{Program: p}
+		defer func() {
+			answer.Discoveries = p.declarationSnapshots()
+			mem.FreeSlice(nil, declared.Stack)
+			freeStrings(a, declared.Dependencies)
+		}()
+		context = p.declarationContext(p.Eval.Scope, declared)
+		context.SourceSelection = true
+	}
 	result := p.Eval.EvaluateWith(expression.Expr, context)
 	defer result.Free(a)
 	defer eval.FreeEffects(a, context.Effects)
 	defer freeStrings(a, context.WritePaths)
+	if p.registrationPending {
+		return PredicateResult{Pending: true}
+	}
 	if result.Diagnostic.Code != "" {
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, result.Diagnostic, request.Located)}
 	}

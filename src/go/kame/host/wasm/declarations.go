@@ -13,24 +13,37 @@ import (
 // defines/environment string arrays, plus an optional directory string supplying
 // the evaluation cwd. Borrowed fields live until the query ends.
 func DeclarationPredicate(a mem.Allocator, data []byte) PureResult {
-	return runConfigurationCondition(a, data, true)
+	r, _ := runConfigurationCondition(a, data, true, nil)
+	return r
 }
 
 // RunCompositionCondition accepts ordinary truth. Alongside the legacy predicate
 // descriptor it accepts declaration-only sources and a condition, each with
 // name/text/offset and optional includes. On failure Text carries diagnostic JSON.
 func RunCompositionCondition(a mem.Allocator, data []byte) PureResult {
-	return runConfigurationCondition(a, data, false)
+	r, _ := runConfigurationCondition(a, data, false, nil)
+	return r
 }
 
-func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool) PureResult {
+func (r *Runtime) CompositionCondition(data []byte) PureResult {
+	if r.Program != nil || r.Node != nil {
+		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "runtime already has active work")}
+	}
+	options := program.Options{Grants: r.grants(), ForwardRequests: true}
+	r.configureDeclarationRead(&options)
+	out, discoveries := runConfigurationCondition(r.Alloc, data, false, &options)
+	r.saveDeclarationSnapshots(discoveries)
+	return out
+}
+
+func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool, options *program.Options) (PureResult, []program.DeclarationSnapshot) {
 	var value core.Value
 	if !core.ParseJSON(a, data, &value) {
-		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "invalid declaration predicate descriptor")}
+		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "invalid declaration predicate descriptor")}, nil
 	}
 	defer value.Free(a)
 	if value.Kind != core.Record {
-		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate descriptor must be a record")}
+		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate descriptor must be a record")}, nil
 	}
 	name, prefix, predicate, directory := "<declaration>", "", "", ""
 	var defines []string
@@ -47,7 +60,7 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 		field := value.Record[i]
 		if field.Key == "name" || field.Key == "prefix" || field.Key == "predicate" || field.Key == "directory" {
 			if field.Value.Kind != core.String {
-				return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate text fields must be strings")}
+				return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate text fields must be strings")}, nil
 			}
 			if field.Key == "name" {
 				name = field.Value.Text
@@ -61,28 +74,28 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 			}
 		} else if !requireBoolean && field.Key == "sources" {
 			if field.Value.Kind != core.List || hasSources {
-				return invalidConditionDescriptor(a)
+				return invalidConditionDescriptor(a), nil
 			}
 			hasSources = true
 			for j := range field.Value.List {
 				if !validConditionSource(field.Value.List[j]) {
-					return invalidConditionDescriptor(a)
+					return invalidConditionDescriptor(a), nil
 				}
 				sources = append(sources, conditionSource(a, field.Value.List[j]))
 			}
 		} else if !requireBoolean && field.Key == "condition" {
 			if hasCondition || !validConditionSource(field.Value) {
-				return invalidConditionDescriptor(a)
+				return invalidConditionDescriptor(a), nil
 			}
 			condition, hasCondition = conditionSource(a, field.Value), true
 		} else if field.Key == "defines" || field.Key == "environment" {
 			if field.Value.Kind != core.List {
-				return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate settings must be string arrays")}
+				return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate settings must be string arrays")}, nil
 			}
 			for j := range field.Value.List {
 				setting := field.Value.List[j]
 				if setting.Kind != core.String {
-					return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate settings must contain strings")}
+					return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate settings must contain strings")}, nil
 				}
 				if field.Key == "defines" {
 					defines = append(defines, setting.Text)
@@ -91,25 +104,28 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 				}
 			}
 		} else {
-			return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "unknown declaration predicate descriptor field")}
+			return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "unknown declaration predicate descriptor field")}, nil
 		}
 	}
 	if hasSources || hasCondition {
 		if !hasSources || !hasCondition || hasPrefix || hasPredicate {
-			return invalidConditionDescriptor(a)
+			return invalidConditionDescriptor(a), nil
 		}
 	} else if !hasPredicate {
-		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate is required")}
+		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "declaration predicate is required")}, nil
 	}
 	var result program.PredicateResult
 	if requireBoolean {
 		result = program.DeclarationPredicate(a, name, prefix, predicate, defines, environment, directory)
 	} else if hasCondition {
-		result = program.CompositionConditionSources(a, sources, condition, defines, environment, directory)
+		result = program.TrackedCompositionCondition(a, sources, condition, defines, environment, directory, options)
 	} else {
 		result = program.CompositionCondition(a, name, prefix, predicate, defines, environment, directory)
 	}
 	defer result.Diagnostic.Free(a)
+	if result.Pending {
+		return PureResult{HostNeeded: true}, result.Discoveries
+	}
 	if result.Diagnostic.Code != "" {
 		out := PureResult{Code: pureText(a, result.Diagnostic.Code), Message: pureText(a, result.Diagnostic.Message), SpanStart: result.Diagnostic.Span.Start, SpanEnd: result.Diagnostic.Span.End}
 		if !requireBoolean {
@@ -118,12 +134,12 @@ func runConfigurationCondition(a mem.Allocator, data []byte, requireBoolean bool
 			out.Text = pureText(a, buffer.String())
 			buffer.Reset()
 		}
-		return out
+		return out, result.Discoveries
 	}
 	if result.Selected {
-		return PureResult{Text: pureText(a, "true")}
+		return PureResult{Text: pureText(a, "true")}, result.Discoveries
 	}
-	return PureResult{Text: pureText(a, "false")}
+	return PureResult{Text: pureText(a, "false")}, result.Discoveries
 }
 
 func invalidConditionDescriptor(a mem.Allocator) PureResult {

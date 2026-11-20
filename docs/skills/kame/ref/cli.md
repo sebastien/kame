@@ -4,7 +4,7 @@ Kame's primary invocation builds discovered targets or executes explicit sources
 
 ```text
 kame [OPTIONS] [TARGET...]
-kame [OPTIONS] FILE.km|FILE.kmk|FILE.kash [ENTRY...] [-- ARG...]
+kame [OPTIONS] FILE.km|FILE.kash [ENTRY...] [-- ARG...]
 kame do COMMAND [OPTIONS] [ARG...]
 ```
 
@@ -12,11 +12,11 @@ With no target, Kame builds `default` when it exists; otherwise the invocation
 fails with `TGT_NO_DEFAULT` and reports the available named targets. Every
 target-taking command resolves targets this way. A bare invocation with no
 source prints help. Source discovery
-tries `Kamefile`, `Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk` below the
-selected working directory. `Kamefile` uses the rule-program (`kmk`) language,
-including when selected explicitly with `-f` or as a positional source.
+tries `Kamefile`, `Makefile.km`, `make.km`, then `src/km/main.km` below the
+selected working directory. An explicitly selected `Kamefile` also uses the
+Kame program language.
 
-File-backed Kame sources can use `(include PATH)` to merge shared definitions and
+File-backed Kame sources can use `include PATH` to merge shared definitions and
 rules under the caller's language. Literal relative paths resolve from the
 including source; includes expand depth-first and reject active-ancestry cycles.
 Repeated nonrecursive includes expand again; duplicate declarations still fail
@@ -25,26 +25,25 @@ registration. Inline `-c` / `--command` sources cannot load selected includes.
 ## Execute values, rules, and processes
 
 ```sh
-kame do run --lang expr -c '(join "," ["a" "b"])'
+kame do run --lang expr -c 'join "," ["a", "b"]'
 kame do run ./values.km result
-kame do run ./Makefile.kmk check
+kame do run ./Makefile.km check
 kame do run ./publish.kash -- preview
 kame do run -c 'name = "Ada"' -c '(out! (uppercase name))'
 ```
 
 Direct source execution is shorthand for `do run`. Execution accepts ordered,
 repeatable file/`-f` and `-c` fragments sharing one scope and engine. All fragments
-are parsed before effects. Suffixes infer `km`, `kmk`, or `kash` (`.ksh` aliases
-`.kash`); inline/stdin defaults to `km`. `--lang km|kmk|kash|expr` overrides
+are parsed before effects. Suffixes infer `km` or `kash` (`.ksh` aliases
+`.kash`); inline/stdin defaults to `km`. `--lang km|kash|expr` overrides
 subsequent fragments until changed, not earlier ones. `expr` accepts exactly
-one expression. Parse/format modes `template`, `rule`, and `script` are not
-execution language names.
+one expression. Use the template renderer for documents.
 
 Invoking the native executable through a symlink named `kash` selects Kash,
 allows a source without a `.kash` suffix, and forwards arguments after the source
 to `args`. With no source, it reads Kash from stdin.
 
-Named entries follow the associated `km`/`kmk` source. Use `--entry NAME` if an
+Named entries follow the associated `km` source. Use `--entry NAME` if an
 entry resembles a source filename. Kash and expr accept no named entries.
 Arguments after `--` are program arguments; in discovered build mode they are
 literal target operands instead. To build an artifact ending in a program
@@ -54,9 +53,9 @@ Relative source filenames and evaluation resources resolve beneath the selected
 `-C` directory, independent of option order. Includes remain source-relative. Later
 fragments share the first fragment's capability policy, not implicit new grants.
 
-Use `do run --lang expr` for expressions and `do run --lang kash` for processes.
-Native and WASM runner
-sessions support `--json` JSON Lines events for values, processes and diagnostics.
+Use `do run --lang expr` for expressions. Use `do run --lang kash` or its
+shorthand `do kash` to start in action context. Native and WASM runner sessions
+support `--json` JSON Lines events for values, processes and diagnostics.
 
 `.km` scripts emit only explicit output effects (such as `out!`/`err!`) by default,
 including inline `-c` scripts and implicit `default` definitions. `--print-result`
@@ -69,8 +68,8 @@ scripts with `(out! VALUE)` for exact data, a named entry, or `--print-result`.
 ```sh
 kame                         # build default
 kame ./build/app             # build one file target
-kame clean                   # run one bare task
-kame -f Build.kmk test       # select a source explicitly
+kame clean                   # run one named task
+kame -f Build.km test       # select a source explicitly
 kame -C subproject default   # build from another directory
 kame -j 4 default test       # share one dependency graph across roots
 kame --watch=250 --cancel app # coalesce changes; stop stale active work
@@ -83,7 +82,7 @@ Primary options:
 | Option | Meaning |
 | --- | --- |
 | `-f`, `--file FILE` | Select a source; repeatable/mixable in execution sessions. Inspection retains a single source. |
-| `-c`, `--command TEXT` | Append inline source, defaulting to `km` in the runner; use `--lang kmk` for inline rules. |
+| `-c`, `--command TEXT` | Append inline source, defaulting to `km` in the runner. |
 | `-C`, `--directory DIR` | Set the working directory. |
 | `-j`, `--jobs N` | Limit concurrent graph nodes; `N` must be positive. |
 | `-n`, `--dry-run` | Render without writing effects or starting processes. |
@@ -104,9 +103,9 @@ Primary options:
 | `--print-result` | In execution sessions, opt into final `.km` result display. |
 | `--tool NAME=PATH` | Override executable resolution for a declared tool. |
 
-`env.NAME=VALUE` is shorthand for a process environment override. Bare
+`env/NAME=VALUE` is shorthand for a process environment override. Bare
 `NAME=VALUE` overrides a declared global or binds a declared named-target argument.
-For example, `deploy {environment} {region=us-east} :` accepts
+For example, `task deploy {environment} {region=us-east}` accepts
 `kame deploy environment=production`. Assignments are classified before source
 suffixes: `SDK_PATH=/path/sdk.km` is literal configuration, never a source file.
 Values remain literal even when they contain interpolation or process syntax;
@@ -120,10 +119,10 @@ value, including `?=` defaults. `--define`, bare `NAME=VALUE` and environment
 overrides are literal strings, never evaluated expressions;
 function definitions cannot be overridden. Unknown explicit names fail, while
 unrelated `KAME_` environment entries are ignored. This is definition
-configuration, not `env.NAME=VALUE` child-environment setup or an `(env NAME)`
-read grant. `do render --define` instead supplies template payload fields.
+configuration. Use `--env` for the child environment and `--allow-env` to
+grant reads through `env/NAME`. `do render --define` instead supplies template payload fields.
 
-Use `--set 'SDK_MODULES=["py" "js"]'` or `--set FLAG=:false`
+Use `--set 'SDK_MODULES=["py", "js"]'` or `--set FLAG=false`
 for typed configuration; `--set=NAME=LITERAL` is also accepted. This configures
 declared values, not task arguments, child environments, or template payloads.
 Accepted data is nil, booleans, finite numbers, plain strings/symbols/paths,
@@ -138,8 +137,8 @@ semantics. `KAME_<NAME>` remains string configuration. Inspection JSON preserves
 typed values rather than rendering them as strings.
 
 `--define-value` is not a compatibility alias; use `--set`.
-In particular, `--set FLAG=:false` supplies false, whereas
-`FLAG=:false` supplies the truthy string `:false`. No default-type inference
+In particular, `--set FLAG=false` supplies false, whereas
+`FLAG=false` supplies the truthy string `"false"`. No default-type inference
 occurs. Template-render payloads retain their separate `--define` interface.
 
 Recipes receive an explicit complete environment. The CLI starts from its
@@ -170,7 +169,7 @@ kame -n ./build/app
 | --- | --- |
 | `do list [QUERY]` | All declared rule outputs when omitted; otherwise exact, prefix, substring, then typo matches. Never builds targets. |
 | `do pick [--picker NAME]` | Interactive `fzf` (or `sk`, or `--picker`) list of targets, then `do` commands. Enter builds a target, asks for a target for `plan`/`inputs`/`outputs`/`span`/`cat`, runs `list`/`tools`/`help`, or prints usage for the rest. Esc exits 130. Native POSIX only. |
-| `do plan [--affected] [--depth N] [RESOURCE...]` | Upstream prerequisites by default; `--affected` shows downstream potential rebuild work and stages. Shared graph for multiple roots. |
+| `do plan [--affected] [--depth N] [RESOURCE...]` | Upstream prerequisites by default; `--affected` shows downstream potential rebuild work and stages. Tools known during planning appear once at their first required stage. Shared graph for multiple roots. |
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
 | `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
@@ -257,23 +256,20 @@ with the reason and available authored source/span and line/column, without valu
 ## Format and parse Kame sources
 
 ```sh
-kame do fmt -n Makefile.kmk       # report files that differ; exit 1 if any
-kame do fmt -i Makefile.kmk       # replace formatted files atomically
-kame do fmt < Makefile.kmk        # write canonical source to stdout
-kame do parse --lang script Makefile.kmk
+kame do fmt -n Makefile.km       # report files that differ; exit 1 if any
+kame do fmt -i Makefile.km       # replace formatted files atomically
+kame do fmt < Makefile.km        # write canonical source to stdout
+kame do parse --lang km Makefile.km
 kame do parse --lang kash -c '$x/cp -pL -- $inputs.0 $outputs.0'
 kame do parse --lang expr --check -c '42'
-kame do fmt --lang expr -c '[1   2]'
+kame do fmt --lang expr -c '[1,   2]'
 ```
 
-`do fmt` defaults to `script` language. `--lang` (`-l`) also accepts `expr`,
-`template`, `rule`, `km`, `kmk`, and `kash`. Use `script` for rule programs and `expr` for
-individual expressions. Use an explicit mode rather than
-assuming filename inference in language tools. `do parse` prints a human AST tree
+`do fmt` defaults to `km`. Use `--lang` (`-l`) to select `expr` for an
+expression, `kash` for actions, or `template` for document templates. `do parse` prints a human AST tree
 with spans; add `--json` for the stable AST document. Parsing `template` inspects
 inline syntax. Formatting `template` handles document directives with
-`--comment STYLE` and preserves non-directive bytes; never format an HTML/config
-template in `script` mode.
+`--comment STYLE` and preserves non-directive bytes.
 
 `parse`, `fmt`, and `render` share `-c`/`--command TEXT`, `-f`/`--file FILE`,
 positional files, explicit stdin `-`, and `-C`/`--directory DIR`. Long value
@@ -282,7 +278,7 @@ Omitted sources read stdin. Parse/render accept one source; fmt accepts multiple
 files but cannot mix files with inline/stdin input. `fmt -i` requires files;
 `fmt -n` also checks inline/stdin text. Parse `--check` validates without an AST.
 Comment styles for fmt/render are case-insensitive.
-Explicit indentation options require `rule`, `script`, `kmk`, or `kash`;
+Explicit indentation options require a program or action language;
 `--indent-width` requires `--indent spaces`. `--comment` requires template mode.
 Empty option values are invalid, not unknown options. Invalid `-C` directories
 fail before source reads or effects, including inline and absolute-path input.
@@ -299,9 +295,9 @@ Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 ## Evaluate a standalone expression
 
 ```sh
-kame do run --lang expr -c '(join "," ["a" "b"])'
+kame do run --lang expr -c 'join "," ["a", "b"]'
 kame do run --lang expr --allow-read=./src -c './src/*.c'
-kame do run --lang expr --allow-env=HOME -c '(env "HOME")'
+kame do run --lang expr --allow-env=HOME -c 'env/HOME'
 ```
 
 Value-first (`km`/`expr`) sessions deny filesystem, environment, and process
@@ -315,8 +311,8 @@ Grant only what the expression needs:
 | `--allow-run[=ROOTS]` | Process execution, optionally restricted by executable path. Does not override phase restrictions. |
 | `--allow-env[=NAMES]` | Reads of named environment variables. |
 
-Arguments after `--` are available as the same typed list through `args` and
-`@*` in km, expr, Kash, and session rule work; `args.0` selects the first operand.
+Arguments after `--` are available as the same typed list through `args` in
+Kame and Kash. `args.0` selects the first operand.
 Each operand is one literal string, and no operands means `[]`. Normal builds
 and rule/Kash-first sessions default to recipe execution and working-directory
 read/write access; language-level environment reads and access outside that
@@ -327,10 +323,10 @@ run grants require explicit executable paths for direct argv processes; legacy
 shell-text operations require an unrestricted run grant.
 Grants do not sandbox a launched executable's internal filesystem access.
 
-Render a document with `(render [PAYLOAD] [STYLE] SOURCE)`, for example:
+Render a document with `render PAYLOAD? STYLE? SOURCE`, for example:
 
 ```sh
-kame do run --lang expr --allow-read -c '(render [title: "Hello"] ./page.html)'
+kame do run --lang expr --allow-read -c 'render ./page.html {title: "Hello"}'
 ```
 
 `do render` renders document files directly and supports parse-only `--check`:
@@ -352,14 +348,12 @@ options. Document rendering is not source formatting.
 - The first `SIGINT` or `SIGTERM` cancels active roots and their process groups;
   a repeated signal may terminate immediately.
 
-For a migration loop, prefer: format check → `plan` → graph inspection →
-dry-run → targeted build. This makes target classification and dependency
-mistakes visible before a recipe changes the working tree.
+Check formatting, inspect the plan and graph, then dry-run before building
+the selected target.
 
 Boundary diagnostics should identify the actual value kind, destination and
-authored span. A callable lookup is not a record/bytes conversion error; a
-noncallable `@(name)` may need `@{name}` when lookup was intended. `CAP_DENIED`
-for an environment read is not fixed by `--env` or definition configuration.
-Selector-looking literal text needs escaping, not command-specific guessing.
+authored span. Use `${name}` to interpolate a value and `${name ()}`
+to call a zero-argument function. A denied environment read needs an
+appropriate environment read grant.
 See [boundary recovery](../../../spec/011-diagnostics.md#language-boundary-recovery)
 for the shared human/plain/JSON contract. Tips never change source or authority.

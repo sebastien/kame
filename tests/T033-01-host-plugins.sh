@@ -7,7 +7,9 @@ test-start "T033-01 plugin adapters"
 cd "$CLI_ROOT"
 
 test-step "build the public WASM embedding"
-make dist-wasm >/dev/null
+if [ -z "${KAME_WASM:-}" ]; then
+  make dist-wasm >/dev/null
+fi
 test-ok "WASM plugin registration and callback exports are current"
 
 test-step "round-trip all value kinds; verify identity, grants, bounds, timeout, cancellation and cleanup"
@@ -16,7 +18,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Kame } from './dist/kame.js';
+const { Kame } = await import(process.env.KAME_WASM ? './src/js/kame.js' : './dist/kame.js');
 
 const declarations = (operation = {}) => [{
   name: 'example',
@@ -67,7 +69,7 @@ const allKinds = {
   kind: 'list',
   items: [
     { kind: 'nil' }, { kind: 'bool', data: true }, { kind: 'int', data: -42 },
-    { kind: 'float', data: 1.5 }, { kind: 'string', data: 'text' },
+    { kind: 'float', data: 1.5 }, { kind: 'string', data: 'text' }, { kind: 'symbol', data: '+text' },
     { kind: 'pattern', data: '{name:*}' }, { kind: 'bytes', data: 'QUJD' },
     { kind: 'resource', resourceKind: 'file', name: 'file:///work/input' },
     { kind: 'list', items: [{ kind: 'string', data: 'nested' }, { kind: 'bool', data: false }] },
@@ -81,13 +83,17 @@ const allKinds = {
     { kind: 'resource', resourceKind: 'tool', name: 'compiler' },
   ],
 };
-const allKindsDisplay = '[:nil :true -42 1.5 "text" "{name:*}" ABC file:///work/input ["nested" :false] [field: "record"] answer build test server *.km PATH compiler]';
+const allKindsDisplay = '[nil, true, -42, 1.5, "text", :+text, "{name:*}", ABC, file:///work/input, ["nested", false], {field: "record"}, answer, build, test, server, *.km, PATH, compiler]';
 const callbackKinds = await call('(example-run "all-kinds")', declarations(), async (request) => ({
   protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
   operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
   attempt: request.attempt, value: allKinds,
 }));
 assert.equal(callbackKinds, allKindsDisplay, 'JavaScript callback changed a canonical Kame value kind');
+assert.equal(await call('example-run :+text', declarations(), async (request) => {
+  assert.deepEqual(request.args, [{ kind: 'symbol', data: '+text' }]);
+  return { ...responseFor(request), value: request.args[0] };
+}), ':+text');
 for (let i = 0; i < 5; i++) {
   assert.equal(await call('(example-run "repeat")', declarations(), async (request) => ({
     ...responseFor(request), value: { kind: 'int', data: i },

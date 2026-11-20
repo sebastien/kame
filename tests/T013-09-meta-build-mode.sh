@@ -38,12 +38,12 @@ context_project="$TMPDIR/artifact-context"
 mkdir -p "$context_project/build" "$context_project/dist"
 printf debug > "$context_project/debug-input"
 printf release > "$context_project/release-input"
-cat > "$context_project/Makefile.kmk" <<'KMK'
-./build/kame.debug : ./debug-input
-	cp @< @>
-./dist/kame : ./release-input
-	cp @< @>
-KMK
+cat > "$context_project/Makefile.km" <<'KAME'
+rule ./build/kame.debug : ./debug-input
+	cp $inputs.0 $outputs.0
+rule ./dist/kame : ./release-input
+	cp $inputs.0 $outputs.0
+KAME
 timeout 30 "$CLI_ROOT/build/kame.debug" --json -C "$context_project" ./build/kame.debug ./dist/kame > "$TMPDIR/context-events" 2> "$TMPDIR/context-err"
 
 test-step "Kame skips unchanged debug and release file outputs"

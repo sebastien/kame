@@ -6,7 +6,9 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T010-32 JavaScript embedding API lifecycle"
 test-step "build the importable WASM distribution"
 cd "$CLI_ROOT"
-if [ "${KAME_TEST_SKIP_BUILD:-0}" != 1 ]; then
+if [ -n "${KAME_WASM:-}" ]; then
+	export KAME_TEST_JS="${KAME_TEST_JS:-./src/js/kame.js}"
+elif [ "${KAME_TEST_SKIP_BUILD:-0}" != 1 ]; then
 	make dist-wasm >/dev/null
 fi
 test-ok "WASM module and ESM entry point are current"
@@ -26,22 +28,22 @@ assert.equal(typeof KameProgram, 'function');
 const kame = await Kame.create();
 assert.equal(typeof kame.module.exports.kame_wasm_next_request_id, 'function');
 // Spec038: direct Kash keeps commands and embedded expressions distinct.
-const kashSource = 'printf "%s" (str "two " "words")\n(nop [value: 1])\n';
+const kashSource = 'printf "%s" (str "two " "words")\n(nop {value: 1})\n';
 for (const source of [kashSource, await kame.format('kash', kashSource)]) {
   const items = (await kame.parse('kash', source)).ast.items;
   assert.deepEqual(items.map((item) => item.kind), ['command', 'expression']);
   const argument = items[0].expression.items[0].items[2];
   assert.equal(argument.kind, 'command-word');
   assert.equal(argument.parts[0].form, '(');
-  assert.equal(argument.parts[0].expression.kind, 'application');
-  assert.equal(argument.parts[0].expression.items[0].text, 'str');
-  assert.equal(items[1].expression.items[1].kind, 'record');
+  assert.equal(argument.parts[0].expression.kind, 'group');
+  assert.equal(argument.parts[0].expression.expression.items[0].text, 'str');
+  assert.equal(items[1].expression.expression.items[1].kind, 'record');
 }
 // Exercise checked narrowing on the actual WASM32 target, not only native64.
 const boundsProgram = await kame.compile('');
-for (const collection of ['[1 2]', '[value: [1 2]]']) {
+for (const collection of ['[1, 2]', '{value: [1, 2]}']) {
   await assert.rejects(boundsProgram.evaluate(`(str ${collection})`), (error) => error.code === 'EXPR_INVALID');
-  assert.equal(await boundsProgram.evaluate(`(= (parse-json (json ${collection})) ${collection})`), ':true');
+  assert.equal(await boundsProgram.evaluate(`(parse-json (json ${collection})) == ${collection}`), 'true');
 }
 const writes = { out: [], err: [] };
 const stdoutWrite = process.stdout.write;
@@ -49,39 +51,39 @@ const stderrWrite = process.stderr.write;
 process.stdout.write = (data) => { writes.out.push(Buffer.from(data).toString()); return true; };
 process.stderr.write = (data) => { writes.err.push(Buffer.from(data).toString()); return true; };
 try {
-  assert.equal(await boundsProgram.evaluate('[value: 1]'), '[value: 1]');
-  assert.deepEqual(JSON.parse(JSON.parse(await boundsProgram.evaluate('(json [value: 1])'))), { value: 1 });
+  assert.equal(await boundsProgram.evaluate('{value: 1}'), '{value: 1}');
+  assert.deepEqual(JSON.parse(JSON.parse(await boundsProgram.evaluate('(json {value: 1})'))), { value: 1 });
   assert.deepEqual(writes, { out: [], err: [] }, 'value display/JSON encoding must not publish effects');
-  assert.equal(await boundsProgram.evaluate('(let [emit out!] (emit "out"))'), '"out"');
+  assert.equal(await boundsProgram.evaluate('((emit => emit "out") out!)'), '"out"');
   assert.equal(await boundsProgram.evaluate('(err! "err")'), '"err"');
   assert.deepEqual(writes, { out: ['out'], err: ['err'] });
   await assert.rejects(boundsProgram.evaluate('(fail! "stop")'), (error) => error.code === 'USER_ERROR');
-  await assert.rejects(boundsProgram.evaluate('((kash """value = (fail! "stop") ?? (nop "fallback"); (out! value)"""))'), (error) => error.code === 'USER_ERROR');
+  await assert.rejects(boundsProgram.evaluate('(fail! "stop") ?? (out! "fallback")'), (error) => error.code === 'USER_ERROR');
   assert.deepEqual(writes, { out: ['out'], err: ['err'] }, 'authored failure must not publish fallback/display');
 } finally {
   process.stdout.write = stdoutWrite;
   process.stderr.write = stderrWrite;
 }
 for (const expression of ['(nth 4294967296 [7])', '(nth -4294967296 "a")']) {
-  assert.equal(await boundsProgram.evaluate(expression), ':nil', expression);
+  assert.equal(await boundsProgram.evaluate(expression), 'nil', expression);
 }
-for (const expression of ['(slice 4294967296 [7])', '(slice 0 4294967296 "a")']) {
+for (const expression of ['(slice 4294967296 [7])', '(slice 0 4294967296 "a")', '(slice 0 -2147483648 [7])']) {
   await assert.rejects(boundsProgram.evaluate(expression), (error) => error.code === 'EXPR_INVALID', expression);
 }
-for (const expression of ['(let [xs [7]] xs.-2147483648)', '(let [xs [7]] xs.0..-2147483648)']) {
+for (const expression of ['((xs => xs.-2147483648) [7])']) {
   await assert.rejects(boundsProgram.evaluate(expression), (error) => error.code === 'SEL_INDEX_INVALID', expression);
 }
-assert.equal(await boundsProgram.evaluate('(let [xs [7 8]] xs.1..)'), '[8]');
+assert.equal(await boundsProgram.evaluate('(slice 1 2 [7, 8])'), '[8]');
 await boundsProgram.dispose();
-const formatted = await kame.format('script', 'value = 42\n');
+const formatted = await kame.format('km', 'value = 42\n');
 const hostUsed = kame.module.exports.kame_wasm_host_heap_used();
 const hostPages = kame.module.exports.memory.buffer.byteLength;
 for (let i = 0; i < 100; i++) {
-  const parsed = await kame.parse('script', `value = ${i}\n`);
+  const parsed = await kame.parse('km', `value = ${i}\n`);
   assert.equal(parsed.ast.items.length, 1);
   assert.equal(parsed.ast.items[0].kind, 'definition');
   parsed.ast.items.length = 0;
-  assert.equal(await kame.format('script', 'value = 42\n'), formatted);
+  assert.equal(await kame.format('km', 'value = 42\n'), formatted);
 }
 assert.equal(kame.module.exports.kame_wasm_host_heap_used(), hostUsed, 'parse/format grew the retained owner host heap');
 assert.equal(kame.module.exports.memory.buffer.byteLength, hostPages, 'parse/format grew linear memory');
@@ -142,7 +144,7 @@ assert.ok(Array.isArray(built.events));
 built.events.push({ type: 'caller-mutation' });
 assert.equal((await answer.build('answer')).events.some((event) => event.type === 'caller-mutation'), false);
 await assert.rejects(kame.compile('x = 1\nx = 2\n'), (error) => ['DEF_INVALID', 'PARSE_ERR'].includes(error.code));
-const shared = await kame.compile('a : shared\nb : shared\nshared : ; [shell: kash]\n\t(out! "once")\n', { name: 'shared.kmk' });
+const shared = await kame.compile('task a : shared\ntask b : shared\ntask shared\n\t(out! "once")\n', { name: 'shared.km' });
 const sharedBuild = await shared.build(['a', 'b']);
 assert.equal(sharedBuild.events.filter((event) => event.type === 'target-started' && event.target === 'shared').length, 1);
 assert.deepEqual(sharedBuild.results.map((result) => result.target), ['a', 'b']);
@@ -216,19 +218,28 @@ assert.equal(answer.ast.ast.items[0].kind, 'definition');
 
 const preAborted = new AbortController();
 preAborted.abort();
-await assert.rejects(kame.parse('script', 'value = 42\n', { signal: preAborted.signal }), (error) => error.code === 'EXEC_CANCELLED');
-await assert.rejects(kame.format('script', 'value = 42\n', { signal: preAborted.signal }), (error) => error.code === 'EXEC_CANCELLED');
+await assert.rejects(kame.parse('km', 'value = 42\n', { signal: preAborted.signal }), (error) => error.code === 'EXEC_CANCELLED');
+await assert.rejects(kame.format('km', 'value = 42\n', { signal: preAborted.signal }), (error) => error.code === 'EXEC_CANCELLED');
 await assert.rejects(answer.evaluate('42', { signal: preAborted.signal }), (error) => error.code === 'EXEC_CANCELLED');
 
 const directory = mkdtempSync(join(tmpdir(), 'kame-js-process-'));
 try {
-  const typedArgv = await kame.compile('SHELL = kash\n./argv.txt :\n\tprintf "<%s>" (concat [(str """@(missing)""" " two words")] ["*.c" """$(touch injected)""" ""]) > ./argv.txt\n\t(nop [value: 1])\n', { name: 'typed-argv.kmk' });
+  const typedArgv = await kame.compile('rule ./argv.txt\n\tlet argv = concat [(str """@(missing)""" " two words")] ["*.c", """$(touch injected)""", ""]\n\tprintf "<%s>" $...argv > ./argv.txt\n\t(nop {value: 1})\n', { name: 'typed-argv.km' });
   try {
     await typedArgv.build('./argv.txt', { cwd: directory, grants: [{ capability: 'run', names: [] }, { capability: 'write', names: [directory] }] });
     assert.equal(readFileSync(join(directory, 'argv.txt'), 'utf8'), '<@(missing) two words><*.c><$(touch injected)><>');
     assert.equal(existsSync(join(directory, 'injected')), false);
   } finally { await typedArgv.dispose(); }
-  assert.equal(JSON.parse(await answer.evaluate('(sh! "pwd")', { cwd: directory, grants: [{ capability: 'run', names: [] }] })).trim(), directory);
+  const runOptions = { cwd: directory, grants: [{ capability: 'run', names: [] }] };
+  assert.equal(JSON.parse(await answer.evaluate('$(pwd)', runOptions)).trim(), directory);
+  assert.equal(await answer.evaluate('$?(sh -c "exit 9").status', runOptions), '9');
+  assert.equal(await answer.evaluate('(tool "absent-kame-embedding-test") ?? nil', runOptions), 'nil');
+  await assert.rejects(answer.evaluate('$(pwd)', { cwd: directory }), (error) => error.code === 'CAP_DENIED');
+  await assert.rejects(answer.evaluate('$(printf long)', { ...runOptions, captureLimit: 2 }), (error) => error.code === 'CAPTURE_LIMIT');
+  const definitionCapture = await kame.compile('location = $(pwd)\n');
+  try {
+    assert.equal(JSON.parse(await definitionCapture.evaluate('location', runOptions)).trim(), directory);
+  } finally { await definitionCapture.dispose(); }
   for (const cleanup of ['abort', 'program', 'owner']) {
     const owner = await Kame.create();
     const retained = await owner.compile('answer = 42\n');
@@ -264,7 +275,7 @@ try {
   const spawnProcess = childProcess.spawn;
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   const expression = '(pipe! (run! "/bin/sh" "-c" "exec sleep 30 # producer") (run! "/bin/sh" "-c" "exec sleep 30 # consumer"))';
-  const faultProgram = await kame.compile(`probe : ; [shell: kash]\n\t${expression}\n`, { name: 'fault.kmk' });
+  const faultProgram = await kame.compile(`task probe\n\t${expression}\n`, { name: 'fault.km' });
   for (const failure of ['publication', 'EIO']) {
     const children = [];
     const controller = new AbortController();
@@ -308,8 +319,8 @@ try {
       : closure === 'read-one' ? 'read line; printf "%s\\n" "$line" # consumer'
       : closure === 'close-stdin-live' ? `exec 0<&-; sleep 0.1; printf done > ${marker} # consumer`
       : `cat >/dev/null; printf done > ${marker} # consumer`;
-    const source = `probe : ; [shell: kash]\n\t(pipe! (run! "/bin/sh" "-c" ${JSON.stringify(producer)}) (run! "/bin/sh" "-c" ${JSON.stringify(consumer)}))\n`;
-    const early = await kame.compile(source, { name: 'early.kmk' });
+    const source = `task probe\n\t(pipe! (run! "/bin/sh" "-c" ${JSON.stringify(producer)}) (run! "/bin/sh" "-c" ${JSON.stringify(consumer)}))\n`;
+    const early = await kame.compile(source, { name: 'early.km' });
     const children = [];
     let injected = false;
     const controller = new AbortController();
@@ -351,8 +362,8 @@ try {
   // Actual kind-23 service cancellation must find every independently
   // detached pipeline stage by raw event identity, not the opaque ABI handle.
   const stage = (name) => `(run! "/bin/sh" "-c" "trap '' TERM; echo $$ > ${join(directory, name)}; while :; do sleep 1; done")`;
-  const pipeline = await kame.compile(`service daemon : ; [shell: kash ready: [argv: ["test" "-f" "stage-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('stage-one.pid')} ${stage('stage-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-pipeline ]; do sleep 0.01; done\n`, { name: 'pipeline.kmk' });
-  const peer = await kame.compile(`service daemon : ; [shell: kash ready: [argv: ["test" "-f" "peer-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('peer-one.pid')} ${stage('peer-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-peer ]; do sleep 0.01; done\nsecond : daemon\n\ttrue\n`, { name: 'peer.kmk' });
+  const pipeline = await kame.compile(`service daemon ; {ready: {argv: ["test", "-f", "stage-two.pid"], interval-ms: 10, timeout-ms: 3000}, stop: {grace-ms: 0}}\n\t(pipe! ${stage('stage-one.pid')} ${stage('stage-two.pid')})\ntask consumer : daemon ; {shell: "sh"}\n\twhile [ ! -f release-pipeline ]; do sleep 0.01; done\n`, { name: 'pipeline.km' });
+  const peer = await kame.compile(`service daemon ; {ready: {argv: ["test", "-f", "peer-two.pid"], interval-ms: 10, timeout-ms: 3000}, stop: {grace-ms: 0}}\n\t(pipe! ${stage('peer-one.pid')} ${stage('peer-two.pid')})\ntask consumer : daemon ; {shell: "sh"}\n\twhile [ ! -f release-peer ]; do sleep 0.01; done\ntask second : daemon\n\ttrue\n`, { name: 'peer.km' });
   const controller = new AbortController();
   const options = { cwd: directory, signal: controller.signal, grants: [{ capability: 'run', names: [] }, { capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }] };
   const deadline = setTimeout(() => controller.abort(), 5000);
@@ -362,7 +373,7 @@ try {
   const materializeProcess = processModule.materialize;
   let pipelineModule, pipelineContext;
   processModule.materialize = async function (...args) {
-    if (args[3] === 'pipeline.kmk') { pipelineModule = this; pipelineContext = args[2]; }
+    if (args[3] === 'pipeline.km') { pipelineModule = this; pipelineContext = args[2]; }
     return materializeProcess.apply(this, args);
   };
   const watchStates = new Map();
@@ -385,7 +396,7 @@ try {
     }
     if (args[2] === 23) {
       const raw = BigInt(JSON.parse(args[3]).id);
-      cancelledGroups.push({ module: this, instance: args[0], raw, size: this.processGroups.get(`${args[0]}:${raw}`)?.size });
+      cancelledGroups.push({ module: this, instance: args[0], raw, size: this.processGroups.get(`${args[0]}:${raw}`)?.children.size });
     }
     return dispatchProcess.apply(this, args);
   };
@@ -403,7 +414,7 @@ try {
       assert.equal(controller.signal.aborted, false, 'owned pipeline did not start');
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    const peerWatch = watchStates.get('peer.kmk');
+    const peerWatch = watchStates.get('peer.km');
     assert.ok(pipelineModule && peerWatch, 'capture both actual operational modules');
     const peerModule = peerWatch.module;
     assert.notEqual(pipelineModule, peerModule);
@@ -411,7 +422,7 @@ try {
     assert.equal(identities.get(peerModule).instance, peerWatch.state.instance);
     assert.equal(identities.get(pipelineModule).raw.toString(), String(rawRequest), 'ABI raw ID differs from exported process event');
     assert.equal(identities.get(peerModule).raw.toString(), String(rawRequest));
-    assert.equal(peerModule.processGroups.get(`${peerWatch.state.instance}:${rawRequest}`)?.size, 2, 'colliding peer identity must retain both pipeline stages');
+    assert.equal(peerModule.processGroups.get(`${peerWatch.state.instance}:${rawRequest}`)?.children.size, 2, 'colliding peer identity must retain both pipeline stages');
     // Drive the host cancellation boundary explicitly while the real ABI
     // process request is detached and live. No ABI completion target is created
     // for this injected service request; its completion is intentionally invalid.
@@ -429,7 +440,7 @@ try {
     // A retained input change, unlike build disposal, naturally queues a
     // cancellation while the detached service pipeline is still live.
     writeFileSync(join(directory, 'automatic-input'), 'before');
-    const automatic = await kame.compile(`service daemon : ./automatic-input ; [shell: kash ready: [argv: ["test" "-f" "automatic-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('automatic-one.pid')} ${stage('automatic-two.pid')})\nconsumer : daemon\n\ttrue\n`, { name: 'automatic.kmk' });
+    const automatic = await kame.compile(`service daemon : ./automatic-input ; {ready: {argv: ["test", "-f", "automatic-two.pid"], interval-ms: 10, timeout-ms: 3000}, stop: {grace-ms: 0}}\n\t(pipe! ${stage('automatic-one.pid')} ${stage('automatic-two.pid')})\ntask consumer : daemon\n\ttrue\n`, { name: 'automatic.km' });
     let automaticWatch;
     try {
       automaticWatch = await automatic.watch('consumer', options);
@@ -448,7 +459,7 @@ try {
       assert.notEqual(actualModule, peerModule);
       assert.equal(identity.instance, automaticWatch.watch.instance);
       assert.equal(String(automaticEvents.find((event) => event.type === 'process-started' && event.target === 'daemon').request), String(identity.raw), 'automatic cancellation identity must match the actual process event');
-      assert.equal(actualModule.processGroups.get(`${identity.instance}:${identity.raw}`)?.size, 2);
+      assert.equal(actualModule.processGroups.get(`${identity.instance}:${identity.raw}`)?.children.size, 2);
       const oldPids = ['automatic-one.pid', 'automatic-two.pid'].map((name) => Number(readFileSync(join(directory, name), 'utf8')));
       const input = automaticWatch.snapshot().resources.find((resource) => resource.name.endsWith('/automatic-input'));
       assert.ok(input, 'watch must retain the changed service input');
@@ -467,7 +478,7 @@ try {
         assert.equal(controller.signal.aborted, false, 'changed input did not rebuild the service');
         await nextAutomatic();
       }
-      assert.equal(actualModule.processGroups.get(`${identity.instance}:${identities.get(actualModule).raw}`)?.size, 2, 'rebuilt pipeline must publish both stages');
+      assert.equal(actualModule.processGroups.get(`${identity.instance}:${identities.get(actualModule).raw}`)?.children.size, 2, 'rebuilt pipeline must publish both stages');
       const rebuiltPids = ['automatic-one.pid', 'automatic-two.pid'].map((name) => Number(readFileSync(join(directory, name), 'utf8')));
       await automaticWatch.close();
       for (const pid of rebuiltPids) assert.throws(() => process.kill(pid, 0), (error) => error.code === 'ESRCH', 'rebuilt stage was not reaped');
@@ -545,8 +556,8 @@ await kame.dispose();
 await kame.dispose();
 assert.equal(kame.module, null, 'disposed owner retained its WASM linear memory');
 await assert.rejects(kame.compile('value = 1\n'), (error) => error.code === 'DISPOSED');
-await assert.rejects(kame.parse('script', 'value = 1\n'), (error) => error.code === 'DISPOSED');
-await assert.rejects(kame.format('script', 'value = 1\n'), (error) => error.code === 'DISPOSED');
+await assert.rejects(kame.parse('km', 'value = 1\n'), (error) => error.code === 'DISPOSED');
+await assert.rejects(kame.format('km', 'value = 1\n'), (error) => error.code === 'DISPOSED');
 NODE
 	test-ok "JS embedding copies results, observes grants, completes async requests, and reuses 100 lifecycle cycles"
 else

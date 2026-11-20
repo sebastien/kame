@@ -4,10 +4,14 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T013-05 representative Kash workflows"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make -C "$CLI_ROOT" dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
 	cp -R "$CLI_ROOT/examples/kash/." "$work/"
@@ -36,7 +40,7 @@ for backend in native wasm; do
 		fi
 	done
 	test-step "$backend workflows"
-	check 01-values.kash $'Little publication\n[hello world.txt]\n[second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n<>\n<two words>\n<a; echo surprise>\nsource=./sample.txt\n'
+	check 01-values.kash $'Little publication\n[hello world.txt]\n[second.txt]\nNames: [hello world.txt second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n<>\n<two words>\n<a; echo surprise>\nsource=./sample.txt\n'
 	check 02-pipelines.kash $'hello\nworld\nhello\nworld\n12\nhello\nworld\n'
 	cli_expect_file "$work/report.txt" $'hello\nworld\nreport complete\n'
 	check 03-recovery.kash $'continued after an accepted non-match\nno needle in the sample\nno result\npreview only\nsample validated\nnote=intro\n'

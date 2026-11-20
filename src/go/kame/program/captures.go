@@ -4,13 +4,25 @@ import (
 	"kame/core"
 	"kame/internal/mem"
 	"kame/lang/eval"
+	"kame/lang/rule"
 	"kame/lang/template"
 
 	"strconv"
 )
 
+func captureValues(a mem.Allocator, captures []template.CaptureValue) []core.Value {
+	if len(captures) == 0 {
+		return nil
+	}
+	values := make([]core.Value, len(captures))
+	for i, capture := range captures {
+		values[i] = core.NewString(a, capture.Text)
+	}
+	return values
+}
+
 // Captures are lexical values in both prerequisite expressions and recipes.
-func (p *Program) ruleScope(c *eval.Context, captures []template.CaptureValue, arguments []ArgumentValue) *eval.Scope {
+func (p *Program) ruleScope(c *eval.Context, authored *rule.Rule, captures []template.CaptureValue, arguments []ArgumentValue) *eval.Scope {
 	var fields []core.RecordField
 	var positionalNames []string
 	for i := range captures {
@@ -54,7 +66,11 @@ func (p *Program) ruleScope(c *eval.Context, captures []template.CaptureValue, a
 	}
 	mem.FreeSlice(nil, positionalNames)
 	mem.FreeSlice(nil, fields)
-	scope := eval.RenderChildScope(c, p.Eval.Scope, payload)
+	parent := p.Eval.Scope
+	if declaration, ok := p.RuleDeclarations[authored]; ok {
+		parent = declaration.Scope
+	}
+	scope := eval.RenderChildScope(c, parent, payload)
 	payload.Free(p.Alloc)
 	return scope
 }

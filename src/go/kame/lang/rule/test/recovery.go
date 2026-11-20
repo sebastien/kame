@@ -15,7 +15,7 @@ func TestDuplicateTargetArgumentDiagnosticIsStable(t *testing.T) {
 }
 
 func TestRecipeDocumentPreservesNewerInputSelector(t *testing.T) {
-	parsed := rule.ParseRule(t.Allocator(), "selector.km", "task build : dep\n\t@<?\n\t@if(true)\n\tok\n\t@end(if)\n")
+	parsed := rule.ParseRule(t.Allocator(), "selector.km", "task build : dep\n\t@{changed-inputs}\n\t@if true\n\tok\n\t@end if\n")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || parsed.Rule == nil || parsed.Rule.BodyDoc == nil {
 		t.Fatal("recipe did not select document lowering")
@@ -24,14 +24,14 @@ func TestRecipeDocumentPreservesNewerInputSelector(t *testing.T) {
 	found := false
 	for i := range parsed.Rule.BodyDoc.Root.Items {
 		item := parsed.Rule.BodyDoc.Root.Items[i]
-		if item.Kind == expr.Selector {
+		if item.Kind == expr.Name && item.Text == "changed-inputs" {
 			found = true
-			if item.Text != "@<?" || item.Span.Start != 18 || item.Span.End != 21 {
-				t.Error("recipe document changed newer-input selector or span")
+			if item.Span.Start != 20 || item.Span.End != 34 {
+				t.Errorf("unexpected changed-inputs reference: %q %+v", item.Text, item.Span)
 			}
 		}
 	}
 	if !found {
-		t.Error("recipe document lost newer-input selector")
+		t.Error("recipe document lost its changed-inputs reference")
 	}
 }

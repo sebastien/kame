@@ -100,12 +100,13 @@ func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json b
 }
 
 type buildSession struct {
-	Ledger   *outputLedger
-	Source   buildSource
-	Registry *eval.Registry
-	Parsed   *script.Script // Borrowed from Program after successful compilation.
-	Program  *program.Program
-	Status   int
+	Ledger      *outputLedger
+	Source      buildSource
+	Registry    *eval.Registry
+	Parsed      *script.Script // Borrowed from Program after successful compilation.
+	Program     *program.Program
+	Status      int
+	Discoveries []program.DeclarationSnapshot
 }
 
 func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bool) buildSession {
@@ -117,6 +118,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	session := buildSession{Source: loadBuildSource(options, errOut, reportMissing)}
 	if session.Source.Status != 0 {
 		session.Status = session.Source.Status
+		session.Discoveries, session.Source.Discoveries = session.Source.Discoveries, nil
 		return session
 	}
 	// Capability roots and canonical file keys compare against an absolute
@@ -156,6 +158,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	defer authored.Free(mem.System)
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool}
 	programOptions.Watch = options.Watch
+	programOptions.CompositionDiscoveries = session.Source.Discoveries
 	programOptions.TrackTimings = true
 	if ownership.Supported() {
 		session.Ledger = mem.Alloc[outputLedger](mem.System)
@@ -167,6 +170,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, session.Ledger
 	}
 	compiled := program.CompileMany(mem.System, session.Source.Parts, session.Registry, programOptions)
+	session.Discoveries, compiled.Discoveries = compiled.Discoveries, nil
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		if directoryOwned {
@@ -176,7 +180,14 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, authored)
 		}
 		compiled.Free(mem.System)
+		discoveries := session.Discoveries
+		session.Discoveries = nil
+		var failedSource buildSource
+		if options.Watch {
+			failedSource, session.Source = session.Source, buildSource{}
+		}
 		session.Free()
+		session.Discoveries, session.Source = discoveries, failedSource
 		session.Status = 1
 		return session
 	}
@@ -218,6 +229,10 @@ func (s *buildSession) Free() {
 	if s.Registry != nil {
 		s.Registry.Free()
 	}
+	for i := range s.Discoveries {
+		s.Discoveries[i].Free(mem.System)
+	}
+	mem.FreeSlice(nil, s.Discoveries)
 	freeBuildSource(&s.Source)
 	*s = buildSession{}
 }

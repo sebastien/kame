@@ -7,23 +7,24 @@ test-start "T004-15 rule regex captures"
 test-step "build native and WASM runners"
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 
 work="$TMPDIR/rule-regex-captures"
 project="$work/project"
 mkdir -p "$project/src"
-cat >"$project/Makefile.kmk" <<'KMK'
-./src/{name:~[a-z]+}.c : ./src/{name}.h
-	cat @< > @>
-./{name:~[a-z]+}.name :
-	printf '%s' @{_0} > @>
-KMK
+cat >"$project/Makefile.km" <<'KAME'
+rule ./src/{name:~[a-z]+}.c : ./src/{name}.h
+	cat $inputs.0 > $outputs.0
+rule ./{name:~[a-z]+}.name :
+	printf %s $_0 > $outputs.0
+KAME
 printf 'regex-rule-capture-ok\n' >"$project/src/demo.h"
 
 for host in native wasm; do
-	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
-	"${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$work/$host.formatted"
-	"${runner[@]}" do fmt --lang script "$work/$host.formatted" >"$work/$host.formatted.again"
+	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
+	"${runner[@]}" do fmt --lang km "$project/Makefile.km" >"$work/$host.formatted"
+	"${runner[@]}" do fmt --lang km "$work/$host.formatted" >"$work/$host.formatted.again"
 	if cmp -s "$work/$host.formatted" "$work/$host.formatted.again" && grep -q 'name:~\[a-z\]+' "$work/$host.formatted"; then
 		test-ok "$host formats regex rule targets idempotently"
 	else

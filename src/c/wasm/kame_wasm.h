@@ -104,7 +104,9 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_PROCESS_TOPOLOGY = 32,
   KAME_WASM_REQUEST_PROCESS_OPERANDS = 33,
   KAME_WASM_REQUEST_PROCESS_POLICIES = 34,
-  KAME_WASM_REQUEST_PROCESS_LOSSY = 35
+  KAME_WASM_REQUEST_PROCESS_LOSSY = 35,
+  /* Bounded I/O exchange with an evaluator-owned process stage. */
+  KAME_WASM_REQUEST_PROCESS_STAGE_IO = 46
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */
@@ -239,6 +241,18 @@ uint32_t kame_wasm_watch_begin(uint64_t instance, uint32_t data, uint32_t len);
 uint32_t kame_wasm_watch_invalidate(uint64_t instance, uint32_t data, uint32_t len);
 uint32_t kame_wasm_watch_state(uint64_t instance, uint32_t dst, uint32_t dst_len,
                                uint32_t out_len);
+/* Query exact membership for a grouped resource using the opaque snapshot name
+ * and a JSON array of paths obtained from the snapshot's scan wildcard. */
+uint32_t kame_wasm_watch_glob_fingerprint(uint64_t instance,
+                                          uint32_t name, uint32_t name_len,
+                                          uint32_t candidates, uint32_t candidates_len,
+                                          uint32_t dst, uint32_t dst_len,
+                                          uint32_t out_len);
+uint32_t kame_wasm_declaration_state(uint64_t instance, uint32_t dst,
+                                     uint32_t dst_len, uint32_t out_len);
+uint32_t kame_wasm_declaration_fingerprint(uint64_t instance, uint32_t data,
+                                           uint32_t len, uint32_t dst,
+                                           uint32_t dst_len, uint32_t out_len);
 uint32_t kame_wasm_watch_cancel_message(uint64_t instance, uint32_t data, uint32_t len,
                                         uint32_t dst, uint32_t dst_len, uint32_t out_len);
 uint32_t kame_wasm_watch_cancel(uint64_t instance);
@@ -307,7 +321,7 @@ uint32_t kame_wasm_process_terminal(uint64_t instance, int32_t status,
 uint32_t kame_wasm_expression_begin(uint64_t instance, uint32_t source,
                                     uint32_t source_len);
 uint32_t kame_wasm_expression_cancel(uint64_t instance);
-/* Completed standalone-expression effects. kind is 1=out, 2=err, 3=yield,
+/* Completed standalone-expression effects. kind is 1=out, 2=err,
  * or 0 when no effect remains. Copy advances to the next effect. */
 uint32_t kame_wasm_expression_effect_kind(uint64_t instance);
 uint32_t kame_wasm_expression_effect_length(uint64_t instance);

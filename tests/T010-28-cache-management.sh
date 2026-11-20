@@ -11,22 +11,27 @@ test-start "T010-28 cache management"
 cd "$CLI_ROOT"
 
 test-step "build native and wasm artifacts"
-make dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then
+	wasm_cli="$CLI_ROOT/src/js/kame.js"
+else
+	make dist-wasm >/dev/null
+	wasm_cli="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 prepare_project() {
   local project="$1"
   mkdir -p "$project"
-  printf 'task cached : ; [shell: kash]\n\techo run >> runs.log\n\t(out! "cached-output")\n\ntask other : ; [shell: kash]\n\techo other >> runs.log\n\t(out! "other-output")\n' >"$project/Makefile.kmk"
+  printf 'task cached memoized\n\techo run >> runs.log\n\t(out! "cached-output")\n\ntask cached other\n\techo other >> runs.log\n\t(out! "other-output")\n' >"$project/Makefile.km"
 }
-run_native() { (cd "$1" && "$CLI_BIN" "${2:-cached}") >/dev/null 2>&1; }
-run_wasm() { (cd "$1" && node "$CLI_ROOT/dist/kame.js" "${2:-cached}") >/dev/null 2>&1; }
+run_native() { (cd "$1" && "$CLI_BIN" "${2:-memoized}") >/dev/null 2>&1; }
+run_wasm() { (cd "$1" && node "$wasm_cli" "${2:-memoized}") >/dev/null 2>&1; }
 cache_command() {
   local host="$1" project="$2" action="$3"
   if [ "$host" = native ]; then
     (cd "$project" && "$CLI_BIN" do cache "$action" --json)
   else
-    (cd "$project" && node "$CLI_ROOT/dist/kame.js" do cache "$action" --json)
+    (cd "$project" && node "$wasm_cli" do cache "$action" --json)
   fi
 }
 

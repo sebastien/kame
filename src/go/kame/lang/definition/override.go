@@ -27,3 +27,20 @@ func ParseOverride(assignment string) Override {
 	}
 	return Override{Name: assignment[:end], Text: assignment[equal+1:], Typed: typed}
 }
+
+// SelectOverride resolves one value definition using the invocation's precedence.
+func SelectOverride(name string, defines, environment []string) Override {
+	var selected Override
+	prefix := "KAME_" + name + "="
+	for _, entry := range environment {
+		if text, ok := strings.CutPrefix(entry, prefix); ok {
+			selected = Override{Name: name, Text: text}
+		}
+	}
+	for _, entry := range defines {
+		if override := ParseOverride(entry); override.Name == name {
+			selected = override
+		}
+	}
+	return selected
+}

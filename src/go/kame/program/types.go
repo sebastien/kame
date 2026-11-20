@@ -10,6 +10,7 @@ import (
 	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
+	"kame/lang/source"
 	"kame/lang/template"
 )
 
@@ -289,6 +290,13 @@ type Options struct {
 	// JavaScript host can service filesystem, environment, and process work
 	// asynchronously. Native callers leave it false.
 	ForwardRequests bool
+	// DeclarationRead returns an owned candidate list for a scan and kind mask.
+	// An empty completion suspends registration until the scan is available.
+	DeclarationRead   func(any, string, int) core.Completion
+	DeclarationSource func(any, string) core.Completion
+	DeclarationHost   any
+	// CompositionDiscoveries were observed while selecting source fragments.
+	CompositionDiscoveries []DeclarationSnapshot
 	// ResolveTool returns an allocator-owned executable path when a reached
 	// recipe references a tool. A nil callback uses paths supplied by the host.
 	ResolveTool func(mem.Allocator, string, string, []string) string
@@ -348,13 +356,23 @@ type Program struct {
 	ResumeForeground bool
 	// BackgroundNode reports nodes of background jobs, whose graphs attach
 	// the terminal without taking its foreground (052).
-	BackgroundNode    func(nodeID int64) bool
-	Options           Options
-	Rules             []registeredRule
-	GeneratedRules    []*rule.Rule
-	ResolvedRules     []*rule.Rule
-	GeneratedRuleMeta []generatedRuleMeta
-	Tools             []Tool
+	BackgroundNode          func(nodeID int64) bool
+	Options                 Options
+	Rules                   []registeredRule
+	ResolvedRules           []*rule.Rule
+	ScopedRules             []*rule.Rule
+	RuleDeclarations        map[*rule.Rule]declarationScope
+	GeneratedBatchUsage     map[*expr.Expr]generatedBatchUsage
+	firstGenerateSpan       source.Span
+	declarationDiscoveries  []declarationDiscovery
+	declarationSources      []DeclarationSnapshot
+	declarationSourceValues map[string]core.Completion
+	declarationIncludes     []*script.Script
+	declarationIncludeStack []string
+	declarationImportRoots  map[*core.Node]*core.Root
+	registrationPending     bool
+	GeneratedRuleMeta       []generatedRuleMeta
+	Tools                   []Tool
 	// Configuration owns the effective literal definition overrides.
 	Configuration []string
 	// ParameterDefinitions owns shorthand operands consumed as definition
@@ -372,6 +390,7 @@ type Program struct {
 	collectingProcesses bool
 	workReady           []*core.Node
 	workIndex           int
+	activeJobs          []jobSlot
 	nextRequest         int64
 	Pending             []pendingRequest
 	epoch               int64
@@ -432,7 +451,6 @@ func (c *ServiceConfig) Free(a mem.Allocator) {
 type registeredRule struct{ Rule *rule.Rule }
 type generatedRuleMeta struct {
 	Rule         *rule.Rule
-	Name         string
 	Dependencies []string
 }
 type instance struct {
@@ -472,6 +490,8 @@ type instance struct {
 	ExecutionOutputs       []string
 	ExecutionKey           [32]byte
 	MetadataEnvironment    []string
+	EnvironmentRead        []string
+	EnvironmentUnset       []string
 	// Terminal is the rule metadata's terminal-handoff grant (051).
 	Terminal             eval.TerminalAuthority
 	SettingsDependencies []string
@@ -545,8 +565,10 @@ type ArgumentValue struct {
 }
 
 type CompileResult struct {
-	Program     *Program
-	Diagnostics []diagnostic.Diagnostic
+	Program             *Program
+	Diagnostics         []diagnostic.Diagnostic
+	Discoveries         []DeclarationSnapshot
+	RegistrationPending bool
 }
 type CompileSource struct {
 	Name string
@@ -569,5 +591,9 @@ func (r *CompileResult) Free(a mem.Allocator) {
 		r.Diagnostics[i].Free(a)
 	}
 	mem.FreeSlice(nil, r.Diagnostics)
+	for i := range r.Discoveries {
+		r.Discoveries[i].Free(a)
+	}
+	mem.FreeSlice(nil, r.Discoveries)
 	*r = CompileResult{}
 }

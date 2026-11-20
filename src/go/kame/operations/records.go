@@ -37,6 +37,9 @@ func opKindPredicate(c *eval.Context, s any, v []core.Value) eval.Result {
 	if c.OperationName == "number?" {
 		matched = v[0].Kind == core.Int || v[0].Kind == core.Float
 	}
+	if c.OperationName == "pattern?" {
+		matched = v[0].Kind == core.Pattern || v[0].Kind == core.PathPattern
+	}
 	c.FreeCallable(&v[0])
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: matched}}
 }

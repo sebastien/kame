@@ -29,8 +29,8 @@ func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 	defer b.Reset()
 	for i := range v {
 		kind := v[i].Kind
-		if kind != core.Nil && kind != core.Bool && kind != core.Int && kind != core.Float && kind != core.String {
-			return invalidArgument(c, v, i, "textual scalar (nil, bool, int, float, or string); use json for collections")
+		if kind != core.Nil && kind != core.Bool && kind != core.Int && kind != core.Float && kind != core.Symbol && !v[i].IsPathText() {
+			return invalidArgument(c, v, i, "textual scalar (nil, bool, int, float, string, symbol, or path); use json for collections")
 		}
 		value, ok := stringValue(c.Run, v[i], false)
 		if !ok {
@@ -70,7 +70,12 @@ func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
 	} else if v.Kind == core.Float {
 
 		b.WriteString(strconv.FormatFloat(v.Float, 'g', -1, 64))
-	} else if v.Kind == core.String {
+	} else if v.Kind == core.Symbol {
+		if quoted {
+			b.WriteByte(':')
+		}
+		b.WriteString(v.Text)
+	} else if v.IsPathText() {
 		if quoted {
 			quote(&b, v.Text)
 		} else {

@@ -3,6 +3,7 @@ package operations
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
@@ -18,13 +19,24 @@ func opPattern(c *eval.Context, state any, values []core.Value) eval.Result {
 	if values[0].Kind != core.String {
 		return invalidArgument(c, values, 0, "string")
 	}
-	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
+	parsed := expr.ParsePathPatternText(c.Run, values[0].Text)
 	defer parsed.Pattern.Free(c.Run)
 	defer mem.FreeSlice(nil, parsed.Diagnostics)
-	if len(parsed.Diagnostics) != 0 || (parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0) {
+	if len(parsed.Diagnostics) != 0 || strings.ContainsRune(values[0].Text, 0) {
 		return ownedFailure(c.Run, "PAT_INVALID", "invalid runtime pattern")
 	}
-	return eval.Result{Value: core.NewPattern(c.Run, values[0].Text)}
+	kind := core.PathPattern
+	pattern := parsed.Pattern
+	if pattern.References != 0 {
+		if pattern.Matchers != 0 || pattern.Globs != 0 {
+			if _, ok := pattern.PromoteNamedCaptures(); !ok {
+				return ownedFailure(c.Run, "PAT_INVALID", "positional reference is not valid in a path pattern")
+			}
+		} else {
+			kind = core.PathTemplate
+		}
+	}
+	return eval.Result{Value: core.Value{Kind: kind, Text: expr.CanonicalPathPattern(c.Run, pattern)}}
 }
 
 // replaceState holds the parsed patterns of one pattern replace. The state is
@@ -32,6 +44,7 @@ func opPattern(c *eval.Context, state any, values []core.Value) eval.Result {
 type replaceState struct {
 	match              *expr.Pattern
 	expand             *expr.Pattern
+	expandsPath        bool
 	constant           core.Value
 	replacement        core.Value
 	scope              *eval.Scope
@@ -68,8 +81,8 @@ func missingReferenceFailure(run mem.Allocator, name string) eval.Result {
 // On success it sets *out and returns an empty result; otherwise it returns a
 // failure and leaves *out nil.
 func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, out **replaceState) eval.Result {
-	parsed := expr.ParsePatternText(c.Run, match.Text, 0)
-	if len(parsed.Diagnostics) != 0 || !expr.HasGroups(parsed.Pattern) || parsed.Pattern.Matchers == 0 {
+	parsed := parsePatternValue(c.Run, match)
+	if len(parsed.Diagnostics) != 0 || (parsed.Pattern.Matchers == 0 && parsed.Pattern.Globs == 0) {
 		parsed.Pattern.Free(c.Run)
 		mem.FreeSlice(nil, parsed.Diagnostics)
 		return ownedFailure(c.Run, "PAT_INVALID", "match pattern needs a matcher group")
@@ -87,7 +100,7 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 			return eval.Result{}
 		}
 	}
-	if expansion.Kind == core.String {
+	if expansion.IsPathText() {
 		state.constant = expansion.Clone(c.Run)
 		*out = state
 		return eval.Result{}
@@ -100,15 +113,15 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 			return eval.Result{}
 		}
 	}
-	if expansion.Kind == core.Pattern {
-		expanded := expr.ParsePatternText(c.Run, expansion.Text, 0)
+	if expansion.Kind == core.PathTemplate {
+		expanded := parsePatternValue(c.Run, expansion)
 		if len(expanded.Diagnostics) != 0 || expanded.Pattern.Matchers != 0 || expanded.Pattern.References == 0 {
 			expanded.Pattern.Free(c.Run)
 			mem.FreeSlice(nil, expanded.Diagnostics)
 			freeReplaceState(c.Run, state)
 			return ownedFailure(c.Run, "PAT_INVALID", "expansion pattern needs reference groups")
 		}
-		state.expand = expanded.Pattern
+		state.expand, state.expandsPath = expanded.Pattern, isExplicitPath(expansion.Text)
 		mem.FreeSlice(nil, expanded.Diagnostics)
 		*out = state
 		return eval.Result{}
@@ -134,7 +147,7 @@ func replaceNativeFree(a mem.Allocator, state any) {
 
 // replaceCall applies a replace section to one evaluated subject.
 func replaceCall(c *eval.Context, state any, values []core.Value) eval.Result {
-	return replaceApply(c, state.(*replaceState), values[0])
+	return substitute(c, state.(*replaceState), values[0], 0)
 }
 
 // replaceSection returns a temporary callable of arity one applying the
@@ -157,29 +170,53 @@ func replaceSection(c *eval.Context, state *replaceState) eval.Result {
 	return eval.Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 }
 
-// replaceApply matches one string subject or every item of a list subject.
+func substitute(c *eval.Context, state *replaceState, subject core.Value, position int) eval.Result {
+	if subject.Kind != core.PathPattern {
+		return replaceApply(c, state, subject)
+	}
+	if c.PurePredicate {
+		return ownedFailure(c.Run, "KASH_PREDICATE_EFFECT", "stream predicates cannot discover paths")
+	}
+	var matches eval.Result
+	if c.Phase == eval.PlanningPhase && c.DeclarationFiles != nil {
+		matches = declarationWildcard(c, []core.Value{subject}, []int{position}, host.DiscoveryAll)
+	} else {
+		// Discovery and replacement each retain their own progress on suspension.
+		previous := c.CallPath
+		c.CallPath += "/subst-subject"
+		matches = fileRequest(c, host.OpWildcard, subject)
+		c.CallPath = previous
+	}
+	if matches.Waiting || matches.Diagnostic.Code != "" {
+		return matches
+	}
+	defer matches.Free(c.Run)
+	return replaceApply(c, state, matches.Value)
+}
+
+// replaceApply matches one string or path subject or every item of a list.
 func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval.Result {
 	if subject.Kind == core.Nil {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
-	if subject.Kind == core.String {
-		return replaceOne(c, state, subject.Text)
+	if subject.IsPathText() {
+		return replaceOne(c, state, subject)
 	}
 	if subject.Kind == core.List {
 		progress := callbackProgress(c)
 		for progress.Index < len(subject.List) {
 			i := progress.Index
-			if subject.List[i].Kind != core.String {
+			if !subject.List[i].IsPathText() {
 				discardCallback(c, progress)
 				c.DiscardCallables(&subject)
-				return c.InvalidOperation("replace subject list must contain only strings; got " + core.KindName(subject.List[i].Kind))
+				return c.InvalidOperation("replace subject list must contain only strings or paths; got " + core.KindName(subject.List[i].Kind))
 			}
 			previous := c.CallPath
 
 			identity := core.NewString(c.Run, previous+"/replace-item:"+strconv.Itoa(i))
 			c.CallPath = identity.Text
 			effects, paths := len(c.Effects), len(c.WritePaths)
-			one := replaceOne(c, state, subject.List[i].Text)
+			one := replaceOne(c, state, subject.List[i])
 			c.CallPath = previous
 			identity.Free(c.Run)
 			if one.Waiting {
@@ -199,12 +236,16 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 	}
 	// No ownership transfers on rejection; the caller frees storage only.
 	c.DiscardCallables(&subject)
-	return c.InvalidOperation("replace subject expects string, list of strings, or nil; got " + core.KindName(subject.Kind))
+	expected := "replace subject expects a string, path, list of strings or paths, or nil"
+	if state.preserveNonmatches {
+		expected = "replace subject expects a string, path, path pattern, list of strings or paths, or nil"
+	}
+	return c.InvalidOperation(expected + "; got " + core.KindName(subject.Kind))
 }
 
 // replaceOne expands one subject; resub alone drops nonmatches.
-func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Result {
-	matched := state.match.MatchText(c.Run, subject)
+func replaceOne(c *eval.Context, state *replaceState, subject core.Value) eval.Result {
+	matched := state.match.MatchText(c.Run, subject.Text)
 	if matched.Limited {
 		mem.FreeSlice(nil, matched.Captures)
 		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")
@@ -212,7 +253,7 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 	if !matched.Matched {
 		mem.FreeSlice(nil, matched.Captures)
 		if state.preserveNonmatches {
-			return eval.Result{Value: core.NewString(c.Run, subject)}
+			return eval.Result{Value: subject.Clone(c.Run)}
 		}
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
@@ -256,8 +297,9 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 			mem.FreeSlice(nil, matched.Captures)
 			return result
 		}
-		if result.Value.Kind == core.Pattern {
-			expansion := expr.ParsePatternText(c.Run, result.Value.Text, 0)
+		if result.Value.Kind == core.PathTemplate {
+			expandsPath := isExplicitPath(result.Value.Text)
+			expansion := parsePatternValue(c.Run, result.Value)
 			result.Free(c.Run)
 			invalid := len(expansion.Diagnostics) != 0 || expansion.Pattern.Matchers != 0 || expansion.Pattern.References == 0
 			mem.FreeSlice(nil, expansion.Diagnostics)
@@ -272,12 +314,15 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 			if expanded.Missing != "" {
 				return missingReferenceFailure(c.Run, expanded.Missing)
 			}
-			return eval.Result{Value: core.Value{Kind: core.String, Text: expanded.Text}}
+			return eval.Result{Value: expansionValue(expanded.Text, expandsPath)}
 		}
 		mem.FreeSlice(nil, matched.Captures)
-		if result.Value.Kind != core.String && result.Value.Kind != core.Int && result.Value.Kind != core.Float && result.Value.Kind != core.Bool {
+		if !result.Value.IsPathText() && result.Value.Kind != core.Int && result.Value.Kind != core.Float && result.Value.Kind != core.Bool {
 			result.Free(c.Run)
 			return ownedFailure(c.Run, "PAT_INVALID", "expansion must be a string, number, bool, or expansion pattern")
+		}
+		if result.Value.Kind == core.Path {
+			return result
 		}
 		text, ok := stringValue(c.Run, result.Value, false)
 		result.Free(c.Run)
@@ -295,5 +340,20 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 	if expanded.Missing != "" {
 		return missingReferenceFailure(c.Run, expanded.Missing)
 	}
-	return eval.Result{Value: core.Value{Kind: core.String, Text: expanded.Text}}
+	return eval.Result{Value: expansionValue(expanded.Text, state.expandsPath)}
+}
+
+func parsePatternValue(a mem.Allocator, value core.Value) expr.PatternParse {
+	if value.Kind == core.Pattern {
+		return expr.ParsePatternText(a, value.Text, 0)
+	}
+	return expr.ParsePathPatternText(a, value.Text)
+}
+
+func expansionValue(text string, path bool) core.Value {
+	kind := core.String
+	if path {
+		kind = core.Path
+	}
+	return core.Value{Kind: kind, Text: text}
 }

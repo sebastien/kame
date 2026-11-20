@@ -88,7 +88,7 @@ for option in --repo --notes-file; do
 done
 
 test-step "kame release publishes through the Kash library with the terminal"
-if grep -Eq '^release \{repo=\} \{notes=\} : release-assets .*; \[tty: :true foreground: :true\]$' Kamefile &&
+if grep -Eq '^task release \{repo=\} \{notes=\} : release-assets .*; \{tty: true, foreground: true\}$' Kamefile &&
 	grep -Fq '(release-publish ' Kamefile && [ ! -e src/sh/release.sh ]; then
 	test-ok "release target prebuilds assets and lends npm the terminal"
 else
@@ -104,10 +104,9 @@ cp -R src/kash "$fixture/src/kash"
 cp VERSION package.json "$fixture/"
 # A committed Kamefile runs the same library as `kame release` does.
 cat >"$fixture/Kamefile" <<'KAMEFILE'
-SHELL = kash
-(include ./src/kash/release.kash)
+include ./src/kash/release.kash
 
-publish {repo=} : ; [tty: :true foreground: :true]
+task publish {repo=} ; {tty: true, foreground: true}
 	(release-publish (abspath ".") repo "" "" "")
 KAMEFILE
 printf 'dist/\n.kame/\n' >"$fixture/.gitignore"

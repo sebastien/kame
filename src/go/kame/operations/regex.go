@@ -18,6 +18,7 @@ type regexCache struct {
 }
 
 type regexCacheEntry struct {
+	kind     core.Kind
 	text     string
 	parsed   expr.PatternParse
 	compiled expr.CompiledPattern
@@ -40,17 +41,18 @@ func freeRegexCache(a mem.Allocator, value any) {
 	mem.Free(a, cache)
 }
 
-func (r *regexCache) lookup(text string) *regexCacheEntry {
+func (r *regexCache) lookup(value core.Value) *regexCacheEntry {
 	for i := range r.entries {
-		if r.entries[i].parsed.Pattern != nil && r.entries[i].text == text {
+		if r.entries[i].parsed.Pattern != nil && r.entries[i].text == value.Text && r.entries[i].kind == value.Kind {
 			return &r.entries[i]
 		}
 	}
 	entry := &r.entries[r.next]
 	r.next = (r.next + 1) % len(r.entries)
 	entry.free(r.alloc)
-	entry.text = core.NewString(r.alloc, text).Text
-	entry.parsed = expr.ParsePatternText(r.alloc, text, 0)
+	entry.text = core.NewString(r.alloc, value.Text).Text
+	entry.kind = value.Kind
+	entry.parsed = parsePatternValue(r.alloc, value)
 	pattern := entry.parsed.Pattern
 	entry.valid = len(entry.parsed.Diagnostics) == 0 && pattern.Matchers != 0 && pattern.References == 0 && hasRegexMatcher(pattern)
 	if entry.valid {
@@ -60,13 +62,13 @@ func (r *regexCache) lookup(text string) *regexCacheEntry {
 }
 
 func opRegexMatch(c *eval.Context, state any, values []core.Value) eval.Result {
-	if values[0].Kind != core.Pattern {
+	if values[0].Kind != core.Pattern && values[0].Kind != core.PathPattern {
 		return invalidArgument(c, values, 0, "pattern")
 	}
-	if values[1].Kind != core.String {
+	if !values[1].IsPathText() {
 		return invalidArgument(c, values, 1, "string")
 	}
-	entry := state.(*regexCache).lookup(values[0].Text)
+	entry := state.(*regexCache).lookup(values[0])
 	if !entry.valid {
 		return ownedFailure(c.Run, "PAT_INVALID", "regex-match needs a regex match pattern")
 	}
@@ -141,7 +143,7 @@ func regexMatchRecord(c *eval.Context, pattern *expr.Pattern, subject string, ca
 	return eval.Result{Value: result}
 }
 
-func opCapture(c *eval.Context, state any, values []core.Value) eval.Result {
+func opRegexGroup(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
 	if values[1].Kind != core.Record {
 		return invalidArgument(c, values, 1, "regex match record")
@@ -155,7 +157,7 @@ func opCapture(c *eval.Context, state any, values []core.Value) eval.Result {
 		if list.Kind != core.List {
 			list.Free(c.Run)
 			discardArgCallables(c, values)
-			return c.InvalidOperation("capture expects a regex match record")
+			return c.InvalidOperation("regex-group expects a regex match record")
 		}
 		if index >= int64(len(list.List)) {
 			list.Free(c.Run)
@@ -170,7 +172,7 @@ func opCapture(c *eval.Context, state any, values []core.Value) eval.Result {
 		if named.Kind != core.Record {
 			named.Free(c.Run)
 			discardArgCallables(c, values)
-			return c.InvalidOperation("capture expects a regex match record")
+			return c.InvalidOperation("regex-group expects a regex match record")
 		}
 		for i := range named.Record {
 			if named.Record[i].Key == values[0].Text {
@@ -196,13 +198,13 @@ func regexRecordValue(a mem.Allocator, record core.Value, key string) core.Value
 
 func opResub(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
-	if values[0].Kind != core.Pattern {
+	if values[0].Kind != core.Pattern && values[0].Kind != core.PathPattern {
 		return invalidArgument(c, values, 0, "pattern")
 	}
-	if values[1].Kind != core.String && values[1].Kind != core.Pattern && values[1].Kind != core.Callable {
+	if !values[1].IsPathText() && values[1].Kind != core.PathTemplate && values[1].Kind != core.Callable {
 		return invalidArgument(c, values, 1, "string or expansion pattern")
 	}
-	if values[2].Kind != core.String && values[2].Kind != core.List {
+	if !values[2].IsPathText() && values[2].Kind != core.List {
 		return invalidArgument(c, values, 2, "string or list of strings")
 	}
 	var replace *replaceState

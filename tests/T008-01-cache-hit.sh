@@ -75,14 +75,14 @@ test-step "environment changes invalidate the record"
 (
 	cd cache-hit
 	rm -rf .kame runs.log
-	cli_run -- --allow-run --allow-write=. --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=one env-report
+	cli_run -- --allow-run --allow-write=. --allow-env=CACHE_VALUE --env CACHE_VALUE=one env-report
 	cli_expect_status 0
-	cli_run -- --json --allow-run --allow-write=. --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=one env-report
+	cli_run -- --json --allow-run --allow-write=. --allow-env=CACHE_VALUE --env CACHE_VALUE=one env-report
 	cli_expect_status 0
 	cli_expect_event "$CLI_OUT" 'stdout' '.cached == true'
-	cli_run -- --allow-run --allow-write=. --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=two env-report
+	cli_run -- --allow-run --allow-write=. --allow-env=CACHE_VALUE --env CACHE_VALUE=two env-report
 	cli_expect_status 0
-	cli_run -- --json --allow-run --allow-write=. --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=two env-report
+	cli_run -- --json --allow-run --allow-write=. --allow-env=CACHE_VALUE --env CACHE_VALUE=two env-report
 	cli_expect_status 0
 	cli_expect_event "$CLI_OUT" 'stdout' '.cached == true'
 	if [ "$(run_count ./runs.log)" = 2 ]; then
@@ -101,7 +101,8 @@ test-step "failed cached tasks do not commit a record"
 (
 	cd cache-hit
 	rm -rf .kame
-	cli_run -- -c $'task failing :\n\texit 1' failing
+	printf 'task cached failing\n\tfalse\n' >Kamefile
+	cli_run -- failing
 	cli_expect_status 1
 	records="$(find .kame -name '*.kmkr' -type f 2>/dev/null | wc -l | tr -d ' ')" || true
 	if [ "$records" = 0 ]; then

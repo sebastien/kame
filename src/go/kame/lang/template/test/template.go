@@ -13,52 +13,54 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestStringTemplateRetainsExpansionSpans(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "before @{project.name} @< after")
+	parsed := template.ParseString(t.Allocator(), "test.km", "before @{project.name} @{inputs.0} after")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 5 {
-		t.Error("template did not parse literal, expression, and selector parts")
+		t.Error("template did not parse literal and interpolation parts")
 		return
 	}
-	if parsed.Parts[1].Kind != template.Reference || !sameSpan(parsed.Parts[1].Span, 7, 22) || parsed.Parts[3].Kind != template.Selector || !sameSpan(parsed.Parts[3].Span, 23, 25) {
+	if parsed.Parts[1].Kind != template.Reference || !sameSpan(parsed.Parts[1].Span, 7, 22) || parsed.Parts[3].Kind != template.Reference || !sameSpan(parsed.Parts[3].Span, 23, 34) {
 		t.Error("template expansion spans were not retained")
 	}
 }
 
 func TestCommandToolReferenceIsGlobalTemplatePart(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "@{x/gcc} -c @<")
+	parsed := template.ParseString(t.Allocator(), "test.km", "@{x/gcc} -c @{inputs.0}")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 3 || parsed.Parts[0].Kind != template.Tool || parsed.Parts[0].Text != "gcc" || !sameSpan(parsed.Parts[0].Span, 0, 8) {
 		t.Error("command reference did not parse as a tool part")
 		return
 	}
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "@{x/gcc} -c @<" {
+	if formatted != "@{x/gcc} -c @{inputs.0}" {
 		t.Errorf("formatted command reference = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
-func TestMalformedExpansionStaysLiteralWithWarning(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "echo @(name")
+func TestMalformedExpansionStaysLiteralWithError(t *testing.T) {
+	parsed := template.ParseString(t.Allocator(), "test.km", "echo @{name")
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 1 || parsed.Diagnostics[0].Severity != source.Warning || len(parsed.Parts) != 1 || parsed.Parts[0].Text != "echo @(name" {
-		t.Error("malformed expansion was not retained as literal text with a warning")
+	if len(parsed.Diagnostics) != 1 || parsed.Diagnostics[0].Severity != source.Error || len(parsed.Parts) != 1 || parsed.Parts[0].Text != "echo @{name" {
+		t.Error("malformed expansion was not retained as literal text with an error")
 	}
 }
 
 func TestClosedInvalidExpansionIsAnError(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "@(1_)")
+	parsed := template.ParseString(t.Allocator(), "test.km", "@{1_}")
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 1 || parsed.Diagnostics[0].Severity != source.Error || parsed.Parts[0].Text != "@(1_)" {
+	if len(parsed.Diagnostics) != 1 || parsed.Diagnostics[0].Severity != source.Error || parsed.Parts[0].Text != "@{1_}" {
 		t.Error("closed invalid expansion did not retain the parser error")
 	}
 }
 
 func TestMalformedSelectorStaysLiteral(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "@1...")
+	const text = "@1... @< @(missing) \\@> @@{missing}"
+	parsed := template.ParseString(t.Allocator(), "test.km", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 1 || parsed.Parts[0].Kind != template.Literal || parsed.Parts[0].Text != "@1..." {
-		t.Error("malformed selector was tokenized as a selector")
+	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 1 || parsed.Parts[0].Kind != template.Literal ||
+		parsed.Parts[0].Text != "@1... @< @(missing) \\@> @{missing}" {
+		t.Error("template changed literal text outside interpolations")
 	}
 }
 
@@ -176,10 +178,10 @@ func TestTargetCharacterClassesRejectDescendingRanges(t *testing.T) {
 }
 
 func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "a\\@b @{name}")
+	parsed := template.ParseString(t.Allocator(), "test.km", "a@@b @{name}")
 	defer parsed.Free()
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "a\\@b @{name}" {
+	if formatted != "a@@b @{name}" {
 		t.Errorf("FormatString() = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
@@ -187,9 +189,9 @@ func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
 
 func TestFormatDocumentCanonicalizesInlineDirectives(t *testing.T) {
 	a := t.Allocator()
-	formatted := template.FormatDocument(a, "inline.tmpl", "hello @if(true)yes@end world", "plain")
+	formatted := template.FormatDocument(a, "inline.tmpl", "hello @if true yes@end world", "plain")
 	defer formatted.Free()
-	if !formatted.OK || formatted.Text != "hello @if(true)yes@end(if) world" {
+	if !formatted.OK || formatted.Text != "hello @if true yes@end world" {
 		t.Errorf("FormatDocument() = %q, want canonical labels", formatted.Text)
 	}
 	again := template.FormatDocument(a, "inline.tmpl", formatted.Text, "plain")
@@ -201,9 +203,9 @@ func TestFormatDocumentCanonicalizesInlineDirectives(t *testing.T) {
 
 func TestFormatDocumentCanonicalizesCommentWrappers(t *testing.T) {
 	a := t.Allocator()
-	formatted := template.FormatDocument(a, "inline.html", "a<!--   @if( true )   -->b<!-- @end -->c", "html")
+	formatted := template.FormatDocument(a, "inline.html", "a<!--   @if true   -->b<!-- @end -->c", "html")
 	defer formatted.Free()
-	if !formatted.OK || formatted.Text != "a<!-- @if(true) -->b<!-- @end(if) -->c" {
+	if !formatted.OK || formatted.Text != "a<!-- @if true -->b<!-- @end if -->c" {
 		t.Errorf("FormatDocument() = %q, %s %s", formatted.Text, formatted.Code, formatted.Message)
 	}
 }
@@ -211,16 +213,16 @@ func TestFormatDocumentCanonicalizesCommentWrappers(t *testing.T) {
 func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
-		"@if(eq name \"Ada\")\nyes\n@elif(eq name \"Lin\")\nother\n@end(if)\n",
-		"@with(nop {name: \"Ada\"})\n@{name}\n@end(with)\n",
-		"@match(str \"./\" name)\n@case(nop ./Ada)\nyes\n@end(match)\n",
-		"@if(cond)yes@end(if)",
-		"@if((predicate ()))yes@end(if)",
-		"@for([item] (list \"a\" \"b\") \",\")\n@{item}\n@end(for)\n",
-		"@let(name (str \"A\" \"da\"))\n@{name}\n",
-		"@include((str \"./\" name) {name: \"Ada\"})\n",
-		"@if((x => (eq x \"Ada\")) name)yes@end(if)",
-		"@if((values |> count))yes@end(if)",
+		"@if eq? name \"Ada\"\nyes\n@elif eq? name \"Lin\"\nother\n@end if\n",
+		"@with nop {name: \"Ada\"}\n@{name}\n@end with\n",
+		"@match str \"./\" name\n@case ./Ada\nyes\n@end match\n",
+		"@if cond\nyes\n@end if",
+		"@if predicate ()\nyes\n@end if",
+		"@for item in list \"a\" \"b\" sep \",\"\n@{item}\n@end for\n",
+		"@let name = str \"A\" \"da\"\n@{name}\n",
+		"@include (str \"./\" name) {name: \"Ada\"}\n",
+		"@if (x => (eq? x \"Ada\")) name\nyes\n@end if",
+		"@if values |> count\nyes\n@end if",
 	}
 	for i := range inputs {
 		doc := template.ParseDocument(a, "boundary.tmpl", inputs[i], "plain")
@@ -232,7 +234,7 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 				t.Error("directive shorthand has unexpected lowered structure")
 			} else {
 				condition := doc.Root.Items[1].Items[1]
-				if condition == nil || condition.Kind != expr.Application || !sameSpan(condition.Span, 4, 17) || len(condition.Items) != 3 || condition.Items[1] == nil || !sameSpan(condition.Items[1].Span, 7, 11) {
+				if condition == nil || condition.Kind != expr.Application || !sameSpan(condition.Span, 4, 18) || len(condition.Items) != 3 || condition.Items[1] == nil || !sameSpan(condition.Items[1].Span, 8, 12) {
 					t.Error("directive shorthand lost authored expression spans")
 				}
 			}
@@ -249,12 +251,12 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 		again.Free()
 		formatted.Free()
 	}
-	legacy := template.FormatDocument(a, "boundary.html", "<!-- @if((eq name \"Ada\")) -->\nyes\n<!-- @end -->\n", "html")
-	if !legacy.OK || legacy.Text != "<!-- @if((eq name \"Ada\")) -->\nyes\n<!-- @end(if) -->\n" {
+	legacy := template.FormatDocument(a, "boundary.html", "<!-- @if (eq? name \"Ada\") -->\nyes\n<!-- @end -->\n", "html")
+	if !legacy.OK || legacy.Text != "<!-- @if (eq? name \"Ada\") -->\nyes\n<!-- @end if -->\n" {
 		t.Error("directive formatting did not preserve authored parentheses")
 	}
 	legacy.Free()
-	invalid := []string{"@if()\nyes\n@end\n", "@if(eq name\nyes\n@end\n", "@with(\"a\"\"b\")\nyes\n@end\n", "@end(if extra)\n", "@for([item] (list \"a\") \",\" extra)\nyes\n@end\n"}
+	invalid := []string{"@if\nyes\n@end\n", "@if (eq? name\nyes\n@end\n", "@with \"a\"\"b\"\nyes\n@end\n", "@end if extra\n", "@for item in [\"a\"] sep ,\nyes\n@end\n"}
 	for i := range invalid {
 		doc := template.ParseDocument(a, "invalid.tmpl", invalid[i], "plain")
 		if len(doc.Diagnostics) == 0 {
@@ -265,7 +267,7 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 }
 
 func TestDocumentIfElseLowersWithoutBlankDebt(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "test.hash", "# @if(cond)\nyes\n# @else\nno\n# @end\n", "hash")
+	doc := template.ParseDocument(t.Allocator(), "test.hash", "# @if cond\nyes\n# @else\nno\n# @end\n", "hash")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 || doc.Root == nil {
 		t.Error("hash document did not parse")
@@ -275,10 +277,10 @@ func TestDocumentIfElseLowersWithoutBlankDebt(t *testing.T) {
 func TestFormattingPreservesEscapedAndRawTemplateBytes(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
-		"@@if((eq \"x\" \"x\"))\n",
-		"\\@if(eq \"x\" \"x\")\n",
-		"literal \\@if(eq \"x\" \"x\") text\n",
-		"@raw\n{(missing)} @(missing) @if((eq \"x\" \"x\"))\n@end(raw)\n",
+		"@@if eq \"x\" \"x\"\n",
+		"@\u0020if eq \"x\" \"x\"\n",
+		"literal @if eq \"x\" \"x\" text\n",
+		"@raw\n@{missing} @if eq \"x\" \"x\"\n@end raw\n",
 	}
 	for i := range inputs {
 		formatted := template.FormatDocument(a, "escaped.tmpl", inputs[i], "plain")
@@ -299,12 +301,12 @@ func TestDocumentStrayEndIsBlockError(t *testing.T) {
 
 func TestDocumentBlockEndLabelsAreChecked(t *testing.T) {
 	a := t.Allocator()
-	valid := template.ParseDocument(a, "labels.tmpl", "@if(ok)\nyes\n@end(if)\n@for([x] xs)\n@{x}\n@end(for)\n", "plain")
+	valid := template.ParseDocument(a, "labels.tmpl", "@if ok\nyes\n@end if\n@for x in xs\n@{x}\n@end for\n", "plain")
 	defer valid.Free()
 	if len(valid.Diagnostics) != 0 {
 		t.Error("matching template block labels were rejected")
 	}
-	invalid := template.ParseDocument(a, "mismatch.tmpl", "@for([x] xs)\n@{x}\n@end(if)\n", "plain")
+	invalid := template.ParseDocument(a, "mismatch.tmpl", "@for x in xs\n@{x}\n@end if\n", "plain")
 	defer invalid.Free()
 	if len(invalid.Diagnostics) != 1 || invalid.Diagnostics[0].Code != "TPL_BLOCK" {
 		t.Error("mismatched template block label was not TPL_BLOCK")
@@ -312,7 +314,7 @@ func TestDocumentBlockEndLabelsAreChecked(t *testing.T) {
 }
 
 func TestDocumentMatchClausesLowerToMatchForm(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "match.tmpl", "@match(path)\n@case(./posts/{slug}.md)\n@{slug}\n@else\nother\n@end(match)\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "match.tmpl", "@match path\n@case ./posts/{slug}.md\n@{slug}\n@else\nother\n@end match\n", "plain")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 || doc.Root == nil || len(doc.Root.Items) != 2 {
 		t.Error("document match clauses did not parse and lower")
@@ -331,7 +333,7 @@ func TestDocumentMatchClausesLowerToMatchForm(t *testing.T) {
 }
 
 func TestRawBlockAcceptsLabeledRawEnd(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "raw.tmpl", "@raw\n@not_a_directive\n@end(raw)\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "raw.tmpl", "@raw\n@not_a_directive\n@end raw\n", "plain")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 {
 		t.Error("raw block did not accept its matching labeled end")
@@ -348,21 +350,21 @@ func TestDocumentUnknownStyleIsStyleError(t *testing.T) {
 
 func TestDocumentAutoStyleUsesExtensionAndContent(t *testing.T) {
 	a := t.Allocator()
-	if style, ok := template.ResolveAutoStyle("view.ps1", "# @if(ok)\nyes\n# @end(if)\n"); !ok || style != "powershell" {
+	if style, ok := template.ResolveAutoStyle("view.ps1", "# @if ok\nyes\n# @end if\n"); !ok || style != "powershell" {
 		t.Error("PowerShell extension did not select its comment style")
 	}
-	if style, ok := template.InferContentStyle("<!-- @if(ok) -->\nyes\n<!-- @end(if) -->\n"); !ok || style != "html" {
+	if style, ok := template.InferContentStyle("<!-- @if ok -->\nyes\n<!-- @end if -->\n"); !ok || style != "html" {
 		t.Error("HTML content style was not detected")
 	}
-	if _, ok := template.InferContentStyle("# @if(ok)\n<!-- @end(if) -->\n"); ok {
+	if _, ok := template.InferContentStyle("# @if ok\n<!-- @end if -->\n"); ok {
 		t.Error("mixed comment styles were not reported as ambiguous")
 	}
-	doc := template.ParseDocument(a, "view.unknown", "# @if(ok)\nyes\n# @end(if)\n", "auto")
+	doc := template.ParseDocument(a, "view.unknown", "# @if ok\nyes\n# @end if\n", "auto")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 {
 		t.Error("auto style did not use a unique content style")
 	}
-	ambiguous := template.ParseDocument(a, "view.unknown", "# @if(ok)\nyes\n<!-- @end(if) -->\n", "auto")
+	ambiguous := template.ParseDocument(a, "view.unknown", "# @if ok\nyes\n<!-- @end if -->\n", "auto")
 	defer ambiguous.Free()
 	if len(ambiguous.Diagnostics) != 1 || ambiguous.Diagnostics[0].Code != "TPL_STYLE" {
 		t.Error("ambiguous auto style did not report TPL_STYLE")
@@ -371,12 +373,12 @@ func TestDocumentAutoStyleUsesExtensionAndContent(t *testing.T) {
 
 func TestDocumentPowerShellAndBatchCommentStyles(t *testing.T) {
 	a := t.Allocator()
-	powershell := template.ParseDocument(a, "view.ps1", "<# @if(ok) #>\nyes\n<# @end(if) #>\n", "powershell")
+	powershell := template.ParseDocument(a, "view.ps1", "<# @if ok #>\nyes\n<# @end if #>\n", "powershell")
 	defer powershell.Free()
 	if len(powershell.Diagnostics) != 0 {
 		t.Error("PowerShell block comments were not recognized")
 	}
-	batch := template.ParseDocument(a, "view.cmd", "REM @if(ok)\nyes\n:: @end(if)\n", "batch")
+	batch := template.ParseDocument(a, "view.cmd", "REM @if ok\nyes\n:: @end if\n", "batch")
 	defer batch.Free()
 	if len(batch.Diagnostics) != 0 {
 		t.Error("batch comment directives were not recognized")

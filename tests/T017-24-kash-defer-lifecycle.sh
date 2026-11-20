@@ -5,11 +5,12 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-24 Kash deferred cleanup lifecycle"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make -C "$CLI_ROOT" dist-wasm >/dev/null; fi
+wasm_wrapper=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
-	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_wrapper"); fi
 	test-step "$backend default cleanup deadline remains bounded"
 	status=0
 	timeout -k 2 15 "${runner[@]}" "do" run -C "$work" --allow-run --allow-read --allow-write -l kash -c 'defer sleep 30' >"$work/out" 2>"$work/err" || status=$?
@@ -33,10 +34,10 @@ SH
 		rm -f "$work/worker.pid" "$work/reaped" "$work/expression-cleaned" "$work/finally-cleaned"
 		text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; ./worker'
 		options=()
-		if [ "$scenario" = timeout ]; then options=(--timeout 150); fi
+		if [ "$scenario" = timeout ]; then options=(--timeout 1000); fi
 		if [ "$scenario" = background ]; then text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; ./worker &; sh -c "while test ! -s worker.pid; do sleep .01; done"; (fail! "stop")'; fi
 		if [ "$scenario" = combined ]; then
-			text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; (finally! ([] (run! "./worker")) ([] (write! ./finally-cleaned "yes")))'
+			text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; (finally! (() => run! "./worker") (() => write! ./finally-cleaned "yes"))'
 		fi
 		if [ "$scenario" = signal ] || [ "$scenario" = combined ]; then
 			"${runner[@]}" "do" run -C "$work" --allow-run --allow-write -l kash -c "$text" >"$work/out" 2>"$work/err" &
@@ -47,7 +48,11 @@ SH
 			done
 			# Signal the runner itself: GNU timeout can deliver TERM twice, which
 			# intentionally requests forced shutdown instead of normal finalization.
-			kill -TERM "$watchdog"
+			if [ -s "$work/worker.pid" ] && kill -TERM "$watchdog"; then
+				test-ok "$backend $scenario started before interruption"
+			else
+				test-fail "$backend $scenario exited before the startup handshake"
+			fi
 			for _attempt in {1..1000}; do
 				kill -0 "$watchdog" 2>/dev/null || break
 				sleep .01

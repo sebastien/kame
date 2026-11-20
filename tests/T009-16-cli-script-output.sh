@@ -5,26 +5,24 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T009-16 script output and assignment classification"
 cd "$CLI_ROOT"
 cli_build
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
 work="$TMPDIR/framing"
 mkdir -p "$work"
 cat >"$work/data.km" <<'KM'
-(out! "{\"ok\":true}\n")
-(err! "progress\n")
-[ignored: 42]
+default = nop (out! "{\"ok\":true}\n") (err! "progress\n") {ignored: 42}
 KM
 cat >"$work/default.km" <<'KM'
-default = (out! "default\n")
+default = out! "default\n"
 KM
-cat >"$work/config.kmk" <<'KMK'
+cat >"$work/config.km" <<'KM'
 SDK_PATH = "original"
-default : ; [shell: kash]
+task default
 	(out! SDK_PATH)
-deploy {path} : ; [shell: kash]
+task deploy {path}
 	(out! path)
-KMK
+KM
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "${KAME_TEST_WASM_WRAPPER:-$CLI_ROOT/dist/kame.js}"); fi
 	check() {
 		local expected="$1"; shift
 		local status=0
@@ -35,19 +33,19 @@ for backend in native wasm; do
 	test-step "$backend exact machine-readable stdout, explicit display and operands"
 	check $'{"ok":true}\n' "$work/data.km"
 	if [ "$(cat "$work/err")" = progress ] && jq -e '.ok == true' "$work/out" >/dev/null; then test-ok "$backend JSON data and stderr stay separate"; else test-fail "$backend stdout framing"; fi
-	check $'{"ok":true}\n[ignored: 42]' do run --print-result "$work/data.km"
+	check $'{"ok":true}\n{ignored: 42}' do run --print-result "$work/data.km"
 	check '' do run -c '42'
-	check '' do run -c ':nil'
+	check '' do run -c 'nil'
 	check '' do run -c '""'
 	check '42' do run --print-result -c '42'
 	check '7' do run --lang expr -c '7' --lang km -c '42'
 	check 'raw42' do run --print-result -c '(out! "raw")' -c '42'
 	check 'raw42' do run --lang expr -c '(nop (out! "raw") 42)'
-	check ':nil' do run --lang expr -c ':nil'
+	check 'nil' do run --lang expr -c 'nil'
 	check $'default\n' "$work/default.km"
 	check $'default\n"default\\n"' --print-result "$work/default.km"
 	check $'default\n"default\\n"' "$work/default.km" default
-	check '["one two" "--help" "x.km"]' do run --lang expr -c 'args' -- 'one two' --help x.km
+	check '["one two", "--help", "x.km"]' do run --lang expr -c 'args' -- 'one two' --help x.km
 	check '["one two","--help"]' do run -c '(out! (json args))' -- 'one two' --help
 	check '[]' do run --lang expr -c 'args'
 	check '"one two"' do run --lang expr -c 'args.0' -- 'one two'
@@ -56,17 +54,17 @@ for backend in native wasm; do
 	if [ "$status" = 1 ] && [ ! -s "$work/out" ]; then test-ok "$backend failure prevents final result"; else test-fail "$backend fabricated a success result"; fi
 
 	test-step "$backend assignments remain literal before and after rule sources"
-	for suffix in km kmk kash ksh; do
+	for suffix in km kame kash ksh; do
 		value="/missing/sdk.$suffix"
-		check "$value" do run "$work/config.kmk" "SDK_PATH=$value"
-		check "$value" "SDK_PATH=$value" "$work/config.kmk"
-		check "$value" "$work/config.kmk" default "SDK_PATH=$value"
-		check "$value" do run "$work/config.kmk" deploy "path=$value"
-		check "$value" do run "$work/config.kmk" "SDK_PATH=$value" -c '42'
+		check "$value" do run "$work/config.km" "SDK_PATH=$value"
+		check "$value" "SDK_PATH=$value" "$work/config.km"
+		check "$value" "$work/config.km" default "SDK_PATH=$value"
+		check "$value" do run "$work/config.km" deploy "path=$value"
+		check "$value" do run "$work/config.km" --entry default "SDK_PATH=$value" -c '42'
 	done
-	check '@(missing)=$(printf injected).km' do run "$work/config.kmk" 'SDK_PATH=@(missing)=$(printf injected).km'
-	check '(fail! "not an expression")' do run "$work/config.kmk" 'SDK_PATH=(fail! "not an expression")'
-	check '' do run "$work/config.kmk" 'SDK_PATH='
+	check '${missing}=$(printf injected).km' do run "$work/config.km" 'SDK_PATH=${missing}=$(printf injected).km'
+	check '(fail! "not an expression")' do run "$work/config.km" 'SDK_PATH=(fail! "not an expression")'
+	check '' do run "$work/config.km" 'SDK_PATH='
 
 	test-step "$backend JSON Lines obey the same display policy"
 	for display in silent explicit; do

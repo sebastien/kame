@@ -10,14 +10,14 @@ import (
 func TestKashLeadingValuePathsKeepExpressionBoundaries(t *testing.T) {
 	a := t.Allocator()
 	texts := []string{
-		"def root = \"./work\"; def path = @{root}/config.json; (nop path)",
-		"def root () = \"./work\"; def path = @{root ()}/config.json; (nop path)",
-		"def path = @{nop\n \"./work\"}/config.json; (nop path)",
-		"def path = @{root}/semi\\;colon; (nop path)",
-		"def path = @{nop \"./semi;colon\"}/file; (nop path)",
-		"def path = (nop @{root}/semi;colon); (nop path)",
-		"for file in @{root}/*.txt\n\tprintf $file\n",
-		"def status ()\n\treturn @{root}/status\n",
+		"def root = \"./work\"; def path = ${root}/config.json; (nop path)",
+		"def root () = \"./work\"; def path = ${root ()}/config.json; (nop path)",
+		"def path = ${nop\n \"./work\"}/config.json; (nop path)",
+		"def path = ${root}/semi\\;colon; (nop path)",
+		"def path = ${nop \"./semi;colon\"}/file; (nop path)",
+		"def path = (nop ${root}/semi;colon); (nop path)",
+		"for file in ${root}/*.txt\n\tprintf $file\n",
+		"def status ()\n\treturn ${root}/status\n",
 	}
 	for i := range texts {
 		s := script.ParseKash(a, "paths.kash", texts[i])

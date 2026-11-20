@@ -15,8 +15,10 @@ import (
 
 func materializeSource(t *testing.T, dir string, source string, read bool, force bool) (string, bool) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", source)
+	parsed := script.ParseKameFile(a, "test.km", source)
+	defer parsed.Free()
 	registry := eval.NewRegistry(a)
+	defer registry.Free()
 	if read && !operations.Register(registry) {
 		t.Fatal("operation registration failed")
 		return "", false
@@ -27,18 +29,19 @@ func materializeSource(t *testing.T, dir string, source string, read bool, force
 	} else {
 		compiled = program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Force: force})
 	}
+	defer compiled.Free(a)
 	if compiled.Program == nil {
-		t.Fatal("compile failed")
+		if len(compiled.Diagnostics) != 0 {
+			return copyText(a, compiled.Diagnostics[0].Code), false
+		}
+		t.Fatal("compile failed without a diagnostic")
 		return "", false
 	}
+	defer compiled.Program.Free()
 	result := compiled.Program.Materialize("./output")
 	code := copyText(a, result.Diagnostic.Code)
 	fresh := result.Fresh
 	result.Free(a)
-	compiled.Program.Free()
-	compiled.Free(a)
-	parsed.Free()
-	registry.Free()
 	return code, fresh
 }
 
@@ -84,7 +87,7 @@ func TestFileInputsSkipShellAcrossProcesses(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input\n\tcp @< @>\n\tprintf x >> recipe-log\n"
+	source := "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf x >> recipe-log\n"
 	if code, _ := materializeSource(t, dir, source, false, false); code != "" {
 		t.Fatal("first build failed: " + code)
 		return
@@ -117,8 +120,8 @@ func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
 	directories := []string{"/sdk/first", "/sdk/first", "/sdk/second"}
 	for i := range directories {
 		sources := []program.CompileSource{
-			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "def assets () = (source-dir ())\n"},
-			{Name: "build.kmk", Text: "rule ./output : ./input = assets ()\n"},
+			{Name: "helper.km", SourceDirectory: directories[i], Text: "def assets () = (source-dir ())\n"},
+			{Name: "build.km", Text: "rule ./output : ./input = assets ()\n"},
 		}
 		compiled := program.CompileMany(a, sources, registry, program.Options{Host: posix.New(a), Directory: dir})
 		if compiled.Program == nil {
@@ -160,16 +163,16 @@ func TestFileFreshnessTracksReachedSignedSources(t *testing.T) {
 			if phase >= 3 {
 				value = "new"
 			}
-			root := "SHELL = kash\nrule ./output : ./input\n\t(yield! (payload ()))\n"
+			root := "rule ./output : ./input\n\treturn (payload ())\n"
 			helper := "def payload () = \"" + value + "\"\n"
 			if mode == 0 {
 				root += helper
 				helper = ""
 			}
 			sources := []program.CompileSource{
-				{Name: dir + "/build.kmk", SourceDirectory: dir, Text: root},
-				{Name: dir + "/helper.kmk", SourceDirectory: dir, Text: helper},
-				{Name: dir + "/unused.kmk", SourceDirectory: dir, Text: "unused = \"" + unused + "\"\n"},
+				{Name: dir + "/build.km", SourceDirectory: dir, Text: root},
+				{Name: dir + "/helper.km", SourceDirectory: dir, Text: helper},
+				{Name: dir + "/unused.km", SourceDirectory: dir, Text: "unused = \"" + unused + "\"\n"},
 			}
 			for i := range sources {
 				sources[i].Signature = core.ContentSignature([]byte(sources[i].Text))
@@ -208,7 +211,7 @@ func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
+	source := "rule ./output : ./input = text (read \"./extra\")\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -244,7 +247,7 @@ func TestFileInputsRebuildWhenDiscoveredInputChanges(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
+	source := "rule ./output : ./input = text (read \"./extra\")\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -279,7 +282,7 @@ func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	source := "./output : @(wildcard ./src/*) ; {shell: kame}\n\t(str (count @<*))\n"
+	source := "rule ./output : ./src/* = str (count inputs)\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first membership build failed: " + code)
 		return
@@ -318,19 +321,19 @@ func TestFileInputsRebuildWhenSourceChanges(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	first := "./output : ./input\n\tprintf x >> recipe-log\n\tprintf a > @>\n"
+	first := "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tprintf x >> recipe-log\n\tprintf a > @{outputs.0}\n"
 	if code, _ := materializeSource(t, dir, first, false, false); code != "" {
 		t.Fatal("first source build failed: " + code)
 		return
 	}
-	second := "./output : ./input\n\tprintf x >> recipe-log\n\tprintf b > @>\n"
+	second := "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tprintf x >> recipe-log\n\tprintf b > @{outputs.0}\n"
 	code, fresh := materializeSource(t, dir, second, false, false)
 	if code != "" || fresh || !tempMatches(t, dir+"/recipe-log", "xx") || !tempMatches(t, dir+"/output", "b") {
 		t.Errorf("changed recipe did not rebuild: %s %t", code, fresh)
 	}
 }
 
-func TestFileInputsSkipKashYield(t *testing.T) {
+func TestKashReturnedArtifactTracksAdditionalReads(t *testing.T) {
 
 	dir, err := os.MkdirTemp("", "kame-file-inputs-")
 	if err != nil {
@@ -342,9 +345,9 @@ func TestFileInputsSkipKashYield(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "SHELL = kash\n./output : ./input\n\t(yield! (text (read \"./extra\")))\n"
+	source := "rule ./output : ./input\n\treturn (read ./extra)\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
-		t.Fatal("kash yield failed: " + code)
+		t.Fatal("Kash artifact publication failed: " + code)
 		return
 	}
 	if os.WriteFile(dir+"/extra", []byte("B"), 0o644) != nil {
@@ -358,7 +361,7 @@ func TestFileInputsSkipKashYield(t *testing.T) {
 	}
 	code, fresh := materializeSource(t, dir, source, true, false)
 	if code != "" || fresh || !tempMatches(t, dir+"/output", "B") {
-		t.Errorf("scoped yield reused changed bytes with old mtime: %s %t", code, fresh)
+		t.Errorf("returned artifact reused changed bytes with old mtime: %s %t", code, fresh)
 	}
 }
 
@@ -374,7 +377,7 @@ func TestFileInputsAlwaysAndForceRerun(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	always := "always ./output : ./input\n\tprintf x >> recipe-log\n\tprintf a > @>\n"
+	always := "rule always ./output : ./input ; {shell: \"/bin/sh\"}\n\tprintf x >> recipe-log\n\tprintf a > @{outputs.0}\n"
 	if code, fresh := materializeSource(t, dir, always, false, false); code != "" || fresh {
 		t.Fatal("always rule did not run: " + code)
 		return
@@ -382,7 +385,7 @@ func TestFileInputsAlwaysAndForceRerun(t *testing.T) {
 	if code, fresh := materializeSource(t, dir, always, false, false); code != "" || fresh || !tempMatches(t, dir+"/recipe-log", "xx") {
 		t.Errorf("always rule reused an input record: %s %t", code, fresh)
 	}
-	plain := "./output : ./input\n\tprintf x >> recipe-log\n\tprintf a > @>\n"
+	plain := "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tprintf x >> recipe-log\n\tprintf a > @{outputs.0}\n"
 	if code, _ := materializeSource(t, dir, plain, false, false); code != "" {
 		t.Fatal("plain rule failed: " + code)
 		return
@@ -409,7 +412,7 @@ func TestFileInputsDemandDiscoveredGeneratedInput(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./extra : ./seed\n\tcp @< @>\n./output : ./input ; {shell: kame}\n\t(text (read \"./extra\"))\n"
+	source := "rule ./extra : ./seed ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\nrule ./output : ./input = text (read \"./extra\")\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first generated dependency build failed: " + code)
 		return

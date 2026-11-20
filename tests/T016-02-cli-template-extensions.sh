@@ -7,59 +7,64 @@ test-start "T016-02 template extensions"
 test-step "build native and WASM runners"
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 
-match_source='@match("./posts/demo.md")
-@case(./posts/{slug:*}.md)
+match_source='@match "./posts/demo.md"
+@case ./posts/{slug:*}.md
 @{slug}
 @else
 other
-@end(match)
+@end match
 '
-hash_source='# @if(:true)
+hash_source='# @if true
 yes
-# @end(if)
+# @end if
 '
-powershell_source='<# @if(:true) #>
+powershell_source='<# @if true #>
 yes
-<# @end(if) #>
+<# @end if #>
 '
-batch_source='REM @if(:true)
+batch_source='REM @if true
 yes
-:: @end(if)
+:: @end if
 '
-list_loop='(render [xs: ["a" "b"]] "plain" """@for([item] xs)
-@{index}:@{key}:@{item};
-@end(for)
-""")'
-record_loop='(render [xs: [first: "A" second: "B"]] "plain" """@for([item] xs)
-@{index}:@{key}:@{item};
-@end(for)
-""")'
-inline_plain='(render "plain" "Hi @if(:true)there@end!")'
-inline_html='(render "html" "a<!-- @if(:true) -->b<!-- @end(if) -->c")'
-inline_c='(render "c" "x/* @if(:true) */y/* @end(if) */z")'
-inline_powershell='(render "powershell" "x<# @if(:true) #>y<# @end(if) #>z")'
-inline_for='(render [xs: ["x" "y"]] "plain" """<@for([item] xs)@{item}@end(for)>!""")'
-inline_with='(render "plain" """x@with([name: "A"])@{name}@end(with)z""")'
-inline_match='(render [path: "./a.md"] "plain" """x@match(path)@case(./{slug:*}.md)@{slug}@else other@end(match)z""")'
-inline_raw='(render "plain" (str "a@raw " "@" "(name)" "@end(raw)c"))'
-trim_markers='(render "plain" "left   @-if(:true)-  right  @-end(if)- \r\n\t tail")'
-trim_else='(render "plain" "A@if(:false) B@else-  C@end(if)D")'
-format_source='hello @if(:true)yes@end world'
-nested_loop='(render [groups: [["a" "b"] ["c"]]] "plain" """@for([group] groups)
-outer:@{index}[
-@for([item] group)
-@{index}:@{item},
-@end(for)
-]@{index}
-@end(for)
-""")'
+list_loop='render """@for i x in indexed xs
+@{i}:@{x};
+@end for
+""" {xs: ["a", "b"]}'
+record_loop='render {xs: {first: "A", second: "B"}} """@for entry in items xs
+@{entry.key}:@{entry.value};
+@end for
+"""'
+inline_plain='render "Hi @if true there @end!"'
+inline_html='render "html" "a<!-- @if true -->b<!-- @end if -->c"'
+inline_c='render "c" "x/* @if true */y/* @end if */z"'
+inline_powershell='render "powershell" "x<# @if true #>y<# @end if #>z"'
+inline_for='render {xs: ["x", "y"]} "html" """<<!-- @for x in xs -->@{x}<!-- @end for -->>!"""'
+inline_with='render "html" """x<!-- @with {name: "A"} -->@{name}<!-- @end with -->z"""'
+inline_match='render {path: "./a.md"} "html" """x<!-- @match path --><!-- @case ./{slug:*}.md -->@{slug}<!-- @else --> other<!-- @end match -->z"""'
+inline_raw='render "html" """a<!-- @raw --> @{name}<!-- @end raw -->c"""'
+trim_markers='render "left   \r\n  @-if true -\r\n  right  \r\n  @-end if - \r\n\t tail"'
+trim_else='render "html" "A<!-- @if false --> B<!-- @else - -->  C<!-- @end if -->D"'
+format_source=$'@if   true\nyes\n@end'
+format_expected=$'@if true\nyes\n@end if'
+nested_loop='render {groups: [["a", "b"], ["c"]], index: "scope"} """@for i group in indexed groups
+outer:@{i}[
+@for i x in indexed group
+@{i}:@{x},
+@end for
+]@{i}:@{index}
+@end for
+"""'
 
 for host in native wasm; do
-	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
 	printf '%s' "$format_source" | "${runner[@]}" do fmt --lang template --comment plain >"$TMPDIR/$host.format.out" 2>"$TMPDIR/$host.format.err"
-	if [ "$(cat "$TMPDIR/$host.format.out")" = 'hello @if(:true)yes@end(if) world' ]; then
+	if [ "$(cat "$TMPDIR/$host.format.out")" = "$format_expected" ]; then
 		test-ok "$host formats template directives canonically"
 	else
 		test-fail "$host template format: $(cat "$TMPDIR/$host.format.err") $(cat "$TMPDIR/$host.format.out")"
@@ -75,7 +80,7 @@ for host in native wasm; do
 	"${runner[@]}" do fmt --lang template --comment plain --in-place "$TMPDIR/$host.format.km" >"$TMPDIR/$host.in-place.out" 2>"$TMPDIR/$host.in-place.err"
 	status=0
 	"${runner[@]}" do fmt --lang template --comment plain --check "$TMPDIR/$host.format.km" >"$TMPDIR/$host.check.out" 2>"$TMPDIR/$host.check.err" || status=$?
-	if [ "$status" -eq 0 ] && [ "$(cat "$TMPDIR/$host.format.km")" = 'hello @if(:true)yes@end(if) world' ]; then
+	if [ "$status" -eq 0 ] && [ "$(cat "$TMPDIR/$host.format.km")" = "$format_expected" ]; then
 		test-ok "$host in-place template formatting is canonical"
 	else
 		test-fail "$host template in-place format: $(cat "$TMPDIR/$host.in-place.err") $(cat "$TMPDIR/$host.check.err")"
@@ -106,8 +111,8 @@ for host in native wasm; do
 		test-fail "$host batch comments: $(cat "$TMPDIR/$host.batch.err")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$inline_plain" >"$TMPDIR/$host.inline-plain.out" 2>"$TMPDIR/$host.inline-plain.err"
-	if [ "$(cat "$TMPDIR/$host.inline-plain.out")" = '"Hi there!"' ]; then
-		test-ok "$host renders plain inline blocks across text boundaries"
+	if [ "$(cat "$TMPDIR/$host.inline-plain.out")" = '"Hi @if true there @end!"' ]; then
+		test-ok "$host passes plain inline directive-like text through"
 	else
 		test-fail "$host plain inline block: $(cat "$TMPDIR/$host.inline-plain.err") $(cat "$TMPDIR/$host.inline-plain.out")"
 	fi
@@ -136,7 +141,7 @@ for host in native wasm; do
 			for) expected='"<xy>!"' ;;
 			with) expected='"xAz"' ;;
 			match) expected='"xaz"' ;;
-			raw) expected='"a @(name)c"' ;;
+			raw) expected='"a @{name}c"' ;;
 		esac
 		"${runner[@]}" do run --lang expr -c "${!value}" >"$TMPDIR/$host.inline-$block.out" 2>"$TMPDIR/$host.inline-$block.err"
 		if [ "$(cat "$TMPDIR/$host.inline-$block.out")" = "$expected" ]; then
@@ -158,19 +163,19 @@ for host in native wasm; do
 		test-fail "$host else trim: $(cat "$TMPDIR/$host.trim-else.err") $(cat "$TMPDIR/$host.trim-else.out")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$list_loop" >"$TMPDIR/$host.list-loop.out" 2>"$TMPDIR/$host.list-loop.err"
-	if [ "$(cat "$TMPDIR/$host.list-loop.out")" = '"0::a;\n1::b;\n"' ]; then
-		test-ok "$host binds loop indices and nil list keys"
+	if [ "$(cat "$TMPDIR/$host.list-loop.out")" = '"0:a;\n1:b;\n"' ]; then
+		test-ok "$host destructures explicitly indexed list entries"
 	else
 		test-fail "$host list loop bindings: $(cat "$TMPDIR/$host.list-loop.err") $(cat "$TMPDIR/$host.list-loop.out")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$record_loop" >"$TMPDIR/$host.record-loop.out" 2>"$TMPDIR/$host.record-loop.err"
-	if [ "$(cat "$TMPDIR/$host.record-loop.out")" = '"0:first:A;\n1:second:B;\n"' ]; then
+	if [ "$(cat "$TMPDIR/$host.record-loop.out")" = '"first:A;\nsecond:B;\n"' ]; then
 		test-ok "$host binds record loop keys in source order"
 	else
 		test-fail "$host record loop bindings: $(cat "$TMPDIR/$host.record-loop.err") $(cat "$TMPDIR/$host.record-loop.out")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$nested_loop" >"$TMPDIR/$host.nested-loop.out" 2>"$TMPDIR/$host.nested-loop.err"
-	if [ "$(cat "$TMPDIR/$host.nested-loop.out")" = '"outer:0[\n0:a,\n1:b,\n]0\nouter:1[\n0:c,\n]1\n"' ]; then
+	if [ "$(cat "$TMPDIR/$host.nested-loop.out")" = '"outer:0[\n0:a,\n1:b,\n]0:scope\nouter:1[\n0:c,\n]1:scope\n"' ]; then
 		test-ok "$host restores outer loop indices after nested loops"
 	else
 		test-fail "$host nested loop bindings: $(cat "$TMPDIR/$host.nested-loop.err") $(cat "$TMPDIR/$host.nested-loop.out")"

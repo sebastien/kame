@@ -77,7 +77,7 @@ func TestNativeKashLogin(t *testing.T) {
 	}
 	profile := filepath.Join(directory, "profile.kash")
 	init := filepath.Join(directory, "init.kash")
-	nativeCLIWrite(t, profile, "echo profile\nexport FROM_PROFILE=yes\nalias p = [\"echo\", \"shortcut\"]\n")
+	nativeCLIWrite(t, profile, "echo profile\nset env/FROM_PROFILE = \"yes\"\nalias p = [\"echo\", \"shortcut\"]\n")
 	nativeCLIWrite(t, init, "echo init\n")
 	t.Setenv("KASH_PROFILE", profile)
 	t.Setenv("KASH_INIT", init)
@@ -139,11 +139,11 @@ func TestNativeKashAliasFormatting(t *testing.T) {
 		t.Fatalf("formatted aliases: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 	command = exec.Command(binary, "do", "run", path)
-	if output, err = command.CombinedOutput(); err == nil || !strings.Contains(string(output), "FEATURE_UNSUP") {
+	if output, err = command.CombinedOutput(); err == nil || !strings.Contains(string(output), "PARSE_ERR") {
 		t.Fatalf("batch aliases were not rejected: error=%v out=%q", err, output)
 	}
 	for _, test := range []struct{ source, code string }{
-		{"touch ./unexpected\nalias ll = [\"ls\"]\n", "FEATURE_UNSUP"},
+		{"touch ./unexpected\nalias ll = [\"ls\"]\n", "PARSE_ERR"},
 		{"((kash " + kameString("touch ./unexpected\nalias ll = [\"ls\"]\n") + "))", "EXPR_INVALID"},
 	} {
 		command = exec.Command(binary, "do", "run", "--lang", "kash", "-c", test.source)
@@ -157,6 +157,18 @@ func TestNativeKashAliasFormatting(t *testing.T) {
 	command = exec.Command(binary, "do", "fmt", "--lang", "kash", "-i", path)
 	if output, err = command.CombinedOutput(); err == nil || nativeCLIRead(path) != text {
 		t.Fatalf("malformed alias was overwritten: error=%v out=%q file=%q", err, output, nativeCLIRead(path))
+	}
+}
+
+func TestNativeInteractiveCommandLookupPrefersSessionBindings(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("KASH_INIT", "")
+	input := "def cd directory\n  out! $directory\n\ncd lexical-directory\n" +
+		"def option name\n  out! $name\n\noption lexical-option\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(input), &out, &errOut)
+	if status != 0 || out.String() != "lexical-directorylexical-option" || errOut.Len() != 0 {
+		t.Fatalf("interactive lookup: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 }
 

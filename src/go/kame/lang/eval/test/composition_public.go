@@ -16,7 +16,7 @@ func TestCompositionPublicEvaluationPreflightsAllChildren(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	parsed := script.Parse(a, "empty", "")
+	parsed := script.ParseKameFile(a, "empty", "")
 	defer parsed.Free()
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()

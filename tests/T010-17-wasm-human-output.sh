@@ -11,7 +11,11 @@ test-start "T010-17 wasm human build output"
 cd "$CLI_ROOT"
 
 test-step "build artifacts"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 cli_build
 
 project="$TMPDIR/wasm-human"
@@ -31,7 +35,7 @@ compare() {
 	rm -f "$project/out.txt" "$project/bad.txt"
 	(cd "$project" && "$CLI_BIN" --output text --color never "$@" >"$project/native.out" 2>"$project/native.err") || native_status=$?
 	rm -f "$project/out.txt" "$project/bad.txt"
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" --output text --color never "$@" >"$project/wasm.out" 2>"$project/wasm.err") || wasm_status=$?
+	(cd "$project" && node "$wasm_runner" --output text --color never "$@" >"$project/wasm.out" 2>"$project/wasm.err") || wasm_status=$?
 	normalize <"$project/native.err" >"$project/native.err.n"
 	normalize <"$project/wasm.err" >"$project/wasm.err.n"
 	if [ "$native_status" = "$wasm_status" ] && cmp -s "$project/native.err.n" "$project/wasm.err.n" && cmp -s "$project/native.out" "$project/wasm.out"; then
@@ -42,11 +46,11 @@ compare() {
 	if { [ "$label" = success ] && [ "$native_status" = 0 ]; } || { [ "$label" != success ] && [ "$native_status" != 0 ]; }; then test-ok "$label exit status"; else test-fail "$label unexpected exit status $native_status"; fi
 }
 
-cat >"$project/Makefile.kmk" <<'EOF'
-./out.txt :
+cat >"$project/Makefile.km" <<'EOF'
+rule ./out.txt
 	echo recipe-stdout
-	echo recipe-stderr 1>&2
-	printf x > out.txt
+	echo recipe-stderr >&err
+	printf x > ./out.txt
 EOF
 
 test-step "a successful primary build matches native progress and streams"
@@ -55,33 +59,33 @@ compare "success" ./out.txt
 if [ "$(cat "$project/wasm.out")" = recipe-stdout ] && grep -qx recipe-stderr "$project/wasm.err" && grep -qx 'started \[./out.txt\]' "$project/wasm.err" && grep -qx 'done \[./out.txt\] complete' "$project/wasm.err" && grep -q '^done build · .* targets complete · 0 failed · 0 cancelled · [0-9]*ms$' "$project/wasm.err" && ! grep -q $'\033' "$project/wasm.err"; then test-ok "text lifecycle, summary and separate recipe streams"; else test-fail "text lifecycle or stream separation"; fi
 
 test-step "a recipe failure matches native diagnostic and summary"
-cat >"$project/Makefile.kmk" <<'EOF'
-./bad.txt :
-	printf partial > bad.txt
+cat >"$project/Makefile.km" <<'EOF'
+rule ./bad.txt
+	printf partial > ./bad.txt
 	false
 EOF
 compare "recipe failure" ./bad.txt
 
 test-step "a missing target matches native failure diagnostic"
-cat >"$project/Makefile.kmk" <<'EOF'
-./out.txt :
-	printf x > out.txt
+cat >"$project/Makefile.km" <<'EOF'
+rule ./out.txt
+	printf x > ./out.txt
 EOF
 compare "missing target" ./nope.txt
 
 test-step "a parse error matches native diagnostic and excerpt"
-cat >"$project/Makefile.kmk" <<'EOF'
+cat >"$project/Makefile.km" <<'EOF'
 GREETING = "hello"
 this is not valid
 EOF
 compare "parse error" ./out.txt
 
 test-step "operand diagnostics after multibyte text retain native columns"
-compare "Unicode operand failure" -l kmk -c $'root :\n\t@(nop "界e\u0301") @(first 1)\n' root
+compare "Unicode operand failure" -l km -c $'task root\n\tprintf "界e\u0301" (first 1)\n' root
 
 test-step "source-backed frames keep markers aligned after clipping and across lines"
-compare "wrapped operand failure" -l kmk -c $'root :\n\t@(nop "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") @(first 1)\n' root
-compare "multiline operand failure" -l kmk -c $'value = (first\n  1)\nroot :\n\t@{value}\n' root
-compare "coloured Unicode trace" --diagnostic-format human --color always -l kmk -c $'value = (first 1)\nroot :\n\t@{value}\n' root
+compare "wrapped operand failure" -l km -c $'task root\n\tprintf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" (first 1)\n' root
+compare "multiline operand failure" -l km -c $'value = (first\n  1)\ntask root\n\tprintf $value\n' root
+compare "coloured Unicode trace" --diagnostic-format human --color always -l km -c $'value = (first 1)\ntask root\n\tprintf $value\n' root
 
 test-end

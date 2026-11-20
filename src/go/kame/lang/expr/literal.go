@@ -1,9 +1,15 @@
 package expr
 
 import (
+	"kame/lang/source"
 	"strings"
 	"unicode/utf8"
 )
+
+// LiteralString constructs an expression for text supplied outside source syntax.
+func LiteralString(text string, span source.Span) Expr {
+	return Expr{Kind: String, Span: span, Parts: []StringPart{{Text: text, Span: span}}}
+}
 
 // IsLiteral accepts only closed data: no names, interpolation, patterns, calls,
 // selectors or captures. Typed configuration cannot execute caller-supplied
@@ -77,8 +83,6 @@ func AppendPathText(b *strings.Builder, text string, keepEscapes bool) {
 			if keepEscapes {
 				b.WriteByte('\\')
 			}
-			i++
-		} else if text[i] == '@' && i+1 < len(text) && text[i+1] == '@' {
 			i++
 		}
 		b.WriteByte(text[i])

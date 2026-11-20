@@ -1,0 +1,9 @@
+ENTRY = ./bin/kame
+OUTPUT = ./dist/kame
+
+rule ./dist/kame : ./bin/kame
+	mkdir -p dist
+	cat $inputs.0 > $outputs.0
+	printf 'run\n' >> runs.log
+
+task default : ./dist/kame

@@ -62,12 +62,15 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 		if stage.Framed && outgoing[i] == 0 {
 			return "KASH_FRAME_MISMATCH"
 		}
-		if operator.Argv {
-			if len(stage.Argv) == 0 || stdin[i] < operator.MinIn || (operator.MaxIn >= 0 && stdin[i] > operator.MaxIn) || (operator.MaxOut >= 0 && outgoing[i] > operator.MaxOut) {
+		if operator.Argv || stage.Kind == "emit" || stage.Kind == "callable" {
+			if (len(stage.Argv) != 0) != operator.Argv || stdin[i] < operator.MinIn || (operator.MaxIn >= 0 && stdin[i] > operator.MaxIn) || (operator.MaxOut >= 0 && outgoing[i] > operator.MaxOut) {
 				return "KASH_MUX_ARITY"
 			}
 			if (stdin[i] != 0 && stage.Input != "") || (outgoing[i] != 0 && stage.Output != "") {
 				return "KASH_DOUBLE_CONSUME"
+			}
+			if stage.Kind == "callable" && (stage.Terminal || stage.Foreground) {
+				return "KASH_TERMINAL_UNSUPPORTED"
 			}
 			continue
 		}

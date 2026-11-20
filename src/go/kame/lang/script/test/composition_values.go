@@ -48,7 +48,7 @@ func TestKashLibraryCompositionAndFormatting(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.ParseKash(a, "library.kash", "# library\ninclude ./nested.kash\ndef value = 1\ndef check ()\n\tprintf %s $value\n")
 	defer parsed.Free()
-	script.ValidateKashLibrary(parsed)
+	script.ValidateKashModule(parsed)
 	if len(parsed.Diagnostics) != 0 || parsed.Items[1].Kind != script.Include {
 		t.Fatal("literal Kash include or definition-only library rejected")
 		return
@@ -57,7 +57,7 @@ func TestKashLibraryCompositionAndFormatting(t *testing.T) {
 	defer mem.FreeString(a, formatted)
 	again := script.ParseKash(a, "formatted.kash", formatted)
 	defer again.Free()
-	script.ValidateKashLibrary(again)
+	script.ValidateKashModule(again)
 	if len(again.Diagnostics) != 0 || again.Items[1].Kind != script.Include || again.Items[1].Include != "./nested.kash" {
 		t.Error("Kash formatting changed library composition")
 	}
@@ -65,8 +65,8 @@ func TestKashLibraryCompositionAndFormatting(t *testing.T) {
 	for i := range texts {
 		text := texts[i]
 		invalid := script.ParseKash(a, "invalid.kash", text)
-		script.ValidateKashLibrary(invalid)
-		if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "PARSE_ERR" {
+		script.ValidateKashModule(invalid)
+		if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "DEF_INVALID" {
 			t.Error("library accepted top-level work: " + text)
 		}
 		invalid.Free()

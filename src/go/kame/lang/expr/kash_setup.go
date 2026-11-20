@@ -1,11 +1,27 @@
 package expr
 
+// CommandSetupKeyPrefix recognizes KEY: as one unquoted Kash word. Callers
+// validate the name and decide whether their syntactic position permits it.
+func CommandSetupKeyPrefix(text string, start int) (key string, end int) {
+	i := start
+	for i < len(text) && setupKeyByte(text[i], false) {
+		i++
+	}
+	if i == start || i == len(text) || text[i] != ':' {
+		return "", start
+	}
+	if i+1 < len(text) && !commandWhitespace(text[i+1]) && text[i+1] != ')' && text[i+1] != ',' {
+		return "", start
+	}
+	return text[start:i], i + 1
+}
+
 // SetupKey classifies the name of one Kash process setup entry.
 type SetupKey int
 
 const (
 	SetupInvalid SetupKey = iota
-	// SetupEnvEntry assigns one per-stage environment entry: NAME VALUE.
+	// SetupEnvEntry assigns one per-stage environment entry with NAME: VALUE.
 	SetupEnvEntry
 	SetupEnvRecord
 	SetupCwd

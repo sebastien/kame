@@ -61,27 +61,17 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 			b.WriteString(tool)
 			continue
 		}
-		var r Result
-		if part.Kind == template.Selector {
-			r = literalSelectorTip(context.Run, p.selector(part.Text, part.Span, context))
+		value := operands.Values[next]
+		next++
+		var text string
+		var ok bool
+		if part.Kind == template.Reference {
+			text, ok = InterpolationText(run, value)
 		} else {
-			r.Value = operands.Values[next]
-			next++
+			text, ok = stringify(run, value)
 		}
-		if r.Waiting || r.Diagnostic.Code != "" {
-			attachSource(&r, context)
-			return r
-		}
-		text, ok := stringify(run, r.Value)
 		if !ok {
-			kind := r.Value.Kind
-			if part.Kind == template.Selector {
-				r.Free(run)
-			}
-			return renderFailure(context.Run, part.Expr, part.Span, kind)
-		}
-		if part.Kind == template.Selector {
-			r.Free(run)
+			return renderFailure(context.Run, part.Expr, part.Span, value.Kind)
 		}
 		b.WriteString(text)
 		mem.FreeString(run, text)

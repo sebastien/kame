@@ -36,8 +36,8 @@ test-step "implicit default target"
 )
 
 test-step "without a default, the invocation fails and reports available targets"
-TWO_TASKS=$'task first :\ntask second :'
-cli_run -- -l kmk -c "$TWO_TASKS"
+TWO_TASKS=$'task first\ntask second'
+cli_run -- -l km -c "$TWO_TASKS"
 cli_expect_status 1
 cli_expect_stdout_empty
 cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first, second"
@@ -87,11 +87,11 @@ test-step "definitions requested as targets print their value"
 	cd basic
 	cli_run -- GREETING
 	cli_expect_status 0
-	cli_expect_stdout '"hello"' 
+	cli_expect_stdout '"hello"'
 
 	cli_run -- LIST
 	cli_expect_status 0
-	cli_expect_stdout '["alpha" "beta" "gamma"]'
+	cli_expect_stdout '["alpha", "beta", "gamma"]'
 )
 
 test-step "unknown targets fail with TGT_NO_RULE"
@@ -119,8 +119,8 @@ fixture_copy errors errors
 )
 
 test-step "a target named do is requested after --"
-DO_SOURCE=$'task do : ; [shell: kash]\n\t(out! "do-target\\n")'
-cli_run -- -l kmk -c "$DO_SOURCE" do
+DO_SOURCE=$'task do\n\t(out! "do-target\\n")'
+cli_run -- -l km -c "$DO_SOURCE" do
 cli_expect_status 0
 cli_expect_stdout "do-target
 "

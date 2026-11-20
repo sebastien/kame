@@ -21,6 +21,10 @@ func KindName(kind Kind) string {
 		return "float"
 	case String:
 		return "string"
+	case Symbol:
+		return "symbol"
+	case Stream:
+		return "stream"
 	case Bytes:
 		return "bytes"
 	case List:
@@ -37,6 +41,14 @@ func KindName(kind Kind) string {
 		return "pattern"
 	case Process:
 		return "process"
+	case Rule:
+		return "rule"
+	case Path:
+		return "path"
+	case PathPattern:
+		return "path-pattern"
+	case PathTemplate:
+		return "path-template"
 	}
 	return "unknown"
 }
@@ -55,6 +67,12 @@ const (
 	Pattern
 	Process
 	Module
+	Rule
+	Path
+	PathPattern
+	PathTemplate
+	Symbol
+	Stream
 )
 
 type RecordField struct {
@@ -87,11 +105,14 @@ type Value struct {
 	// Process is an opaque invocation-scoped handle, never serialized. Completed
 	// handles retain Go-owned snapshots rather than keeping execution graphs live.
 	Process any
+	Stream  *OwnedStream
 	// Module is an opaque invocation-owned library; its owner outlives snapshots.
 	Module          any
 	ModuleOwner     any
 	ModuleSignature *Signature
-	Resource        ResourceKey
+	// Rule is an opaque declaration and lexical scope owned by its evaluator.
+	Rule     any
+	Resource ResourceKey
 	// Shared counts the owners of an immutable list or record backing. Clone
 	// adds an owner in O(1); Free releases the elements with the last owner.
 	// Shared values never contain callables, which need per-owner wrappers.
@@ -101,12 +122,45 @@ type Value struct {
 // SharedStorage is the owner count of one shared list or record backing.
 type SharedStorage struct{ References int }
 
+// HasStream reports whether publishing a value would publish a live cursor.
+func (v Value) HasStream() bool {
+	if v.Kind == Stream {
+		return true
+	}
+	for _, item := range v.List {
+		if item.HasStream() {
+			return true
+		}
+	}
+	for _, field := range v.Record {
+		if field.Value.HasStream() {
+			return true
+		}
+	}
+	return false
+}
+
 func NewString(a mem.Allocator, text string) Value {
 	if len(text) == 0 {
 		return Value{Kind: String}
 	}
 	return Value{Kind: String, Text: strings.Clone(text)}
 }
+
+// NewSymbol takes the symbol name without its leading colon.
+func NewSymbol(a mem.Allocator, text string) Value {
+	return Value{Kind: Symbol, Text: strings.Clone(text)}
+}
+
+func NewPath(a mem.Allocator, text string) Value {
+	value := NewString(a, text)
+	value.Kind = Path
+	return value
+}
+
+// IsPathText reports whether a path operation can consume the value's text.
+// Plain strings remain accepted by existing filesystem operation contracts.
+func (v Value) IsPathText() bool { return v.Kind == Path || v.Kind == String }
 
 func NewBytes(a mem.Allocator, data []byte) Value {
 	b := slices.Clone(data)
@@ -151,8 +205,13 @@ func (v *Value) Clone(a mem.Allocator) Value {
 	}
 	copy := *v
 	switch v.Kind {
-	case String:
+	case Stream:
+		if v.Stream != nil {
+			v.Stream.references++
+		}
+	case String, Symbol, Path, PathPattern, PathTemplate:
 		copy = NewString(a, v.Text)
+		copy.Kind = v.Kind
 		copy.ToolName = NewString(a, v.ToolName).Text
 		copy.GlobPattern = NewString(a, v.GlobPattern).Text
 	case Bytes:
@@ -268,7 +327,14 @@ func (v *Value) Free(a mem.Allocator) {
 		mem.Free(a, v.Shared)
 	}
 	switch v.Kind {
-	case String:
+	case Stream:
+		if v.Stream != nil {
+			v.Stream.references--
+			if v.Stream.references == 0 {
+				v.Stream.release()
+			}
+		}
+	case String, Symbol, Path, PathPattern, PathTemplate:
 		mem.FreeString(a, v.Text)
 		mem.FreeString(a, v.ToolName)
 		mem.FreeString(a, v.GlobPattern)

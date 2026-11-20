@@ -10,25 +10,24 @@ func Register(r *eval.Registry) bool {
 	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) && pure(r, "blank?", opBlank, 1, 1) &&
 		contract(r, "fail!", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
 		r.Add(eval.Operation{Name: "finally!", Call: opFinally, MinArity: 2, MaxArity: 3, Version: version, Category: eval.ControlOperation, Phases: eval.EvaluationAllowed, Behavior: eval.RaisesFailure | eval.CallsCallable | eval.ReadsClock, ScopedFinalizer: true}) &&
+		pure(r, "fmt", opFmt, 1, 1) &&
+		callback(r, "eval", opEval, 1, 1) &&
 		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "parse-args", opParseArgs, 2, 2) && pure(r, "sub-token", opSubToken, 3, 3) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
 		pure(r, "add", opArithmetic, 2, 2) && pure(r, "sub", opArithmetic, 2, 2) &&
 		pure(r, "mul", opArithmetic, 2, 2) && pure(r, "div", opArithmetic, 2, 2) &&
 		pure(r, "mod", opArithmetic, 2, 2) && pure(r, "neg", opArithmetic, 1, 1) &&
-		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) && pure(r, "has?", opHas, 2, 2) &&
-		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&
-		pure(r, "gt", opGt, 2, 2) && pure(r, "gte", opGte, 2, 2) && pure(r, "lte", opLte, 2, 2) &&
 		pure(r, "eq?", opEq, 2, 2) && pure(r, "ne?", opNe, 2, 2) && pure(r, "lt?", opLt, 2, 2) &&
 		pure(r, "gt?", opGt, 2, 2) && pure(r, "gte?", opGte, 2, 2) && pure(r, "lte?", opLte, 2, 2) &&
-		pure(r, "in?", opHas, 2, 2) && pure(r, "has-key?", opHasKey, 2, 2) && pure(r, "success?", opSuccess, 1, 1) &&
+		pure(r, "in?", opIn, 2, 2) && pure(r, "has-key?", opHasKey, 2, 2) && pure(r, "success?", opSuccess, 1, 1) &&
 		pure(r, "template-cat", opTemplateCat, 0, -1) && pure(r, "text", opText, 1, 1) &&
-		registerRender(r) && pure(r, "template-items", opTemplateItems, 1, 1) &&
-		callback(r, "template-apply", opTemplateApply, 2, 2) &&
+		registerRender(r) &&
+		callback(r, "template-apply", opTemplateApply, 2, 2) && callback(r, "template-map", opTemplateMap, 2, 2) &&
 		pure(r, "template-trim-start", opTemplateTrimStart, 1, 1) && pure(r, "template-trim-end", opTemplateTrimEnd, 1, 1) &&
 		contract(r, "tool", opTool, 1, 1, eval.ObservationOperation, eval.AllPhases, eval.TracksDependency) &&
 		pure(r, "source-dir", opSourceDir, 0, 0) &&
 		pure(r, "get", opGet, 2, 3) && pure(r, "first", opFirst, 1, 1) && pure(r, "nth", opNth, 2, 2) &&
 		callback(r, "apply", opApply, 2, 2) && pure(r, "list", opList, 0, -1) &&
-		pure(r, "items", opItems, 1, 1) && pure(r, "put", opPut, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&
+		pure(r, "indexed", opIndexed, 1, 1) && pure(r, "items", opItems, 1, 1) && pure(r, "put", opPut, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&
 		pure(r, "record?", opKindPredicate, 1, 1) && pure(r, "list?", opKindPredicate, 1, 1) && pure(r, "string?", opKindPredicate, 1, 1) &&
 		pure(r, "nil?", opKindPredicate, 1, 1) && pure(r, "bool?", opKindPredicate, 1, 1) && pure(r, "number?", opKindPredicate, 1, 1) &&
 		pure(r, "int?", opKindPredicate, 1, 1) && pure(r, "float?", opKindPredicate, 1, 1) && pure(r, "bytes?", opKindPredicate, 1, 1) &&
@@ -37,11 +36,13 @@ func Register(r *eval.Registry) bool {
 		pure(r, "digest", opDigest, 2, 2) &&
 		callback(r, "map", opMap, 2, 2) && callback(r, "flatmap", opFlatMap, 2, 2) &&
 		callback(r, "filter", opFilter, 2, 2) && callback(r, "filter-out", opFilterOut, 2, 2) && callback(r, "reduce", opReduce, 2, 3) &&
+		contract(r, "collect!", eval.CollectStream, 1, 2, eval.ControlOperation, eval.EvaluationAllowed, eval.CallsCallable|eval.RaisesFailure|eval.ReadsClock) &&
 		pure(r, "concat", opConcat, 0, -1) && pure(r, "slice", opSlice, 2, 3) && pure(r, "sorted", opSorted, 1, 1) &&
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
 		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "line", opLine, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
-		callback(r, "subst", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
-		r.Add(eval.Operation{Name: "regex-match", Call: opRegexMatch, Context: &regexCache{alloc: r.Alloc}, FreeContext: freeRegexCache, MinArity: 2, MaxArity: 2, Category: eval.PureOperation, Phases: eval.AllPhases, Version: version}) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
+		r.Add(eval.Operation{Name: "subst", Call: opReplace, MinArity: 2, MaxArity: 3, Category: eval.PureOperation, Phases: eval.AllPhases, Behavior: eval.CallsCallable, DeferredReplacement: true, ConditionalCapabilities: []eval.Capability{eval.Read}, Version: version + "-discovery-subject"}) &&
+		pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
+		r.Add(eval.Operation{Name: "regex-match", Call: opRegexMatch, Context: &regexCache{alloc: r.Alloc}, FreeContext: freeRegexCache, MinArity: 2, MaxArity: 2, Category: eval.PureOperation, Phases: eval.AllPhases, Version: version}) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) && pure(r, "bind", opBind, 2, 2) && pure(r, "regex-group", opRegexGroup, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&
 		pure(r, "black", opTerminalStyle, 1, 1) && pure(r, "red", opTerminalStyle, 1, 1) &&
 		pure(r, "green", opTerminalStyle, 1, 1) && pure(r, "yellow", opTerminalStyle, 1, 1) &&
@@ -61,14 +62,13 @@ func Register(r *eval.Registry) bool {
 		process(r, "shell-template!", opShellTemplate, 2, 2) &&
 		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&
 		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&
-		contract(r, "yield!", opYield, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.PublishesFile) &&
 		pure(r, "nop", opNop, 0, -1) &&
 		contract(r, "now", opNow, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock) &&
 		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock)
 }
 
 func contract(r *eval.Registry, name string, call eval.OperationCall, min int, max int, category eval.OperationCategory, phases eval.PhaseMask, behavior eval.OperationBehavior) bool {
-	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "subst" || name == "resub"})
+	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "resub"})
 }
 
 func pure(r *eval.Registry, name string, call eval.OperationCall, min int, max int) bool {
@@ -81,11 +81,13 @@ func callback(r *eval.Registry, name string, call eval.OperationCall, min int, m
 
 func observation(r *eval.Registry, name string, call eval.OperationCall, min int, max int, capability eval.Capability) bool {
 	operation := eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Category: eval.ObservationOperation, Phases: eval.AllPhases, Behavior: eval.ReadsHost | eval.TracksDependency, Version: version}
-	if name == "wildcard" {
+	switch name {
+	case "wildcard":
 		operation.Preflight = wildcardPreflight
-	}
-	if name == "files" || name == "dirs" {
+		operation.Version += "-typed-discovery"
+	case "files", "dirs":
 		operation.Preflight = kindShorthandPreflight
+		operation.Version += "-typed-discovery"
 	}
 	return r.Add(operation)
 }
@@ -95,7 +97,13 @@ func process(r *eval.Registry, name string, call eval.OperationCall, min int, ma
 }
 
 func registerRender(r *eval.Registry) bool {
-	return r.Add(eval.Operation{Name: "render", Call: opRender, MinArity: 1, MaxArity: 3, ConditionalCapabilities: []eval.Capability{eval.Read}, Category: eval.ObservationOperation, Phases: eval.AllPhases, Behavior: eval.ReadsHost | eval.TracksDependency | eval.CallsCallable, Version: version})
+	contract := eval.Operation{MinArity: 1, ConditionalCapabilities: []eval.Capability{eval.Read}, Category: eval.ObservationOperation, Phases: eval.AllPhases, Behavior: eval.ReadsHost | eval.TracksDependency | eval.CallsCallable, Version: version}
+	contract.Name, contract.Call, contract.MaxArity = "render", opRender, 3
+	if !r.Add(contract) {
+		return false
+	}
+	contract.Name, contract.Call, contract.MaxArity = "template-include", opTemplateInclude, 2
+	return r.Add(contract)
 }
 
 func registerWrite(r *eval.Registry) bool {

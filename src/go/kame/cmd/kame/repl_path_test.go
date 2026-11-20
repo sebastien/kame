@@ -35,29 +35,29 @@ func TestNativeInteractiveKashSessionPath(t *testing.T) {
 	entries := strings.Join([]string{
 		"probe",
 		`alias p = ["probe"]`,
-		"export PATH=" + kameString(two+":/usr/bin:/bin"),
+		"set env/PATH = " + kameString(two+":/usr/bin:/bin"),
 		"probe",
 		"p",
 		`echo (tool "probe")`,
-		"export PATH=bin:/usr/bin:/bin",
+		"set env/PATH = \"bin:/usr/bin:/bin\"",
 		"probe",
-		":cwd ./sub probe",
+		"cwd: ./sub probe",
 		"cd sub",
 		"probe",
-		"export PATH=",
+		"set env/PATH = \"\"",
 		"probe",
-		"unset PATH",
+		"set env/PATH = nil",
 		"probe",
 	}, "\n") + "\n"
 	var out, errOut bytes.Buffer
 	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i"}, strings.NewReader(entries), &out, &errOut)
 	want := "one\ntwo\ntwo\n" + second + "\nrelative\nsub-relative\nsub-relative\ncurrent-directory\ncurrent-directory\n"
-	if status != 0 || out.String() != want || errOut.Len() != 0 {
+	if status != 0 || out.String() != want || !strings.Contains(errOut.String(), "[CAP_DENIED]") {
 		t.Fatalf("session PATH: status=%d out=%q want=%q err=%q", status, out.String(), want, errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	status = runNativeCLIIn(t, directory, []string{"do", "run", "-i", "--tool", "probe=" + first}, strings.NewReader("export PATH="+kameString(two)+"\nprobe\n"), &out, &errOut)
+	status = runNativeCLIIn(t, directory, []string{"do", "run", "-i", "--tool", "probe=" + first}, strings.NewReader("set env/PATH = "+kameString(two)+"\nprobe\n"), &out, &errOut)
 	if status != 0 || out.String() != "one\n" || errOut.Len() != 0 {
 		t.Fatalf("tool override: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
@@ -69,12 +69,12 @@ func TestNativeInteractiveKashSessionPath(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	status = runNativeCLIIn(t, directory, []string{"do", "run", "-i", "--allow-run=" + first}, strings.NewReader("export PATH="+kameString(two)+"\nprobe\n"), &out, &errOut)
+	status = runNativeCLIIn(t, directory, []string{"do", "run", "-i", "--allow-run=" + first}, strings.NewReader("set env/PATH = "+kameString(two)+"\nprobe\n"), &out, &errOut)
 	if status == 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "CAP_DENIED") {
 		t.Fatalf("PATH escaped run grants: status=%d out=%q err=%q", status, out.String(), errOut.String())
 	}
 	profile := filepath.Join(directory, "profile.kash")
-	nativeCLIWrite(t, profile, "export PATH="+kameString(two)+"\n")
+	nativeCLIWrite(t, profile, "set env/PATH = "+kameString(two)+"\n")
 	t.Setenv("KASH_PROFILE", profile)
 	out.Reset()
 	errOut.Reset()
@@ -94,7 +94,7 @@ func TestNativeInteractiveKashPathKeepsBackgroundJob(t *testing.T) {
 	nativeCLIAwait(t, stderr, func() bool {
 		return strings.Contains(nativeCLIRead(stdout), "ready\n") && fileExists(filepath.Join(directory, "launches"))
 	})
-	io.WriteString(in, "export PATH="+kameString(two)+"\nprobe\n")
+	io.WriteString(in, "set env/PATH = "+kameString(two)+"\nprobe\n")
 	nativeCLIAwait(t, stderr, func() bool { return strings.Contains(nativeCLIRead(stdout), "two\n") })
 	nativeCLIWrite(t, filepath.Join(directory, "release"), "")
 	in.Close()

@@ -75,7 +75,7 @@ func (s *Script) letDeclaration(start, operand, end int) (ScriptItem, int) {
 	part := definition.ParseBindingHeader(s.Alloc, s.Source, operand, headerEnd)
 	s.takeDiagnostics(part.Diagnostics)
 	d := part.Definition
-	if d.ExplicitDef || d.Function || d.Default || d.Contribution || !expr.ValidBindingName(d.Name) || d.Name == "env" {
+	if d.ExplicitDef || d.Function || d.Default || d.Contribution || !expr.ValidBindingName(d.Name) {
 		s.error(operand, headerEnd, "let requires one non-reserved value name and =")
 	}
 	value, comment, finish := s.declarationValue(trimStart(text, headerEnd, end))
@@ -111,7 +111,7 @@ func (s *Script) loopDeclaration(lineStart, start, operand, end int) (ScriptItem
 	loop := mem.Alloc[DeclarationLoop](s.Alloc)
 	loop.Name, loop.NameSpan = name, source.Span{Start: operand, End: operand + len(name)}
 	item := ScriptItem{Kind: DeclarationFor, Loop: loop, Span: source.Span{Start: start, End: end}}
-	if !expr.ValidBindingName(name) || name == "env" {
+	if !expr.ValidBindingName(name) {
 		s.error(loop.NameSpan.Start, loop.NameSpan.End, "expected non-reserved loop binding name")
 	}
 	if keyword != "in" {
@@ -163,6 +163,31 @@ func (s *Script) literalSourcePath(start, end int) (string, source.Span, bool) {
 	var decoded strings.Builder
 	expr.AppendPathText(&decoded, part.Expr.Text, false)
 	return owned(s.Alloc, decoded.String()), part.Expr.Span, true
+}
+
+// CompositionBindsLocals reports whether flattening would discard declarations' lexical bindings.
+func CompositionBindsLocals(branches []DeclarationBranch) bool {
+	for _, branch := range branches {
+		for _, item := range branch.Items {
+			if item.Kind == DeclarationLet || item.Kind == Composition && CompositionBindsLocals(item.Branches) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// CompositionLoadsSources identifies conditionals whose branches the source
+// loader must inspect. Declaration-only conditionals stay in the program AST.
+func CompositionLoadsSources(branches []DeclarationBranch) bool {
+	for _, branch := range branches {
+		for _, item := range branch.Items {
+			if item.Kind == Include || item.Kind == Composition && CompositionLoadsSources(item.Branches) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Script) conditionalDeclaration(lineStart, start, operand, end int) (ScriptItem, int) {
@@ -298,7 +323,7 @@ func writeSourceDeclaration(a mem.Allocator, b *strings.Builder, text string, it
 		} else {
 			b.WriteString("generate ")
 		}
-		formatted := expr.Compact(a, value)
+		formatted := expr.FormatAtIndent(a, value, 0, 0)
 		writeDeclarationLines(b, formatted, prefix)
 		mem.FreeString(a, formatted)
 		if item.Text != "" {

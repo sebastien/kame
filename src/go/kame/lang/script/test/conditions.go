@@ -9,8 +9,8 @@ import (
 
 func TestConditionalDeclarationsKeepPredicatesRulesAndIncludes(t *testing.T) {
 	a := t.Allocator()
-	text := "if (eq mode \"debug\")\n\tinclude ./debug.kmk\nelse\n\tif false\n\t\tinclude? ./absent.kmk\nbuild :\n\techo debug\n"
-	parsed := script.Parse(a, "conditions.kmk", text)
+	text := "if mode == \"debug\"\n\tinclude ./debug.km\nelse\n\tif false\n\t\tinclude? ./absent.km\ntask build\n\techo debug\n"
+	parsed := script.ParseKameFile(a, "conditions.km", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 {
 		t.Fatal("conditional declarations did not parse")
@@ -20,12 +20,12 @@ func TestConditionalDeclarationsKeepPredicatesRulesAndIncludes(t *testing.T) {
 		t.Error("conditional composition or rule metadata was lost")
 	}
 	leaf := parsed.Items[0].Branches[1].Items[0].Branches[0].Items[0]
-	if leaf.Kind != script.Include || !leaf.OptionalInclude || leaf.Include != "./absent.kmk" {
+	if leaf.Kind != script.Include || !leaf.OptionalInclude || leaf.Include != "./absent.km" {
 		t.Error("nested optional include metadata was lost")
 	}
 	formatted := script.Format(a, parsed)
 	defer mem.FreeString(a, formatted)
-	again := script.Parse(a, "formatted.kmk", formatted)
+	again := script.ParseKameFile(a, "formatted.km", formatted)
 	defer again.Free()
 	if len(again.Diagnostics) != 0 || len(again.Items) != len(parsed.Items) {
 		t.Error("formatted conditionals changed structure")
@@ -36,11 +36,16 @@ func TestConditionalDeclarationsRejectLegacyMarkers(t *testing.T) {
 	a := t.Allocator()
 	cases := []string{"when\nend\n", " when true\nend\n", "when true\nx = 1\n", "otherwise\n", "end\n", "when true\notherwise\notherwise\nend\n", "when true false\nend\n"}
 	for i := range cases {
-		parsed := script.Parse(a, "bad.kmk", cases[i])
-		if len(parsed.Diagnostics) == 0 {
-			t.Error("invalid conditional structure was accepted")
+		parsed := script.ParseKameFile(a, "bad.km", cases[i])
+		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "PARSE_ERR" {
+			t.Error("invalid conditional structure did not report a parse error")
 		}
 		parsed.Free()
+	}
+	parsed := script.ParseKameFile(a, "definitions.km", "when = true\notherwise = false\nend = nil\n")
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 3 {
+		t.Error("ordinary definitions with these names did not parse")
 	}
 }
 

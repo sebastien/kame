@@ -14,13 +14,13 @@ func TestStreamPredicatesArePureBooleanAndHostFree(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	defer registry.Free()
-	parsed := script.Parse(a, "predicates.km", "flag = true\nmatching = (x => (eq x \"a\"))\nbad = (read ./missing)\ncycle = cycle\n")
+	parsed := script.ParseKameFile(a, "predicates.km", "flag = true\nmatching = (x => (eq? x \"a\"))\nbad = (read ./missing)\ncycle = cycle\n")
 	defer parsed.Free()
 	engine := core.NewEngine(a)
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()
 	defer engine.Free()
-	texts := []string{"(eq item \"a\")", "(x => (eq x \"a\"))", "((x => (eq x \"a\")) item)", "(eq item \"b\")", "item", "(read ./missing)", "(out! item)", "$(printf x)", "(eval \"1\")", "(env \"HOME\")"}
+	texts := []string{"(eq? item \"a\")", "(x => (eq? x \"a\"))", "((x => (eq? x \"a\")) item)", "(eq? item \"b\")", "item", "(read ./missing)", "(out! item)", "$(printf x)", "(eval \"1\")", "(env \"HOME\")"}
 	expected := []int{1, 1, 1, 0, -eval.StreamPredicateBoolean, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect}
 	for i := range texts {
 		r := expr.Parse(a, "predicate.km", texts[i])

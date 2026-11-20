@@ -146,7 +146,7 @@ func parseRun(args []string, discover bool) Invocation {
 			if inv.Error.Code != "" {
 				return inv
 			}
-			if len(arg) >= 4 && arg[:4] == "env." {
+			if len(arg) >= 4 && arg[:4] == "env/" {
 				processOptions = true
 				continue
 			}

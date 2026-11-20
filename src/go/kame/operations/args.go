@@ -50,7 +50,7 @@ func validArgumentSchema(schema core.Value) bool {
 		}
 		names, arity := recordField(d, "names"), recordField(d, "arity")
 		repeat := recordField(d, "repeat")
-		if names.Kind != core.List || len(names.List) == 0 || arity.Kind != core.String || repeat.Kind != core.String {
+		if names.Kind != core.List || len(names.List) == 0 || arity.Kind != core.Symbol || repeat.Kind != core.Symbol {
 			return false
 		}
 		if arity.Text != "flag" && arity.Text != "one" && arity.Text != "many" {

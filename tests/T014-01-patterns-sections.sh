@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
-test-start "T014-01 placeholder sections and pattern replace"
+test-start "T014-01 placeholder sections and pattern substitution"
 
 test-step "toolchain and binary"
 cli_require_tools
@@ -31,45 +31,45 @@ diag() { # EXPR CODE
 }
 
 test-step "placeholder sections evaluate as lambda equivalents"
-evaluates '(((nop _0)) 7)' '7'
-evaluates '(((list _0 _0)) "same")' '["same" "same"]'
-evaluates '(((list _0 __ _2)) "a" "b" "c")' '["a" "b" "c"]'
-evaluates '(((list _1)) "unused" "kept")' '["kept"]'
+evaluates '(nop _0) 7' '7'
+evaluates '(list _0 _0) "same"' '["same", "same"]'
+evaluates '(list _0 __ _2) "a" "b" "c"' '["a", "b", "c"]'
+evaluates '(list _1) "unused" "kept"' '["kept"]'
 
 test-step "section arity and missing arguments"
-evaluates '(((nop _0)))' ':nil'
-diag '(((nop _0)) 1 2)' 'EXPR_INVALID'
+evaluates '(nop _0) ()' 'nil'
+diag '(nop _0) 1 2' 'EXPR_INVALID'
 diag '_0x' 'REF_MISSING'
 
-test-step "patterns classify and pattern replace matches"
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")' '"./build/a/b/x.c"'
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a.c")' '"./a.c"'
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c ["./a.c" "./x/y.c" "./no.obj"])' '["./a.c" "./build/x/y.c" "./no.obj"]'
-evaluates '(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")' '"./build/demo.o"'
-evaluates '(replace ./src/txto/{prefix:**}.txto ./build/data/{prefix}.json "./src/txto/blog/2026/deep/post.txto")' '"./build/data/blog/2026/deep/post.json"'
-evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '["./a.c" "./build/x.o"]'
-evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' '"./x/a.o"'
-evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' '"./x/b.o"'
+test-step "patterns classify and pattern substitution matches"
+evaluates '(subst ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")' './build/a/b/x.c'
+evaluates '(subst ./{**}/{*}.c ./build/{_0}/{_1}.c "./a.c")' '"./a.c"'
+evaluates '(subst ./{**}/{*}.c ./build/{_0}/{_1}.c ["./a.c", "./x/y.c", "./no.obj"])' '["./a.c", ./build/x/y.c, "./no.obj"]'
+evaluates '(subst ./src/{name:*}.c ./build/{name}.o "./src/demo.c")' './build/demo.o'
+evaluates '(subst ./src/txto/{prefix:**}.txto ./build/data/{prefix}.json "./src/txto/blog/2026/deep/post.txto")' './build/data/blog/2026/deep/post.json'
+evaluates '(map (subst ./{**}/{*}.c ./build/{_0}.o) ["./a.c", "./x/y.c"])' '["./a.c", ./build/x.o]'
+evaluates '(subst ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' './x/a.o'
+evaluates '(subst ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' './x/b.o'
 diag '(str ./{**}/{*}.c)' 'EXPR_INVALID'
-evaluates '(replace "a" "b" "banana")' '"bbnbnb"'
+evaluates '(subst "a" "b" "banana")' '"bbnbnb"'
 
 test-step "invalid pattern combinations"
-diag '(replace "a" "b")' 'EXPR_INVALID'
-diag '(replace ./{**}/{*}.c ./build/{_0}/{_9}.c "./a/b.c")' 'PAT_INVALID'
-diag '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c 42)' 'EXPR_INVALID'
+diag '(subst "a" "b")' 'EXPR_INVALID'
+diag '(subst ./{**}/{*}.c ./build/{_0}/{_9}.c "./a/b.c")' 'PAT_INVALID'
+diag '(subst ./{**}/{*}.c ./build/{_0}/{_1}.c 42)' 'EXPR_INVALID'
 
 test-step "patterns render as their text in rule inputs"
 (
 	mkdir -p patternproj/src
 	cd patternproj
-	cat > Makefile.kmk <<'LMK'
-sources = ["./src/a.c" "./src/b.c"]
-objects = (replace ./src/{name:*}.c ./build/{name}.o sources)
-./build/marker : @{objects}
-	cat @<* > @>
-./build/{name}.o : ./src/{name}.c
-	cp @< @>
-LMK
+	cat > Makefile.km <<'KM'
+sources = [./src/a.c, ./src/b.c]
+objects = (subst ./src/{name:*}.c ./build/{name}.o sources)
+rule ./build/marker : ${objects}
+	cat $...inputs > $outputs.0
+rule ./build/{name}.o : ./src/{name}.c
+	cp $inputs.0 $outputs.0
+KM
 	echo a > src/a.c
 	echo b > src/b.c
 	cli_run -- do plan ./build/marker

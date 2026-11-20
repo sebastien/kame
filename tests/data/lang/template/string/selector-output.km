@@ -1,1 +1,1 @@
-install @> @>* @># @>1
+install @{outputs.0} @{count outputs} @{outputs.1}

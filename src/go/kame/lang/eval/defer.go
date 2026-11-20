@@ -249,6 +249,8 @@ func (s *DeferScope) recordFailure(d diagnostic.Diagnostic) {
 		return
 	}
 	s.Diagnostic.Notes = append(s.Diagnostic.Notes, owned(s.Program.Alloc, "additional deferred action failed: "+d.Code+": "+d.Message))
+	s.Diagnostic.Protected = s.Diagnostic.Protected || !functionOutcomeAllowed(d)
+	s.Diagnostic.Cancelled = s.Diagnostic.Cancelled || d.Cancelled || d.Code == "EXEC_CANCELLED"
 }
 
 func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult {
@@ -260,7 +262,20 @@ func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult
 	c.Engine, c.Run, c.Requests = engine, engine.Allocator(), p.Requests
 	c.CleanupDeadlineNS = p.FinalizerDeadline(engine.NodeID())
 	c.Resume(engine)
+	c.Cwd = c.Unit.Directory(c.Cwd)
 	if action.Prepared != nil {
+		for i := range action.Prepared.Setups {
+			setup := &action.Prepared.Setups[i]
+			for j := range setup.Record {
+				field := &setup.Record[j]
+				if field.Key == host.FieldCwd && field.Value.Text == "" {
+					field.Value.Free(p.Alloc)
+					field.Value = core.NewString(p.Alloc, c.commandDirectory())
+					break
+				}
+			}
+			setStageEnvironment(p.Alloc, setup, &c)
+		}
 		c.operationStart, c.operationEnd = action.Expression.Span.Start, action.Expression.Span.End
 		c.SetOperationState(action.Prepared, freeCaptureState)
 		action.Prepared = nil
@@ -279,6 +294,9 @@ func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult
 	if (r.Diagnostic.Code == "EXEC_CANCELLED" || r.Diagnostic.Code == "FINALIZE_TIMEOUT") && p.FinalizerBudget(engine.NodeID()) < 0 {
 		r.Free(c.Run)
 		r = failure(c.Run, "RECIPE_TIMEOUT", action.Expression.Span, "deferred cleanup budget exhausted")
+	}
+	if (!r.Waiting || action.Evaluated) && (c.commandOutput != nil || c.functionStage != nil || c.RecipeOutput != nil) {
+		p.streamControlOutput(&c, 0)
 	}
 	if (!r.Waiting || action.Evaluated) && p.DefinitionEffectSink != nil {
 		for i := range c.Effects {

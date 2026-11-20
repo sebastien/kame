@@ -63,13 +63,47 @@ func (p *Program) newAggregate(d *definition.Definition) *definition.Definition 
 
 func (p *Program) aggregateValue(d *definition.Definition, scope *Scope, c *Context) Result {
 	operands := p.argumentValues(scope, d.Expression.Items, c, d.Span)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+	return joinContributionValues(d.Expression.Items, operands, c)
+}
+
+type localAggregate struct {
+	Inherited   expr.Expr
+	Expressions []*expr.Expr
+	Scopes      []*Scope
+}
+
+func (a *localAggregate) append(e *expr.Expr, scope *Scope) {
+	a.Expressions = append(a.Expressions, e)
+	a.Scopes = append(a.Scopes, scope)
+}
+
+func (p *Program) evaluateLocal(engine *core.EngineContext, local *localDefinition, c *Context) Result {
+	if local.Configured != nil {
+		return p.evaluate(engine, local.Scope, local.Configured, c)
+	}
+	if local.Aggregate == nil {
+		return p.evaluate(engine, local.Scope, local.Expression, c)
+	}
+	aggregate := local.Aggregate
+	previous := c.Engine
+	c.Engine = engine
+	operands := p.argumentValuesMode(local.Scope, aggregate.Expressions, aggregate.Scopes, c, local.Expression.Span, false, "")
+	c.Engine = previous
+	return joinContributionValues(aggregate.Expressions, operands, c)
+}
+
+func joinContributionValues(expressions []*expr.Expr, operands argumentResult, c *Context) Result {
+	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	values := operands.Values
 	for i := range values {
 		if values[i].Kind != core.List {
-			result := failure(c.Run, "EXPR_INVALID", d.Expression.Items[i].Span, "+= base and contributions must be lists; got "+core.KindName(values[i].Kind))
+			result := failure(c.Run, "EXPR_INVALID", expressions[i].Span, "+= base and contributions must be lists; got "+core.KindName(values[i].Kind))
+			previous := c.SourceOrigin
+			c.SourceOrigin = expressions[i].SourceOrigin
+			attachSource(&result, c)
+			c.SourceOrigin = previous
 			freeValuesWithCallables(c.Run, values)
 			return result
 		}

@@ -227,7 +227,7 @@ func TestTickDoesNotWaitForQueuedSynchronousReads(t *testing.T) {
 	memory.SetFile("src/one.txt", []byte("one"))
 	memory.SetFile("src/two.txt", []byte("two"))
 	host := &countingReadDirHost{memory: memory}
-	parsed := script.Parse(a, "requests.kmk", "FILES = (files ./src/*.txt)\n")
+	parsed := script.ParseKameFile(a, "requests.km", "FILES = (files ./src/*.txt)\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -269,7 +269,7 @@ func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
 	memory.SetFile("src/keep/one.go", []byte("keep"))
 	memory.SetFile("src/noise/deep/level/file.txt", []byte("noise"))
 	host := &countingReadDirHost{memory: memory}
-	parsed := script.Parse(a, "glob.kmk", "./output : ; {shell: kame}\n\t(json (wildcard \"./src/*/*.go\"))\n")
+	parsed := script.ParseKameFile(a, "glob.km", "rule ./output = (json (map std/str (files ./src/*/*.go)))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -305,7 +305,7 @@ func TestMaterializeWritesOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./out/result :\n\tprintf result > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/result : ; {shell: \"/bin/sh\"}\n\tprintf result > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -343,7 +343,7 @@ func TestRemoteFileRuleStagesInputsAndPublishesDeclaredOutput(t *testing.T) {
 	}
 	base := posix.New(a)
 	remote := &fakeRemoteHost{base: base, allocator: a}
-	parsed := script.Parse(a, "remote.kmk", "./out : ./input ; {executor: \"remote:fake\", env: {SAFE: \"sent\"}}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote.km", "rule ./out : ./input ; {shell: \"/bin/sh\", executor: \"remote:fake\", env: {SAFE: \"sent\"}}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, Environment: []string{"HOST_SECRET=ambient"}, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
 	if compiled.Program == nil {
@@ -392,7 +392,7 @@ func TestRemoteFileRuleRejectsMissingDeclaredOutput(t *testing.T) {
 		return
 	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OmitOutputs: true}
-	parsed := script.Parse(a, "remote-missing.kmk", "./out : ./input ; {executor: \"remote:fake\"}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote-missing.km", "rule ./out : ./input ; {shell: \"/bin/sh\", executor: \"remote:fake\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
 	if compiled.Program == nil {
@@ -430,7 +430,7 @@ func TestRemoteFileRuleRejectsUndeclaredOutput(t *testing.T) {
 		return
 	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OutputOverride: "unexpected"}
-	parsed := script.Parse(a, "remote-undeclared.kmk", "./out : ./input ; {executor: \"remote:fake\"}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote-undeclared.km", "rule ./out : ./input ; {shell: \"/bin/sh\", executor: \"remote:fake\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
 	if compiled.Program == nil {
@@ -460,7 +460,7 @@ func TestRemoteFileRuleRequiresRegisteredExecutor(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "remote-unregistered.kmk", "./out : ; {executor: \"remote:missing\"}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote-unregistered.km", "rule ./out : ; {shell: \"/bin/sh\", executor: \"remote:missing\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -502,7 +502,7 @@ func runRemoteTerminalFailure(t *testing.T, a mem.Allocator, label string, outco
 		return
 	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OutcomeOverride: outcome, HasOutcomeOverride: true, StdoutTruncated: truncated}
-	parsed := script.Parse(a, "remote-"+label+".kmk", "./out : ./input ; {executor: \"remote:fake\"}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote-"+label+".km", "rule ./out : ./input ; {shell: \"/bin/sh\", executor: \"remote:fake\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
 	if compiled.Program == nil {
@@ -540,7 +540,7 @@ func TestRemoteRetryReusesIdempotencyKeyAndPublishesOnlySuccess(t *testing.T) {
 		return
 	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, FailFirst: true}
-	parsed := script.Parse(a, "remote-retry.kmk", "./out : ./input ; {executor: \"remote:fake\"}\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "remote-retry.km", "rule ./out : ./input ; {shell: \"/bin/sh\", executor: \"remote:fake\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RetryCount: 1, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
 	if compiled.Program == nil {
@@ -575,7 +575,7 @@ func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "arguments.kmk", "prepare {region=west} {zone=global} :\n\tprintf @{region} >> ./dependency-log\ndeploy {region=west} {zone=global} : \"prepare region=@{region} zone=@{zone}\"\n\tprintf @{region} >> ./deploy-log\n")
+	parsed := script.ParseKameFile(a, "arguments.km", "task prepare {region=west} {zone=global} : ; {shell: \"/bin/sh\"}\n\tprintf @{region} >> ./dependency-log\ntask deploy {region=west} {zone=global} : \"prepare region=${region} zone=${zone}\" ; {shell: \"/bin/sh\"}\n\tprintf @{region} >> ./deploy-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -637,7 +637,7 @@ func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
 
 func TestNamedTargetArgumentCannotShadowDefinition(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "arguments.kmk", "region = \"global\"\ndeploy {region=west} :\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "arguments.km", "region = \"global\"\ntask deploy {region=west} : ; {shell: \"/bin/sh\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
 	if compiled.Program != nil || len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "TGT_ARGUMENT" {
@@ -646,6 +646,41 @@ func TestNamedTargetArgumentCannotShadowDefinition(t *testing.T) {
 	compiled.Free(a)
 	parsed.Free()
 	registry.Free()
+}
+
+func TestNamedTargetArgumentDefaultsDoNotRequestHost(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.ParseKameFile(a, "arguments.km", `existing = env/DEFAULT_EXPRESSION
+task literal {value=env/DEFAULT_EXPRESSION} {name=existing}
+	(nop value)
+`)
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{
+		ForwardRequests: true,
+		Grants:          []eval.Grant{{Capability: eval.Env}},
+	})
+	defer compiled.Free(a)
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+		t.Fatal("literal argument example did not compile")
+		return
+	}
+	p := compiled.Program
+	defer p.Free()
+	result := p.ExpandPlan("literal")
+	defer result.Plan.Free(a)
+	defer result.Diagnostic.Free(a)
+	arguments := result.Plan.Arguments
+	if result.Diagnostic.Code != "" || len(arguments) != 2 || arguments[0].Value != "env/DEFAULT_EXPRESSION" || arguments[1].Value != "existing" {
+		t.Error("literal defaults did not survive plan expansion")
+	}
+	p.Tick(0)
+	if next := p.NextOutbound(); next.OK {
+		next.Request.Free(a)
+		t.Error("expanding default argument bindings made a host request")
+	}
 }
 
 func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
@@ -657,7 +692,7 @@ func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./input :\n\tprintf source > @>\nrun : ; {shell: kash}\n\t(nop $(cat < input > output))\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./input : ; {shell: \"/bin/sh\"}\n\tprintf source > @{outputs.0}\ntask run\n\t(nop $(cat < input > output))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -721,7 +756,7 @@ func TestMissingDeclaredOutputFails(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./out/result :\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/result : ; {shell: \"/bin/sh\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -752,7 +787,7 @@ func TestSiblingOutputsShareOneExecution(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./out/a ./out/b : ./input\n\tprintf a > @>0\n\tprintf b > @>1\n\tprintf x >> file-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./out/a ./out/b : ./input ; {shell: \"/bin/sh\"}\n\tprintf a > @{outputs.0}\n\tprintf b > @{outputs.1}\n\tprintf x >> file-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -786,7 +821,7 @@ func TestBareTaskRuns(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "run :\n\tprintf x >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run : ; {shell: \"/bin/sh\"}\n\tprintf x >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -820,7 +855,7 @@ func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "run :\n\tprintf x >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run : ; {shell: \"/bin/sh\"}\n\tprintf x >> task-log\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -856,7 +891,7 @@ func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf l >> task-log\ntask run : leaf\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf l >> task-log\ntask cached run : leaf ; {shell: \"/bin/sh\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -897,7 +932,7 @@ func TestBareTaskRerunsForEachRoot(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf l >> task-log\nleft : leaf\nright : leaf\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf l >> task-log\ntask left : leaf\ntask right : leaf\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -931,7 +966,7 @@ func TestTransitiveBareTaskReruns(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf l >> task-log\ntask mid : leaf\n\tprintf m >> task-log\ntask run : mid\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf l >> task-log\ntask cached mid : leaf ; {shell: \"/bin/sh\"}\n\tprintf m >> task-log\ntask cached run : mid ; {shell: \"/bin/sh\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -965,7 +1000,7 @@ func TestConcurrentRootsShareBareTask(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf x >> task-log\nleft : leaf\nright : leaf\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf x >> task-log\ntask left : leaf\ntask right : leaf\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -1027,7 +1062,7 @@ func TestCancelBareRerunPreservesCachedRecord(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task keep :\n\tprintf k >> task-log\nleaf :\n\tsleep 1\ntask run : leaf\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task cached keep : ; {shell: \"/bin/sh\"}\n\tprintf k >> task-log\ntask leaf : ; {shell: \"/bin/sh\"}\n\tsleep 1\ntask cached run : leaf ; {shell: \"/bin/sh\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -1125,7 +1160,7 @@ func TestDiscoveredBareTaskRerunsForNewRoot(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf l >> task-log\nrun :\n\t@(depends \"leaf\")\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf l >> task-log\ntask run : ; {shell: \"/bin/sh\"}\n\t@{depends \"leaf\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	if !registry.Add(eval.Operation{Name: "depends", Call: dependOnNamedTarget, MinArity: 1, MaxArity: 1}) {
 		t.Fatal("operation registration failed")
@@ -1167,7 +1202,7 @@ func TestFailedBareTaskRerunsForNewRoot(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf l >> task-log\n\tfalse\nrun : leaf\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf l >> task-log\n\tfalse\ntask run : leaf ; {shell: \"/bin/sh\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -1205,7 +1240,7 @@ func TestCancelledBareTaskRerunsForNewRoot(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tsleep 1\n\tprintf l >> task-log\nrun : leaf\n\tprintf r >> task-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tsleep 1\n\tprintf l >> task-log\ntask run : leaf ; {shell: \"/bin/sh\"}\n\tprintf r >> task-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -1277,7 +1312,7 @@ func TestDiamondDependencySharesPrerequisite(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "leaf :\n\tprintf x >> task-log\nleft : leaf\nright : leaf\nroot : left right\n")
+	parsed := script.ParseKameFile(a, "test.km", "task leaf : ; {shell: \"/bin/sh\"}\n\tprintf x >> task-log\ntask left : leaf\ntask right : leaf\ntask root : left right\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -1323,7 +1358,7 @@ func TestFreshFileSkipsRecipe(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : ./input\n\tcp @< @>\n\tprintf x >> recipe-log\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf x >> recipe-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -1366,7 +1401,7 @@ func TestNewerInputRebuildsFile(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : ./input\n\tcp @< @>\n\tprintf x >> recipe-log\nwait :\n\tsleep 1\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ./input ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf x >> recipe-log\ntask wait : ; {shell: \"/bin/sh\"}\n\tsleep 1\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -1399,7 +1434,7 @@ func TestNewerInputRebuildsFile(t *testing.T) {
 
 func TestDefinitionHostReadFailureReleasesDiagnosticOnce(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "value = (read \"missing-file\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "value = (read \"missing-file\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1421,7 +1456,7 @@ func TestDefinitionHostReadFailureReleasesDiagnosticOnce(t *testing.T) {
 	registry.Free()
 }
 
-func TestYieldWritesFileOutput(t *testing.T) {
+func TestKashReturnPublishesFileOutput(t *testing.T) {
 	a := t.Allocator()
 
 	dir, err := os.MkdirTemp("", "kame-runtime-")
@@ -1430,7 +1465,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kash}\n\t(yield! \"yielded\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output\n\treturn \"published\"\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1443,12 +1478,12 @@ func TestYieldWritesFileOutput(t *testing.T) {
 	}
 	result := compiled.Program.Materialize("./output")
 	if result.Diagnostic.Code != "" {
-		t.Errorf("yield failed: %s", result.Diagnostic.Code)
+		t.Errorf("publication failed: %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
 	data, readErr := os.ReadFile(dir + "/output")
-	if readErr != nil || string(data) != "yielded" {
-		t.Error("yield did not write output")
+	if readErr != nil || string(data) != "published" {
+		t.Error("return did not publish output")
 	}
 	mem.FreeSlice(a, data)
 	compiled.Program.Free()
@@ -1457,10 +1492,10 @@ func TestYieldWritesFileOutput(t *testing.T) {
 	registry.Free()
 }
 
-func TestYieldRejectsShellCommand(t *testing.T) {
+func TestShellTemplateRejectsOutputWrite(t *testing.T) {
 	a := t.Allocator()
-	source := "./output :\n\t@(yield! \"content\")\n\ttrue\n"
-	parsed := script.Parse(a, "test.kmk", source)
+	source := "rule ./output : ; {shell: \"/bin/sh\"}\n\t@{write! ./output \"content\"}\n\ttrue\n"
+	parsed := script.ParseKameFile(a, "test.km", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1473,10 +1508,10 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 	}
 	result := compiled.Program.Materialize("./output")
 	if result.Diagnostic.Code != "PHASE_INVALID" {
-		t.Errorf("yield conflict = %s", result.Diagnostic.Code)
+		t.Errorf("template write diagnostic = %s", result.Diagnostic.Code)
 	}
-	if result.Diagnostic.Span.Start <= 0 || result.Diagnostic.Span.End > len(source) || !containsSubstring(source[result.Diagnostic.Span.Start:result.Diagnostic.Span.End], "yield") {
-		t.Errorf("yield conflict did not record the yield source span: %d..%d", result.Diagnostic.Span.Start, result.Diagnostic.Span.End)
+	if result.Diagnostic.Span.Start <= 0 || result.Diagnostic.Span.End > len(source) || !containsSubstring(source[result.Diagnostic.Span.Start:result.Diagnostic.Span.End], "write!") {
+		t.Errorf("template write diagnostic did not record its source span: %d..%d", result.Diagnostic.Span.Start, result.Diagnostic.Span.End)
 	}
 	result.Free(a)
 	compiled.Program.Free()
@@ -1494,7 +1529,7 @@ func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "service daemon :\n\twhile :; do sleep 1; done\nconsumer : daemon\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "service daemon : ; {shell: \"/bin/sh\"}\n\twhile :; do sleep 1; done\ntask consumer : daemon ; {shell: \"/bin/sh\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
@@ -1521,7 +1556,7 @@ func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
 
 func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "service daemon :\n\twhile :; do sleep 1; done\n")
+	parsed := script.ParseKameFile(a, "test.km", "service daemon : ; {shell: \"/bin/sh\"}\n\twhile :; do sleep 1; done\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: "."})
@@ -1561,7 +1596,7 @@ func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
 
 func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "service.kmk", "service daemon : ; {stop: {grace-ms: 0}, summary: \"Run daemon\", kind: \"service\", name: \"daemon\"}\n\ttrap '' TERM; while :; do sleep 1; done\n")
+	parsed := script.ParseKameFile(a, "service.km", "service daemon : ; {shell: \"/bin/sh\", stop: {grace-ms: 0}, summary: \"Run daemon\", kind: \"service\", name: \"daemon\"}\n\ttrap '' TERM; while :; do sleep 1; done\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host})
@@ -1612,7 +1647,7 @@ func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 
 func TestForwardedServiceUsesConfiguredLogRetention(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "service.kmk", "service daemon : ; {log-bytes: 17}\n\twhile :; do sleep 1; done\n")
+	parsed := script.ParseKameFile(a, "service.km", "service daemon : ; {shell: \"/bin/sh\", log-bytes: 17}\n\twhile :; do sleep 1; done\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ForwardRequests: true})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
@@ -1651,8 +1686,8 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	source := "service daemon : ; {ready: {argv: [\"test\", \"-f\", \"ready\"], interval-ms: 10, timeout-ms: 1000}, restart: {attempts: 1, backoff-ms: 10}}\n\tif [ ! -f first ]; then touch first; exit 1; fi; touch ready; while :; do sleep 1; done\n"
-	parsed := script.Parse(a, "service.kmk", source)
+	source := "service daemon : ; {shell: \"/bin/sh\", ready: {argv: [\"test\", \"-f\", \"ready\"], interval-ms: 10, timeout-ms: 1000}, restart: {attempts: 1, backoff-ms: 10}}\n\tif [ ! -f first ]; then touch first; exit 1; fi; touch ready; while :; do sleep 1; done\n"
+	parsed := script.ParseKameFile(a, "service.km", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
@@ -1688,7 +1723,8 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 	}
 	mem.FreeSlice(a, starts)
 	started.Handle.Cancel()
-	for i := 0; i < 30 && compiled.Program.Host.Active() != 0; i++ {
+	// The host can reap the process before the program consumes its terminal event.
+	for i := 0; i < 30 && (compiled.Program.Host.Active() != 0 || len(compiled.Program.Pending) != 0); i++ {
 		compiled.Program.Tick(10)
 	}
 	if len(compiled.Program.Pending) != 0 {
@@ -1710,8 +1746,14 @@ func TestServiceHealthFailureRestartsAndResumesConsumer(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	source := "service daemon : ; {ready: {argv: [\"test\", \"-f\", \"ready\"], interval-ms: 10, timeout-ms: 1000}, health: {argv: [\"test\", \"-f\", \"healthy\"], interval-ms: 10, failures: 1}, restart: {attempts: 1, backoff-ms: 10}}\n\tif [ ! -f started ]; then touch started; else touch healthy; fi; touch ready; while :; do sleep 1; done\nconsumer : daemon\n\tprintf c >> consumers; sleep 0.1\n"
-	parsed := script.Parse(a, "service.kmk", source)
+	// Fail the first health probe only after the consumer starts, and clear
+	// readiness before failure so the next process must publish its own marker.
+	source := `service daemon ; {shell: "sh", ready: {argv: ["test", "-f", "ready"], interval-ms: 10, timeout-ms: 1000}, health: {argv: ["sh", "-c", "if [ -e healthy ] || [ ! -s consumers ]; then exit 0; fi; rm -f ready; exit 1"], interval-ms: 10, failures: 1}, restart: {attempts: 1, backoff-ms: 10}}
+	if [ ! -f started ]; then touch started; else touch healthy; fi; touch ready; while :; do sleep 1; done
+task consumer : daemon ; {shell: "sh"}
+	printf c >> consumers; if [ ! -f healthy ]; then while :; do sleep 1; done; fi
+`
+	parsed := script.ParseKameFile(a, "service.km", source)
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
@@ -1746,7 +1788,7 @@ func TestServiceReadinessProbeGatesDependents(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "service daemon : ; {ready: {argv: [\"test\", \"-f\", \"ready-marker\"], interval-ms: 10, timeout-ms: 3000}}\n\tsleep 0.1; touch ready-marker; while :; do sleep 1; done\nconsumer : daemon\n\ttest -f ready-marker\n")
+	parsed := script.ParseKameFile(a, "test.km", "service daemon : ; {shell: \"/bin/sh\", ready: {argv: [\"test\", \"-f\", \"ready-marker\"], interval-ms: 10, timeout-ms: 3000}}\n\tsleep 0.1; touch ready-marker; while :; do sleep 1; done\ntask consumer : daemon ; {shell: \"/bin/sh\"}\n\ttest -f ready-marker\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
@@ -1780,7 +1822,7 @@ func TestServiceReadinessTimeoutCancelsService(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "service daemon : ; {ready: {argv: [\"false\"], interval-ms: 10, timeout-ms: 100}}\n\twhile :; do sleep 1; done\nconsumer : daemon\n\ttrue\n")
+	parsed := script.ParseKameFile(a, "test.km", "service daemon : ; {shell: \"/bin/sh\", ready: {argv: [\"false\"], interval-ms: 10, timeout-ms: 100}}\n\twhile :; do sleep 1; done\ntask consumer : daemon ; {shell: \"/bin/sh\"}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
@@ -1812,7 +1854,7 @@ func TestInvalidServiceConfigFailsBeforeExecution(t *testing.T) {
 	}
 	for i := range invalid {
 		a := t.Allocator()
-		parsed := script.Parse(a, "test.kmk", invalid[i])
+		parsed := script.ParseKameFile(a, "test.km", invalid[i])
 		registry := eval.NewRegistry(a)
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 		if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -1847,7 +1889,7 @@ func TestFileDependencyRunsProducerBeforeDependent(t *testing.T) {
 		t.Fatal("source write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./mid : ./src\n\tcp @< @>\n./out : ./mid\n\tcp @< @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./mid : ./src ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\nrule ./out : ./mid ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil {
@@ -1886,7 +1928,7 @@ func TestFileDependencyRunsProducerBeforeDependent(t *testing.T) {
 
 func TestEmptyFileRecipeMissingOutputFails(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./missing :\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./missing :\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -1917,7 +1959,7 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC OTHER)\n\tcat @<* > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "SRC = ./src\nOTHER = ./other\nrule ./output : ${list SRC OTHER} ; {shell: \"/bin/sh\"}\n\tcat @{join \" \" (map std/str inputs)} > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1946,7 +1988,7 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 
 func TestSharedHandlesCancelOnlyAfterLastRelease(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "run :\n\tsleep 1\n")
+	parsed := script.ParseKameFile(a, "test.km", "task run : ; {shell: \"/bin/sh\"}\n\tsleep 1\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil {
@@ -1993,7 +2035,7 @@ func TestDynamicExternalFileDependencyIsCurrent(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(depends-file \"./input\")\n\tprintf result > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ; {shell: \"/bin/sh\"}\n\t@{depends-file \"./input\"}\n\tprintf result > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	if !registry.Add(eval.Operation{Name: "depends-file", Call: observeFileDependency, MinArity: 1, MaxArity: 1}) {
 		t.Fatal("operation registration failed")
@@ -2024,7 +2066,7 @@ func TestFileURIWritePreservesHostProtocolParents(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	uri := "file:///virtual/parent%252F%23%3F/deep/output.txt"
-	parsed := script.Parse(a, "uri-write.kmk", "publish : ; {shell: kash}\n\t(write! (resource \""+uri+"\") \"uri\")\n")
+	parsed := script.ParseKameFile(a, "uri-write.km", "task publish\n\t(write! (resource \""+uri+"\") \"uri\")\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -2061,7 +2103,7 @@ func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	inputURI := "mem://workspace/src/input.txt"
-	parsed := script.Parse(a, "resource.kmk", "./output : @(list (resource \"mem://workspace/src/./input.txt\")) ; {shell: kame}\n\t(read (resource \"mem://workspace/src/input.txt\"))\n")
+	parsed := script.ParseKameFile(a, "resource.km", "rule ./output : ${list (resource \"mem://workspace/src/./input.txt\")} = (read (resource \"mem://workspace/src/input.txt\"))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -2139,7 +2181,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kash}\n\t(write! \"./output\" \"written\")\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output\n\t(write! \"./output\" \"written\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -2166,9 +2208,9 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 	a := t.Allocator()
 	bodies := []string{
-		"\t@(write! \"./output\" \"written\")\n\t@(out! \"rendered\")\n\tprintf command >> @>\n",
-		"\t@if(true)\n\t@(write! \"./output\" \"written\")\n\t@(out! \"rendered\")\n\tprintf command >> @>\n\t@end(if)\n",
-		"\t@if(true)\r\n\t@(write! \"./output\" \"written\")\r\n\t@(out! \"rendered\")\r\n\tprintf command >> @>\r\n\t@end(if)\r\n",
+		"\t@{write! \"./output\" \"written\"}\n\t@{out! \"rendered\"}\n\tprintf command >> @{first outputs}\n",
+		"\t@if true\n\t@{write! \"./output\" \"written\"}\n\t@{out! \"rendered\"}\n\tprintf command >> @{first outputs}\n\t@end if\n",
+		"\t@if true\r\n\t@{write! \"./output\" \"written\"}\r\n\t@{out! \"rendered\"}\r\n\tprintf command >> @{first outputs}\r\n\t@end if\r\n",
 	}
 	for i := range bodies {
 
@@ -2177,7 +2219,7 @@ func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 			t.Fatal("temporary directory failed")
 			return
 		}
-		parsed := script.Parse(a, "render.kmk", "./output :\n"+bodies[i])
+		parsed := script.ParseKameFile(a, "render.km", "rule ./output ; {shell: \"/bin/sh\"}\n"+bodies[i])
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -2236,7 +2278,7 @@ func TestWriteOperationCoercesValue(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kash}\n\t(write! \"./output\" 42)\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output\n\t(write! \"./output\" 42)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -2273,7 +2315,7 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kame}\n\t(str (count (read \"./input\")))\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output = (str (count (read \"./input\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2310,7 +2352,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output : ; {shell: kame}\n\t(json (wildcard \"./*\"))\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output = (json (map std/str (files ./*)))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2347,7 +2389,7 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\tprintf kept\n\tprintf '%s' @(str (count (read \"./input\"))) > @>\n")
+	parsed := script.ParseKameFile(a, "test.km", "rule ./output : ; {shell: \"/bin/sh\"}\n\tprintf kept\n\tprintf '%s' @{str (count (read \"./input\"))} > @{outputs.0}\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2368,7 +2410,7 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 
 func TestDefinitionMaterializationReturnsCurrentValue(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "value.kmk", "answer = [1, 2]\n")
+	parsed := script.ParseKameFile(a, "value.km", "answer = [1, 2]\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
 	if compiled.Program == nil {
@@ -2402,7 +2444,7 @@ func TestAlwaysFileRerunsOncePerRootEpochAndRemainsAnArtifact(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "always.kmk", "always ./output : ./input\n\tcp @< @>\n\tprintf x >> recipe-log\nleft : ./output\nright : ./output\nroot : left right\n")
+	parsed := script.ParseKameFile(a, "always.km", "rule always ./output : ./input ; {shell: \"/bin/sh\"}\n\tcp @{inputs.0} @{outputs.0}\n\tprintf x >> recipe-log\ntask left : ./output\ntask right : ./output\ntask root : left right\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {

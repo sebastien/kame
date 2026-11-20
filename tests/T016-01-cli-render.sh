@@ -7,16 +7,20 @@ test-step "build artifacts"
 cli_require_tools
 cli_build
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+wasm_runner="$CLI_ROOT/src/js/kame.js"
+if [ -z "${KAME_WASM:-}" ]; then
+	make dist-wasm >/dev/null
+	wasm_runner="$CLI_ROOT/dist/kame.js"
+fi
 work="$TMPDIR/render"
 mkdir -p "$work"
 printf 'Hello @{name}!' >"$work/hello.md"
-printf '@(text (read ./value.txt))' >"$work/read.md"
+printf '@{text (read ./value.txt)}' >"$work/read.md"
 printf 'read-value' >"$work/value.txt"
-printf '@if(:true)\nmissing end' >"$work/broken.md"
+printf '@if true\nmissing end' >"$work/broken.md"
 for backend in native wasm; do
  test-step "$backend raw output, payloads, sources and styles"
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+ if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
  "${runner[@]}" do render "$work/hello.md" --define name=World >"$work/out" 2>"$work/err"
  printf 'Hello World!' >"$work/expected"
  if cmp -s "$work/out" "$work/expected"; then test-ok "$backend file payload raw bytes"; else test-fail "$backend file rendering"; fi
@@ -28,7 +32,7 @@ for backend in native wasm; do
  printf 'literal' >"$work/no-extension"
  "${runner[@]}" do render "$work/no-extension" --comment plain >"$work/out" 2>"$work/err"
  if [ "$(cat "$work/out")" = literal ]; then test-ok "$backend explicit style overrides extension"; else test-fail "$backend style"; fi
- "${runner[@]}" do render -c '@(missing)' --check >"$work/out" 2>"$work/err"
+ "${runner[@]}" do render -c '@{missing}' --check >"$work/out" 2>"$work/err"
  if [ ! -s "$work/out" ]; then test-ok "$backend check does not evaluate or output"; else test-fail "$backend check output"; fi
  status=0
  "${runner[@]}" do render "$work/broken.md" --comment plain --check >"$work/out" 2>"$work/err" || status=$?

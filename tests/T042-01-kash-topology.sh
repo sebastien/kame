@@ -6,7 +6,8 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
 test-start "T042-01 Kash streaming topology parity"
 cd "$CLI_ROOT"
-make dist-wasm >/dev/null
+if [ -z "${KAME_TEST_WASM_WRAPPER:-}" ]; then make dist-wasm >/dev/null; fi
+export KAME_TEST_WASM_WRAPPER=${KAME_TEST_WASM_WRAPPER:-"$CLI_ROOT/dist/kame.js"}
 cli_build
 work="$TMPDIR/topology"
 mkdir -p "$work"
@@ -30,7 +31,7 @@ expect() {
 }
 
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$KAME_TEST_WASM_WRAPPER"); fi
 	test-step "$backend: nested merges and EOF"
 	run_case '$((printf "a\n", sh -c "sleep 0.1; echo b") |(merge) wc -l)' 0
 	expect "merge waits for both EOFs" grep -Fq '"2\n"' "$work/$backend.out"
@@ -90,18 +91,17 @@ for backend in native wasm; do
 	build="$work/$backend-build"
 	mkdir -p "$build"
 	printf 'seed\n' >"$build/seed"
-	cat >"$build/Makefile.kmk" <<'KMK'
-SHELL = kash
-./source : ./seed
-	cat < ./seed > @>
-./combined :
-	(sh -c "echo run >> runs; cat" < ./source, printf "extra\n") |(merge) sort > @>
-./linear :
-	sh -c "echo run >> linear-runs; cat" < ./source > @>
-KMK
+	cat >"$build/Makefile.km" <<'KM'
+rule ./source : ./seed
+	cat < ./seed > $outputs.0
+rule ./combined
+	(sh -c "echo run >> runs; cat" < ./source, printf "extra\n") |(merge) sort > $outputs.0
+rule ./linear
+	sh -c "echo run >> linear-runs; cat" < ./source > $outputs.0
+KM
 	for attempt in first cached changed; do
 		if [ "$attempt" = changed ]; then printf 'changed\n' >"$build/seed"; fi
-		if timeout 15 "${command[@]}" -C "$build" -f ./Makefile.kmk ./combined ./linear >"$work/$backend.out" 2>"$work/$backend.err"; then test-ok "$backend discovered prerequisite: $attempt"; else test-fail "$backend generated dependency failed: $(cat "$work/$backend.err")"; fi
+		if timeout 15 "${command[@]}" -C "$build" ./combined ./linear >"$work/$backend.out" 2>"$work/$backend.err"; then test-ok "$backend discovered prerequisite: $attempt"; else test-fail "$backend generated dependency failed: $(cat "$work/$backend.err")"; fi
 		if [ "$attempt" = changed ]; then expected=2; else expected=1; fi
 		if [ "$(wc -l <"$build/runs")" -eq "$expected" ]; then test-ok "$backend reuse count: $attempt"; else test-fail "$backend unexpected execution count for $attempt: $(cat "$build/runs")"; fi
 		if [ "$(wc -l <"$build/linear-runs")" -eq "$expected" ]; then test-ok "$backend linear reuse count: $attempt"; else test-fail "$backend unexpected linear execution count for $attempt"; fi

@@ -8,7 +8,7 @@ import (
 
 func TestComputedPatternAuthoredPartsAndClone(t *testing.T) {
 	a := t.Allocator()
-	text := `@{ROOT}/{one:*}.@{EXT}/{two:~[a-z]+}`
+	text := `${ROOT}/{one:*}.${EXT}/{two:~[a-z]+}`
 	r := expr.Parse(a, "computed", text)
 	if len(r.Diagnostics) != 0 || r.Expr.Pattern == nil {
 		t.Error("computed pattern did not classify")
@@ -39,7 +39,7 @@ func TestComputedPatternAuthoredPartsAndClone(t *testing.T) {
 
 func TestPathReferenceFormattingAndClone(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`@{ROOT}/js/{path}.js`, `./src/{path}/{_0}.js`, `./@{ROOT}/\{literal\}/{path}.@{nop "js"}`}
+	texts := []string{`${ROOT}/js/{path}.js`, `./src/{path}/{_0}.js`, `./${ROOT}/\{literal\}/{path}.${nop "js"}`}
 	for i := range texts {
 		r := expr.Parse(a, "paths", texts[i])
 		if len(r.Diagnostics) != 0 {
@@ -60,12 +60,12 @@ func TestPathReferenceFormattingAndClone(t *testing.T) {
 
 func TestComputedPatternClassificationAndGroupBoundaries(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`@{ROOT}/{name}`, `@{ROOT}/{bad:}`, `@{ROOT}/\{name\}`, `"@{ROOT}/{name:*}"`, `@{ROOT}/{a:*}/{b}`, `./{@{NAME}:*}`, `./{name:@{GLOB}}`, `./{name:~@{REGEX}}`, `@{ROOT}/{name:~(a|)}`}
+	texts := []string{`${ROOT}/{name}`, `${ROOT}/{bad:}`, `${ROOT}/\{name\}`, `"${ROOT}/{name:*}"`, `${ROOT}/{a:*}/{b}`, `./{${NAME}:*}`, `./{name:${GLOB}}`, `./{name:~${REGEX}}`, `${ROOT}/{name:~(a|)}`}
 	for i := range texts {
 		r := expr.Parse(a, "computed", texts[i])
 		if i == 0 {
-			if len(r.Diagnostics) != 0 || r.Expr.Pattern != nil || len(r.Expr.Parts) != 3 || r.Expr.Parts[2].Form != "{" {
-				t.Error("computed reference path did not lower to interpolation")
+			if len(r.Diagnostics) != 0 || r.Expr.Pattern == nil || r.Expr.Pattern.References != 1 || r.Expr.Pattern.Matchers != 0 {
+				t.Error("computed path template lost its deferred reference")
 			}
 		} else if i == 2 || i == 3 {
 			if len(r.Diagnostics) != 0 || r.Expr.Pattern != nil {
@@ -86,7 +86,7 @@ func TestComputedPatternClassificationAndGroupBoundaries(t *testing.T) {
 		}
 		r.Free()
 	}
-	r := expr.Parse(a, "computed", `@{ROOT}/{bad:}`)
+	r := expr.Parse(a, "computed", `${ROOT}/{bad:}`)
 	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Span.Start != 13 {
 		t.Error("malformed group diagnostic lost its authored span")
 	}

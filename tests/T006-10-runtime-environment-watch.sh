@@ -5,26 +5,25 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T006-10 warm watch execution observations"
 cli_build
-make -C "$CLI_ROOT" dist-wasm >/dev/null
+if [ -n "${KAME_WASM:-}" ]; then wasm_cli="$CLI_ROOT/src/js/kame.js"; else make -C "$CLI_ROOT" dist-wasm >/dev/null; wasm_cli="$CLI_ROOT/dist/kame.js"; fi
 for backend in native wasm; do
-	if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$wasm_cli"); fi
 	for scenario in equal discovered task definition; do
 		test-step "$backend warm watch restores $scenario observations"
 		project="$TMPDIR/$backend-$scenario"
 		mkdir -p "$project"
-		cat >"$project/Makefile.kmk" <<'KMK'
-SHELL = /bin/sh
+		cat >"$project/Makefile.km" <<'KMK'
 CONTENT = (text (read ./definition-input))
-./constant : ./input
-	printf fixed > @>; printf x >> child-runs
-./downstream : ./constant
-	cp @< @>; printf x >> parent-runs
-./discovered : ./input ; [shell: kash]
-	(yield! (text (read ./extra)))
-task read-task : ./input ; [shell: kash]
+rule ./constant : ./input ; {shell: "/bin/sh"}
+	printf fixed > @{outputs.0}; printf x >> child-runs
+rule ./downstream : ./constant ; {shell: "/bin/sh"}
+	cp @{inputs.0} @{outputs.0}; printf x >> parent-runs
+rule ./discovered : ./input
+	return (text (read ./extra))
+task cached read-task : ./input
 	printf %s (text (read ./extra)) > task-output
 	printf x >> task-runs
-task definition-task : ./input ; [shell: kash]
+task cached definition-task : ./input
 	printf %s $CONTENT > definition-output
 	printf x >> definition-runs
 KMK

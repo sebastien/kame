@@ -10,13 +10,12 @@ import (
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
-	"kame/lang/template"
 	"slices"
 	"strings"
 )
 
 // Compile validates a parsed script and registers definitions and rule declarations.
-// It deliberately performs no host or filesystem work.
+// Authored declaration discovery observes filesystem membership during registration.
 func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, options Options) CompileResult {
 	return compileSources(a, parsed, registry, options, nil, nil)
 }
@@ -30,7 +29,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 		}
 	}
 	engine := core.NewEngine(a)
-	compiled := eval.CompileChecked(a, engine, parsed, registry)
+	compiled := eval.CompileCheckedForProgram(a, engine, parsed, registry)
 	result := CompileResult{Diagnostics: slices.Clone(compiled.Diagnostics)}
 	mem.FreeSlice(nil, compiled.Diagnostics)
 	// Parser and evaluator diagnostics are tied to this parsed source. Keep the
@@ -58,6 +57,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
+	engine.CanRun = p.canRunJob
 	p.Eval.ExitBoundary = true
 	for i := range sources {
 		p.Eval.AddSourcePart(sources[i].Name, offsets[i], offsets[i]+len(sources[i].Text), sources[i].Offset)
@@ -77,6 +77,9 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	}
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Forwarding = options.ForwardRequests
+	p.Options.DeclarationRead, p.Options.DeclarationHost = options.DeclarationRead, options.DeclarationHost
+	p.Options.DeclarationSource = options.DeclarationSource
+	p.Options.CompositionDiscoveries = options.CompositionDiscoveries
 	p.Options.Watch = options.Watch
 	if p.Host != nil && !p.Forwarding {
 		p.Eval.FinalizationNow, p.Eval.FinalizationQuiet, p.Eval.FinalizationHost = finalizationNow, finalizationQuiet, p
@@ -91,6 +94,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	}
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
 	p.Options.ToolOverrides = cloneStrings(a, options.ToolOverrides)
+	p.Eval.ToolOverrides = p.Options.ToolOverrides
 	for i := range options.RemoteExecutors {
 		p.Options.RemoteExecutors = append(p.Options.RemoteExecutors, host.ExecutorDescriptor{Name: cloneText(a, options.RemoteExecutors[i].Name), Version: cloneText(a, options.RemoteExecutors[i].Version)})
 	}
@@ -114,6 +118,13 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	for i := range options.Environment {
 		p.Options.Environment = append(p.Options.Environment, cloneText(a, options.Environment[i]))
 	}
+	p.Eval.ModuleEnvironment = p.Options.Environment
+	p.Eval.ModuleWatch = p.Options.Watch
+	if invalid := p.Eval.RegisterImports(); invalid.Code != "" {
+		result.Diagnostics = append(result.Diagnostics, invalid)
+		p.Free()
+		return result
+	}
 	for i := range options.Grants {
 		grant := eval.Grant{Capability: options.Grants[i].Capability}
 		for j := range options.Grants[i].Names {
@@ -132,64 +143,68 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 		p.Options.Shell = append(p.Options.Shell, cloneText(a, "/bin/sh"))
 		p.Options.Shell = append(p.Options.Shell, cloneText(a, "-c"))
 	}
+	return p.registerProgram(result, options)
+}
+
+func (p *Program) registerProgram(result CompileResult, options Options) (finished CompileResult) {
+	defer func() {
+		finished.RegistrationPending = p.registrationPending
+		if options.Watch || options.DeclarationRead != nil || options.DeclarationSource != nil {
+			finished.Discoveries = p.declarationSnapshots()
+		}
+		p.Options.CompositionDiscoveries = nil
+		for _, root := range p.declarationImportRoots {
+			p.Engine.Release(root)
+		}
+		p.declarationImportRoots = nil
+		for _, completion := range p.declarationSourceValues {
+			completion.Value.Free(p.Alloc)
+			completion.Diagnostic.Free(p.Alloc)
+		}
+		p.declarationSourceValues = nil
+		if finished.Program == nil {
+			p.Free()
+		}
+	}()
+	parsed := p.Parsed
 	for i := range parsed.Items {
-		item := parsed.Items[i]
-		if item.Kind != script.Rule || item.Rule == nil {
-			continue
+		if d := p.registerDeclarationBlock(parsed.Items[i:i+1], declarationScope{Scope: p.Eval.Scope}); d.Code != "" {
+			result.Diagnostics = append(result.Diagnostics, d)
 		}
-		resolved := p.resolveOutputs(item.Rule)
-		if resolved.Diagnostic.Code != "" {
-			result.Diagnostics = append(result.Diagnostics, resolved.Diagnostic)
-			continue
-		}
-		candidate := resolved.Rule
-		if collision := duplicateLiteral(p, candidate); collision.Code != "" {
-			result.Diagnostics = append(result.Diagnostics, collision)
-			continue
-		}
-		p.Rules = append(p.Rules, registeredRule{Rule: candidate})
-		for j := range item.Rule.Arguments {
-			argument := item.Rule.Arguments[j]
-			if p.Eval.Definition(argument.Name) != nil {
-				d := failureAt(a, "TGT_ARGUMENT", diagnostic.Span{Start: argument.Span.Start, End: argument.Span.End}, "target argument shadows definition: "+argument.Name)
-				d.Source = cloneText(a, parsed.Source.Name)
-				result.Diagnostics = append(result.Diagnostics, d)
-			}
-		}
-		for j := range item.Rule.Body {
-			if item.Rule.Body[j].Template == nil {
-				continue
-			}
-			for k := range item.Rule.Body[j].Template.Parts {
-				part := item.Rule.Body[j].Template.Parts[k]
-				if part.Kind != template.Tool || p.toolIndex(part.Text) >= 0 {
-					continue
-				}
-				p.Tools = append(p.Tools, Tool{Name: cloneText(a, part.Text)})
-			}
+		if p.registrationPending {
+			return result
 		}
 	}
+	p.GeneratedBatchUsage = nil
 	for i := range result.Diagnostics {
 		if result.Diagnostics[i].Severity >= diagnostic.Error {
-			p.Free()
 			return result
 		}
 	}
 	p.declareBuildTools(parsed)
-	if generated := p.compileGeneratedDeclarations(); generated.Code != "" {
-		result.Diagnostics = append(result.Diagnostics, generated)
-		p.Free()
+	if overlap := p.validateDiscoveryOutputs(); overlap.Code != "" {
+		result.Diagnostics = append(result.Diagnostics, overlap)
 		return result
 	}
+	if invalid := p.validateDefinitionOverrides(options.Defines); invalid.Code != "" {
+		result.Diagnostics = append(result.Diagnostics, invalid)
+		return result
+	}
+	includedOverrides := p.Eval.IncludedConfiguration()
+	for _, override := range includedOverrides {
+		p.recordDefinitionOverride(override)
+	}
+	mem.FreeSlice(nil, includedOverrides)
 	if invalid := p.validateParameters(options.Parameters); invalid.Code != "" {
 		result.Diagnostics = append(result.Diagnostics, invalid)
-		p.Free()
 		return result
 	}
 	if options.AutomaticClean != nil {
 		p.EnableAutomaticClean(options.AutomaticClean, options.AutomaticCleanState)
 	}
 	p.nextRequest = 1 << 32
+	p.Options.DeclarationRead, p.Options.DeclarationHost = nil, nil
+	p.Options.DeclarationSource = nil
 	result.Program = p
 	return result
 }
@@ -341,7 +356,7 @@ func parseSourceFragments(a mem.Allocator, name string, text string, sources []C
 func parseSourceFragment(a mem.Allocator, original *source.Source, input CompileSource, start int) *script.Script {
 	part := script.ParseFragment(a, original, input.Lang, start, start+len(input.Text))
 	if input.Lang == "kash" && len(input.Includes) != 0 {
-		script.ValidateKashLibrary(part)
+		script.ValidateKashModule(part)
 	}
 	return part
 }
@@ -401,18 +416,7 @@ func qualifyCompileLocation(a mem.Allocator, name *string, span *diagnostic.Span
 
 func appendIncludeFrames(a mem.Allocator, d *diagnostic.Diagnostic, frames []diagnostic.Frame) {
 	for i := len(frames) - 1; i >= 0; i-- {
-		frame := frames[i]
-		found := false
-		for j := range d.Frames {
-			other := d.Frames[j]
-			if other.Kind == frame.Kind && other.Label == frame.Label && other.Source == frame.Source && other.Span.Start == frame.Span.Start && other.Span.End == frame.Span.End {
-				found = true
-				break
-			}
-		}
-		if !found {
-			d.Frames = append(d.Frames, diagnostic.Frame{Kind: cloneText(a, frame.Kind), Label: cloneText(a, frame.Label), Source: cloneText(a, frame.Source), Span: frame.Span})
-		}
+		appendDiagnosticFrame(a, d, frames[i])
 	}
 }
 
@@ -447,7 +451,9 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 					mem.FreeString(p.Alloc, first)
 					mem.FreeString(p.Alloc, second)
 					if equal {
-						return p.producerAmbiguity(candidate.Outputs[i].Text, other.Outputs[k], candidate.Outputs[i])
+						return p.producerAmbiguity(candidate.Outputs[i].Text,
+							producerCandidate{Rule: other, Output: other.Outputs[k]},
+							producerCandidate{Rule: candidate, Output: candidate.Outputs[i]})
 					}
 				}
 			}
@@ -468,8 +474,21 @@ func (p *Program) Free() {
 	}
 	p.Eval.CancelProcesses()
 	p.Eval.CancelDefers()
+	mem.FreeSlice(nil, p.activeJobs)
 	mem.FreeSlice(nil, p.RecordReaders)
 	p.clearProductionChanges()
+	for i := range p.declarationDiscoveries {
+		item := &p.declarationDiscoveries[i]
+		mem.FreeString(p.Alloc, item.Name)
+		mem.FreeString(p.Alloc, item.Pattern)
+		item.Files.Free(p.Alloc)
+		item.Failure.Free(p.Alloc)
+	}
+	mem.FreeSlice(nil, p.declarationDiscoveries)
+	for i := range p.declarationSources {
+		p.declarationSources[i].Free(p.Alloc)
+	}
+	mem.FreeSlice(nil, p.declarationSources)
 	mem.FreeSlice(nil, p.deferredTerminal)
 	p.RecordReaders = nil
 	for i := range p.RecordRequests {
@@ -569,21 +588,25 @@ func (p *Program) Free() {
 		p.Host.Free()
 	}
 	p.Engine.Free()
-	for i := range p.GeneratedRules {
-		freeGeneratedRule(p.Alloc, p.GeneratedRules[i])
+	for _, scoped := range p.RuleDeclarations {
+		scoped.Scope.Free()
+	}
+	for _, r := range p.ScopedRules {
+		mem.Free(p.Alloc, r)
 	}
 	for i := range p.ResolvedRules {
 		freeResolvedRule(p.Alloc, p.ResolvedRules[i])
 	}
 	mem.FreeSlice(nil, p.ResolvedRules)
 	for i := range p.GeneratedRuleMeta {
-		mem.FreeString(p.Alloc, p.GeneratedRuleMeta[i].Name)
 		freeStrings(p.Alloc, p.GeneratedRuleMeta[i].Dependencies)
 	}
-	mem.FreeSlice(nil, p.GeneratedRules)
 	mem.FreeSlice(nil, p.GeneratedRuleMeta)
 	p.Eval.RecordReaderCloser = nil
 	p.Eval.Free()
+	for _, included := range p.declarationIncludes {
+		included.Free()
+	}
 	if p.ParsedOwned && p.Parsed != nil {
 		p.Parsed.Free()
 	}

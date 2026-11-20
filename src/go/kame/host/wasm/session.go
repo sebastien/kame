@@ -24,6 +24,11 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	if !validDescriptorOptions(value, true) {
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid session options")}
 	}
+	discoveries, valid := descriptorCompositionDiscoveries(r.Alloc, value)
+	if !valid {
+		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid source-selection discoveries")}
+	}
+	defer freeCompositionDiscoveries(r.Alloc, discoveries)
 	inputs := host.PayloadList(value, "fragments")
 	for i := range inputs {
 		if !validSessionFragment(inputs[i]) {
@@ -98,6 +103,8 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		parameters = append(parameters, fields[i].Text)
 	}
 	options.Parameters = parameters
+	options.CompositionDiscoveries = discoveries
+	r.configureDeclarationRead(&options)
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
 	mem.FreeSlice(nil, shell)
 	mem.FreeSlice(nil, parameters)
@@ -111,6 +118,11 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		mem.FreeSlice(nil, fragments[i].Defines)
 	}
 	mem.FreeSlice(nil, fragments)
+	if compiled.RegistrationPending {
+		compiled.Free(r.Alloc)
+		return PureResult{HostNeeded: true}
+	}
+	r.freeDeclarationReads()
 	if compiled.Session == nil {
 		buffer := bytes.Buffer{}
 		for i := range compiled.Diagnostics {
@@ -170,6 +182,9 @@ func (r *Runtime) CaptureLimit() int {
 	}
 	if r.Program != nil {
 		return r.Program.Options.CaptureLimit
+	}
+	if r.Node != nil {
+		return eval.DefaultCaptureLimit
 	}
 	return 0
 }

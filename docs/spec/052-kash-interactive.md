@@ -144,8 +144,8 @@ output was already delivered.
 On a terminal session, a foreground statement graph receives the terminal.
 This is the interactive counterpart of `051-kash-session-authority.md`
 handoff, enabled by the session rather than rule metadata, and uses the same
-host primitive. Stage `:tty false` keeps a stage on pipes, and stage
-`:tty`/`:foreground` need no metadata here.
+host primitive. Stage `tty: false` keeps a stage on pipes, and stage
+`tty:`/`foreground:` need no metadata here.
 
 - Eligible graphs are statement and test graphs whose input is not closed:
   captures, deferred cleanup, record-fed graphs, and record-loop bodies keep
@@ -310,7 +310,7 @@ precedence, and run grants still authorize the selected executable.
 
 Resolved absolute paths are tracked as tool dependencies. A PATH change does
 not invalidate old tool nodes, cancel running jobs, or replay earlier effects.
-Already evaluated lazy definitions keep their values. Stage-local `:env PATH`
+Already evaluated lazy definitions keep their values. Stage-local `env: PATH`
 overrides affect the child environment, not session lookup. Batch scripts and
 recipes resolve against their own unit's `PATH` under the same rule, which is
 the startup `PATH` until the unit writes it.
@@ -485,7 +485,7 @@ sessions without a terminal never call it.
 ```kash
 def kash-prompt info
 	let mark = if info.status == 0 then "" else " !"
-	return "@{info.name}@{mark} $ "
+	return "${info.name}${mark} $ "
 ```
 
 A function named `kash-rprompt` is called the same way, after `kash-prompt`,
@@ -496,7 +496,7 @@ reported as a diagnostic named `<kash-rprompt>`, shows no right prompt.
 
 ```kash
 def kash-rprompt info
-	return if info.jobs == 0 then "" else "[@{info.jobs} jobs]"
+	return if info.jobs == 0 then "" else "[${info.jobs} jobs]"
 ```
 
 ## Line editing

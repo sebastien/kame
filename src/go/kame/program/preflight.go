@@ -34,6 +34,9 @@ func (p *Program) fileGuard(entry *instance) core.Signature {
 }
 
 func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Signature) core.Signature {
+	if settings.Mode != core.SignatureContent {
+		return core.Signature{}
+	}
 	var sink hashSink
 	sink.state = core.NewDigest()
 	// Old accepted renders must not hide actions now forbidden during expansion.
@@ -43,6 +46,15 @@ func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Sig
 	source := p.sourceSignature()
 	sink.state.Write(source.Digest[:])
 	sink.state.Write(settings.Digest[:])
+	if !p.appendFileContext(&sink, entry) {
+		return core.Signature{}
+	}
+	signature := core.Signature{Mode: core.SignatureContent}
+	sink.state.Sum(signature.Digest[:])
+	return signature
+}
+
+func (p *Program) appendFileContext(sink *hashSink, entry *instance) bool {
 	if entry.KameExpression != nil {
 		sink.appendText("kame")
 	} else if entry.Kash {
@@ -71,7 +83,7 @@ func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Sig
 	for i := range p.Eval.DefinitionArgs {
 		signature := core.ValueSignature(p.Eval.DefinitionArgs[i])
 		if signature.Mode == core.SignatureUnavailable {
-			return core.Signature{}
+			return false
 		}
 		sink.state.Write(signature.Digest[:])
 	}
@@ -93,9 +105,7 @@ func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Sig
 			sink.appendText(p.Options.Grants[i].Names[j])
 		}
 	}
-	signature := core.Signature{Mode: core.SignatureContent}
-	sink.state.Sum(signature.Digest[:])
-	return signature
+	return true
 }
 
 func (p *Program) preflightMiss(c *core.EngineContext, index int) core.ProducerResult {

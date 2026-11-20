@@ -8,28 +8,42 @@ import (
 	"unicode/utf8"
 )
 
+type valueJSONMode uint8
+
+const (
+	jsonNative valueJSONMode = iota
+	jsonPresentation
+	jsonLiteral
+)
+
 // PresentationValueJSON encodes values for human-facing output. Unlike ValueJSON,
 // it preserves record order, accepts UTF-8 bytes as strings, and passes ordinary
 // string/key bytes to the encoder without UTF-8 validation. It is not a canonical
 // serialization or a strict JSON-value validator. Failure leaves out unchanged.
 func PresentationValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
-	return valueJSON(a, value, out, true)
+	return valueJSON(a, value, out, jsonPresentation)
 }
 
 // ValueJSON encodes JSON-native values only, with lexical record key order.
 func ValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
-	return valueJSON(a, value, out, false)
+	return valueJSON(a, value, out, jsonNative)
 }
 
 // EncodeValueJSON writes a JSON-native value into an existing encoder.
 func EncodeValueJSON(a mem.Allocator, e *json.Encoder, value Value) bool {
-	return encodeValueJSON(a, e, value, 0, false)
+	return encodeValueJSON(a, e, value, 0, jsonNative)
 }
 
-func valueJSON(a mem.Allocator, value Value, out *[]byte, presentation bool) bool {
+// EncodeLiteralJSON writes configuration literals, tagging kinds that have no
+// native JSON representation.
+func EncodeLiteralJSON(a mem.Allocator, e *json.Encoder, value Value) bool {
+	return encodeValueJSON(a, e, value, 0, jsonLiteral)
+}
+
+func valueJSON(a mem.Allocator, value Value, out *[]byte, mode valueJSONMode) bool {
 	var builder strings.Builder
 	e := json.NewEncoder(&builder)
-	if !encodeValueJSON(a, &e, value, 0, presentation) {
+	if !encodeValueJSON(a, &e, value, 0, mode) {
 		builder.Reset()
 		return false
 	}
@@ -42,7 +56,7 @@ func valueJSON(a mem.Allocator, value Value, out *[]byte, presentation bool) boo
 	return true
 }
 
-func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, presentation bool) bool {
+func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, mode valueJSONMode) bool {
 	var order []int
 	defer mem.FreeSlice(nil, order)
 	if depth >= 256 {
@@ -68,19 +82,29 @@ func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, p
 			e.Float(value.Float)
 		}
 	case String:
-		if !presentation && !utf8.Valid([]byte(value.Text)) {
+		if mode != jsonPresentation && !utf8.Valid([]byte(value.Text)) {
 			return false
 		}
 		e.Str(value.Text)
+	case Symbol, Path:
+		if mode != jsonLiteral || !utf8.ValidString(value.Text) {
+			return false
+		}
+		e.BeginObject()
+		e.Str("kind")
+		e.Str(KindName(value.Kind))
+		e.Str("data")
+		e.Str(value.Text)
+		e.EndObject()
 	case Bytes:
-		if !presentation || !utf8.Valid(value.Bytes) {
+		if mode != jsonPresentation || !utf8.Valid(value.Bytes) {
 			return false
 		}
 		e.Str(string(value.Bytes))
 	case List:
 		e.BeginArray()
 		for i := range value.List {
-			if !encodeValueJSON(a, e, value.List[i], depth+1, presentation) {
+			if !encodeValueJSON(a, e, value.List[i], depth+1, mode) {
 				return false
 			}
 		}
@@ -89,7 +113,7 @@ func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, p
 		order = make([]int, len(value.Record))
 		for i := range order {
 			order[i] = i
-			if !presentation {
+			if mode != jsonPresentation {
 				for j := i; j > 0 && value.Record[order[j]].Key < value.Record[order[j-1]].Key; j-- {
 					order[j], order[j-1] = order[j-1], order[j]
 				}
@@ -97,11 +121,11 @@ func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, p
 		}
 		e.BeginObject()
 		for _, i := range order {
-			if !presentation && !utf8.Valid([]byte(value.Record[i].Key)) {
+			if mode != jsonPresentation && !utf8.Valid([]byte(value.Record[i].Key)) {
 				return false
 			}
 			e.Str(value.Record[i].Key)
-			if !encodeValueJSON(a, e, value.Record[i].Value, depth+1, presentation) {
+			if !encodeValueJSON(a, e, value.Record[i].Value, depth+1, mode) {
 				return false
 			}
 		}

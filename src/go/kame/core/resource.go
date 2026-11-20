@@ -14,6 +14,8 @@ const (
 	ResourceEnvironment
 	ResourceTool
 	ResourceOperation
+	ResourceDiscovery
+	ResourceDeclarationSource
 )
 
 // ResourceKey is owned by the allocator that created or cloned it.

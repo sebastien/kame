@@ -71,7 +71,11 @@ func opLine(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.Pattern {
+	if v[0].Kind == core.PathTemplate {
+		discardArgCallables(c, v)
+		return ownedFailure(c.Run, "PAT_INVALID", "subst requires a matching pattern")
+	}
+	if v[0].Kind != core.Pattern && v[0].Kind != core.PathPattern {
 		// Literal form: parameters precede the subject, as in pattern substitution.
 		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
 			discardArgCallables(c, v)
@@ -90,7 +94,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	if len(v) == 2 {
 		return replaceSection(c, state)
 	}
-	out := replaceApply(c, state, v[2])
+	out := substitute(c, state, v[2], 2)
 	freeReplaceState(c.Run, state)
 	return out
 }
@@ -186,7 +190,7 @@ func opTemplateCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	b := strings.Builder{}
 	defer b.Reset()
 	for i := range v {
-		text, ok := eval.Stringify(c.Run, v[i])
+		text, ok := eval.InterpolationText(c.Run, v[i])
 		if !ok {
 			discardArgCallables(c, v)
 			return c.InvalidRender(i, v[i].Kind)

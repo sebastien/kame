@@ -31,7 +31,7 @@ func dispatchTrace(t *testing.T, prepared bool) string {
 	workTrace = mem.Alloc[bytes.Buffer](a)
 	*workTrace = bytes.Buffer{}
 	defer freeWorkTrace(a)
-	source := script.Parse(a, "work.kmk", "task root : a b\ntask a :\ntask b :\n")
+	source := script.ParseKameFile(a, "work.km", "task root : a b\ntask a :\ntask b :\n")
 	defer source.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()

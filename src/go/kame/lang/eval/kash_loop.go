@@ -7,19 +7,23 @@ import (
 )
 
 type kashLoopState struct {
-	Program   *Program
-	ReaderID  int64
-	RequestID int64
-	Path      string
-	Delimiter int
-	Stdin     bool
-	Control   *kashControlState
-	Budget    kashInvocation
-	Iterable  core.Value
-	Ready     bool
-	InBody    bool
-	Done      bool
-	Iteration int
+	Program     *Program
+	ReaderID    int64
+	RecordStage *functionStage
+	RequestID   int64
+	Path        string
+	Delimiter   int
+	Stdin       bool
+	Control     *kashControlState
+	Budget      kashInvocation
+	Iterable    core.Value
+	Ready       bool
+	InBody      bool
+	Done        bool
+	Iteration   int
+	Consumer    int64
+	Closing     bool
+	Terminal    Result
 }
 
 func freeKashLoop(a mem.Allocator, value any) {
@@ -29,6 +33,7 @@ func freeKashLoop(a mem.Allocator, value any) {
 	freeKashControlState(a, state.Control)
 	freeCallables(a, &state.Iterable)
 	state.Iterable.Free(a)
+	state.Terminal.Free(a)
 	mem.Free(a, state)
 }
 
@@ -80,12 +85,15 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
 		}
-		if r.Value.Kind != core.List {
-			freeCallables(c.Run, &r.Value)
+		if r.Value.Kind != core.List && r.Value.Kind != core.Stream {
 			r.Free(c.Run)
-			return failure(c.Run, "EXPR_INVALID", e.Span, "for iterable must be a list")
+			return failure(c.Run, "EXPR_INVALID", e.Span, "for iterable must be a list or stream")
 		}
 		state.Iterable, state.Ready = borrowValue(p.Alloc, r.Value), true
+		if r.Value.Kind == core.Stream {
+			p.NextScriptGroup++
+			state.Consumer = p.NextScriptGroup
+		}
 		freeCallables(c.Run, &r.Value)
 		r.Free(c.Run)
 		p.retainControlEffects(state.Control, c, scope, before, beforePaths)
@@ -97,7 +105,7 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 		c.CallPath = invocationPath(c.Run, previousPath, e.Span.Start, state.Iteration)
 		r = p.advanceKashLoop(scope, e, state, c)
 		mem.FreeString(c.Run, c.CallPath)
-		if !c.pureValueBlock || state.Done || r.Waiting || r.Returned || r.Diagnostic.Code != "" {
+		if !c.pureValueBlock || state.Done || r.Waiting || r.Yielded || r.Returned || r.Diagnostic.Code != "" {
 			break
 		}
 		r.Free(c.Run)
@@ -111,7 +119,20 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 }
 
 func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopState, c *Context) Result {
-	if e.Kind == expr.KashFor && state.Iteration >= len(state.Iterable.List) {
+	var stream *generator
+	if state.Iterable.Kind == core.Stream {
+		if c.Engine == nil || c.pureValueBlock {
+			return failure(c.Run, "PHASE_INVALID", e.Span, "stream iteration requires runtime execution")
+		}
+		stream = streamGenerator(state.Iterable)
+		if stream == nil {
+			return failure(c.Run, "EXPR_INVALID", e.Span, "unsupported stream source")
+		}
+	}
+	if state.Closing {
+		return closeGeneratorLoop(state, stream, c)
+	}
+	if e.Kind == expr.KashFor && stream == nil && state.Iteration >= len(state.Iterable.List) {
 		state.Done = true
 		return Result{}
 	}
@@ -160,7 +181,22 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 		control.Scope = newScope(p.Alloc, scope)
 		if e.Kind == expr.KashFor || e.Kind == expr.KashRecords {
 			value := state.Iterable
-			if e.Kind == expr.KashFor {
+			if stream != nil {
+				before, beforePaths := len(c.Effects), len(c.WritePaths)
+				next := stream.pull(c, state.Consumer)
+				if next.Waiting || next.Diagnostic.Code != "" || !next.Yielded {
+					control.Scope.Free()
+					control.Scope = nil
+					if !next.Waiting && next.Diagnostic.Code == "" {
+						p.retainControlEffects(control, c, scope, before, beforePaths)
+						state.Done = true
+					}
+					return next
+				}
+				p.retainControlEffects(control, c, scope, before, beforePaths)
+				defer next.Free(c.Run)
+				value = next.Value
+			} else if e.Kind == expr.KashFor {
 				value = state.Iterable.List[state.Iteration]
 			}
 			item := borrowValue(p.Alloc, value)
@@ -184,7 +220,16 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	}
 	r := p.kashBodyBudget(control, branch.Body, c, budget)
 	c.RecordBody = previousBody
-	if r.Waiting || r.Returned || r.Diagnostic.Code != "" {
+	if r.Waiting || r.Yielded {
+		return r
+	}
+	if stream != nil && (r.Returned || r.Diagnostic.Code != "" || r.LoopTransfer == expr.KashBreak) {
+		state.Closing = true
+		state.Terminal = Result{Value: borrowValue(p.Alloc, r.Value), Returned: r.Returned, Diagnostic: r.Diagnostic.Clone(p.Alloc)}
+		r.Free(c.Run)
+		return closeGeneratorLoop(state, stream, c)
+	}
+	if r.Returned || r.Diagnostic.Code != "" {
 		return r
 	}
 	transfer := r.LoopTransfer
@@ -209,7 +254,7 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	}
 	state.Iteration++
 	state.Budget.Index++
-	if e.Kind == expr.KashFor && state.Iteration == len(state.Iterable.List) {
+	if e.Kind == expr.KashFor && stream == nil && state.Iteration == len(state.Iterable.List) {
 		state.Done = true
 		return Result{}
 	}
@@ -218,4 +263,25 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 		return p.kashBudget(&state.Budget, c)
 	}
 	return Result{}
+}
+
+func closeGeneratorLoop(state *kashLoopState, stream *generator, c *Context) Result {
+	cleanup := stream.stop(c)
+	if cleanup.Waiting {
+		return cleanup
+	}
+	terminal := Result{
+		Value: borrowValue(c.Run, state.Terminal.Value), Returned: state.Terminal.Returned,
+		Diagnostic: state.Terminal.Diagnostic.Clone(c.Run),
+	}
+	state.Terminal.Free(stream.program.Alloc)
+	state.Done = true
+	if cleanup.Diagnostic.Code != "" && terminal.Diagnostic.Code != "" {
+		terminal.Diagnostic.Notes = append(terminal.Diagnostic.Notes, owned(c.Run, "generator cleanup failed: "+cleanup.Diagnostic.Message))
+	} else if cleanup.Diagnostic.Code != "" {
+		terminal.Free(c.Run)
+		return cleanup
+	}
+	cleanup.Free(c.Run)
+	return terminal
 }

@@ -14,14 +14,14 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "paths.km", "")
+	parsed := script.ParseKameFile(a, "paths.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
 	for _, tc := range []struct{ input, want string }{
-		{`./@@assets/file`, `./@assets/file`},
-		{`./@@\{not-a-reference\}/file`, `./@{not-a-reference}/file`},
-		{`./@@files/@{nop '@@'}`, `./@files/@@`},
-		{`./@@assets/{name:*}`, `./@assets/{name:*}`},
-		{`./@@assets/@{nop "dir"}/{name:*}`, `./@assets/dir/{name:*}`},
+		{`./@assets/file`, `./@assets/file`},
+		{`./@\{not-a-reference\}/file`, `./@{not-a-reference}/file`},
+		{`./@files/${nop '@'}`, `./@files/@`},
+		{`./@assets/{name:*}`, `./@assets/{name:*}`},
+		{`./@assets/${nop "dir"}/{name:*}`, `./@assets/dir/{name:*}`},
 	} {
 		e := expr.Parse(a, "path.km", tc.input)
 		r := p.Evaluate(a, e.Expr, p.Scope)
@@ -31,7 +31,7 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 		r.Free(a)
 		e.Free()
 	}
-	texts := []string{`./@{nop "a *?[\\]"}/file.txt`, `@{nop "../two words"}/file`, `~/@{nop "dir"}/file`, `./@{nop nil}/file`, `./@{nop 42}/file`, `./@{nop []}/file`, `./@{nop {a: 1}}/file`, `@{nop "src"}/file`, `./@{nop true}/file`, `./@{x => x}/file`, "./@{nop \"\x00\"}/file"}
+	texts := []string{`./${nop "a *?[\\]"}/file.txt`, `${nop "../two words"}/file`, `~/${nop "dir"}/file`, `./${nop nil}/file`, `./${nop 42}/file`, `./${nop []}/file`, `./${nop {a: 1}}/file`, `${nop "src"}/file`, `./${nop true}/file`, `./${x => x}/file`, "./${nop \"\x00\"}/file"}
 	for i := range texts {
 		e := expr.Parse(a, "path.km", texts[i])
 		if len(e.Diagnostics) != 0 {
@@ -75,7 +75,7 @@ func TestPathInterpolationRetainsCompletedChildrenAcrossSuspension(t *testing.T)
 	state := memoCountState{}
 	registry.Add(eval.Operation{Name: "once", Call: memoCountOperation, Context: &state, MinArity: 0, MaxArity: 0})
 	registry.Add(eval.Operation{Name: "async", Call: asyncOperation, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "paths.km", "result = ./@{str (once ())}/@{str (async ())}")
+	parsed := script.ParseKameFile(a, "paths.km", "result = ./${str (once ())}/${str (async ())}")
 	p := eval.Compile(a, engine, parsed, registry)
 	p.DefinitionEffectSink, p.DefinitionEffectState = memoEffectSink, &state
 	node := p.Definition("result")

@@ -203,7 +203,7 @@ func (o *replOptions) command(text string, out, errOut io.Writer) (bool, int) {
 		fmt.Fprintln(errOut, "option:", err)
 		return true, 2
 	}
-	parsed := script.ParseKash(mem.System, "<option>", text)
+	parsed := script.ParseKashSessionText(mem.System, "<option>", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 {
 		return fail(errors.New(parsed.Diagnostics[0].Message))

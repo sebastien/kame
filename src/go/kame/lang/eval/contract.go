@@ -40,12 +40,10 @@ const (
 	ReadsClock
 )
 
-// HasContract distinguishes explicitly described standard operations from
-// legacy/custom registrations that retain their existing runtime checks.
+// HasContract reports whether the operation declares semantic metadata.
 func (o *Operation) HasContract() bool { return o.Category != UnspecifiedOperation }
 
-// ValidContract rejects partial/invalid descriptions, without requiring custom
-// embedders to adopt standard-library metadata in this migration step.
+// ValidContract rejects partial or invalid metadata. A registration can omit it.
 func (o *Operation) ValidContract() bool {
 	if !o.HasContract() {
 		return o.Phases == 0 && o.Behavior == 0 && len(o.ConditionalCapabilities) == 0
