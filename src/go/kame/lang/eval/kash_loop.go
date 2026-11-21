@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/internal/mem"
 	"kame/lang/expr"
+	"kame/lang/source"
 )
 
 type kashLoopState struct {
@@ -17,6 +18,8 @@ type kashLoopState struct {
 	Control     *kashControlState
 	Budget      kashInvocation
 	Iterable    core.Value
+	Pattern     core.Value
+	Matcher     expr.CompiledPattern
 	Ready       bool
 	InBody      bool
 	Done        bool
@@ -33,6 +36,9 @@ func freeKashLoop(a mem.Allocator, value any) {
 	freeKashControlState(a, state.Control)
 	freeCallables(a, &state.Iterable)
 	state.Iterable.Free(a)
+	state.Pattern.Free(a)
+	state.Matcher.Pattern.Free(a)
+	state.Matcher.Free(a)
 	state.Terminal.Free(a)
 	mem.Free(a, state)
 }
@@ -81,13 +87,29 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	if e.Kind == expr.KashFor && !state.Ready {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
-		r := p.evaluate(c.Engine, scope, e.Items[0].Items[0], c)
-		if r.Waiting || r.Diagnostic.Code != "" {
+		source := e.Items[0].Items[0]
+		var r Result
+		if state.Pattern.Kind != core.PathPattern {
+			r = p.evaluate(c.Engine, scope, source, c)
+			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+				return r
+			}
+			if r.Value.Kind == core.PathPattern {
+				state.Pattern = r.Value.Clone(p.Alloc)
+				r.Free(c.Run)
+				p.retainControlEffects(state.Control, c, scope, before, beforePaths)
+				before, beforePaths = len(c.Effects), len(c.WritePaths)
+			}
+		}
+		if state.Pattern.Kind == core.PathPattern {
+			r = p.expandKashLoopPattern(state, c, source.Span)
+		}
+		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 			return r
 		}
 		if r.Value.Kind != core.List && r.Value.Kind != core.Stream {
 			r.Free(c.Run)
-			return failure(c.Run, "EXPR_INVALID", e.Span, "for iterable must be a list or stream")
+			return failure(c.Run, "EXPR_INVALID", source.Span, "for iterable must be a list, stream, or path pattern")
 		}
 		state.Iterable, state.Ready = borrowValue(p.Alloc, r.Value), true
 		if r.Value.Kind == core.Stream {
@@ -116,6 +138,66 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 	c.loopDepth--
 	c.CallPath, c.TimeoutMS = previousPath, previousTimeout
 	return r
+}
+
+func (p *Program) expandKashLoopPattern(state *kashLoopState, c *Context, span source.Span) Result {
+	if c.Phase != EvaluatePhase || c.Engine == nil {
+		return failure(c.Run, "PHASE_INVALID", span, "path pattern iteration requires runtime execution")
+	}
+	wildcard := p.Registry.lookup("wildcard")
+	if wildcard == nil {
+		return failure(c.Run, "OP_UNKNOWN", span, "environment does not support wildcard expansion")
+	}
+	if r := p.prepareOperation(wildcard, 1, c, span); r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+		return r
+	}
+	r := p.invokeOperation(wildcard, []core.Value{state.Pattern}, nil, c, span)
+	if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+		return r
+	}
+	parsed := expr.ParsePathPatternText(p.Alloc, state.Pattern.Text)
+	mem.FreeSlice(nil, parsed.Diagnostics)
+	if len(parsed.Pattern.Names) != 0 && len(r.Value.List) != 0 {
+		if !core.IsResourceURIName(state.Pattern.Text) {
+			expr.NormalizePathPatternRoot(p.Alloc, parsed.Pattern, c.Cwd)
+		}
+		state.Matcher = expr.CompilePattern(p.Alloc, parsed.Pattern)
+		if !state.Matcher.Valid {
+			parsed.Pattern.Free(p.Alloc)
+			r.Free(c.Run)
+			return failure(c.Run, "PAT_INVALID", span, "invalid loop path pattern")
+		}
+	} else {
+		parsed.Pattern.Free(p.Alloc)
+	}
+	state.Pattern.Free(p.Alloc)
+	return r
+}
+
+func (p *Program) bindKashLoopCaptures(e *expr.Expr, state *kashLoopState, value core.Value, c *Context) Result {
+	span := e.Items[0].Items[0].Span
+	subject := canonicalPath(c.Run, p.DefinitionCwd, value.Text)
+	defer mem.FreeString(c.Run, subject)
+	match := state.Matcher.MatchText(c.Run, subject)
+	defer mem.FreeSlice(nil, match.Captures)
+	if match.Limited {
+		return failure(c.Run, "PAT_LIMIT", span, "loop path match exceeded its step budget")
+	}
+	if !match.Matched {
+		return failure(c.Run, "HOST_FAIL", span, "discovered path does not match loop pattern")
+	}
+	for i, name := range state.Matcher.Pattern.Names {
+		if name == "" || state.Control.Scope.localBinding(name) != nil {
+			continue
+		}
+		if name == e.Text {
+			return failure(c.Run, "DEF_INVALID", span, "path capture conflicts with loop binding: "+name)
+		}
+		capture := core.NewString(p.Alloc, match.Captures[i])
+		state.Control.Scope.setValue(name, capture)
+		capture.Free(p.Alloc)
+	}
+	return Result{}
 }
 
 func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopState, c *Context) Result {
@@ -198,6 +280,11 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 				value = next.Value
 			} else if e.Kind == expr.KashFor {
 				value = state.Iterable.List[state.Iteration]
+				if state.Matcher.Valid {
+					if r := p.bindKashLoopCaptures(e, state, value, c); r.Diagnostic.Code != "" {
+						return r
+					}
+				}
 			}
 			item := borrowValue(p.Alloc, value)
 			control.Scope.setValue(e.Text, item)

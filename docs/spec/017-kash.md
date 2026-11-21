@@ -1119,14 +1119,20 @@ enclosing sequence.
 
 ### Loops
 
-`for NAME in EXPR` iterates a list, record or stream, and `while EXPR` repeats
+`for NAME in EXPR` iterates a list, stream or path pattern, and `while EXPR` repeats
 while its condition is true; `break` and `continue` control the innermost loop.
 Each iteration has its own lexical scope. `046` and `048` refine iteration over
 records and streams.
 
+At runtime, a `PathPattern` source uses tracked `wildcard` discovery. `NAME`
+is the matched `Path`, and each named capture binds a string in that iteration
+only. A capture cannot have the same name as `NAME`. No matches means no
+iterations. Bare patterns match any entry kind; `files` and `dirs` still
+produce filtered path lists without capture bindings.
+
 ```kash
-for source in files ./src/*.c
-	compile $source (object-path source)
+for source in ./src/{name:*}.c
+	compile $source ./build/${name}.o
 while not (ready? server)
 	sleep 1
 ```

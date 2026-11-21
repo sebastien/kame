@@ -85,6 +85,23 @@ func (e *editorReader) resetEditor() {
 	e.shell.Prompt.Primary(func() string { return e.prompt })
 	e.shell.Prompt.Right(func() string { return e.right })
 	e.shell.Hint.SetProvider(e.completionSeparator)
+	e.shell.HistorySearchLabel = func() string { return "history: " + e.historyScopeLabel() }
+	e.shell.Keymap.Register(map[string]func(){
+		"kash-history-search-toggle": func() { e.shell.UpdateHistorySearch(e.switchHistoryScope) },
+	})
+	const searchToggle = "kash-history-search-toggle"
+	if _, bound := e.shell.Config.Binds["isearch"]["\x1bg"]; !bound {
+		defaultKey := true
+		for _, bind := range e.shell.Config.Binds["isearch"] {
+			if bind.Action == searchToggle && !bind.Macro {
+				defaultKey = false
+				break
+			}
+		}
+		if defaultKey {
+			e.shell.Config.Bind("isearch", "\x1bg", searchToggle, false)
+		}
+	}
 	// Redraw a menu without accepting its virtual insertion or dropping its keymap.
 	e.shell.Config.Bind("menu-select", "\x0c", "clear-screen", false)
 	if e.shell.Config.GetString("completion-selection-style") == "\x1b[1;30m" {
@@ -143,14 +160,21 @@ func (e *editorReader) clearHistoryCache() {
 }
 
 func (e *editorReader) toggleHistory() {
+	e.switchHistoryScope()
+	e.shell.Hint.Set("history: " + e.historyScopeLabel())
+}
+
+func (e *editorReader) switchHistoryScope() {
 	e.clearHistoryCache()
 	e.history.setScope(!e.history.global)
 	e.history.refresh(e.history.cwd)
-	view := "local"
+}
+
+func (e *editorReader) historyScopeLabel() string {
 	if e.history.global {
-		view = "global"
+		return "global"
 	}
-	e.shell.Hint.Set("history: " + view)
+	return "local"
 }
 
 // completionSeparator lives in readline's hint area, so resize and cleanup

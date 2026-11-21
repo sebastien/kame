@@ -269,8 +269,9 @@ pattern/capture meaning.
 Path atoms have the kinds of `055` §9.1. An atom with authored glob syntax or
 matcher groups is a `PathPattern`; one with only `{name}` groups is a
 `PathTemplate`; otherwise it is a `Path`. A `PathPattern` is a value, not a file
-list: discovery is explicit through `files`, `dirs` or `wildcard`, which return
-tracked path lists (`055` §9.4, `023-wildcard-sources.md`). A `PathTemplate`
+list: `files`, `dirs` and `wildcard` return tracked path lists (`055` §9.4,
+`023-wildcard-sources.md`). A runtime Kash `for` source can also discover a
+`PathPattern` and bind its captures (`017`, Loops). A `PathTemplate`
 produces a path only through `bind TEMPLATE CAPTURES`. Kinds never convert
 implicitly.
 
@@ -297,8 +298,8 @@ the explicit-root, text-only and no-NUL rules above.
 `wildcard` accepts `PathPattern` values and already-expanded lists of `Path`
 values. It resolves pattern operands and uses each list member as a path. It
 applies its kind flags to the combined matches. Structural path interpolation
-applies to expression and Kash path atoms; discovery happens only through the
-discovery operations, never implicitly in raw Kash command words.
+applies to expression and Kash path atoms; evaluating an atom as a value
+does not discover paths.
 
 ## Signed symbol flags and wildcard kinds
 

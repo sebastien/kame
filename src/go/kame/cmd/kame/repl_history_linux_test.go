@@ -97,3 +97,64 @@ func TestNativeInteractiveHistoryRecordsOnlySubmittedEntries(t *testing.T) {
 		t.Fatalf("history contained entries besides the submitted command: %+v", h.entries)
 	}
 }
+
+func TestNativeInteractiveHistorySearchScope(t *testing.T) {
+	t.Run("default", func(t *testing.T) { checkHistorySearchScope(t, "", "\x1bg") })
+	t.Run("rebound", func(t *testing.T) {
+		checkHistorySearchScope(t, "set keymap isearch\n\"\\ej\": kash-history-search-toggle\n", "\x1bj")
+	})
+}
+
+func checkHistorySearchScope(t *testing.T, config, toggle string) {
+	t.Helper()
+	h, root := historyFixture(t)
+	local, other := filepath.Join(root, "local"), filepath.Join(root, "other")
+	for _, dir := range []string{local, other} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.refresh(other)
+	h.record("echo needle-other")
+	stamp := h.entries[0].Time.UTC().Format("2006-01-02 15:04:05 MST")
+	h.refresh(local)
+	h.record("echo needle-local")
+	inputrc := filepath.Join(root, "inputrc")
+	nativeCLIWrite(t, inputrc, config)
+	s := startTerminalSession(t, nativeCLIBinary(t), local, []string{
+		"KASH_HISTORY=" + h.path, "KASH_HISTORY_SCOPE=local", "INPUTRC=" + inputrc, "TZ=UTC",
+	}, "do", "run", "-i")
+	s.waitReading()
+	check := func(keys, scope string, global bool) {
+		t.Helper()
+		before := s.size()
+		s.send(keys)
+		s.await(before, func(output string) bool {
+			i := strings.LastIndex(output, "\x1b[?25l")
+			if i < 0 || !strings.HasSuffix(output, "\x1b[?25h") {
+				return false
+			}
+			frame := stripControls(output[i:])
+			label := "history: " + scope + " (inc-search)"
+			if !global {
+				label += " (no matches)"
+			}
+			return strings.Contains(frame, label+": needle-other") &&
+				strings.Contains(frame, stamp) == global &&
+				strings.Contains(frame, "echo needle-other") == global &&
+				strings.Contains(frame, "echo draft") != global
+		})
+	}
+	check("echo draft\x12needle-other", "local", false)
+	check(toggle, "global", true)
+	check(toggle, "local", false)
+	check(toggle, "global", true)
+	before := s.size()
+	s.send("\r")
+	s.await(before, func(output string) bool {
+		return strings.Contains(stripControls(output), "\nneedle-other\r\n")
+	})
+	if status := s.finish(); status != 0 {
+		t.Fatalf("interactive session exited %d", status)
+	}
+}

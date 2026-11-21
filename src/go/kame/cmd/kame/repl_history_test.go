@@ -285,6 +285,19 @@ func TestHistoryConcurrentAndClear(t *testing.T) {
 	}
 }
 
+func TestHistoryMergeRejectsUnvalidatedEntry(t *testing.T) {
+	h, _ := historyFixture(t)
+	h.record("echo kept")
+	entry := h.entries[0]
+	entry.Text = "TOKEN=stored-secret"
+	if err := h.update(&entry, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.entries) != 1 || h.entries[0].Text != "echo kept" {
+		t.Fatal("merge accepted an invalid entry or displaced valid history")
+	}
+}
+
 func TestHistoryMigrationAndUnsafeStorage(t *testing.T) {
 	h, cwd := historyFixture(t)
 	if err := os.WriteFile(h.path, []byte("TOKEN=legacy-secret\n"), 0o644); err != nil {

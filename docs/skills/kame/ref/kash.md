@@ -703,15 +703,20 @@ Only selected branches execute. A `match` arm binds captures in its body.
 for source in fonts
 	converter $source
 	verifier $source
+for source in ./src/{name:*}.c
+	compile $source ./build/${name}.o
 
 while $?(probe --pending).ok
 	worker --one
 ```
 
-`for NAME in EXPRESSION` evaluates a list or stream and visits typed items in order,
-and returns nil without collecting results. Each iteration has a fresh lexical
-scope; local lazy definitions and the item binding do not escape. Empty lists do
-nothing. The body may use `break` or `continue` in its own invocation. Use
+`for NAME in EXPRESSION` visits a list, stream or path pattern in order and
+returns nil without collecting results. A runtime path pattern uses tracked
+`wildcard` discovery and binds each match's named captures alongside the path.
+It matches all entry kinds; use `files` or `dirs` for filtered path lists
+without capture bindings. Empty lists and patterns with no matches do nothing.
+Each iteration has a fresh lexical scope. The body may use `break` or `continue`
+in its own invocation. Use
 `set` only for an eligible eager binding.
 
 `while` accepts the same expression conditions as `if` and tests before

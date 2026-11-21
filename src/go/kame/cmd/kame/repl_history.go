@@ -225,6 +225,10 @@ func historyRecord(entry historyEntry) []byte {
 }
 
 func (h *replHistory) prune(entries []historyEntry) []historyEntry {
+	return h.pruneWith(entries, h.valid)
+}
+
+func (h *replHistory) pruneWith(entries []historyEntry, accept func(historyEntry, time.Time) bool) []historyEntry {
 	now := h.now()
 	slices.SortFunc(entries, func(a, b historyEntry) int {
 		if c := a.Time.Compare(b.Time); c != 0 {
@@ -237,7 +241,7 @@ func (h *replHistory) prune(entries []historyEntry) []historyEntry {
 	kept := make([]historyEntry, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
-		if seen[entry.ID] || !h.valid(entry, now) {
+		if seen[entry.ID] || !accept(entry, now) {
 			continue
 		}
 		seen[entry.ID] = true
@@ -273,11 +277,18 @@ func (h *replHistory) record(text string) {
 	}
 	if err := h.update(&entry, ""); err != nil {
 		h.warning("persistence unavailable; using filtered session memory")
-		h.entries = h.prune(h.entries)
-		h.entries = h.add(h.entries, entry)
-		h.entries = h.prune(h.entries)
+		h.entries = h.merge(h.prune(h.entries), entry)
 	}
 	h.selectView()
+}
+
+// merge takes already validated entries. Recheck time and quota after adding
+// the new entry, but do not screen the existing text again.
+func (h *replHistory) merge(entries []historyEntry, entry historyEntry) []historyEntry {
+	if !h.valid(entry, h.now()) {
+		return entries
+	}
+	return h.pruneWith(h.add(entries, entry), h.current)
 }
 
 func (h *replHistory) add(entries []historyEntry, entry historyEntry) []historyEntry {
@@ -355,7 +366,7 @@ func (h *replHistory) update(entry *historyEntry, clear string) error {
 		})
 	}
 	if entry != nil {
-		entries = h.prune(h.add(entries, *entry))
+		entries = h.merge(entries, *entry)
 	}
 	var data bytes.Buffer
 	data.WriteString(historyHeader)
@@ -433,6 +444,14 @@ func (h *replHistory) GetLine(index int) (string, error) {
 }
 
 func (h *replHistory) Len() int { return len(h.view) }
+
+// Description annotates a recall result without changing its command text.
+func (h *replHistory) Description(index int) string {
+	if line, _ := h.GetLine(index); line == "" {
+		return ""
+	}
+	return h.view[index].Time.Local().Format("2006-01-02 15:04:05 MST")
+}
 
 func (h *replHistory) expireView() bool {
 	changed := false

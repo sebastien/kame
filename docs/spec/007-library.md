@@ -565,10 +565,10 @@ including empty members. For example,
 `files ./src/**/*.go ./glue/**/*.c ./glue/**/*.h` combines source extensions
 without shell discovery.
 
-A `PathPattern` is never enumerated implicitly (`023-wildcard-sources.md`);
-discovery is always an explicit `wildcard`, `files` or `dirs` call or a rule
-input. `wildcard` also accepts flat lists of `Path` values as already-discovered
-members, so `wildcard (files ./journal/*)` is valid and can be combined with
+A `PathPattern` is not enumerated by ordinary expression evaluation. Use an
+explicit `wildcard`, `files` or `dirs` call, a rule input, or a runtime Kash
+`for` source (`017`, Loops). `wildcard` also accepts flat lists of `Path` values
+as already-discovered members, so `wildcard (files ./journal/*)` can be combined with
 pattern operands. Lists are unioned without globbing their members again;
 filenames containing metacharacters remain data. An empty list is valid and
 contributes no members; nested lists and non-path members are `EXPR_INVALID`.

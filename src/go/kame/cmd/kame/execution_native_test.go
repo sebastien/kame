@@ -41,6 +41,42 @@ func nativeCLIRead(name string) string {
 	return string(data)
 }
 
+func TestNativeKashPathPatternLoop(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"[work]/alpha/src/py/one", "[work]/beta/src/py", "iter/first", "iter/second"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nativeCLIWrite(t, filepath.Join(dir, "[work]/beta/src/py/two"), "")
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), `BASE = joinpath env/PWD "[work]"
+task all
+	for PY in ${BASE}/{project:*}/src/py/{module:*}
+		echo "- ${project}: ${module} ($PY)"
+	for PY in ./{root:*}/{project:*}/src/py/{module:*}
+		echo "+ ${project}: ${module}"
+	for PY in ./absent/{module:*}
+		echo unexpected
+task broken
+	for item in (dirs ./iter/*)
+		echo "$item"
+		echo "${missing}"
+	echo unexpected
+`)
+	args := []string{"--allow-env=PWD", "--allow-run", "--allow-read", "--color=never"}
+	var out, errOut bytes.Buffer
+	want := "- alpha: one (./[work]/alpha/src/py/one)\n- beta: two (./[work]/beta/src/py/two)\n+ alpha: one\n+ beta: two\n"
+	if status := runNativeCLIIn(t, dir, append(args, "all"), nil, &out, &errOut); status != 0 || out.String() != want {
+		t.Fatalf("status=%d stdout=%q stderr=%s", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLIIn(t, dir, append(args, "broken"), nil, &out, &errOut); status != 1 ||
+		out.String() != "./iter/first\n" || strings.Count(errOut.String(), "error[REF_MISSING]") != 1 {
+		t.Fatalf("status=%d stdout=%q stderr=%s", status, out.String(), errOut.String())
+	}
+}
+
 func nativeCLIStart(t *testing.T, directory string, args ...string) (*exec.Cmd, string, string) {
 	t.Helper()
 	stdout, stderr := filepath.Join(directory, "stdout"), filepath.Join(directory, "stderr")

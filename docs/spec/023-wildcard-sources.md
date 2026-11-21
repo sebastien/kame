@@ -14,9 +14,9 @@ character class is a `PathPattern` value (`055` §9.1). Valid capture groups
 (`{name}`, `{name:**}` and the other group forms of `014`/`029`/`041`) also make
 a `PathPattern`, but never initiate filesystem enumeration. Wildcard bytes
 contributed by `${…}` interpolation and wildcard characters inside quoted
-strings remain literal data. A `PathPattern` never converts implicitly into a
-list of paths: membership is observed through a wildcard source, either as a
-rule input or through an explicit discovery operation.
+strings remain literal data. Ordinary expression evaluation never converts a
+`PathPattern` into a list of paths: membership is observed as a rule input,
+through an explicit discovery operation, or in a runtime Kash `for` source.
 
 ```kame
 sources-journal = files ./journal/*
@@ -66,9 +66,10 @@ portable runtime.
 - `files`, `dirs` and `wildcard` discover in definitions, application arguments,
   containers and declaration-time loops, and wildcard path atoms discover as
   rule inputs, preserving empty/singleton list shape and sorted order.
-- A `PathPattern` value is never implicitly enumerated or converted to a list.
-- Quoted wildcard text and dynamic interpolation bytes remain literal; capture
-  patterns do not scan, and parse/format performs no filesystem access.
+- A runtime Kash `for` source discovers a `PathPattern` and binds its named
+  captures per match (`017`, Loops). Ordinary value evaluation does not scan.
+- Quoted wildcard text and dynamic interpolation bytes remain literal;
+  parse/format performs no filesystem access.
 - `wildcard` over already-discovered lists preserves equivalent membership and
   flags without re-globbing filenames.
 - Denied or phase-forbidden glob reads issue no host request; unused definitions

@@ -101,9 +101,9 @@ evaluations to avoid a CLI/WASM startup for each value; rejection cases stay iso
 
 Run `kame bench` from the repository root on Linux (with PTYs and
 `/proc` memory accounting). It runs three independent Kash sessions, reporting
-first-key and typing p50/p99 and process RSS at 0, 100, 1,000, and 2,000
-submitted commands. The typing probe uses a line that doesn't match any history
-entry. It uses private history with a 128 KiB cap so the last two
+first-key, typing, and Enter-to-next-prompt p50/p99 and process RSS at 0, 100,
+1,000, and 2,000 submitted commands. The typing probe uses a line that doesn't
+match any history entry. It uses private history with a 128 KiB cap so the last two
 checkpoints measure steady state after eviction begins. Compare runs on the
 same machine: timing and RSS are reported, not enforced as pass/fail
 thresholds. The probe does not include terminal emulator rendering or measure

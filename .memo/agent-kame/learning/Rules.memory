@@ -137,8 +137,12 @@ agent_nodes:
     role: guidance
     topic: language-syntax
     core: false
+  isolate-repeated-cli-diagnostics:
+    role: guidance
+    core: true
+    topic: cli-diagnostics
 created: 2026-11-16T01:50:04.405444+00:00
-updated: 2026-11-21T18:35:00.947622+00:00
+updated: 2026-11-21T19:46:41.306122+00:00
 ---
 {
   "version": 1,
@@ -168,6 +172,15 @@ updated: 2026-11-21T18:35:00.947622+00:00
           "src/go/kame/program/declaration_blocks.go",
           "src/go/kame/program/file_context.go",
           "plan-055.md"
+        ],
+        "review": false
+      },
+      "isolate-repeated-cli-diagnostics": {
+        "title": "Isolate repeated CLI diagnostics",
+        "text": "When a CLI diagnostic appears repeatedly during a language-loop investigation, first reduce to one failing target and inspect argv parsing and positional operands before attributing repetition to loop replay; otherwise one invocation may actually run multiple targets and emit one diagnostic per target.",
+        "children": [],
+        "sources": [
+          "identity==\"kame:observations\" item=k-18b955cb15707bcc379dd79b41cd2f2c46f23827434665820a375079e614e0d0"
         ],
         "review": false
       },
@@ -333,7 +346,8 @@ updated: 2026-11-21T18:35:00.947622+00:00
           "preserve-computed-rule-output-spellings",
           "preserve-newline-collection-separators",
           "preserve-kash-setup-label-spelling",
-          "preserve-path-pattern-subst-discovery"
+          "preserve-path-pattern-subst-discovery",
+          "isolate-repeated-cli-diagnostics"
         ],
         "sources": [],
         "review": true

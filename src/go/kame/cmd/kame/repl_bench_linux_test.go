@@ -31,17 +31,25 @@ func kashBenchMarker(n int) string { return fmt.Sprintf("bench-%04d\r\n", n) }
 
 // Paste each seed command and wait for its output and the next prompt.
 // Sending ahead can race the editor's raw-to-cooked terminal transitions.
-func kashBenchGrow(s *terminalSession, from, to int) {
+func kashBenchGrow(s *terminalSession, from, to int, timings *latencies) {
 	for n := from + 1; n <= to; n++ {
 		s.mu.Lock()
 		s.output.Reset()
 		s.mu.Unlock()
-		s.send("\x1b[200~" + kashBenchCommand(n) + "\x1b[201~\r")
+		command := kashBenchCommand(n)
+		s.send("\x1b[200~" + command + "\x1b[201~")
+		s.await(0, func(frame string) bool { return kashBenchFrame(frame, command) })
+		before := s.size()
 		marker := kashBenchMarker(n)
-		s.await(0, func(frame string) bool {
+		start := time.Now()
+		s.send("\r")
+		s.await(before, func(frame string) bool {
 			_, tail, found := strings.Cut(frame, marker)
 			return found && kashBenchFrame(tail, "")
 		})
+		if timings != nil {
+			*timings = append(*timings, time.Since(start))
+		}
 	}
 }
 
@@ -135,11 +143,13 @@ func TestKashInteractiveBenchmark(t *testing.T) {
 	var baseline, cappedRSS float64
 	var baselineMedian, cappedMedian time.Duration
 	for _, n := range []int{0, 100, 1000, 2000} {
-		kashBenchGrow(s, submitted, n)
+		kashBenchGrow(s, submitted, n, nil)
 		kept, size := kashBenchHistory(t, history, n, n >= 1000)
 		rss := kashBenchRSS(t, s)
 		first, typing := kashBenchType(s)
 		after := kashBenchRSS(t, s)
+		var enter latencies
+		kashBenchGrow(s, n, n+20, &enter)
 		median, _ := typing.percentiles()
 		if n == 0 {
 			baseline, baselineMedian = rss, median
@@ -147,12 +157,12 @@ func TestKashInteractiveBenchmark(t *testing.T) {
 		if n == 1000 {
 			cappedRSS, cappedMedian = rss, median
 		}
-		t.Logf("commands=%d history=%d entries/%d KiB rss=%.2f MiB idle, %.2f MiB after typing (idle Δ%+.2f MiB) first key: %s; typing: %s (p50 %.2fx baseline)",
-			n, kept, size>>10, rss, after, rss-baseline, first, typing, float64(median)/float64(baselineMedian))
+		t.Logf("commands=%d history=%d entries/%d KiB rss=%.2f MiB idle, %.2f MiB after typing (idle Δ%+.2f MiB) first key: %s; typing: %s (p50 %.2fx baseline); Enter→prompt: %s",
+			n, kept, size>>10, rss, after, rss-baseline, first, typing, float64(median)/float64(baselineMedian), enter)
 		if n == 2000 {
 			t.Logf("since history capped (1000→2000): idle RSS Δ%+.2f MiB; typing p50 %.2fx", rss-cappedRSS, float64(median)/float64(cappedMedian))
 		}
-		submitted = n
+		submitted = n + len(enter)
 	}
 	if status := s.finish(); status != 0 {
 		t.Fatalf("interactive session exited %d", status)

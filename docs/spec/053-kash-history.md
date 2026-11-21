@@ -60,6 +60,13 @@ Ctrl-X h toggles local/global recall while editing, preserving the input buffer
 and cursor. The editor must invalidate its own cached recalled edits when scope
 or eligibility changes; filtering only the persistence source is insufficient.
 
+Within Ctrl-R incremental history search, Alt-G switches scope without leaving
+search or clearing the query. The search label shows the current scope and
+matches show their submission time in the local timezone. The timestamp is
+display-only; it is not searched or inserted into the command. To rebind
+Alt-G in `INPUTRC`, select `set keymap isearch` and bind
+`kash-history-search-toggle` to the desired key.
+
 The editor retains at most 1000 recent eligible entries in the selected view.
 This is an in-memory recall bound, separate from persistence quotas.
 
