@@ -1,3 +1,4 @@
+.auto
 /build/
 /dist/
 /tests/**/*.sh.log.result
