@@ -405,6 +405,7 @@ type Program struct {
 }
 
 type pendingRequest struct {
+	ForeignShell     bool
 	TypedCapture     bool
 	CaptureStdout    bool
 	CaptureStderr    bool

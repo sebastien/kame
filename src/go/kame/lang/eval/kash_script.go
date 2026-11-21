@@ -130,7 +130,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 	if state == nil {
 		if parsed != nil {
 			for _, item := range parsed.Items {
-				if item.Module != nil {
+				if item.Module != nil && (c.nativeSource == nil || c.nativeSource.source.Parsed != parsed) {
 					return failure(c.Run, "FEATURE_UNSUP", item.Span, "module declarations require a file-backed source")
 				}
 				if item.Kind == script.Include {

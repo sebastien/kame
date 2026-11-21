@@ -97,8 +97,35 @@ func (p *Program) kashSetEnvironment(scope *Scope, e *expr.Expr, c *Context) Res
 	name := strings.TrimPrefix(e.Text, "env/")
 	previous := c.sequencedOperand
 	c.sequencedOperand = true
+	defer func() { c.sequencedOperand = previous }()
+	if len(e.Items) == 2 {
+		target := e.Items[1]
+		start, end, path := c.operationStart, c.operationEnd, c.CallPath
+		c.operationStart, c.operationEnd, c.CallPath = e.Span.Start, e.Span.End, path+"/env-name"
+		state, _ := c.OperationState().(*kashControlState)
+		c.operationStart, c.operationEnd, c.CallPath = start, end, path
+		if state != nil {
+			replayControlEffects(state, c)
+		} else {
+			before, paths := len(c.Effects), len(c.WritePaths)
+			r := p.evaluate(c.Engine, scope, target, c)
+			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
+				return r
+			}
+			defer r.Free(c.Run)
+			if r.Value.Kind != core.String || !expr.ValidEnvironmentName(r.Value.Text) {
+				return failure(c.Run, "EXPR_INVALID", target.Span, "environment assignment requires a valid name string")
+			}
+			state = mem.Alloc[kashControlState](p.Alloc)
+			state.Value = r.Value.Clone(p.Alloc)
+			p.retainControlEffects(state, c, scope, before, paths)
+			c.operationStart, c.operationEnd, c.CallPath = e.Span.Start, e.Span.End, path+"/env-name"
+			c.SetOperationState(state, freeKashControlState)
+			c.operationStart, c.operationEnd, c.CallPath = start, end, path
+		}
+		name = state.Value.Text
+	}
 	r := p.evaluate(c.Engine, scope, e.Items[0], c)
-	c.sequencedOperand = previous
 	if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 		return r
 	}
@@ -106,7 +133,11 @@ func (p *Program) kashSetEnvironment(scope *Scope, e *expr.Expr, c *Context) Res
 	switch r.Value.Kind {
 	case core.Nil:
 		if !slices.Contains(c.EnvironmentUnset, name) {
-			return failure(c.Run, "CAP_DENIED", e.Span, "environment removal requires rule authority for "+name)
+			_, inherited := (*ExecutionUnit)(nil).EnvironmentValue(c.Environment, name)
+			_, present := c.Unit.EnvironmentValue(c.Environment, name)
+			if !c.directSourceUnit() || inherited || !present {
+				return failure(c.Run, "CAP_DENIED", e.Span, "environment removal is not authorized for "+name)
+			}
 		}
 		c.setEnvironment(name, "", false)
 	case core.String, core.Int, core.Float:

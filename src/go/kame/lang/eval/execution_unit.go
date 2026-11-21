@@ -21,6 +21,7 @@ type ExecutionUnit struct {
 	environment map[string]environmentEdit
 	directory   string
 	previous    string
+	shells      map[string]*foreignShell
 }
 
 func (u *ExecutionUnit) Directory(base string) string {

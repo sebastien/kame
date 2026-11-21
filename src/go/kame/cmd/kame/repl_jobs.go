@@ -348,7 +348,7 @@ func (s *replSession) foreground(j *replJob, resumed bool) (int, bool) {
 			s.cancelJobs()
 			return run.endForSignal(h, signal, false)
 		}
-		if s.jobControl && s.takeStop() {
+		if s.jobControl && s.takeStop() && !run.Session.Program.HasForeignShellCall(s.roots(j)) {
 			s.suspend(j, int(syscall.SIGTSTP))
 			break
 		}

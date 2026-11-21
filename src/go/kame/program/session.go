@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/expr"
@@ -414,6 +415,11 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
 	context.Deferred = state.Deferred
 	context.Unit, context.Environment = &state.Session.unit, p.Options.Environment
+	context.DirectUnit = context.Unit
+	if endpoint, ok := p.Host.(host.ForeignShellHost); ok && !p.Forwarding {
+		context.SupportsForeignShell = endpoint.SupportsForeignShell
+		context.CloseForeignShell = endpoint.CloseForeignShell
+	}
 	if state.Session.FollowDirectoryGrants {
 		context.DirectoryGrantRoot = p.Options.Directory
 	}

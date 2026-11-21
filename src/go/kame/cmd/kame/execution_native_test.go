@@ -701,7 +701,7 @@ func TestNativeInteractiveKashSessionDirectoryAndEnvironment(t *testing.T) {
 	}, "\n") + "\n"
 	var out, errOut bytes.Buffer
 	command := exec.Command(nativeCLIBinary(t), "do", "run", "-i")
-	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash", "KASH_INIT=", "HOME="+filepath.Join(directory, "sub"))
+	command.Dir, command.Env = directory, append(os.Environ(), "KASH_TEST_NAME=kash", "GREETING=inherited", "KASH_INIT=", "HOME="+filepath.Join(directory, "sub"))
 	command.Stdin, command.Stdout, command.Stderr = strings.NewReader(entries), &out, &errOut
 	err := command.Run()
 	status := 0

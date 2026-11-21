@@ -32,6 +32,10 @@ type Context struct {
 	DirectoryGrantRoot    string
 	Environment           []string
 	Unit                  *ExecutionUnit
+	DirectUnit            *ExecutionUnit // direct session only; captures use a different Unit
+	nativeSource          *kashSourceState
+	SupportsForeignShell  func(string) bool
+	CloseForeignShell     func(int64)
 	StageEnvironment      []string
 	EnvironmentUnset      []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
@@ -528,6 +532,10 @@ func (c *Context) submitSource(name string) int64 {
 }
 
 func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool {
+	if kind == host.RequestForeignShell {
+		shell := host.PayloadText(payload, "shell")
+		return shell != "" && c.DirectUnit != nil && c.Unit == c.DirectUnit && authorizeExecutable(c, shell)
+	}
 	if kind == host.RequestProcessStageIO {
 		stage := c.functionStage
 		if stage == nil || stage.node == nil || c.Engine == nil {

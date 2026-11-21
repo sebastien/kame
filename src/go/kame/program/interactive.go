@@ -104,6 +104,16 @@ func (p *Program) PendingNodes() []int64 {
 	return nodes
 }
 
+// HasForeignShellCall reports a foreground-only exchange on these roots.
+func (p *Program) HasForeignShellCall(roots []*core.Root) bool {
+	for _, pending := range p.Pending {
+		if pending.ForeignShell && RootsReach(roots, p.Engine.LookupID(pending.NodeID)) {
+			return true
+		}
+	}
+	return false
+}
+
 // SuspendRoots pauses an interactive job's roots and their host work (052).
 func (p *Program) SuspendRoots(roots []*core.Root) {
 	for _, r := range roots {

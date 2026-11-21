@@ -29,6 +29,14 @@ func (p *Program) localCommand(graph *expr.Expr, c *Context) (Result, bool, comm
 			imported, _ := p.findImport(head.SourceOrigin, spelling)
 			lexical := c.Scope.lookupResolved(spelling, head.LetBinding) != nil || imported != nil ||
 				p.moduleImport(head.SourceOrigin, spelling).module != nil
+			if !lexical {
+				if spelling == "source" && len(stage.Items) < 5 {
+					return p.nativeSourceCommand(graph, stage, c), true, heads
+				}
+				if r, handled := p.foreignShellCommand(graph, stage, spelling, c); handled {
+					return r, true, heads
+				}
+			}
 			if !lexical && spelling == "cd" {
 				return p.directoryCommand(graph, stage, head, nil, c), true, heads
 			}

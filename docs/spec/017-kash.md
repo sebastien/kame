@@ -169,6 +169,7 @@ form. `echo revision=$revision` and `echo a = b` are commands.
 | `let NAME = EXPR` | Evaluate `EXPR` eagerly when reached and bind it immutably for the rest of the block. A later `let` of the same name shadows it. |
 | `set NAME = EXPR` | Assign a `let` binding of an enclosing block in the same invocation. Cannot create a binding. Targeting a binding captured by a lambda or nested `def` is `PARSE_ERR`. |
 | `set env/NAME = EXPR` | Write the unit's environment store (`055` §5.3). `nil` unsets. |
+| `set env/${NAME-EXPR} = EXPR` | Write the unit's environment store with a computed name (`051`). |
 | `def NAME PARAM… = EXPR` | Expression-bodied function. |
 | `def NAME PARAM…` + block | Block-bodied function (below). |
 | `if`, `match`, `for`, `while` | Control blocks (below and `046`). |
@@ -577,6 +578,8 @@ The head of a command statement resolves syntactically and then by name
    | `cd [DIR]` | everywhere | Change the unit's working directory. No operand means `$HOME`, `-` the previous directory; `~`/`~/…` expand to `$HOME`. |
    | `wait [JOB…]` | everywhere | Wait for owned async work and return its outcome. |
    | `kill [-SIGNAL] JOB…` | everywhere | Signal owned async work. |
+   | `source PATH` | direct | Run a Kash file chosen at runtime; publish environment and directory changes only on success (`055`). |
+   | `source SHELL PATH as NAME` | direct | Load a script into a foreign-shell namespace (`056`). |
    | `jobs`, `fg`, `bg`, `alias`, `unalias`, `history`, `option`, `explain` | interactive | Session commands of `052`, `053` and `054`. |
 
    An interactive-only builtin in a script or rule body is `PARSE_ERR`.

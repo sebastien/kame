@@ -69,7 +69,7 @@ authorize a handoff. They do not grant environment reads or removal.
 Authority is recipe-scoped and additive. It does not pass through `--allow-env`
 and does not replace the session capability set. Read, write, and run grants
 already held by a build recipe remain. A direct `do run` session has no rule
-metadata: this specification grants it neither removal nor a terminal.
+metadata: it receives no rule removal grants or terminal from this metadata.
 `--allow-env` remains a named read grant only, with its existing replacement
 policy, and does not authorize removal or a handoff.
 
@@ -82,6 +82,14 @@ and may read any name that overlay still contains.
 Environment writes use the block statement `set env/NAME = EXPR` (`055` §5.2).
 It is a statement only at statement start; a quoted or escaped `set`, or
 `x/set`, is a command.
+
+`set env/${NAME-EXPR} = EXPR` evaluates one expression in the current lexical
+scope before evaluating the assigned value. The result must be a string
+matching `[A-Za-z_][A-Za-z0-9_]*`; otherwise the assignment fails with
+`EXPR_INVALID`. The interpolation occupies the entire name, and does not
+perform command-word expansion. All write and removal rules apply to the
+resolved name. Use the existing `env NAME-EXPR` operation to read a computed
+name under the ordinary read authority. Dry-run evaluates neither operand.
 
 ```kash
 set env/PATH = join ":" ["${run}/bin", PATH]
@@ -101,6 +109,11 @@ invalid statement changes nothing.
 | `set env/NAME = VALUE` (non-nil) | none for a computed value | Set `NAME` in the unit's overlay. |
 | `env/NAME`, bare `NAME`, `$NAME`, or `${env/NAME}` | `read` contains `NAME`, or an existing session read grant | Observe the effective value. |
 | `set env/NAME = nil` | `unset` contains `NAME` | Remove `NAME` from the unit's overlay. |
+
+In a direct Kash session, including native `source` actions, a present
+overlay name that did not exist in the invocation environment may also be
+removed. This allows undoing session additions without granting removal of
+inherited names. It does not grant permission to read any name.
 
 A value expression that reads the environment uses the read rule above.
 Setting a name does not itself require the name to be listed. Replacing `PATH`

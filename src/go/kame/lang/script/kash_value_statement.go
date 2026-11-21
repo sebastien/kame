@@ -14,12 +14,30 @@ func (p *kashParser) valueStatement(word string, start, operand int) *expr.Expr 
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Span = source.Span{Start: start, End: end}
 	p.Pos = end
+	var target *expr.Expr
 	if word == "yield" {
 		e.Kind = expr.KashYield
 		if p.Functions == 0 || p.ValueBlock {
 			s.error(start, operand, "yield requires an enclosing function body")
 			return e
 		}
+	} else if strings.HasPrefix(text[pos:end], "env/${") {
+		e.Kind, e.Text = expr.KashSet, "env/"
+		name := expr.ParseKashInterpolation(s.Alloc, s.Source, pos+len("env/"))
+		s.takeDiagnostics(name.Diagnostics)
+		p.Pos = physicalLineEnd(text, name.End)
+		equals := trimStart(text, name.End, p.Pos)
+		if len(name.Diagnostics) != 0 {
+			expr.Free(s.Alloc, name.Expr)
+			return e
+		}
+		if equals == p.Pos || text[equals] != '=' {
+			s.error(equals, equals, "set requires NAME = EXPR")
+			expr.Free(s.Alloc, name.Expr)
+			return e
+		}
+		target = name.Expr
+		pos = bindingValueStart(text, start, equals+1)
 	} else {
 		e.Kind = expr.KashSet
 		equals := strings.IndexByte(text[pos:end], '=')
@@ -38,12 +56,16 @@ func (p *kashParser) valueStatement(word string, start, operand int) *expr.Expr 
 		pos = bindingValueStart(text, start, equals+1)
 	}
 	if pos == len(text) || text[pos] == '\n' || text[pos] == '#' || text[pos] == ';' {
+		expr.Free(s.Alloc, target)
 		s.error(pos, pos, word+" requires an expression")
 		return e
 	}
 	value := expr.ParseValuePrefix(s.Alloc, s.Source, pos)
 	s.takeDiagnostics(value.Diagnostics)
 	e.Items = append(e.Items, value.Expr)
+	if target != nil {
+		e.Items = append(e.Items, target)
+	}
 	e.Span.End, p.Pos = value.End, value.End
 	tail := trimStart(text, p.Pos, len(text))
 	if tail < len(text) && text[tail] != '\n' && text[tail] != ';' && text[tail] != '#' {

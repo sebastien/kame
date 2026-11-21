@@ -377,6 +377,7 @@ Block statements:
 | `let NAME = EXPR` | Evaluate `EXPR` **eagerly** when reached and bind it immutably for the rest of the block. A later `let` of the same name shadows it. |
 | `set NAME = EXPR` | Assign a `let` binding of an enclosing block in the same invocation. `set` cannot create a lexical binding. Targeting a binding captured by a lambda or nested `def` is `PARSE_ERR`. |
 | `set env/NAME = EXPR` | Write the environment store (§5.3). `nil` unsets. |
+| `set env/${NAME-EXPR} = EXPR` | Compute one environment name and write it with the same rules. |
 | `def …` | Nested function, closing over the block scope. |
 | `if` / `elif` / `else`, `for NAME in EXPR`, `while EXPR` | Control blocks. Headers have no trailing `:`. |
 | `match EXPR` | Statement form with `PATTERN =>` arms followed by blocks. |
@@ -415,7 +416,8 @@ Each process-like unit (§8.4) owns two pieces of mutable state, inherited from
 its parent unit when it starts:
 
 - **Environment store.** The child-process environment, read through `env/NAME`
-  and bare `ENV-NAME` references (§6) and written with `set env/NAME = EXPR`.
+  and bare `ENV-NAME` references (§6), or with `env NAME-EXPR` for a computed
+  name. Write with `set env/NAME = EXPR` or `set env/${NAME-EXPR} = EXPR`.
   The value must be a scalar (string, number or path). `nil` removes the
   variable. A write is visible to all later statements, later lookups and
   processes started afterwards in the same unit, including after the function
@@ -462,6 +464,7 @@ yields `nil` when unset.
 | `cd [DIR]` | everywhere | Change the unit's working directory (§5.3). No operand means `$HOME`, `-` means the previous directory, and `~`/`~/…` expand to `$HOME`, as in `052`. |
 | `wait [JOB…]` | everywhere | Wait for owned async work and return its outcome. |
 | `kill [-SIGNAL] JOB…` | everywhere | Signal owned async work. |
+| `source SHELL PATH as NAME [unset ENV-NAME …]` | direct scripts and interactive sessions | Source a file in a persistent foreign shell and expose its functions as namespaced commands (`056`). |
 | `out! ARG…`, `err! ARG…` | everywhere | Write the arguments' exact text or bytes to the stage's stdout or stderr, so they work with pipes and redirection (`out! $content > $outputs.0`). These are the library's `out!` and `err!` (`007`). |
 | `jobs` | interactive | List session jobs. |
 | `fg [JOB]`, `bg [JOB]` | interactive | Resume a job in the foreground or background. |
@@ -471,6 +474,8 @@ yields `nil` when unset.
 | `explain` | interactive | Show the full report of the latest failure. |
 
 An interactive-only builtin used in a script or rule body is `PARSE_ERR`.
+Foreign-shell command heads resolve after lexical names but before executable
+lookup; their availability and environment effects are defined by `056`.
 `052`'s `export` and `unset` session commands are replaced by
 `set env/NAME = VALUE` and `set env/NAME = nil`.
 
@@ -873,6 +878,35 @@ include? ./local.km
   `def f = lib/f`.
 - **Imported names and commands.** Imported names resolve before executables in
   command position (§6) without changing effect authority.
+
+### Runtime Kash source
+
+`source PATH` is a direct foreground Kash command, available in direct scripts
+and interactive sessions. `PATH` is one command word evaluated when reached;
+it must yield a nonempty local path. Relative paths resolve against the
+current directory; `~/` uses the unit's `HOME`. Reading the file requires read
+authority; sourcing is trusted code execution, not sandboxing. The exact path
+is read on every invocation and parsed as Kash
+regardless of suffix. Active source paths cannot be sourced recursively.
+`source SHELL PATH as NAME` is the separate foreign-shell form (`056`).
+
+The file has its own lexical scope: it can see caller bindings but does not
+publish its own or assign caller `let` bindings. Literal `import` and `from`
+resolve relative to the file with ordinary module semantics. Use another
+`source` to run another action file; `include` and `export` are not supported
+in a runtime-sourced file.
+
+The command does not accept stage settings, redirections, pipelines, captures,
+recovery branches, background execution, deferred execution or build recipes.
+
+The file and its cleanup run with a private copy of the unit's environment and
+directory. They see their own changes immediately. A successful source
+publishes both back to the caller; failure, interruption or `exit` does not.
+`exit` still requests termination of the enclosing execution boundary.
+`source PATH ?` accepts an ordinary process failure without publishing
+changes; authority, parser and loading errors are not accepted. Output and
+filesystem effects are not rolled back. Dry-run does not evaluate the path or
+load the file.
 
 ## 12. Templates
 

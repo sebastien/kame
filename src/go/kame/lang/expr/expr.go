@@ -396,6 +396,17 @@ func ParseKashValueExpressionPrefix(a mem.Allocator, s *source.Source, start int
 	return parseValuePrefix(a, s, start, true)
 }
 
+// ParseKashInterpolation parses one ${…} operand in a Kash statement.
+func ParseKashInterpolation(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent, kash: true}
+	e := p.parseInterpolation("${")
+	if len(p.diags) == 0 {
+		p.checkPlaceholders(e)
+	}
+	p.retainTrivia(e)
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
 // ParseKashRecordSourcePrefix leaves the literal framing operand for the loop parser.
 func ParseKashRecordSourcePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start, indent: s.StructuralIndent, kash: true, stopAtRecordFrame: true}
@@ -2662,7 +2673,7 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	}
 	if e.Kind == KashSet {
 		b.WriteString("set ")
-		b.WriteString(e.Text)
+		writeKashSetTarget(b, e)
 		b.WriteString(" = ")
 		writeExpr(b, e.Items[0])
 		return

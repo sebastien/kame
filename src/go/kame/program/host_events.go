@@ -142,6 +142,11 @@ func (p *Program) drainRequests() {
 			request.Free(p.Alloc)
 			continue
 		}
+		if request.Kind == host.RequestForeignShell {
+			p.dispatchForeignShell(request)
+			request.Free(p.Alloc)
+			continue
+		}
 		if p.Forwarding {
 			if request.Kind == host.RequestRecordRead {
 				p.noteRecordReader(request)
@@ -1282,6 +1287,10 @@ func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attem
 
 func (p *Program) complete(event host.ProcessEvent) {
 	completedPending := p.retirePendingRequest(event.ID)
+	if completedPending.ForeignShell {
+		p.completeForeignShell(completedPending, event)
+		return
+	}
 	var d diagnostic.Diagnostic
 	if event.Outcome == host.ProcessFailed {
 		d = failure(p.Alloc, "HOST_FAIL", event.Diagnostic.Message)

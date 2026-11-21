@@ -176,6 +176,7 @@ type ProcessEdgeMetrics struct {
 // with Free after its receiver has consumed or transferred them.
 type ProcessEvent struct {
 	StageIO            StageIOCompletion
+	ForeignShell       *ForeignShellReply
 	HasEffectiveStatus bool
 	EffectiveStatus    int
 	EffectiveSignal    int

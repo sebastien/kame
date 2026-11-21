@@ -72,14 +72,15 @@ type running struct {
 	reportedStop  bool
 }
 type nativeHost struct {
-	predicates  chan *predicateRequest
-	waitFailure atomic.Bool
-	mu          sync.Mutex
-	processes   map[int64]*running
-	events      chan host.ProcessEvent
-	locks       map[int]*cacheLease
-	closed      chan struct{}
-	once        sync.Once
+	foreignShells map[int64]*bashBridge
+	predicates    chan *predicateRequest
+	waitFailure   atomic.Bool
+	mu            sync.Mutex
+	processes     map[int64]*running
+	events        chan host.ProcessEvent
+	locks         map[int]*cacheLease
+	closed        chan struct{}
+	once          sync.Once
 }
 type Host struct {
 	Readers     []recordCursor
@@ -607,7 +608,12 @@ func (h *Host) Free() {
 		for _, r := range h.native.processes {
 			runs = append(runs, r)
 		}
+		workers := h.native.foreignShells
+		h.native.foreignShells = nil
 		h.native.mu.Unlock()
+		for _, worker := range workers {
+			worker.close()
+		}
 		for _, r := range runs {
 			<-r.done
 		}

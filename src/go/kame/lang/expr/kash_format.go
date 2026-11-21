@@ -42,10 +42,11 @@ func writeKashStatement(b *strings.Builder, e *Expr, indent string, level int) {
 	if (e.Kind == KashLet || e.Kind == KashSet) && indent == "\t" {
 		if e.Kind == KashLet {
 			b.WriteString("let ")
+			b.WriteString(e.Text)
 		} else {
 			b.WriteString("set ")
+			writeKashSetTarget(b, e)
 		}
-		b.WriteString(e.Text)
 		writeKashBindingValue(b, e.Items[0], indent, level)
 		return
 	}
@@ -54,6 +55,15 @@ func writeKashStatement(b *strings.Builder, e *Expr, indent string, level int) {
 		return
 	}
 	writeKashGraph(b, e, indent, level)
+}
+
+func writeKashSetTarget(b *strings.Builder, e *Expr) {
+	b.WriteString(e.Text)
+	if len(e.Items) == 2 {
+		b.WriteString("${")
+		writeExpr(b, e.Items[1])
+		b.WriteByte('}')
+	}
 }
 
 func writeKashBindingValue(b *strings.Builder, value *Expr, indent string, level int) {

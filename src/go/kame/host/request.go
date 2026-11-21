@@ -44,6 +44,7 @@ const (
 	RequestProcessSignal
 	// RequestProcessStageIO advances one evaluator-owned stage in a process graph.
 	RequestProcessStageIO
+	RequestForeignShell
 )
 
 // Request owns Payload until it is popped or the queue is freed.

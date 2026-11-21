@@ -1,6 +1,7 @@
 package scriptcheck
 
 import (
+	"kame/lang/expr"
 	"kame/lang/script"
 	"testing"
 )
@@ -36,5 +37,18 @@ func TestKashAssignmentRequiresAnUncapturedLocalLet(t *testing.T) {
 			t.Errorf("%q: unexpected diagnostics %v", text, parsed.Diagnostics)
 		}
 		parsed.Free()
+	}
+}
+
+func TestKashComputedEnvironmentTargetFormat(t *testing.T) {
+	parsed := script.ParseKash(nil, "assignment.kash", `set env/${ if (eq? key "=") then "MODE" else key }="dev"`+"\n")
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 {
+		t.Fatal(parsed.Diagnostics)
+	}
+	got := expr.FormatKashStatement(nil, parsed.Items[0].Expression, "\t")
+	want := `set env/${if (eq? key "=") then "MODE" else key} = "dev"`
+	if got != want {
+		t.Fatalf("formatted target: %q, want %q", got, want)
 	}
 }

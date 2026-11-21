@@ -198,6 +198,10 @@ Recipe metadata can grant scoped environment reads and removals through
 to hand the terminal to foreground recipe commands when supported.
 `set env/NAME = VALUE` updates the unit's child environment. Use
 `set env/NAME = nil` to remove a variable under the applicable authority.
+Use `set env/${name} = VALUE` when a string expression supplies the name,
+and `env name` to read a variable by its computed name.
+Direct sessions can remove names added during the session, but cannot use
+`set env/NAME = nil` to remove inherited names.
 
 ### Modules and recipes
 
@@ -214,6 +218,11 @@ tolerate a missing file. Kash sources include other Kash sources. Import
 exports from either language with `import` or `from … import …`.
 Relative source paths use the directory of the containing source.
 `module/dir` and `module/file` identify a definition's authoring source.
+
+In a direct script or session, `source $profile` runs a Kash file selected at
+runtime. It can see caller bindings but does not publish its own. Its environment
+and directory changes persist only if it succeeds. `source bash $profile as
+tools` instead loads a Bash file into a separate worker namespace.
 [Modules](spec/050-kash-libraries.md)
 
 Recipes bind `inputs`, `outputs`, `changed-inputs`, `captures`, and named
