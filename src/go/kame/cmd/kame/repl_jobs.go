@@ -37,7 +37,8 @@ type replJob struct {
 	first      int    // first queue slot owned by this entry
 	index      int    // work item of handle
 	handle     *program.Handle
-	pending    []int64 // host nodes pending when handle started, for interrupts
+	onValue    func(core.Value) int // optional action on a successful work result
+	pending    []int64              // host nodes pending when handle started, for interrupts
 	async      []*eval.ProcessHandle
 	state      replJobState
 	signal     int // stopping signal
@@ -144,7 +145,7 @@ func (s *replSession) advance(j *replJob) {
 		}
 		// & graphs are attributed while the statement that started them,
 		// freed once it is done, still reaches them.
-		done, status, stop := run.pollWork(j.index, j.handle)
+		done, status, stop := run.pollWork(j.index, j.handle, j.onValue)
 		if !done {
 			return
 		}
@@ -184,6 +185,7 @@ func (s *replSession) finish(j *replJob, status int, stop bool) {
 		j.handle = nil
 	}
 	s.run.Session.DiscardWork(j.first, j.end)
+	j.onValue = nil
 	j.state, j.status, j.stop = jobDone, status, stop
 	if j.id != 0 {
 		for _, process := range j.async {

@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"kame/core"
 	"kame/host/posix"
 	"kame/internal/mem"
-	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/program"
 	"path/filepath"
@@ -16,7 +15,7 @@ import (
 // replShell owns whole-entry aliases and the session's presentation context.
 type replShell struct {
 	Session *program.Session
-	aliases map[string][]string
+	aliases map[string][]core.Value
 }
 
 // prompt is the default prompt.
@@ -36,21 +35,7 @@ func (s *replShell) directoryName() string {
 	return directory
 }
 
-// run handles whole-entry alias declarations and removals.
-func (s *replShell) run(text string, out, errOut io.Writer) (bool, int) {
-	trimmed := strings.TrimSpace(text)
-	end := strings.IndexAny(trimmed, " \t\r\n")
-	if end < 0 {
-		end = len(trimmed)
-	}
-	name, rest := trimmed[:end], strings.TrimSpace(trimmed[end:])
-	if name == "alias" || name == "unalias" {
-		return true, s.alias(name, rest, out, errOut)
-	}
-	return false, 0
-}
-
-func replCommandAlias(state any, name string) []string {
+func replCommandAlias(state any, name string) []core.Value {
 	return state.(*replShell).aliases[name]
 }
 
@@ -70,14 +55,18 @@ func replSessionTool(state any, a mem.Allocator, name, cwd string) string {
 	return posix.ResolveTool(a, name, cwd, environment)
 }
 
-// alias accepts closed string lists, never executable expressions or shell text.
-func (s *replShell) alias(command, text string, out, errOut io.Writer) int {
-	fail := func(message string) int {
-		fmt.Fprintf(errOut, "%s: %s\n", command, message)
-		return 2
+func (s *replSession) alias(command, sourceName, text, sourceText string) (int, bool) {
+	run := s.run
+	fail := func(message string) (int, bool) {
+		fmt.Fprintf(run.Err, "%s: %s\n", command, message)
+		return 2, false
 	}
-	parsed := script.ParseKashSessionText(mem.System, "<alias>", command+" "+text)
-	defer parsed.Free()
+	parsed := script.ParseKashSessionText(run.Session.Program.Alloc, sourceName, sourceText)
+	defer func() {
+		if parsed != nil {
+			parsed.Free()
+		}
+	}()
 	if len(parsed.Diagnostics) != 0 {
 		return fail(parsed.Diagnostics[0].Message)
 	}
@@ -95,17 +84,18 @@ func (s *replShell) alias(command, text string, out, errOut io.Writer) int {
 		return fail("expected one whole session entry")
 	}
 	words := strings.Fields(declaration.Text)
+	aliases := s.shell.aliases
 	if command == "unalias" {
 		names := words[1:]
 		for _, name := range names {
-			if _, ok := s.aliases[name]; !ok {
+			if _, ok := aliases[name]; !ok {
 				return fail("unknown alias: " + name)
 			}
 		}
 		for _, name := range names {
-			delete(s.aliases, name)
+			delete(aliases, name)
 		}
-		return 0
+		return 0, false
 	}
 	name := ""
 	if len(words) == 2 {
@@ -114,51 +104,76 @@ func (s *replShell) alias(command, text string, out, errOut io.Writer) int {
 	if declaration.Expression == nil {
 		names := []string{name}
 		if name == "" {
-			names = make([]string, 0, len(s.aliases))
-			for key := range s.aliases {
+			names = make([]string, 0, len(aliases))
+			for key := range aliases {
 				names = append(names, key)
 			}
 			slices.Sort(names)
-		} else if _, ok := s.aliases[name]; !ok {
+		} else if _, ok := aliases[name]; !ok {
 			return fail("unknown alias: " + name)
 		}
 		for _, key := range names {
-			fmt.Fprintf(out, "alias %s = [", key)
-			for i, argument := range s.aliases[key] {
+			fmt.Fprintf(run.Out, "alias %s = [", key)
+			for i, argument := range aliases[key] {
 				if i != 0 {
-					fmt.Fprint(out, ", ")
+					fmt.Fprint(run.Out, ", ")
 				}
-				fmt.Fprint(out, kameString(argument))
+				fmt.Fprint(run.Out, kameString(argument.Text))
 			}
-			fmt.Fprintln(out, "]")
+			fmt.Fprintln(run.Out, "]")
 		}
-		return 0
+		return 0, false
 	}
 	if !validAliasName(name) {
 		return fail("expected an unreserved command name")
 	}
-	var prefix []string
-	for _, item := range declaration.Expression.Items {
-		if item.Kind != expr.String {
-			return fail("expected literal strings without NUL bytes")
-		}
-		var argument strings.Builder
-		for _, part := range item.Parts {
-			if part.Expr != nil || strings.ContainsRune(part.Text, 0) {
-				return fail("expected literal strings without NUL bytes")
-			}
-			argument.WriteString(part.Text)
-		}
-		prefix = append(prefix, argument.String())
+	declaration.Kind = script.Expression
+	first, diagnostics := run.Session.AppendKashScript(parsed)
+	parsed = nil
+	if s.reportDiagnostics(diagnostics) {
+		return 1, false
 	}
-	if prefix[0] == "" {
-		return fail("expected a nonempty executable")
+	run.Session.Work[first].Display = false
+	job := s.newJob(text, first, false)
+	job.onValue = func(value core.Value) int {
+		if message := s.shell.setAlias(name, value); message != "" {
+			status, _ := fail(message)
+			return status
+		}
+		return 0
+	}
+	return s.foreground(job, false)
+}
+
+func (s *replShell) setAlias(name string, value core.Value) string {
+	if value.Kind == core.Nil {
+		delete(s.aliases, name)
+		return ""
+	}
+	prefix := value.List
+	if value.Kind == core.String {
+		prefix = []core.Value{value}
+	}
+	if len(prefix) == 0 {
+		return "expected nil, a string, or a nonempty list of strings"
+	}
+	for _, argument := range prefix {
+		if argument.Kind != core.String || strings.ContainsRune(argument.Text, 0) {
+			return "expected strings without NUL bytes"
+		}
+	}
+	if prefix[0].Text == "" {
+		return "expected a nonempty executable"
 	}
 	if s.aliases == nil {
-		s.aliases = map[string][]string{}
+		s.aliases = map[string][]core.Value{}
 	}
-	s.aliases[name] = prefix
-	return 0
+	stored := make([]core.Value, len(prefix))
+	for i, argument := range prefix {
+		stored[i] = argument.Clone(mem.System)
+	}
+	s.aliases[name] = stored
+	return ""
 }
 
 func validAliasName(name string) bool {

@@ -1,5 +1,5 @@
 ---
-revision: 2
+revision: 3
 ---
 
 # Interactive Kash
@@ -409,7 +409,8 @@ otherwise `~/.config/kash/init.kash`, read from the invocation environment.
 Both default paths use `$XDG_CONFIG_HOME` when it is set to a nonempty value,
 including a relative one, and `$HOME/.config` otherwise. If `$HOME` cannot be
 resolved either, no default path exists and no file is loaded. Only these two
-files are read; nothing else in their directory is loaded.
+files are read during startup; nothing else in their directory is loaded at
+startup.
 
 ## Command aliases
 
@@ -417,6 +418,7 @@ files are read; nothing else in their directory is loaded.
 entries in interactive input, interactive initialization, and login profiles:
 
 ```kash
+alias ls = x/eza ?? nil
 alias ll = ["ls", "-lah"]
 ll ./src
 ll ./src | head -n 10
@@ -425,12 +427,14 @@ alias
 unalias ll
 ```
 
-`alias NAME = LIST` defines or replaces an argv prefix. LIST must be a nonempty,
-closed literal list of strings, without interpolation or NUL bytes; its first
-string must be nonempty. Declaration never executes code. Names contain ASCII
-letters, digits, `_`, `-`, or `.`, cannot start with `-`, and cannot replace
-reserved keywords or builtins. Invalid declarations leave aliases
-unchanged. Ordinary value bindings do not define command aliases.
+`alias NAME = EXPR` evaluates EXPR once in the current session. A string
+becomes a one-element argv prefix, including a resolved tool string such as
+`x/eza`; a list supplies the prefix as separate strings. The prefix must be
+nonempty, its first string must be nonempty, and no string may contain NUL.
+A `nil` result removes the alias, succeeding even if it was already absent.
+Names contain ASCII letters, digits, `_`, `-`, or `.`, cannot start with `-`,
+and cannot replace reserved keywords or builtins. Failed evaluation or validation
+leaves aliases unchanged. Ordinary value bindings do not define command aliases.
 
 `alias` lists declarations sorted by name; `alias NAME` shows one.
 `unalias NAME...` removes named aliases, validating all names before mutation.
@@ -438,10 +442,10 @@ Unknown names report an error. Aliases appear in command completion and are
 recognized by highlighting.
 
 A literal command head matching an alias expands once into that prefix,
-followed by the caller's typed arguments. Prefix strings are never reparsed,
-split, interpolated, or globbed. Pipelines, captures, command lists, redirections,
-and capability checks retain their ordinary behavior. Alias expansion does not
-recurse: `alias ls = ["ls", "-lah"]` invokes the executable `ls` once. Computed
+followed by the caller's typed arguments. After evaluation, prefix strings are
+never reparsed, split, interpolated, or globbed. Pipelines, captures, command
+lists, redirections, and capability checks retain their ordinary behavior.
+Expansion does not recurse: `alias ls = ["ls", "-lah"]` invokes `ls` once. Computed
 command heads (`$command`, `$...argv`) and explicit paths bypass alias lookup.
 Aliases take precedence over executable lookup, not reserved syntax.
 
@@ -533,6 +537,7 @@ match wins; each group has a heading and candidates carry descriptions:
 | Directly after `(` | `functions` | Session functions, described by their parameters, and library operations, described by their arity. |
 | Command position, word without `/` | `builtins`, `keywords`, `commands` | Builtins and aliases, Kash statement keywords, and executables found on the session child environment's `PATH`, described by their directory. |
 | First operand of `cd` | `files` | Directories. |
+| Argument of a literal command | Command-specific | [Options and arguments](058-kash-completion.md), with path fallback as permitted. |
 | Anything else | `files` | Paths. |
 
 Command position is the start of a line, or follows `|`, `;`, `&`, `$(`, or
@@ -561,8 +566,10 @@ styles are display-only: inserted text stays unchanged. `NO_COLOR` and
 `TERM=dumb` disable type colors, not the marks. Selection uses reverse video
 by default; an explicit inputrc selection style is preserved.
 
-Completion only reads session state; it evaluates no definitions and runs no
-commands.
+Built-in completion does not evaluate session definitions or run commands.
+[Command-specific completion](058-kash-completion.md) adds specs discovered
+from man pages and completion files, cached by a Kame build, and opt-in live
+protocols.
 
 Explicit file, command and history pickers use the backends defined by
 [057 Kash UI](057-kash-ui.md). Picking edits the current entry without
@@ -593,8 +600,7 @@ Highlighting runs on every keystroke and must not wait on running jobs or rescan
   `%-`. Job commands inside other statements. Without a terminal, only the
   `&` line applies; there is no stopping and no job command, and `&` graphs
   keep their pipes.
-- Programmable completion, completion of command options, and multi-line
-  prompts.
+- Multi-line prompts.
 - Semantic highlighting beyond command words, such as validating references
   or expressions.
 - Redefining lazy definitions or rules.

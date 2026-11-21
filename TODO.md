@@ -39,6 +39,11 @@ Completed work and historical audit results are not retained here.
   [option system](docs/spec/054-kash-options.md). Define editing-mode precedence
   against `.inputrc` and preserve existing behavior by default.
 
+## Kash command completion
+
+- [ ] Implement Usage-shaped specs, man-page discovery, the Kame-built
+  completion cache, fish files, and opt-in live protocols in the phases of [spec 058](docs/spec/058-kash-completion.md#implementation-phases).
+
 ## Agent memory
 
 - [ ] Retry the native-CLI testing guidance consolidation using `node`, not `id`,

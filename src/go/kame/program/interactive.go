@@ -20,9 +20,14 @@ import (
 // It returns the index of the first new work item; the caller starts items
 // from there through len(s.Work)-1.
 func (s *Session) AppendKash(name string, text string) (int, []diagnostic.Diagnostic) {
+	return s.AppendKashScript(script.ParseKashEntry(s.Program.Alloc, name, text))
+}
+
+// AppendKashScript consumes a parsed entry, including on failure.
+func (s *Session) AppendKashScript(part *script.Script) (int, []diagnostic.Diagnostic) {
 	p := s.Program
 	first := len(s.Work)
-	part := script.ParseKashEntry(p.Alloc, name, text)
+	name, text := part.Source.Name, part.Source.Text
 	captured := p.Eval.CheckInteractiveAssignments(part)
 	eval.SetInteractiveSource(part)
 	var diagnostics []diagnostic.Diagnostic

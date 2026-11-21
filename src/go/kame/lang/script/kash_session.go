@@ -32,9 +32,6 @@ func (p *kashParser) sessionCommand(start, wordEnd int) ScriptItem {
 		part := expr.ParseKashValuePrefix(s.Alloc, s.Source, pos)
 		s.takeDiagnostics(part.Diagnostics)
 		item.Expression, pos = part.Expr, part.End
-		if item.Expression == nil || item.Expression.Kind != expr.List || len(item.Expression.Items) == 0 {
-			s.error(start, pos, "alias expects a nonempty literal list of strings")
-		}
 	} else if word == "alias" && len(words) > 2 || word == "unalias" && len(words) < 2 {
 		s.error(start, pos, "alias expects at most one name; unalias expects one or more names")
 	}

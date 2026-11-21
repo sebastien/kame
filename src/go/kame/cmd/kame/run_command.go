@@ -384,7 +384,7 @@ func (r *sessionRun) step(i int) (int, bool) {
 		if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
 			return r.endForOutputFailure(h, code)
 		}
-		if done, status, stop := r.pollWork(i, h); done {
+		if done, status, stop := r.pollWork(i, h, nil); done {
 			return status, stop
 		}
 	}
@@ -461,7 +461,7 @@ func (r *sessionRun) beginWork(i int) (*program.Handle, int, bool) {
 // pollWork checks once whether work item i, started as h, has finished.
 // When done it reports the item and releases h, returning the item status
 // and whether the session must stop.
-func (r *sessionRun) pollWork(i int, h *program.Handle) (bool, int, bool) {
+func (r *sessionRun) pollWork(i int, h *program.Handle, onValue func(core.Value) int) (bool, int, bool) {
 	p := r.Session.Program
 	if h.Definition && h.Node.Current {
 		if r.Interactive {
@@ -483,9 +483,13 @@ func (r *sessionRun) pollWork(i int, h *program.Handle) (bool, int, bool) {
 			r.Last = h.Node.Latest.Clone(mem.System)
 			r.HasLast = true
 		}
+		status := 0
+		if onValue != nil {
+			status = onValue(h.Node.Latest)
+		}
 		h.Free()
 		h.Free()
-		return true, 0, false
+		return true, status, false
 	}
 	polled := h.Poll()
 	if !polled.Done {
@@ -526,10 +530,14 @@ func (r *sessionRun) pollWork(i int, h *program.Handle) (bool, int, bool) {
 		r.Last = polled.Result.Value.Clone(mem.System)
 		r.HasLast = true
 	}
+	status := 0
+	if onValue != nil {
+		status = onValue(polled.Result.Value)
+	}
 	polled.Result.Free(mem.System)
 	h.Free()
 	h.Free()
-	return true, 0, false
+	return true, status, false
 }
 
 // display echoes the value of an interactive statement-leading expression.

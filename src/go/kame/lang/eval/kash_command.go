@@ -48,8 +48,12 @@ func (p *Program) localCommand(graph *expr.Expr, c *Context) (Result, bool, comm
 			}
 			if !lexical && p.CommandAlias != nil {
 				alias := p.CommandAlias(p.CommandAliasState, spelling)
-				if len(alias) != 0 && alias[0] == "cd" {
-					return p.directoryCommand(graph, stage, head, alias[1:], c), true, heads
+				if len(alias) != 0 && alias[0].Text == "cd" && alias[0].ToolName == "" {
+					args := make([]string, len(alias)-1)
+					for i, arg := range alias[1:] {
+						args[i] = arg.Text
+					}
+					return p.directoryCommand(graph, stage, head, args, c), true, heads
 				}
 			}
 			if strings.HasPrefix(spelling, "x/") || (!lexical && spelling != "out!" && spelling != "err!" && !strings.HasPrefix(spelling, "std/")) {

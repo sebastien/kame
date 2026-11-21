@@ -318,6 +318,7 @@ A stage-local environment override changes only that child.
 Put shortcuts in `~/.config/kash/init.kash`, then invoke their bare names:
 
 ```kash-repl
+alias ls = x/eza ?? nil           # use eza when available, otherwise no alias
 alias ll = ["ls", "-lah"]
 ll ./src | head -n 10
 alias ll                         # show one
@@ -325,9 +326,11 @@ alias                            # list all, sorted by name
 unalias ll
 ```
 
-The nonempty literal string list is an argv prefix. Caller arguments append
-without splitting, globbing, interpolation or reparsing. Expansion happens once,
-so `alias ls = ["ls", "-lah"]` invokes the real `ls`, not itself recursively.
+The expression is evaluated once. A string is one argument, a nonempty list of
+strings is an argv prefix, and `nil` removes the alias if present. Caller
+arguments append without splitting or reparsing the stored prefix. Expansion
+happens once, so `alias ls = ["ls", "-lah"]` invokes the real `ls`, not itself
+recursively.
 Computed command heads and explicit executable paths bypass aliases.
 Ordinary value bindings are not aliases.
 

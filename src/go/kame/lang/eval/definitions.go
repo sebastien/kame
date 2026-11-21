@@ -22,7 +22,7 @@ type Program struct {
 	generators map[*generator]struct{}
 	// CommandAlias supplies driver-owned argv prefixes for literal command heads.
 	// Prefixes are expanded once, before normal executable lookup and authorization.
-	CommandAlias      func(any, string) []string
+	CommandAlias      func(any, string) []core.Value
 	CommandAliasState any
 	// SessionTool resolves live shell lookup to an owned explicit path before
 	// dependency tracking, so changing PATH never invalidates running jobs.

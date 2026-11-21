@@ -865,15 +865,17 @@ Standalone `kash -l` means login; use `--lang` for explicit language selection.
 Define interactive shortcuts as typed argv prefixes, invoked by bare name:
 
 ```kash-repl
+alias ls = x/eza ?? nil
 alias ll = ["ls", "-lah"]
 ll ./src | head -n 10
 alias ll                         # show one; alias alone lists all
 unalias ll
 ```
 
-Prefixes are nonempty literal string lists, expanded once without shell-text
-reparsing; caller arguments retain their boundaries. Computed command heads and
-explicit paths bypass aliases. Put declarations in initialization or a login
+The expression is evaluated once. A string stays one argument, a nonempty list
+of strings supplies separate arguments, and `nil` removes the alias if present.
+Prefixes expand once without reparsing; caller arguments retain their boundaries.
+Computed command heads and explicit paths bypass aliases. Put declarations in initialization or a login
 profile. An alias whose prefix starts with `cd` invokes that builtin.
 Format startup files with `kame do fmt --lang kash -i ~/.config/kash/init.kash`.
 Alias declarations in ordinary scripts report `PARSE_ERR`.

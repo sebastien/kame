@@ -91,3 +91,4 @@ modules and templates. The other specifications refine their own areas, and
 | [054 Kash options](054-kash-options.md) | Shell option registry, defaults and validation |
 | [055 Unified Kame/Kash language](055-unified-kame-kash-language.md) | Revision 2 language overview: contexts, grammar, resolution, bindings, outcomes, paths, rules, modules and templates |
 | [057 Kash UI](057-kash-ui.md) | Pickers, choices, confirmations and text entry across terminal and client-native backends |
+| [058 Kash command completion](058-kash-completion.md) | Usage-shaped command specs from man pages and completion files, cached by a Kame build |

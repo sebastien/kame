@@ -658,7 +658,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 			if len(state.Argv) == 0 && p.CommandAlias != nil && literalSetupWord(word) && !strings.ContainsRune(word.Parts[0].Text, '/') {
 				if prefix := p.CommandAlias(p.CommandAliasState, word.Parts[0].Text); len(prefix) != 0 {
 					for _, argument := range prefix {
-						state.Argv = append(state.Argv, core.NewString(state.Alloc, argument))
+						state.Argv = append(state.Argv, argument.Clone(state.Alloc))
 					}
 					state.Index++
 					continue

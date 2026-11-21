@@ -25,7 +25,8 @@ func TestNativeInteractiveKashAliases(t *testing.T) {
 		`alias ll = ["printf", "%s\n", "replacement"]`,
 		`ll`,
 		`alias ll = []`,
-		`alias ll = ["echo", (out! "must-not-run")]`,
+		`alias ll = ["echo", 42]`,
+		`alias ll = x/kame-test-missing-executable`,
 		`ll`,
 		`alias ll`,
 		`unalias ll missing`,
@@ -46,10 +47,43 @@ func TestNativeInteractiveKashAliases(t *testing.T) {
 	if status != 0 || out.String() != want {
 		t.Fatalf("aliases: status=%d out=%q want=%q err=%q", status, out.String(), want, errOut.String())
 	}
-	for _, message := range []string{"nonempty literal list", "expected literal strings", "unknown alias: missing"} {
+	for _, message := range []string{"nonempty list of strings", "expected strings", "TOOL_MISSING", "unknown alias: missing"} {
 		if !strings.Contains(errOut.String(), message) {
 			t.Errorf("missing %q in %q", message, errOut.String())
 		}
+	}
+}
+
+func TestNativeInteractiveKashComputedAliases(t *testing.T) {
+	directory := t.TempDir()
+	tool := filepath.Join(directory, "echo with spaces")
+	echo, err := exec.LookPath("echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(echo, tool); err != nil {
+		t.Fatal(err)
+	}
+	init := filepath.Join(directory, "init.kash")
+	nativeCLIWrite(t, init, `let executable = x/echo`+"\n"+`alias echo = executable ?? nil`+"\n")
+	t.Setenv("KASH_INIT", init)
+	entries := strings.Join([]string{
+		`set executable = nil`,
+		`alias echo`,
+		`echo first`,
+		`alias echo = [x/echo, "with spaces"]`,
+		`echo second`,
+		`alias echo = x/kame-test-missing-executable ?? nil`,
+		`echo plain`,
+		`alias echo = nil`,
+		`alias say = ` + kameString(tool),
+		`say third`,
+	}, "\n") + "\n"
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, directory, []string{"do", "run", "-i", "--tool", "echo=" + tool}, strings.NewReader(entries), &out, &errOut)
+	want := "alias echo = [" + kameString(tool) + "]\nfirst\nwith spaces second\nplain\nthird\n"
+	if status != 0 || out.String() != want || errOut.Len() != 0 {
+		t.Fatalf("computed aliases: status=%d out=%q want=%q err=%q", status, out.String(), want, errOut.String())
 	}
 }
 
@@ -119,12 +153,12 @@ func TestAliasCompletionAndHighlighting(t *testing.T) {
 func TestNativeKashAliasFormatting(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "init.kash")
-	text := "# shortcuts\nalias   ll=[\n \"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias   ll\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
+	text := "# shortcuts\nalias   ll=[\n \"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias   ll\nalias missing=x/kame-test-missing-executable  ??  nil\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
 	nativeCLIWrite(t, path, text)
 	binary := nativeCLIBinary(t)
 	command := exec.Command(binary, "do", "fmt", "--lang", "kash", "-i", path)
 	output, err := command.CombinedOutput()
-	want := "# shortcuts\nalias ll = [\"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias ll\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
+	want := "# shortcuts\nalias ll = [\"printf\", \"%s\\n\", \"two words\"]\nalias ll\nunalias ll\nalias missing = x/kame-test-missing-executable ?? nil\nalias ll = [\"printf\", \"%s\\n\", \"ready\"]\n"
 	if err != nil || nativeCLIRead(path) != want {
 		t.Fatalf("alias formatting: error=%v out=%q file=%q", err, output, nativeCLIRead(path))
 	}
@@ -143,7 +177,7 @@ func TestNativeKashAliasFormatting(t *testing.T) {
 		t.Fatalf("batch aliases were not rejected: error=%v out=%q", err, output)
 	}
 	for _, test := range []struct{ source, code string }{
-		{"touch ./unexpected\nalias ll = [\"ls\"]\n", "PARSE_ERR"},
+		{"touch ./unexpected\nalias ll = x/ls ?? nil\n", "PARSE_ERR"},
 		{"((kash " + kameString("touch ./unexpected\nalias ll = [\"ls\"]\n") + "))", "EXPR_INVALID"},
 	} {
 		command = exec.Command(binary, "do", "run", "--lang", "kash", "-c", test.source)

@@ -210,7 +210,7 @@ func (s *replSession) runEntry(name, text, parsed string, background bool) (int,
 	session := s.run.Session
 	fields := strings.Fields(text)
 	if len(fields) != 0 && !session.Program.Eval.HasLexicalBinding(fields[0]) {
-		if handled, status, stop := s.sessionCommand(text, fields); handled {
+		if handled, status, stop := s.sessionCommand(name, text, parsed, fields); handled {
 			return status, stop
 		}
 	}
@@ -225,7 +225,7 @@ func (s *replSession) runEntry(name, text, parsed string, background bool) (int,
 	return s.foreground(job, false)
 }
 
-func (s *replSession) sessionCommand(text string, fields []string) (bool, int, bool) {
+func (s *replSession) sessionCommand(name, text, parsed string, fields []string) (bool, int, bool) {
 	run := s.run
 	if s.options != nil {
 		if handled, status := s.options.command(text, run.Out, run.Err); handled {
@@ -246,8 +246,9 @@ func (s *replSession) sessionCommand(text string, fields []string) (bool, int, b
 	if fields[0] == "explain" && !strings.ContainsRune(text, '\n') {
 		return true, s.explain(len(fields)), false
 	}
-	if handled, status := s.shell.run(text, run.Out, run.Err); handled {
-		return true, status, false
+	if fields[0] == "alias" || fields[0] == "unalias" {
+		status, stop := s.alias(fields[0], name, text, parsed)
+		return true, status, stop
 	}
 	return false, 0, false
 }
@@ -432,7 +433,11 @@ func (s *replSession) completion() completionContext {
 	path, _ := s.shell.lookup("PATH")
 	aliases := make(map[string][]string, len(s.shell.aliases))
 	for name, prefix := range s.shell.aliases {
-		aliases[name] = prefix
+		words := make([]string, len(prefix))
+		for i, arg := range prefix {
+			words[i] = arg.Text
+		}
+		aliases[name] = words
 	}
 	return completionContext{Directory: s.run.Session.Directory(), Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases}
 }
