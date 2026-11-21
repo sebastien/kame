@@ -227,6 +227,8 @@ meaning by themselves.
 | `OPT_VALUE_INVALID` | error | Invalid CLI option value |
 | `BUILD_NO_SOURCE` | error | No build source was found |
 | `PICK_UNAVAILABLE` | error | Interactive target selection cannot obtain a terminal, picker, or usable selection |
+| `UI_UNAVAILABLE` | error | No backend could present a Kash UI interaction, or backend configuration is invalid ([057](057-kash-ui.md)) |
+| `UI_PROTOCOL` | error | A Kash UI backend failed to return a valid reply ([057](057-kash-ui.md)) |
 | `NO_ARTIFACT` | error | Requested target has no readable artifact |
 | `VAL_NOT_JSON` | error | Human `do cat` definition value has no plain JSON representation |
 

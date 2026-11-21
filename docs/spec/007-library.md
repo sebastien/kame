@@ -618,6 +618,10 @@ Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
 
+`pick!`, `choose!`, `confirm!`, and `ask!` are execution-only interactions
+defined by [057 Kash UI](057-kash-ui.md). They return typed values and do not
+read or write the invocation's standard streams.
+
 Kash bodies name an executable explicitly with the `x/NAME` head
 (`x/git status`), and foreign-shell recipes interpolate it with `@{x/NAME}`.
 Kame resolves `NAME` against the build driver's startup `PATH` (not the

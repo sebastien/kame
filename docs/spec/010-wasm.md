@@ -238,6 +238,11 @@ or reject them with a capability diagnostic. A process request is semantic, not
 POSIX-specific: the host streams stdout/stderr chunks and terminal status back
 using the same request ID.
 
+Kind 47 presents an interaction under [057 Kash UI](057-kash-ui.md). The
+payload and completion are UTF-8 JSON objects in the UI protocol. Hosts
+without a suitable backend complete with `{"declined":"unavailable"}` and
+never read invocation stdin.
+
 Cached-task hosts also receive ABI kinds 24 and 25 to acquire and release an
 opaque cache-key lock. The host completes kind 24 only after exclusive
 ownership is established. Kind 25 is idempotent so cancellation can release a

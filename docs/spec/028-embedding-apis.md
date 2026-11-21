@@ -67,6 +67,11 @@ completion. Cancellation, disposal, or a rejected callback completes the
 request as a failure; late callback results are ignored. Default Node host
 services remain available when no callback is supplied.
 
+The callback can present [Kash UI](057-kash-ui.md) requests (kind 47) and
+return their answer objects as `json` completions. Without a suitable backend
+the host declines. Secret text entry is local to the built-in terminal
+backend and is not forwarded to the callback.
+
 `dispose()` is idempotent, aborts active work, waits for operations and child
 processes to settle, releases active watches and cache leases, and makes later
 operations fail with `DISPOSED`. A host callback may finish after cancellation;

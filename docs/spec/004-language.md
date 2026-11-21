@@ -764,10 +764,21 @@ include? ./local.km
 ```
 
 `include` and `include?` are source-composition statements, not runtime
-operations. Each takes exactly one literal operand: a path atom beginning with
-`./`, `../`, `/` or `~/`, without interpolation. Quoted strings, empty paths,
-NUL, glob or pattern syntax, `${…}` interpolation, references and computed
-operands are `PARSE_ERR`.
+operations. A single-file include at top level takes a literal path atom beginning with
+`./`, `../`, `/` or `~/`, without interpolation. Inside a Kame declaration-time
+`if` or `for` block, the operand may instead be a value expression, such as
+`include ./sdk/${module}.km`. Only a reached statement evaluates its operand,
+using the current declaration scope. The result must be a rooted local `Path`,
+not a string, glob, or pattern. A computed include requires read authorization
+for the resolved path before loading it. Imports and Kash includes remain literal.
+
+In native Kame source composition, `include ...EXPR` and `include? ...EXPR`
+take an ordered list of rooted local `Path` values. The operand is evaluated
+against the preceding source configuration, with tracked read-only discovery
+and ordinary read grants. The loader splices the selected files into one source
+scope before rule output registration. This form works at file top level or in
+source-selection `if` blocks, not in declaration loops or blocks that depend
+on local `let` bindings. An empty list includes nothing.
 
 - **Placement.** Includes are valid at the top level of a Kame program, inside
   declaration-time `if`/`for` blocks (§8.7), and unconditionally at the top
@@ -778,7 +789,7 @@ operands are `PARSE_ERR`.
 - **Resolution.** The operand resolves relative to the directory of the
   including file, never the evaluation directory or root. Path identity is
   normalized lexically; this is not a physical realpath or symlink-cycle check.
-  A selected include requires a file-backed source; a relative include or
+  A relative include requires a file-backed source; a relative include or
   module path in an inline, stdin or `eval` source is `RES_INVALID`, so such
   sources may contain relative includes only in branches that are not selected.
 - **Expansion.** An include splices the file's declarations into the caller's

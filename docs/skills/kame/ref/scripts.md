@@ -61,6 +61,24 @@ Use literal explicit paths relative to the source containing the statement.
 Includes share the caller's scope and register declarations at the include
 site. Optional includes tolerate missing files. Repeated includes register
 again, and active include and import cycles report a dependency cycle.
+Inside a Kame declaration block, a computed include can use local bindings:
+
+```kame
+for module in ["py", "js"]
+	if (sdk-module? module)
+		include ./sdk/${module}.km
+```
+
+The operand must evaluate to a `Path`, and the resolved file must be readable
+under the invocation's grants. Where discovered files need to reference
+each other's definitions, use a batch include in native Kame:
+
+```kame
+include ...(files ${module/dir}/modules/*.km)
+```
+
+The files are composed in list order into a shared scope before registering
+outputs. Imports stay literal, and per-iteration includes stay local.
 
 Imports load a module's exported names. The module declares its public
 bindings with `export NAME, …`. A plain import uses the source stem as a

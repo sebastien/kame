@@ -38,14 +38,17 @@ Each loaded file is parsed with the grammar selected by its own suffix (`055`
 
 ## Module paths and identity
 
-`import`, `from`, `include` and `include?` operands are literal path atoms
+`import`, `from`, and includes outside Kame declaration blocks use literal path atoms
 beginning with `./`, `../`, `/` or `~/`. Globs, capture groups, `${…}`
 interpolation, quoted strings and computed values are `PARSE_ERR`; a string is
 never a module path, and values are never turned into paths or reparsed as
 source. A relative operand resolves against the directory of the file
 containing the statement, not the root, the working directory or `-C` (`055`
 §9.2). Inline, stdin and `eval` sources are not file-backed and have no load
-base; a relative module path there is `RES_INVALID`.
+base; a relative module path there is `RES_INVALID`. Kame declaration blocks
+may compute a `Path` for `include` or `include?` during registration (`004` §7.1);
+native source composition also supports `include ...EXPR` to splice a list of
+paths together. Module loading through `import` does not evaluate computed includes.
 
 An `import` or `from` operand is without a suffix when it does not end in `.km`,
 `.kame`, `.kash` or `.ksh`. Such an operand tries `PATH.km`, `PATH.kame`,

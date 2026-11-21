@@ -41,6 +41,7 @@ type ScriptItem struct {
 	Expression      *expr.Expr
 	Include         string
 	OptionalInclude bool
+	BatchInclude    bool
 	Branches        []DeclarationBranch
 	Loop            *DeclarationLoop
 	Module          *ModuleDeclaration

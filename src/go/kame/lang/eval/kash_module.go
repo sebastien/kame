@@ -222,6 +222,12 @@ func (p *Program) loadModule(name string, c *Context, span source.Span) Result {
 			continue
 		}
 		if current.Kind == script.Include {
+			if current.Expression != nil {
+				result := failure(c.Run, "FEATURE_UNSUP", current.Span, "computed includes are only supported during declaration registration")
+				result.Diagnostic.Source = owned(c.Run, frame.Path)
+				c.ClearOperationState()
+				return result
+			}
 			if script.IsKashSource(frame.Path) && !script.IsKashSource(current.Include) {
 				result := failure(c.Run, "RES_INVALID", current.Span, "Kash includes require a .kash or .ksh source")
 				result.Diagnostic.Source = owned(c.Run, frame.Path)

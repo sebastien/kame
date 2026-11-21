@@ -88,8 +88,8 @@ func TestForwardedRegistrationLoadsOnlySelectedDeclarationIncludes(t *testing.T)
 	const main = `for variant in ["debug", "release"]
   if variant == "inactive"
     include ./main.km
-  include ./rules/variant.km
-  include? ./local.km
+  include ./rules/${variant}.km
+  include? ./local-${variant}.km
   rule ./${variant}-after.txt = label
 `
 	descriptor, _ := json.Marshal(map[string]any{"sources": []map[string]string{{"name": "/project/main.km", "sourceDirectory": "/project", "text": main}}})
@@ -97,9 +97,11 @@ func TestForwardedRegistrationLoadsOnlySelectedDeclarationIncludes(t *testing.T)
 		t.Fatalf("invalid build sources: %v", result)
 	}
 	for _, fixture := range []struct{ path, text string }{
-		{"/project/rules/variant.km", "label = variant\ninclude ./nested.km\n"},
+		{"/project/rules/debug.km", "label = variant\ninclude ./nested.km\n"},
 		{"/project/rules/nested.km", "rule ./${variant}.txt = label\n"},
-		{"/project/local.km", ""},
+		{"/project/local-debug.km", ""},
+		{"/project/rules/release.km", "label = variant\ninclude ./nested.km\n"},
+		{"/project/local-release.km", ""},
 	} {
 		if result := r.Prepare(); !result.HostNeeded || r.Program != nil {
 			t.Fatalf("registration did not suspend before %s: %v", fixture.path, result)
@@ -125,7 +127,7 @@ func TestForwardedRegistrationLoadsOnlySelectedDeclarationIncludes(t *testing.T)
 	}
 	snapshots := r.DeclarationStateJSON()
 	defer snapshots.Free(a)
-	if strings.Count(snapshots.Text, `"kind":"declaration-source"`) != 3 || !strings.Contains(snapshots.Text, `"signature":"missing"`) {
+	if strings.Count(snapshots.Text, `"kind":"declaration-source"`) != 5 || !strings.Contains(snapshots.Text, `"signature":"missing"`) {
 		t.Fatalf("registration lost selected source observations: %s", snapshots.Text)
 	}
 }

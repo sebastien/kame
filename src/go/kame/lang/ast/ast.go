@@ -1019,10 +1019,16 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 			e.Str(item.Text)
 		}
 		if item.Kind == script.Include {
-			e.Str("path")
-			e.Str(item.Include)
+			if item.Expression == nil {
+				e.Str("path")
+				e.Str(item.Include)
+			}
 			if item.OptionalInclude {
 				e.Str("optional")
+				e.Bool(true)
+			}
+			if item.BatchInclude {
+				e.Str("batch")
 				e.Bool(true)
 			}
 		}

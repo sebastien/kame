@@ -20,6 +20,10 @@ import (
 )
 
 func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, includes []diagnostic.Frame) program.PredicateResult {
+	return s.compositionValue(condition, out, program.CompileSource{Name: authored.Name, Text: authored.Text, Includes: includes}, authored, false)
+}
+
+func (s *buildSource) compositionValue(expression *expr.Expr, out io.Writer, operand program.CompileSource, authored *source.Source, batch bool) program.PredicateResult {
 	sources := slices.Clone(s.SelectionPrefix)
 	for i := range s.Parts {
 		sources = selectionDefinitions(sources, s.Parts[i], s.Parts[i].Lang)
@@ -41,7 +45,13 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 	}
 	grants := effectiveGrants(s.SelectionGrants, []eval.Grant{{Capability: eval.Read, Names: []string{directory}}}, s.SelectionNoDefault)
 	discovery := program.Options{Host: posix.New(mem.System), Grants: grants}
-	result := program.TrackedCompositionCondition(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
+	operand.Offset = expression.Span.Start
+	operand.Text = operand.Text[expression.Span.Start:expression.Span.End]
+	evaluate := program.TrackedCompositionCondition
+	if batch {
+		evaluate = program.CompositionIncludePaths
+	}
+	result := evaluate(mem.System, sources, operand, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
 	s.Discoveries = append(s.Discoveries, result.Discoveries...)
 	mem.FreeSlice(nil, result.Discoveries)
 	result.Discoveries = nil
@@ -72,7 +82,7 @@ func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Sign
 		for _, item := range branch.Items {
 			switch item.Kind {
 			case script.Include:
-				if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, out, authored, lang) {
+				if !s.expandSourceIncludeItem(fileIndex, item, out, authored, lang) {
 					return false
 				}
 			case script.Composition, script.Rule, script.DeclarationFor, script.Generate:
@@ -100,6 +110,8 @@ func declaresRuleWork(item script.ScriptItem) bool {
 	switch item.Kind {
 	case script.Rule, script.Generate:
 		return true
+	case script.Include:
+		return item.Expression != nil
 	case script.DeclarationFor:
 		for _, child := range item.Loop.Items {
 			if declaresRuleWork(child) {
@@ -116,6 +128,25 @@ func declaresRuleWork(item script.ScriptItem) bool {
 		}
 	}
 	return false
+}
+
+func (s *buildSource) expandSourceIncludeItem(fileIndex int, item script.ScriptItem, out io.Writer, authored *source.Source, lang string) bool {
+	if !item.BatchInclude {
+		return s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, out, authored, lang)
+	}
+	file := s.Files[fileIndex]
+	result := s.compositionValue(item.Expression, out, program.CompileSource{Name: file.Name, Text: file.Text, SourceDirectory: file.SourceDirectory, Includes: file.Includes}, authored, true)
+	defer result.Diagnostic.Free(mem.System)
+	defer mem.FreeSlice(nil, result.Paths)
+	if result.Diagnostic.Code != "" {
+		return false
+	}
+	for _, name := range result.Paths {
+		if !s.expandSourceInclude(fileIndex, name, item.OptionalInclude, item.Span, out, authored, lang) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional bool, span source.Span, out io.Writer, authored *source.Source, lang string) bool {
@@ -155,7 +186,8 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	mem.FreeString(mem.System, includeName)
 	includeName = canonical
 	for j := fileIndex; j >= 0; j = s.Files[j].Parent {
-		if s.Files[j].Name == includeName {
+		ancestor := s.Files[j]
+		if ancestor.Name == includeName || path.IsAbs(includeName) && ancestor.FileBacked && path.Join(ancestor.SourceDirectory, path.Base(ancestor.Name)) == includeName {
 			emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "DEP_CYCLE", Severity: diagnostic.Error, Message: "include cycle: " + includeName, Span: diagnostic.Span{Start: span.Start, End: span.End}}, s.JSON, authored)
 			mem.FreeString(mem.System, includeName)
 			return false
@@ -200,7 +232,7 @@ func selectionPrefix(fragments []program.Fragment) []program.CompileSource {
 	for i := range fragments {
 		if fragments[i].Lang == "km" || (fragments[i].Lang == "kash" && len(fragments[i].Includes) != 0) {
 			f := fragments[i]
-			sources = selectionDefinitions(sources, program.CompileSource{Name: f.Name, Text: f.Text, Offset: f.Offset, Includes: f.Includes}, f.Lang)
+			sources = selectionDefinitions(sources, program.CompileSource{Name: f.Name, Text: f.Text, Offset: f.Offset, Includes: f.Includes, SourceDirectory: f.SourceDirectory}, f.Lang)
 		}
 	}
 	return sources
@@ -251,7 +283,7 @@ func selectionDefinitions(sources []program.CompileSource, part program.CompileS
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.Definition {
-			sources = append(sources, program.CompileSource{Name: part.Name, Text: part.Text[item.Span.Start:item.Span.End], Lang: lang, Offset: part.Offset + item.Span.Start, Includes: part.Includes})
+			sources = append(sources, program.CompileSource{Name: part.Name, Text: part.Text[item.Span.Start:item.Span.End], Lang: lang, Offset: part.Offset + item.Span.Start, Includes: part.Includes, SourceDirectory: part.SourceDirectory})
 		}
 	}
 	return sources

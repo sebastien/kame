@@ -1074,7 +1074,7 @@ func TestGroupedConditionalLayout(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 	formatted := expr.Format(nil, r.Expr)
-	want := "(if " + condition + " then first\n\telif second then 2\n\telse 3\n)"
+	want := "(\n\tif " + condition + " then\n\t\tfirst\n\telif second then\n\t\t2\n\telse\n\t\t3\n)"
 	if formatted != want {
 		t.Fatalf("formatted %q, want %q", formatted, want)
 	}

@@ -11,6 +11,7 @@ import (
 	"kame/lang/source"
 	"kame/operations"
 
+	"path"
 	"strings"
 )
 
@@ -19,6 +20,7 @@ type PredicateResult struct {
 	Pending     bool
 	Diagnostic  diagnostic.Diagnostic
 	Discoveries []DeclarationSnapshot
+	Paths       []string
 }
 
 type configurationConditionRequest struct {
@@ -33,6 +35,7 @@ type configurationConditionRequest struct {
 	PredicateOffset int
 	Located         bool
 	Discovery       *Options
+	Include         *CompileSource
 }
 
 func configurationDiagnostic(a mem.Allocator, value diagnostic.Diagnostic, located bool) diagnostic.Diagnostic {
@@ -95,13 +98,26 @@ func CompositionConditionSources(a mem.Allocator, sources []CompileSource, condi
 // TrackedCompositionCondition evaluates a file selection using the declaration
 // discovery host and grants. Its snapshots also belong to the final program.
 func TrackedCompositionCondition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options) PredicateResult {
+	return trackedComposition(a, sources, condition, defines, environment, directory, discovery, false)
+}
+
+// CompositionIncludePaths selects source paths before any of their rules register.
+func CompositionIncludePaths(a mem.Allocator, sources []CompileSource, operand CompileSource, defines []string, environment []string, directory string, discovery *Options) PredicateResult {
+	return trackedComposition(a, sources, operand, defines, environment, directory, discovery, true)
+}
+
+func trackedComposition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options, include bool) PredicateResult {
 	b := strings.Builder{}
 	defer b.Reset()
 	for i := range sources {
 		b.WriteString(sources[i].Text)
 		b.WriteByte('\n')
 	}
-	result := configurationCondition(a, configurationConditionRequest{Name: condition.Name, Prefix: b.String(), Predicate: condition.Text, Defines: defines, Environment: environment, Directory: directory, Origins: sources, PredicateOffset: condition.Offset, Located: true, Discovery: discovery})
+	request := configurationConditionRequest{Name: condition.Name, Prefix: b.String(), Predicate: condition.Text, Defines: defines, Environment: environment, Directory: directory, Origins: sources, PredicateOffset: condition.Offset, Located: true, Discovery: discovery}
+	if include {
+		request.Include = &condition
+	}
+	result := configurationCondition(a, request)
 	if result.Diagnostic.Code == "" {
 		return result
 	}
@@ -167,7 +183,17 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		options.Host = request.Discovery.Host
 		options.Grants = request.Discovery.Grants
 	}
-	compiled := Compile(a, parsed, registry, options)
+	var origins []CompileSource
+	var offsets []int
+	if request.Include != nil {
+		origins = request.Origins
+		at := 0
+		for _, origin := range origins {
+			offsets = append(offsets, at)
+			at += len(origin.Text) + 1
+		}
+	}
+	compiled := compileSources(a, parsed, registry, options, origins, offsets)
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		if len(compiled.Diagnostics) != 0 {
@@ -190,10 +216,12 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	defer p.Free()
 	var expression *expr.Result
 	if request.Located {
-		at := 0
-		for i := range request.Origins {
-			p.Eval.AddSourcePart(request.Origins[i].Name, at, at+len(request.Origins[i].Text), request.Origins[i].Offset)
-			at += len(request.Origins[i].Text) + 1
+		if request.Include == nil {
+			at := 0
+			for i := range request.Origins {
+				p.Eval.AddSourcePart(request.Origins[i].Name, at, at+len(request.Origins[i].Text), request.Origins[i].Offset)
+				at += len(request.Origins[i].Text) + 1
+			}
 		}
 		// Parse the predicate in a disjoint range, so helper-body offsets cannot
 		// accidentally resolve against the predicate's source map.
@@ -207,6 +235,11 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		expression = mem.Alloc[expr.Result](a)
 		expression.Alloc, expression.Source, expression.Expr, expression.Diagnostics = a, src, part.Expr, part.Diagnostics
 		p.Eval.AddSourcePart(request.Name, len(request.Prefix)+1, len(src.Text), request.PredicateOffset)
+		if request.Include != nil && expression.Expr != nil {
+			p.Eval.SetSourcePartDirectory(request.Include.SourceDirectory)
+			scriptView := script.Script{Items: []script.ScriptItem{{Expression: expression.Expr, Span: expression.Expr.Span}}}
+			eval.SetScriptSourceOrigin(&scriptView, len(request.Prefix)+1, len(src.Text), len(p.Eval.SourceParts))
+		}
 	} else {
 		expression = expr.Parse(a, request.Name, request.Predicate)
 	}
@@ -239,6 +272,9 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		return PredicateResult{Pending: true}
 	}
 	if result.Diagnostic.Code != "" {
+		if request.Include != nil {
+			return PredicateResult{Diagnostic: result.Diagnostic.Clone(a)}
+		}
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, result.Diagnostic, request.Located)}
 	}
 	if result.Waiting || result.Stream != nil || context.PhaseInvalid() || len(context.Effects) != 0 {
@@ -248,6 +284,43 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	if request.RequireBoolean && result.Value.Kind != core.Bool {
 		d := diagnostic.Diagnostic{Source: request.Name, Code: "EXPR_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: expression.Expr.Span.Start, End: expression.Expr.Span.End}, Message: "configuration predicate must return bool; got " + core.KindName(result.Value.Kind), Tips: []string{"Use an explicit comparison that returns true or false."}}
 		return PredicateResult{Diagnostic: configurationDiagnostic(a, d, request.Located)}
+	}
+	if request.Include != nil {
+		includeError := func(code, message string) PredicateResult {
+			d := failure(a, code, message)
+			d.Source = cloneText(a, request.Name)
+			d.Span = diagnostic.Span{Start: request.PredicateOffset, End: request.PredicateOffset + len(request.Predicate)}
+			return PredicateResult{Diagnostic: d}
+		}
+		const expected = "batch include requires a list of rooted local paths"
+		if result.Value.Kind != core.List {
+			return includeError("EXPR_INVALID", expected)
+		}
+		paths := make([]string, 0, len(result.Value.List))
+		for _, value := range result.Value.List {
+			if !rootedIncludePath(value) {
+				return includeError("EXPR_INVALID", expected)
+			}
+			name := value.Text
+			if tail, relative := strings.CutPrefix(name, "~/"); relative {
+				home, _ := p.configuredEnvironment("HOME")
+				if !path.IsAbs(home) {
+					return includeError("FS_ERR", "cannot resolve home directory for include")
+				}
+				name = path.Join(home, tail)
+			} else if !path.IsAbs(name) {
+				if request.Include.SourceDirectory == "" {
+					return includeError("RES_INVALID", "relative include requires a file-backed source")
+				}
+				name = path.Join(request.Include.SourceDirectory, name)
+			}
+			name = path.Clean(name)
+			if !context.Allows(eval.Read, name) {
+				return includeError("CAP_DENIED", "batch include requires read access; grant the required path with --allow-read=ROOT")
+			}
+			paths = append(paths, name)
+		}
+		return PredicateResult{Paths: paths}
 	}
 	return PredicateResult{Selected: result.Value.Kind != core.Nil && !(result.Value.Kind == core.Bool && !result.Value.Bool)}
 }

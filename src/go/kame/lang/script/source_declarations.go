@@ -35,7 +35,7 @@ func (s *Script) sourceDeclaration(lineStart, start, end int, inBlock bool) (Scr
 	switch word {
 	case "include", "include?":
 		end = physicalLineEnd(text, start)
-		return s.includeDeclaration(start, operand, end, word == "include?"), nextLine(text, end), true
+		return s.includeDeclaration(start, operand, end, word == "include?", inBlock || strings.HasPrefix(text[operand:end], "...")), nextLine(text, end), true
 	case "import", "from", "export":
 		item := s.moduleDeclaration(word, start, operand, end)
 		if lineStart != start {
@@ -133,7 +133,7 @@ func (s *Script) loopDeclaration(lineStart, start, operand, end int) (ScriptItem
 	return item, next
 }
 
-func (s *Script) includeDeclaration(start, operand, end int, optional bool) ScriptItem {
+func (s *Script) includeDeclaration(start, operand, end int, optional, computed bool) ScriptItem {
 	text := s.Source.Text
 	item := ScriptItem{Kind: Include, OptionalInclude: optional, Span: source.Span{Start: start, End: end}}
 	path, span, ok := s.literalSourcePath(operand, end)
@@ -144,6 +144,16 @@ func (s *Script) includeDeclaration(start, operand, end int, optional bool) Scri
 			return item
 		}
 		mem.FreeString(s.Alloc, path)
+	}
+	if computed {
+		if strings.HasPrefix(text[operand:end], "...") {
+			item.BatchInclude = true
+			operand = trimStart(text, operand+3, end)
+		}
+		part := expr.ParseRange(s.Alloc, s.Source, operand, end, "")
+		s.takeDiagnostics(part.Diagnostics)
+		item.Expression, item.Text = part.Expr, text[operand:end]
+		return item
 	}
 	s.error(operand, end, "expected one literal rooted include path without globs or interpolation")
 	return item
@@ -165,11 +175,12 @@ func (s *Script) literalSourcePath(start, end int) (string, source.Span, bool) {
 	return owned(s.Alloc, decoded.String()), part.Expr.Span, true
 }
 
-// CompositionBindsLocals reports whether flattening would discard declarations' lexical bindings.
-func CompositionBindsLocals(branches []DeclarationBranch) bool {
+// CompositionNeedsScope reports whether the block needs declaration scope rather than source flattening.
+func CompositionNeedsScope(branches []DeclarationBranch) bool {
 	for _, branch := range branches {
 		for _, item := range branch.Items {
-			if item.Kind == DeclarationLet || item.Kind == Composition && CompositionBindsLocals(item.Branches) {
+			if item.Kind == DeclarationLet || item.Kind == DeclarationFor || item.Kind == Include && item.Expression != nil && !item.BatchInclude ||
+				item.Kind == Composition && CompositionNeedsScope(item.Branches) {
 				return true
 			}
 		}
@@ -298,6 +309,9 @@ func writeSourceDeclaration(a mem.Allocator, b *strings.Builder, text string, it
 			b.WriteByte('?')
 		}
 		b.WriteByte(' ')
+		if item.BatchInclude {
+			b.WriteString("...")
+		}
 		b.WriteString(strings.TrimRight(item.Text, " \t\r"))
 		return
 	case DeclarationFor:

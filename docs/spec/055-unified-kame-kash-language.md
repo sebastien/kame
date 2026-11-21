@@ -863,8 +863,11 @@ include? ./local.km
 - **`include`.** `include PATH` splices the file's declarations into the
   caller's scope and declaration transaction at that point. `include?` skips a
   missing file only. Include and import operands are literal path atoms
-  (`./`, `../`, `/` or `~/`) without interpolation; quoted strings are not
-  accepted. Conditional includes use declaration-time `if` in Kame programs.
+  (`./`, `../`, `/` or `~/`) unless the include is inside a Kame declaration
+  block. There it may compute a `Path` in the current scope and requires read
+  authorization for the resolved path (`004` §7.1). Strings are not paths.
+  Native source composition also accepts `include ...EXPR` for a list of
+  paths whose files must share a scope before rule registration (`004` §7.1).
   Kash sources have no conditional include, and they may include only Kash
   sources; including any other kind is `RES_INVALID`. Active include and import cycles are `DEP_CYCLE`, naming the chain.
   Repeated includes register again under ordinary collision rules.
@@ -1008,6 +1011,8 @@ versus nested calls, sections, and spans. Formatting is idempotent and
 canonical:
 
 - one tab per block level
+- wrapped parenthesized value conditionals align `if`, `elif`, and `else`,
+  with each result indented below its header; `then` remains part of the expression
 - `, ` between list and record elements
 - spaces around binary operators
 - no trailing `:` on block headers

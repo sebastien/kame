@@ -114,7 +114,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				break
 			}
 			end := physicalLineEnd(text, start)
-			items = append(items, s.includeDeclaration(start, trimStart(text, wordEnd, end), end, word == "include?"))
+			items = append(items, s.includeDeclaration(start, trimStart(text, wordEnd, end), end, word == "include?", false))
 			p.Pos = nextLine(text, end)
 			continue
 		}

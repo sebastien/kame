@@ -9,7 +9,7 @@ import (
 
 func TestCompositionFormsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "# before\ninclude ./folder/a\\ b.km # required\ninclude? ../optional.km\nif false\n  include ./a.km\n\nelif true # selected\n  if true\n    # nested\n    include? ./b.km\n# after\nanswer = if true then 42 else 0\nwhen = true\n"
+	text := "# before\ninclude ./folder/a\\ b.km # required\ninclude? ../optional.km\nif false\n  include ./a.km\n\nelif true # selected\n  if true\n    # nested\n    include? ./b.km\n    include ./sdk/${module}.km # computed\n# after\nanswer = if true then 42 else 0\nwhen = true\n"
 	parsed := script.ParseKameFile(a, "composition.km", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 7 {
@@ -22,6 +22,10 @@ func TestCompositionFormsAndFormatting(t *testing.T) {
 	leaf := parsed.Items[3].Branches[1].Items[0].Branches[0].Items[1]
 	if leaf.Kind != script.Include || !leaf.OptionalInclude || leaf.Include != "./b.km" {
 		t.Error("nested declaration lost its include path")
+	}
+	computed := parsed.Items[3].Branches[1].Items[0].Branches[0].Items[2]
+	if computed.Kind != script.Include || computed.Expression == nil || computed.Include != "" {
+		t.Error("computed include did not retain its operand expression")
 	}
 	formatted := script.FormatWithIndent(a, parsed, "  ")
 	defer mem.FreeString(a, formatted)
@@ -53,7 +57,7 @@ func TestCompositionValidatesInactiveAndForbiddenPlacements(t *testing.T) {
 		"task build : ${include ./a.km}\n", "task build\n\techo ${include ./a.km}\n",
 		"include\n", "include relative.km\n", "include \"./quoted.km\"\n", "include ./a.km ./b.km\n",
 		"include ./[ab].km\n", "include ./x{a,b}.km\n", "include ./${name ()}\n", "include ./a\x00b\n",
-		"if false\n  include relative.km\nelse\n  include ./valid.km\n",
+		"if false\n  include\nelse\n  include ./valid.km\n",
 	}
 	for i := range cases {
 		authored := source.Source{Name: "bad.km", Text: cases[i]}

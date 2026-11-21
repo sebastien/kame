@@ -207,14 +207,14 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	start := 0
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if item.Kind != script.Include && (item.Kind != script.Composition || !script.CompositionLoadsSources(item.Branches) || script.CompositionBindsLocals(item.Branches)) {
+		if item.Kind != script.Include && (item.Kind != script.Composition || !script.CompositionLoadsSources(item.Branches) || script.CompositionNeedsScope(item.Branches)) {
 			s.RuleWork = s.RuleWork || declaresRuleWork(item)
 			continue
 		}
 		s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Lang: lang, Signature: signature, SourceDirectory: file.SourceDirectory, Offset: start, Includes: file.Includes})
 		start = item.Span.End
 		if item.Kind == script.Include {
-			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
+			if !s.expandSourceIncludeItem(fileIndex, item, errOut, authored, lang) {
 				return false
 			}
 		} else if !s.expandSourceComposition(fileIndex, signature, item.Branches, errOut, authored, lang) {

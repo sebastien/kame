@@ -74,13 +74,32 @@ func writeDelimitedValue(a mem.Allocator, b *strings.Builder, e *Expr, column, i
 	}
 }
 
-// An undelimited application can break only within an authored delimiter.
-// Try those operands from right to left and measure the lines they produce.
+// Prefer one line per grouped argument when they all fit. Otherwise try
+// expanding authored delimiters from right to left.
 func writeJuxtaposition(a mem.Allocator, b *strings.Builder, e *Expr, column, indent, tail int) {
 	if len(e.Items) == 1 {
 		writeLayout(a, b, e.Items[0], column, indent, tail+3)
 		b.WriteString(" ()")
 		return
+	}
+	next := (indent/8 + 1) * 8
+	if len(e.Items) > 2 && inlineFits(a, e.Items[0], column, len(" \\")) {
+		wholeArguments := true
+		for i, arg := range e.Items[1:] {
+			suffix := len(" \\")
+			if i == len(e.Items)-2 {
+				suffix = tail
+			}
+			if arg.Kind != Group || !inlineFits(a, arg, next, suffix) {
+				wholeArguments = false
+				break
+			}
+		}
+		if wholeArguments {
+			// The explicit continuation keeps the same juxtaposed application.
+			writeDelimitedValue(a, b, e, column, indent, tail, valueCollection)
+			return
+		}
 	}
 	inline := make([]string, len(e.Items))
 	parts := make([]string, len(e.Items))
@@ -235,7 +254,7 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		}
 		b.WriteByte('(')
 		if child != nil && child.Kind == Conditional && len(child.Items) >= 3 {
-			writeConditionalBranches(a, b, child, column+1, indent)
+			writeConditionalBranches(a, b, child, indent/8+1)
 			kashLine(b, "\t", indent/8)
 			b.WriteByte(')')
 			return
@@ -378,25 +397,23 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 	writeExpr(b, e)
 }
 
-func writeConditionalBranches(a mem.Allocator, b *strings.Builder, e *Expr, column, indent int) {
-	level := indent/8 + 1
-	branchIndent := indent
+func writeConditionalBranches(a mem.Allocator, b *strings.Builder, e *Expr, level int) {
+	writeBody := func(value *Expr) {
+		kashLine(b, "\t", level+1)
+		writeDelimitedValue(a, b, value, (level+1)*8, (level+1)*8, 0, valueDelimited)
+	}
 	for i := 0; i+1 < len(e.Items); i += 2 {
-		if i == 0 {
-			b.WriteString("if ")
-			column += len("if ")
-		} else {
-			kashLine(b, "\t", level)
-			b.WriteString("elif ")
-			branchIndent, column = level*8, level*8+len("elif ")
+		kashLine(b, "\t", level)
+		keyword := "if "
+		if i != 0 {
+			keyword = "elif "
 		}
-		start := b.Len()
-		writeDelimitedValue(a, b, e.Items[i], column, branchIndent, len(" then"), valueDelimited)
-		b.WriteString(" then ")
-		column = Columns(b.String()[start:], column)
-		writeDelimitedValue(a, b, e.Items[i+1], column, branchIndent, 0, valueDelimited)
+		b.WriteString(keyword)
+		writeDelimitedValue(a, b, e.Items[i], level*8+len(keyword), level*8, len(" then"), valueDelimited)
+		b.WriteString(" then")
+		writeBody(e.Items[i+1])
 	}
 	kashLine(b, "\t", level)
-	b.WriteString("else ")
-	writeDelimitedValue(a, b, e.Items[len(e.Items)-1], level*8+len("else "), level*8, 0, valueDelimited)
+	b.WriteString("else")
+	writeBody(e.Items[len(e.Items)-1])
 }

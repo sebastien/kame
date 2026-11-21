@@ -1394,6 +1394,67 @@ rule ./${variant}.txt = str label nested-label
 	}
 }
 
+func TestNativeBatchIncludesShareDefinitionsBeforeRegisteringOutputs(t *testing.T) {
+	dir := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(dir, "a.km"), `rule ${OUTPUT} = "shared definition"`)
+	nativeCLIWrite(t, filepath.Join(dir, "b.km"), `OUTPUT = ./result.txt`)
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), `FILES = files ${module/dir}/[ab].km
+if true
+  include ...FILES
+`)
+	var out, errOut bytes.Buffer
+	if status := runNativeCLIIn(t, dir, []string{"./result.txt"}, nil, &out, &errOut); status != 0 ||
+		nativeCLIRead(filepath.Join(dir, "result.txt")) != "shared definition" {
+		t.Fatalf("status=%d stdout=%q stderr=%s", status, out.String(), errOut.String())
+	}
+	nativeCLIWrite(t, filepath.Join(dir, "Kamefile"), `include ...[./b.km]`)
+	errOut.Reset()
+	if status := runNativeCLIIn(t, dir, []string{"--no-default-grants", "./result.txt"}, nil, &out, &errOut); status != 1 ||
+		!strings.Contains(errOut.String(), "batch include requires read access") {
+		t.Fatalf("status=%d stderr=%s", status, errOut.String())
+	}
+}
+
+func TestNativeComputedDeclarationIncludes(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(directory, "a.km"), `rule ./from-a.txt = module`)
+	nativeCLIWrite(t, filepath.Join(directory, "b.km"), `rule ./from-b.txt = module`)
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `def enabled module = module != "missing"
+if true
+  for module in ["b", "missing", "a"]
+    if (enabled module)
+      include ./${module}.km
+  include? (joinpath ./ "optional.km")
+  include? ./literal-optional.km
+`)
+	var out, errOut bytes.Buffer
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"./from-a.txt", "./from-b.txt"}, ""},
+		{[]string{"--no-default-grants", "./from-a.txt"}, "error[CAP_DENIED]"},
+	} {
+		out.Reset()
+		errOut.Reset()
+		status := runNativeCLIIn(t, directory, test.args, nil, &out, &errOut)
+		if test.want == "" && status != 0 || test.want != "" && (status != 1 || !strings.Contains(errOut.String(), test.want)) {
+			t.Fatalf("%v: status=%d stdout=%q stderr=%s", test.args, status, out.String(), errOut.String())
+		}
+	}
+	for _, module := range []string{"a", "b"} {
+		if got := nativeCLIRead(filepath.Join(directory, "from-"+module+".txt")); got != module {
+			t.Errorf("module %s: got %q", module, got)
+		}
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), "if true\n  include? (str \"./\" \"missing.km\")\n")
+	errOut.Reset()
+	if status := runNativeCLIIn(t, directory, []string{"all"}, nil, &out, &errOut); status != 1 ||
+		!strings.Contains(errOut.String(), "computed include requires a rooted local Path") {
+		t.Fatalf("string operand: status=%d stderr=%s", status, errOut.String())
+	}
+}
+
 func TestNativeRuleBodyBindsCapturesAndChangedInputs(t *testing.T) {
 	directory := t.TempDir()
 	target := "./out/release/common/example.txt"

@@ -28,6 +28,20 @@ func (p *Program) registerDeclarationInclude(item script.ScriptItem, scope *decl
 		return d
 	}
 	name := item.Include
+	if item.BatchInclude {
+		return includeError("FEATURE_UNSUP", "batch includes require file source composition before declaration registration")
+	}
+	if item.Expression != nil {
+		r := p.registrationValue(item.Expression, scope.Scope)
+		if r.Diagnostic.Code != "" {
+			return r.Diagnostic
+		}
+		defer r.Free(p.Alloc)
+		name = r.Value.Text
+		if !rootedIncludePath(r.Value) {
+			return includeError("EXPR_INVALID", "computed include requires a rooted local Path")
+		}
+	}
 	if suffix, homeRelative := strings.CutPrefix(name, "~/"); homeRelative {
 		home, _ := p.configuredEnvironment("HOME")
 		if !path.IsAbs(home) {
@@ -41,6 +55,12 @@ func (p *Program) registerDeclarationInclude(item script.ScriptItem, scope *decl
 			return includeError("RES_INVALID", "relative include requires a file-backed source")
 		}
 		name = path.Join(author.Directory, name)
+	}
+	if item.Expression != nil {
+		c := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
+		if !c.Allows(eval.Read, name) {
+			return includeError("CAP_DENIED", "computed include requires read access; grant the required path with --allow-read=ROOT")
+		}
 	}
 	if script.IsKashSource(author.Name) && !script.IsKashSource(name) {
 		return includeError("RES_INVALID", "Kash includes require a .kash or .ksh source")
@@ -123,6 +143,12 @@ func (p *Program) registerDeclarationInclude(item script.ScriptItem, scope *decl
 		}
 		remaining = remaining[end+1:]
 	}
+}
+
+func rootedIncludePath(value core.Value) bool {
+	name := value.Text
+	return value.Kind == core.Path && !strings.ContainsRune(name, 0) &&
+		(path.IsAbs(name) || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "~/"))
 }
 
 func (p *Program) includeScopeSignature(scope declarationScope, signature core.Signature, name string) core.Signature {

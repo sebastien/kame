@@ -564,6 +564,10 @@ by default; an explicit inputrc selection style is preserved.
 Completion only reads session state; it evaluates no definitions and runs no
 commands.
 
+Explicit file, command and history pickers use the backends defined by
+[057 Kash UI](057-kash-ui.md). Picking edits the current entry without
+submitting it. Tab completion and incremental history search are unchanged.
+
 ## Highlighting
 
 On a color terminal the editor highlights the entry as it is typed, by Kash

@@ -52,3 +52,24 @@ func TestKashComputedEnvironmentTargetFormat(t *testing.T) {
 		t.Fatalf("formatted target: %q, want %q", got, want)
 	}
 }
+
+func TestKashBindingWrapsWholeArguments(t *testing.T) {
+	const input = `let links = concat (flatmap opencode-skill-links (sdk-list OPENCODE_SKILLS)) (flatmap opencode-agent-links (sdk-list OPENCODE_AGENTS)) (flatmap opencode-rule-links (sdk-list OPENCODE_RULES))`
+	const want = "let links =\n\tconcat \\\n\t\t(flatmap opencode-skill-links (sdk-list OPENCODE_SKILLS)) \\\n\t\t(flatmap opencode-agent-links (sdk-list OPENCODE_AGENTS)) \\\n\t\t(flatmap opencode-rule-links (sdk-list OPENCODE_RULES))\n"
+	var call string
+	for _, text := range []string{input, want} {
+		parsed := script.ParseKash(nil, "links.kash", text)
+		defer parsed.Free()
+		if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 1 || parsed.Items[0].Definition == nil {
+			t.Fatalf("expected one binding: %v", parsed.Diagnostics)
+		}
+		initializer := expr.Compact(nil, parsed.Items[0].Definition.Expression)
+		if call != "" && initializer != call {
+			t.Fatalf("binding changed from %q to %q", call, initializer)
+		}
+		call = initializer
+		if got := script.FormatWithIndent(nil, parsed, "\t"); got != want {
+			t.Fatalf("formatted as:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}

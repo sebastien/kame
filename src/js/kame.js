@@ -5169,6 +5169,13 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     const childLang = childIsKash ? 'kash' : lang;
     parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child.toString('utf8'), childLang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }], child));
   };
+  const includeItem = (item) => {
+    if (item.batch) {
+      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: 'batch includes require the native Kame CLI', source: name, span: item.span };
+      throw Object.assign(diagnosticError(detail.message, detail.code), { span: item.span, diagnostics: [detail] });
+    }
+    return include(item.path, item.optional, item.span);
+  };
   // The portable parser validates every branch before the host selects one.
   const compose = async (branches) => {
     for (const branch of branches) {
@@ -5190,7 +5197,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
         if (!selected) continue;
       }
       for (const item of branch.items) {
-        if (item.kind === 'include') await include(item.path, item.optional, item.span);
+        if (item.kind === 'include') await includeItem(item);
         else if (item.kind === 'composition' && itemLoadsSources(item)) await compose(item.branches);
         else if (item.kind === 'rule' || item.kind === 'for' || item.kind === 'generate' || item.kind === 'composition') {
           if (!selection.ruleWork && declaresRuleWork(item)) selection.ruleWork = true;
@@ -5207,12 +5214,13 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     }
   };
   const bindsLocals = (branches) => branches.some((branch) => branch.items.some((item) =>
-    item.kind === 'let' || (item.kind === 'composition' && bindsLocals(item.branches))));
+    item.kind === 'let' || item.kind === 'for' || (item.kind === 'include' && item.expression && !item.batch) ||
+    (item.kind === 'composition' && bindsLocals(item.branches))));
   let start = 0;
   for (const item of document.ast.items) {
     if (!itemLoadsSources(item) || (item.kind === 'composition' && bindsLocals(item.branches))) continue;
     append(item.span.start);
-    if (item.kind === 'include') await include(item.path, item.optional, item.span);
+    if (item.kind === 'include') await includeItem(item);
     else await compose(item.branches);
     start = item.span.end;
   }

@@ -1,148 +1,8 @@
 ---
-identity: agent-kame:learnings
-agent_nodes:
-  run-native-cli-tests:
-    role: guidance
-    core: true
-    topic: testing
-  pty-redraw-assertions:
-    role: guidance
-    core: true
-    topic: testing
-  validate-composed-lexical-context:
-    role: guidance
-    core: false
-    topic: source-composition
-  verify-inherited-environment-removal:
-    role: guidance
-    core: false
-    topic: testing
-  register-host-process-before-async-launch:
-    role: guidance
-    core: false
-    topic: process-host
-  verify-process-environment-freshness:
-    role: guidance
-    core: false
-    topic: testing
-  verify-missing-module-source-observations:
-    role: guidance
-    core: false
-    topic: testing
-  isolate-declaration-captures-in-freshness-tests:
-    role: guidance
-    core: false
-    topic: testing
-  verify-changed-inputs-through-indirect-consumers:
-    role: guidance
-    core: false
-    topic: testing
-  verify-suspended-declaration-registration:
-    role: guidance
-    core: false
-    topic: testing
-  verify-command-probes-in-kash-loop-fixtures:
-    role: guidance
-    core: false
-    topic: testing
-  drive-closed-pipe-tests-until-closure:
-    role: guidance
-    core: false
-    topic: testing
-  verify-fairness-with-one-ready-slot:
-    role: guidance
-    core: false
-    topic: scheduling
-  verify-borrowed-stdin-handoff-and-cancellation:
-    role: guidance
-    core: false
-    topic: testing
-  preserve-callable-ownership-in-process-outcomes:
-    role: guidance
-    core: false
-    topic: evaluator-ownership
-  verify-deliberate-exit-at-sync-capture-boundary:
-    role: guidance
-    core: false
-    topic: testing
-  verify-standalone-wasm-process-evaluation:
-    role: guidance
-    core: false
-    topic: testing
-  verify-expected-tools-besides-host-parity:
-    role: guidance
-    core: false
-    topic: testing
-  test-absent-and-invalid-host-edge-telemetry:
-    role: guidance
-    core: false
-    topic: testing
-  verify-quiescence-after-latest-watch-idle:
-    role: guidance
-    core: false
-    topic: testing
-  verify-service-restart-readiness-per-generation:
-    role: guidance
-    topic: testing
-    core: false
-  verify-prebuilt-harness-artifact-inputs:
-    role: guidance
-    topic: testing
-    core: false
-  verify-child-output-drains-after-exit:
-    role: guidance
-    topic: process-host
-    core: false
-  verify-pure-operation-registry-coverage:
-    role: guidance
-    topic: testing
-    core: false
-  verify-terminal-handoff-before-cleanup:
-    role: guidance
-    topic: process-host
-    core: false
-  pace-repl-pty-warmup-by-executed-marker:
-    role: guidance
-    topic: testing
-    core: false
-  verify-job-limit-across-host-waits:
-    role: guidance
-    topic: scheduling
-    core: false
-  verify-mixed-recipe-diagnostic-provenance:
-    role: guidance
-    topic: diagnostics
-    core: false
-  preserve-do-kash-unified-runner-alias:
-    role: guidance
-    topic: cli
-    core: false
-  keep-generator-suspension-internal:
-    role: guidance
-    topic: process-outcomes
-    core: false
-  preserve-computed-rule-output-spellings:
-    role: guidance
-    topic: source-composition
-    core: false
-  preserve-newline-collection-separators:
-    role: guidance
-    topic: language-syntax
-    core: false
-  preserve-kash-setup-label-spelling:
-    role: guidance
-    topic: language-syntax
-    core: false
-  preserve-path-pattern-subst-discovery:
-    role: guidance
-    topic: language-syntax
-    core: false
-  isolate-repeated-cli-diagnostics:
-    role: guidance
-    core: true
-    topic: cli-diagnostics
+identity: "agent-kame:learnings"
+agent_nodes: {run-native-cli-tests: {role: guidance, core: true, topic: testing}, pty-redraw-assertions: {role: guidance, core: true, topic: testing}, validate-composed-lexical-context: {role: guidance, core: false, topic: source-composition}, verify-inherited-environment-removal: {role: guidance, core: false, topic: testing}, register-host-process-before-async-launch: {role: guidance, core: false, topic: process-host}, verify-process-environment-freshness: {role: guidance, core: false, topic: testing}, verify-missing-module-source-observations: {role: guidance, core: false, topic: testing}, isolate-declaration-captures-in-freshness-tests: {role: guidance, core: false, topic: testing}, verify-changed-inputs-through-indirect-consumers: {role: guidance, core: false, topic: testing}, verify-suspended-declaration-registration: {role: guidance, core: false, topic: testing}, verify-command-probes-in-kash-loop-fixtures: {role: guidance, core: false, topic: testing}, drive-closed-pipe-tests-until-closure: {role: guidance, core: false, topic: testing}, verify-fairness-with-one-ready-slot: {role: guidance, core: false, topic: scheduling}, verify-borrowed-stdin-handoff-and-cancellation: {role: guidance, core: false, topic: testing}, preserve-callable-ownership-in-process-outcomes: {role: guidance, core: false, topic: evaluator-ownership}, verify-deliberate-exit-at-sync-capture-boundary: {role: guidance, core: false, topic: testing}, verify-standalone-wasm-process-evaluation: {role: guidance, core: false, topic: testing}, verify-expected-tools-besides-host-parity: {role: guidance, core: false, topic: testing}, test-absent-and-invalid-host-edge-telemetry: {role: guidance, core: false, topic: testing}, verify-quiescence-after-latest-watch-idle: {role: guidance, core: false, topic: testing}, verify-service-restart-readiness-per-generation: {role: guidance, topic: testing, core: false}, verify-prebuilt-harness-artifact-inputs: {role: guidance, topic: testing, core: false}, verify-child-output-drains-after-exit: {role: guidance, topic: process-host, core: false}, verify-pure-operation-registry-coverage: {role: guidance, topic: testing, core: false}, verify-terminal-handoff-before-cleanup: {role: guidance, topic: process-host, core: false}, pace-repl-pty-warmup-by-executed-marker: {role: guidance, topic: testing, core: false}, verify-job-limit-across-host-waits: {role: guidance, topic: scheduling, core: false}, verify-mixed-recipe-diagnostic-provenance: {role: guidance, topic: diagnostics, core: false}, preserve-do-kash-unified-runner-alias: {role: guidance, topic: cli, core: false}, keep-generator-suspension-internal: {role: guidance, topic: process-outcomes, core: false}, preserve-computed-rule-output-spellings: {role: guidance, topic: source-composition, core: false}, preserve-newline-collection-separators: {role: guidance, topic: language-syntax, core: false}, preserve-kash-setup-label-spelling: {role: guidance, topic: language-syntax, core: false}, preserve-path-pattern-subst-discovery: {role: guidance, topic: language-syntax, core: false}, isolate-repeated-cli-diagnostics: {role: guidance, core: true, topic: cli-diagnostics}, test-cross-module-computed-includes: {role: guidance, core: true, topic: testing}}
 created: 2026-11-16T01:50:04.405444+00:00
-updated: 2026-11-21T19:46:41.306122+00:00
+updated: 2026-11-21T20:08:06.154827+00:00
 ---
 {
   "version": 1,
@@ -347,7 +207,8 @@ updated: 2026-11-21T19:46:41.306122+00:00
           "preserve-newline-collection-separators",
           "preserve-kash-setup-label-spelling",
           "preserve-path-pattern-subst-discovery",
-          "isolate-repeated-cli-diagnostics"
+          "isolate-repeated-cli-diagnostics",
+          "test-cross-module-computed-includes"
         ],
         "sources": [],
         "review": true
@@ -370,6 +231,15 @@ updated: 2026-11-21T19:46:41.306122+00:00
         "sources": [
           "tests/T042-07-kash-metrics.sh",
           "src/go/kame/lang/eval/process_metrics.go"
+        ],
+        "review": false
+      },
+      "test-cross-module-computed-includes": {
+        "title": "Test computed includes across modules",
+        "text": "When validating native execution or evaluator changes against SDK modules, include an integration test where a computed include in one module references a definition from another module; module-isolation and literal-composition tests can miss declaration-loop scope differences.",
+        "children": [],
+        "sources": [
+          "identity==\"kame:observations\" item=k-f87c55847a142602811e01b1e139bcfa4f280e72a2212c4e3506db06869e7c1f"
         ],
         "review": false
       },
