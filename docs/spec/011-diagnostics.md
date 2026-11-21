@@ -347,8 +347,7 @@ text are not errors.
 Grant tips do not broaden authority automatically or suppress phase failures.
 They must not imply `--env NAME=VALUE`, `NAME=VALUE`, `KAME_NAME` or `--set`
 authorizes `env/NAME` or a bare `ENV-NAME` read. Where a tip names an explicit grant, it must respect
-`009-cli.md`'s replacement policy rather than suggesting that all default grants
-will remain enabled.
+`009-cli.md`'s per-capability override policy and the explicit-only mode.
 
 ## Human and Plain Rendering
 

@@ -131,6 +131,10 @@ func TestHistoryExpiryAndRescan(t *testing.T) {
 	}
 	h.record("echo deadline")
 	now = h.entries[0].Time
+	h.now = func() time.Time { return now.Add(-time.Nanosecond) }
+	if got, _ := h.GetLine(0); got != "" {
+		t.Fatal("clock rollback made a future entry recallable")
+	}
 	h.now = func() time.Time { return now.Add(h.maxAge - time.Nanosecond) }
 	if got, _ := h.GetLine(0); got == "" {
 		t.Fatal("entry expired before deadline")

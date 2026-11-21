@@ -558,9 +558,21 @@ run! "git" "status" "--short"
 
 Command arguments are typed value positions, not shell word-expansion
 positions. A string supplies one argument even when it contains whitespace.
-Values are never re-split, implicitly globbed or reparsed as shell syntax. A raw
-`*.go` is therefore literal; a filesystem wildcard is an explicit value, such as
-`(files ./src/**/*.go)`.
+Values are never re-split, globbed or reparsed as shell syntax. In command
+arguments only, authored unquoted, unescaped `*`, `**` and character classes
+expand against the command's effective directory under ordinary read authority.
+Quoted and substituted bytes are literal, even in a mixed word. `?` outside a
+class remains a command operator. Each match becomes one argument, sorted by
+raw UTF-8 bytes. Wildcard components do not select leading dots unless the
+component starts with a literal dot. A trailing slash requires a directory;
+`..` cannot follow a wildcard component. An unmatched pattern is an error
+before launch; use `wildcard`
+or `files` explicitly to work with an empty list. Command heads and
+redirection operands do not glob.
+
+An authored unquoted leading `~` or `~/` in a command head or argument uses
+the execution unit's `HOME`. Quoting, escaping, or substitution does not
+introduce tilde expansion. `~user` is literal.
 
 ### Command position
 
@@ -1339,7 +1351,7 @@ Words and fragments:
   dependencies and executable tracking, and never reparse result bytes.
   Parse/format/parse is idempotent without turning fragments into quoted
   literals or changing typed splicing on either host.
-- Command arguments containing whitespace stay one argument. A raw wildcard is
+- Command arguments containing whitespace stay one argument. A quoted wildcard is
   literal; `(files PATTERN)` is an explicit discovery value.
 - Quoted and escaped operators are literal, empty quotes keep an empty argument,
   and invalid escapes and unclosed quotes are rejected. Single-quoted

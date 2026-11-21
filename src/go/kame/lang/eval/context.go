@@ -30,6 +30,8 @@ type Context struct {
 	Cwd                   string
 	StageDirectory        string
 	DirectoryGrantRoot    string
+	FollowDirectoryRead   bool
+	FollowDirectoryWrite  bool
 	Environment           []string
 	Unit                  *ExecutionUnit
 	DirectUnit            *ExecutionUnit // direct session only; captures use a different Unit
@@ -335,7 +337,8 @@ func (c *Context) Allows(capability Capability, name string) bool {
 				}
 				continue
 			}
-			if (capability == Read || capability == Write) && c.DirectoryGrantRoot != "" && rootName == c.DirectoryGrantRoot {
+			if (capability == Read && c.FollowDirectoryRead || capability == Write && c.FollowDirectoryWrite) &&
+				c.DirectoryGrantRoot != "" && rootName == c.DirectoryGrantRoot {
 				rootName = c.Cwd
 			}
 			root := canonicalGrantName(a, grantDirectory, rootName)

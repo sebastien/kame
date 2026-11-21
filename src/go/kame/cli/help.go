@@ -72,7 +72,7 @@ func HelpText(topic string) string {
 		mem.FreeString(mem.System, list)
 		b.WriteString(".\nWithout targets, select default; without a source or arguments, show help.\n\nBuild options:\n")
 		b.WriteString(BuildHelp)
-		b.WriteString("\nExplicit execution: -l, --lang km|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
+		b.WriteString("\nExplicit execution: -l, --lang km|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES]. Use --no-default-grants for explicit grants only.\n")
 	} else if topic != "do" {
 		for i := range Commands {
 			if Commands[i].Name == topic {
@@ -91,7 +91,7 @@ func HelpText(topic string) string {
 			b.WriteString("km scripts emit explicit out/err effects; --print-result also displays their final value (requires km work).\nexpr and explicitly selected value entries retain result display.\nArguments after -- bind the args list; each operand remains one literal string.\nNAME=VALUE is literal configuration, even when VALUE ends in a source suffix.\n")
 		}
 		if topic == "run" || topic == "render" {
-			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
+			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES], --no-default-grants.\n")
 		}
 		if topic == "parse" || topic == "fmt" {
 			b.WriteString("-l, --lang expr|template|km|kash\n")
@@ -137,7 +137,7 @@ func HelpText(topic string) string {
 			if topic != "list" {
 				b.WriteString("NAME=VALUE overrides a declared value or binds a target argument.\n")
 			}
-			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
+			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES], --no-default-grants.\n")
 			if topic != "cat" {
 				b.WriteString("Inspection never executes recipes or applies deferred writes; execution-only flags are rejected.\n")
 			}

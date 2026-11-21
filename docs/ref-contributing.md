@@ -99,6 +99,16 @@ evaluations to avoid a CLI/WASM startup for each value; rejection cases stay iso
 | `make test-wasm` | WASM ABI/import checks and the curated cross-backend CLI suites. |
 | `make test-all` | Runs `test` and `test-leaks`. |
 
+Run `kame bench` from the repository root on Linux (with PTYs and
+`/proc` memory accounting). It runs three independent Kash sessions, reporting
+first-key and typing p50/p99 and process RSS at 0, 100, 1,000, and 2,000
+submitted commands. The typing probe uses a line that doesn't match any history
+entry. It uses private history with a 128 KiB cap so the last two
+checkpoints measure steady state after eviction begins. Compare runs on the
+same machine: timing and RSS are reported, not enforced as pass/fail
+thresholds. The probe does not include terminal emulator rendering or measure
+peak memory.
+
 Release validation calls for separate native, leak, and WASM runs at one stable
 revision; see [TODO.md](../TODO.md). A workflow that only builds an artifact or
 runs `--version` is not evidence that the whole suite passed. In particular,

@@ -127,7 +127,7 @@ func commandArguments(stage *expr.Expr) []*expr.Expr {
 	arguments := make([]*expr.Expr, 0, len(stage.Items)-1)
 	for _, word := range stage.Items[1:] {
 		argument := word
-		if word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
+		if word.CommandGlob || word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
 			argument = &expr.Expr{Kind: expr.ListSpread, Span: word.Span, Items: []*expr.Expr{word}}
 		}
 		arguments = append(arguments, argument)

@@ -268,6 +268,17 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		if !discoveryPaths(c, &result.Value) {
 			result.Value.Free(c.Run)
 			result = failure("HOST_FAIL", "wildcard observation must return a list of paths")
+		} else if c.Program != nil && c.Cwd != c.Program.DefinitionCwd && path.IsAbs(c.Program.DefinitionCwd) {
+			// The host spells matches relative to the invocation root, not
+			// the current Kash directory used for the subsequent kind checks.
+			for i := range result.Value.List {
+				match := &result.Value.List[i]
+				if !path.IsAbs(match.Text) && !core.IsResourceURIName(match.Text) {
+					text := path.Join(c.Program.DefinitionCwd, match.Text)
+					mem.FreeString(c.Run, match.Text)
+					match.Text = text
+				}
+			}
 		}
 	}
 	if result.Diagnostic.Code != "" {

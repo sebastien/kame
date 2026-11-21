@@ -290,6 +290,9 @@ func PickArgs(inv *Invocation, kind string, target string) []string {
 		args = appendOwned(args, "--tool")
 		args = appendOwned(args, inv.ToolOverrides[i])
 	}
+	if inv.ExplicitGrantsOnly {
+		args = appendOwned(args, "--no-default-grants")
+	}
 	for i := range inv.Grants {
 		args = appendGrantArgs(args, inv.Grants[i])
 	}

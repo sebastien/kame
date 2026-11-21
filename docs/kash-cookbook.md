@@ -27,7 +27,7 @@ read; nothing else in `~/.config/kash/` is loaded.
 For login-only environment setup, use `~/.config/kash/profile.kash`:
 
 ```kash
-set env/PATH = str HOME "/.local/bin:" PATH
+set env/PATH = "${HOME}/.local/bin:${PATH}"
 ```
 
 `kash --login -i` loads the profile before interactive initialization.

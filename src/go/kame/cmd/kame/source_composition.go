@@ -39,10 +39,7 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 		directory = path.Join(cwd, directory)
 		ownedDirectory = true
 	}
-	grants := s.SelectionGrants
-	if len(grants) == 0 && !s.SelectionNoDefault {
-		grants = []eval.Grant{{Capability: eval.Read, Names: []string{directory}}}
-	}
+	grants := effectiveGrants(s.SelectionGrants, []eval.Grant{{Capability: eval.Read, Names: []string{directory}}}, s.SelectionNoDefault)
 	discovery := program.Options{Host: posix.New(mem.System), Grants: grants}
 	result := program.TrackedCompositionCondition(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
 	s.Discoveries = append(s.Discoveries, result.Discoveries...)
@@ -184,7 +181,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 }
 
 func newCompositionSource(inv cli.Invocation, defines []string, prefix []program.CompileSource) buildSource {
-	return buildSource{JSON: inv.JSON, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), inv.Environment), SelectionDirectory: inv.Directory, SelectionGrants: inv.Grants, SelectionNoDefault: inv.NoDefaultGrants}
+	return buildSource{JSON: inv.JSON, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), inv.Environment), SelectionDirectory: inv.Directory, SelectionGrants: inv.Grants, SelectionNoDefault: inv.NoDefaultGrants || inv.ExplicitGrantsOnly}
 }
 
 func inlineRunSource(name string, text string, lang string, inv cli.Invocation, defines []string, out io.Writer, prefix []program.CompileSource) buildSource {
@@ -225,7 +222,7 @@ func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []prog
 	prefix := selectionPrefix(fragments)
 	defer mem.FreeSlice(nil, prefix)
 	if input.Kind == "discover" {
-		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment, Grants: inv.Grants, NoDefaultGrants: inv.NoDefaultGrants}, out, true, prefix)
+		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment, Grants: inv.Grants, NoDefaultGrants: inv.NoDefaultGrants || inv.ExplicitGrantsOnly}, out, true, prefix)
 	}
 	name := input.Value
 	if path.IsAbs(name) {

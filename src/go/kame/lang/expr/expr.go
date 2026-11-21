@@ -126,7 +126,7 @@ type StringPart struct {
 	Expr *Expr
 	// Form retains the authored interpolation or Kash word boundary.
 	Form string
-	// Spelling retains quoted source bytes that differ from rendered text.
+	// Spelling retains quoted source bytes, or the pattern encoding of a Kash literal.
 	Spelling string
 }
 
@@ -220,6 +220,8 @@ type Expr struct {
 	Expansion    string
 	trivia       *expressionTrivia
 	wordSpelling []string
+	CommandGlob  bool
+	CommandHome  bool
 	ExplicitDef  bool
 }
 

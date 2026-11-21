@@ -398,6 +398,12 @@ task test-examples
 task test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
 	cwd: $KAME_DIR KAME_NATIVE_FORMAT_TEST_BINARY: (abspath ./build/kame.debug) KAME_NATIVE_CLI_TEST_BINARY: (abspath ./build/kame.debug) go test ./cmd/kame
 
+# Performance samples are opt-in and always rerun against the native build.
+task bench : ./build/kame.debug
+	if (ne? (line $(uname -s)) "Linux")
+		(fail! "kame bench requires Linux (PTY and /proc RSS)")
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) KAME_NATIVE_CLI_TEST_BINARY: (abspath ./build/kame.debug) KAME_KASH_BENCH: "1" go test -v -count=3 -run '^TestKashInteractiveBenchmark$' ./cmd/kame
+
 task test-cli : ./build/kame.debug dist-wasm ./dist/kame ${RELEASE_BINARIES} ./dist/kame-windows-x64.zip ./tests/harness.sh
 	KAME_TEST_PREBUILT: (abspath ".") ./tests/harness.sh
 

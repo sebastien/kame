@@ -141,11 +141,11 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		directory = cloneCommandText(directory)
 	}
 	defer mem.FreeString(mem.System, directory)
-	grants := inv.Grants
 	defaults := []eval.Grant{{Capability: eval.Read, Names: []string{directory}}, {Capability: eval.Write, Names: []string{directory}}, {Capability: eval.Run}}
-	if len(grants) == 0 && !inv.NoDefaultGrants {
-		grants = defaults
+	if len(inv.Inputs) != 0 && inv.Inputs[0].Lang == "kash" {
+		defaults = append(defaults, eval.Grant{Capability: eval.Env})
 	}
+	grants := effectiveGrants(inv.Grants, defaults, inv.NoDefaultGrants || inv.ExplicitGrantsOnly)
 	registry := eval.NewRegistry(mem.System)
 	defer registry.Free()
 	operations.Register(registry)

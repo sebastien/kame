@@ -97,10 +97,15 @@ func (l latencies) String() string {
 	if len(l) == 0 {
 		return "-"
 	}
+	p50, p99 := l.percentiles()
+	return fmt.Sprintf("n=%d p50=%s p99=%s max=%s", len(l), p50.Round(time.Microsecond), p99.Round(time.Microsecond), slices.Max(l).Round(time.Microsecond))
+}
+
+func (l latencies) percentiles() (p50, p99 time.Duration) {
 	sorted := slices.Clone(l)
 	slices.Sort(sorted)
-	at := func(q float64) time.Duration { return sorted[int(q*float64(len(sorted)-1))] }
-	return fmt.Sprintf("n=%d p50=%s p99=%s max=%s", len(sorted), at(0.5).Round(time.Microsecond), at(0.99).Round(time.Microsecond), sorted[len(sorted)-1].Round(time.Microsecond))
+	// Nearest rank: at fewer than 100 samples, p99 is the maximum.
+	return sorted[(len(sorted)-1)/2], sorted[len(sorted)-1-len(sorted)/100]
 }
 
 type latencyReport struct {

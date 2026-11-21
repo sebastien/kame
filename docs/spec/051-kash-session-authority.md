@@ -298,7 +298,7 @@ weaker handoff.
 | Contract | Required executable checks |
 | --- | --- |
 | Policy shape | Missing keys, empty lists, duplicate names, invalid names, unknown keys, non-booleans, foreground without tty, planning-time environment read denied, prerequisites not started after a malformed policy. |
-| Grants | Additive to build read/write/run; no effect on another rule; direct session removal and tty denied; `--allow-env` does not authorize removal or attach a terminal and still replaces the default set when explicit. |
+| Grants | Additive to build read/write/run; no effect on another rule; direct session removal follows the session rules; `--allow-env` overrides only the default environment-read grant and does not authorize removal or attach a terminal. |
 | Overlay | Computed `set env/NAME` without a read grant; prepend requires read; `set env/NAME = nil` without observing the value; empty string is present; unauthorized removal changes nothing; non-scalar values rejected; function writes visible to the caller after return; capture writes do not escape the capture; host environment and a later recipe are unchanged; dry-run performs none of these effects. |
 | Lookup | A written `PATH` selects the bare name for later commands in the unit; startup `PATH` remains in other units; stage `PATH:` does not select the executable; `--tool` wins; scoped run grants still reject bare names. |
 | Handoff | Metadata applies only when no stage sets `tty:`; explicit stage request requires authority; capture, background, and cleanup do not attach; missing terminal is `HOST_FAIL` with no child; group restored after success, failure, and cancellation; parent process remains; no terminal-attribute claim. |

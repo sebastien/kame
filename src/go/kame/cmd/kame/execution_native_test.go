@@ -941,7 +941,7 @@ change`)
 		{`set env/KAME055_UNIT_VALUE = {key: "value"}`, "EXPR_INVALID"},
 		{`set env/KAME055_UNIT_VALUE = "unreadable"; (out! (KAME055_UNIT_VALUE ?? "fallback"))`, "CAP_DENIED"},
 	} {
-		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "-c", tc.source)
+		command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "--lang", "kash", "--no-default-grants", "--allow-run", "-c", tc.source)
 		if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" ||
 			!strings.Contains(nativeCLIRead(stderr), "["+tc.code+"]") {
 			t.Fatalf("%s: status %d, output %q, diagnostic %s", tc.source, status, nativeCLIRead(stdout), nativeCLIRead(stderr))
@@ -1638,7 +1638,7 @@ printf '[%s:%s][%s:%s][%s:%s:%s][%s:%s][%s][%s][%s]' $recovered.status $recovere
 	if status := nativeCLIWait(t, command, stderr); status != 0 || nativeCLIRead(stdout) != want {
 		t.Fatalf("command-list outcomes returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))
 	}
-	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "--allow-write", "-c",
+	command, stdout, stderr = nativeCLIStart(t, directory, "do", "run", "-l", "kash", "--no-default-grants", "--allow-write", "-c",
 		"let result = $?(out! hidden && true || out! skipped)\nout! unexpected")
 	if status := nativeCLIWait(t, command, stderr); status != 1 || nativeCLIRead(stdout) != "" || !strings.Contains(nativeCLIRead(stderr), "[CAP_DENIED]") {
 		t.Fatalf("command-list denial returned status %d: stdout %q, stderr %q", status, nativeCLIRead(stdout), nativeCLIRead(stderr))

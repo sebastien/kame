@@ -104,8 +104,8 @@ contain a child process's filesystem, network or environment access.
 `env/NO_COLOR` reads the current unit's environment and yields `nil` when
 the variable is unset. Use `${env/NO_COLOR}` in a string or `@{env/NO_COLOR}` in a template.
 Environment reads require the matching grant, such as `--allow-env=NO_COLOR`.
-An explicit grant list replaces the defaults, so include the other grants
-the invocation needs.
+An explicit grant overrides that capability's default. Use
+`--no-default-grants` when only the listed grants should be enabled.
 
 For an authored opt-in color setting:
 

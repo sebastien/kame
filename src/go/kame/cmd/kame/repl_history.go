@@ -202,12 +202,16 @@ func historyEligible(text string) bool {
 
 func (h *replHistory) valid(entry historyEntry, now time.Time) bool {
 	id, err := hex.DecodeString(entry.ID)
-	return err == nil && len(id) == 16 && !entry.Time.IsZero() && !entry.Time.After(now) &&
-		now.Sub(entry.Time) < h.maxAge && historyEligible(entry.Text) &&
+	return err == nil && len(id) == 16 && !entry.Time.IsZero() &&
+		h.current(entry, now) && historyEligible(entry.Text) &&
 		filepath.IsAbs(entry.CWD) && filepath.Clean(entry.CWD) == entry.CWD &&
 		filepath.IsAbs(entry.Scope.Root) && filepath.Clean(entry.Scope.Root) == entry.Scope.Root &&
 		(entry.Scope.Kind == "directory" && entry.Scope.Root == entry.CWD ||
 			entry.Scope.Kind == "repository" && historyWithin(entry.CWD, entry.Scope.Root))
+}
+
+func (h *replHistory) current(entry historyEntry, now time.Time) bool {
+	return !entry.Time.After(now) && now.Sub(entry.Time) < h.maxAge
 }
 
 func historyWithin(cwd, root string) bool {
@@ -421,8 +425,8 @@ func (h *replHistory) GetLine(index int) (string, error) {
 	if index < 0 || index >= len(h.view) {
 		return "", errors.New("history index out of range")
 	}
-	// Keep indices stable while editing; an expired slot becomes empty.
-	if h.disabled || !h.valid(h.view[index], h.now()) {
+	// Views contain validated entries; only time can invalidate a slot while editing.
+	if h.disabled || !h.current(h.view[index], h.now()) {
 		return "", nil
 	}
 	return h.view[index].Text, nil
@@ -439,7 +443,7 @@ func (h *replHistory) expireView() bool {
 	}
 	h.expireAt = time.Time{}
 	for i := range h.view {
-		if h.view[i].Text != "" && (h.view[i].Time.After(now) || now.Sub(h.view[i].Time) >= h.maxAge) {
+		if h.view[i].Text != "" && !h.current(h.view[i], now) {
 			h.view[i].Text = ""
 			changed = true
 		}

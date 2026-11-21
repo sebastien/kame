@@ -144,10 +144,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 		return session
 	}
 	defaultGrants := []eval.Grant{{Capability: eval.Read, Names: []string{options.Directory}}, {Capability: eval.Write, Names: []string{options.Directory}}, {Capability: eval.Run}}
-	grants := options.Grants
-	if len(grants) == 0 && !options.NoDefaultGrants {
-		grants = defaultGrants
-	}
+	grants := effectiveGrants(options.Grants, defaultGrants, options.NoDefaultGrants || options.ExplicitGrantsOnly)
 	environment := posix.Environment(mem.System)
 	environment = mergeEnvironment(environment, options.Environment)
 	// CompileMany remaps spans to authored offsets, not its combined parse text.

@@ -35,7 +35,7 @@ source to `args`. A `#!/usr/bin/env kash` shebang works in a file. A terminal
 with no source opens the REPL. Piped stdin with no source is read as Kash.
 
 Ordered fragments share one execution session. Kash-first sessions receive
-build-like default grants. Appending Kash to a value session retains that
+build-like default grants plus environment reads. Appending Kash to a value session retains that
 session's grant policy. Capability, timeout, and `-C` options apply across
 the session. [CLI reference](skills/kame/ref/cli.md)
 
@@ -95,7 +95,10 @@ A scalar contributes one argument, including any whitespace. A standalone
 text. A `${EXPR}` fragment in quotes or a mixed word renders like a Kame
 string. For example, `echo "Repos ${(dirs REPOS)}"` passes one argument
 containing the paths separated by spaces. Use `$...files` to pass each path in
-its own argument. Raw wildcard characters remain text.
+its own argument. Authored unquoted `*`, `**` and character classes in arguments
+expand to separate paths in the command's working directory. No matches is an
+error. Quote or escape a wildcard to pass it literally; substitutions are never
+globbed. Unquoted leading `~` or `~/` uses the session's `HOME`.
 
 An unbraced reference stops at `/`. In `$dir/file.txt`, only `dir` is
 substituted. `${EXPR}` accepts qualified names such as `${lib/name}` and calls

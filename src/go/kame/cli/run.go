@@ -366,6 +366,10 @@ func runEntry(inv *Invocation, name string) bool {
 }
 
 func runGrant(inv *Invocation, arg string) bool {
+	if arg == "--no-default-grants" {
+		inv.ExplicitGrantsOnly = true
+		return true
+	}
 	option, name := arg, ""
 	for i := 0; i < len(arg); i++ {
 		if arg[i] == '=' {

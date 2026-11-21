@@ -45,18 +45,19 @@ type SessionWork struct {
 
 // Session owns one compiled program; work is sequenced by its host driver.
 type Session struct {
-	Program               *Program
-	Work                  []SessionWork
-	JSON                  bool
-	reported              bool
-	active                int
-	JoinExpression        expr.Expr
-	Deferred              *eval.DeferScope
-	retained              map[*core.Node]*core.Root
-	Exit                  diagnostic.Termination
-	nextStatement         int
-	unit                  eval.ExecutionUnit
-	FollowDirectoryGrants bool
+	Program              *Program
+	Work                 []SessionWork
+	JSON                 bool
+	reported             bool
+	active               int
+	JoinExpression       expr.Expr
+	Deferred             *eval.DeferScope
+	retained             map[*core.Node]*core.Root
+	Exit                 diagnostic.Termination
+	nextStatement        int
+	unit                 eval.ExecutionUnit
+	FollowDirectoryRead  bool
+	FollowDirectoryWrite bool
 }
 
 func (s *Session) Directory() string { return s.unit.Directory(s.Program.Options.Directory) }
@@ -420,8 +421,10 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 		context.SupportsForeignShell = endpoint.SupportsForeignShell
 		context.CloseForeignShell = endpoint.CloseForeignShell
 	}
-	if state.Session.FollowDirectoryGrants {
+	if state.Session.FollowDirectoryRead || state.Session.FollowDirectoryWrite {
 		context.DirectoryGrantRoot = p.Options.Directory
+		context.FollowDirectoryRead = state.Session.FollowDirectoryRead
+		context.FollowDirectoryWrite = state.Session.FollowDirectoryWrite
 	}
 	context.CloneCallableAST = state.Owned
 	var r eval.Result

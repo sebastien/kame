@@ -256,7 +256,7 @@ func TestNativeInteractiveKashPersistentLatency(t *testing.T) {
 		s.waitFor("warmup-" + label + "\r\n")
 	}
 	warm := measure("after-1000")
-	t.Logf("PTY response (1ms polling): cold=%s after 1000 entries=%s", cold, warm)
+	t.Logf("PTY response (1ms polling): cold=%s after 1000 repeated submissions=%s", cold, warm)
 	if status := s.finish(); status != 0 {
 		t.Fatalf("persistent terminal session exited %d", status)
 	}

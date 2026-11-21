@@ -75,7 +75,7 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	}
 	e.EndArray()
 	e.Str("noDefaultGrants")
-	e.Bool(inv.NoDefaultGrants)
+	e.Bool(inv.NoDefaultGrants || inv.ExplicitGrantsOnly)
 	e.Str("requireRuleWork")
 	e.Bool(inv.RequireRuleWork)
 	e.Str("requireProcessWork")

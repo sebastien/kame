@@ -10,6 +10,7 @@ import (
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/internal/mem"
+	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/program"
 	"os"
@@ -45,7 +46,10 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 	dashboardLive = false
 	emitTaskbar(run.Err, 0, 0)
 	taskbarEnabled = false
-	session.FollowDirectoryGrants = len(run.Inv.Grants) == 0 && !run.Inv.NoDefaultGrants
+	if !run.Inv.NoDefaultGrants && !run.Inv.ExplicitGrantsOnly {
+		session.FollowDirectoryRead = !hasGrant(run.Inv.Grants, eval.Read)
+		session.FollowDirectoryWrite = !hasGrant(run.Inv.Grants, eval.Write)
+	}
 	repl := &replSession{run: run, shell: replShell{Session: session}, contextRequests: make(chan chan completionContext)}
 	session.Program.Eval.CommandAlias, session.Program.Eval.CommandAliasState = replCommandAlias, &repl.shell
 	session.Program.Eval.SessionTool, session.Program.Eval.SessionToolState = replSessionTool, &repl.shell

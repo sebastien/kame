@@ -628,12 +628,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 			if typedArgs {
 				if word != commandHead {
 					before, beforePaths := len(c.Effects), len(c.WritePaths)
-					r := p.commandWord(word, c, "argument")
+					r := p.commandArg(word, c, state.Cwd, true)
 					if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 						return r
 					}
 					rememberArgumentEffects(state, c, before, beforePaths)
-					if word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
+					if word.CommandGlob || word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
 						if r.Value.Kind != core.List {
 							r.Free(c.Run)
 							return failure(c.Run, "EXPR_INVALID", word.Span, "list spread requires a list")
@@ -668,9 +668,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 			if len(state.Argv) == 0 && head != nil {
 				r.Value = borrowValue(c.Run, *head)
 			} else {
-				r = p.commandWord(word, c, destination)
+				r = p.commandArg(word, c, state.Cwd, destination == "argument")
 			}
-			if r.Waiting || r.Diagnostic.Code != "" {
+			if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 				return r
 			}
 			rememberArgumentEffects(state, c, before, beforePaths)
@@ -1277,6 +1277,10 @@ func appendArgument(state *captureState, value core.Value) bool {
 }
 
 func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Result {
+	return p.renderCommandWord(e, c, destination, false)
+}
+
+func (p *Program) renderCommandWord(e *expr.Expr, c *Context, destination string, pattern bool) Result {
 	if e.Bool {
 		return p.evaluate(c.Engine, c.Scope, e.Parts[0].Expr, c)
 	}
@@ -1297,13 +1301,23 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 	for i := range e.Parts {
 		part := e.Parts[i]
 		if part.Expr == nil {
-			b.WriteString(part.Text)
+			if pattern && part.Spelling != "" {
+				b.WriteString(part.Spelling)
+			} else {
+				b.WriteString(part.Text)
+			}
 			continue
 		}
 		value := operands.Values[next]
 		next++
 		if part.Form == "${" {
-			writeInterpolationText(c.Run, &b, value)
+			if pattern {
+				var literal strings.Builder
+				writeInterpolationText(c.Run, &literal, value)
+				expr.WriteCommandPatternLiteral(&b, literal.String())
+			} else {
+				writeInterpolationText(c.Run, &b, value)
+			}
 			continue
 		}
 		if value.Kind == core.Nil {
@@ -1319,7 +1333,11 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 			b.Reset()
 			return failure(c.Run, "EXPR_INVALID", part.Span, "invalid command word")
 		}
-		b.WriteString(text)
+		if pattern {
+			expr.WriteCommandPatternLiteral(&b, text)
+		} else {
+			b.WriteString(text)
+		}
 		mem.FreeString(c.Run, text)
 	}
 	value := core.NewString(c.Run, b.String())

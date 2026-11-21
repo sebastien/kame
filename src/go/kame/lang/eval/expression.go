@@ -165,7 +165,7 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	case expr.CommandGraph, expr.CommandTest:
 		return p.capture(expression, context)
 	case expr.CommandWord:
-		return p.commandWord(expression, context, "argument")
+		return p.commandArg(expression, context, "", true)
 	case expr.CommandList:
 		if expression.ActionPrefix == "$&(" {
 			if context.PurePredicate || context.Phase != EvaluatePhase {

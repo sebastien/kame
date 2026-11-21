@@ -69,7 +69,7 @@ func environmentDenied(a mem.Allocator, span source.Span, name string) Result {
 		message += " for " + name
 	}
 	result := failure(a, "CAP_DENIED", span, message)
-	result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, "Use scoped --allow-env=NAME; explicit grants replace defaults. Definition configuration and child environment settings do not authorize environment reads."))
+	result.Diagnostic.Tips = append(result.Diagnostic.Tips, owned(a, "Use --allow-env=NAME to grant reads for that name. Definition configuration and child environment settings do not authorize environment reads."))
 	return result
 }
 

@@ -820,19 +820,69 @@ func descriptorBoundary(text string, pos int) bool {
 	return commandWhitespace(b) || b == '|' || b == '&' || b == ';' || b == ')' || b == ',' || b == '#' || b == '?' || b == '<' || b == '>'
 }
 
+// WriteCommandPatternLiteral appends bytes that cannot introduce pattern syntax.
+func WriteCommandPatternLiteral(b *strings.Builder, text string) {
+	for i := 0; i < len(text); i++ {
+		if strings.ContainsRune("\\*?[]{}", rune(text[i])) {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(text[i])
+	}
+}
+
+func commandGlobClass(text string) string {
+	for i := 1; i < len(text); i++ {
+		switch text[i] {
+		case ']':
+			if ValidGlob(text[:i+1]) {
+				return text[:i+1]
+			}
+			return ""
+		case ' ', '\t', '\r', '\n', '\'', '"', '$', '\\', '/', '|', '&', ';', '<', '>', '(', ')', ',':
+			return ""
+		}
+	}
+	return ""
+}
+
 func (p *parser) commandWord(allowSpread bool) *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
-	text := strings.Builder{}
+	var text, pattern strings.Builder
 	quoted, hadQuote, spread := false, false, false
 	singleQuoted := false
 	wordDelimiters := 0
 	var continuations []source.Span
 	partStart := p.pos
+	flush := func() {
+		if text.Len() != 0 {
+			p.addTextPart(e, &text, partStart, p.pos)
+			part := &e.Parts[len(e.Parts)-1]
+			if pattern.Len() != 0 {
+				part.Spelling = sourceText(p.a, pattern.String())
+			}
+		}
+		pattern.Reset()
+	}
+	literal := func(b byte) {
+		if strings.ContainsRune("\\*?[]{}", rune(b)) {
+			if pattern.Len() == 0 {
+				pattern.WriteString(text.String())
+			}
+			pattern.WriteByte('\\')
+		}
+		text.WriteByte(b)
+		if pattern.Len() != 0 {
+			pattern.WriteByte(b)
+		}
+	}
+	if allowSpread && p.s.Text[start] == '~' {
+		e.CommandHome = start+1 == len(p.s.Text) || p.s.Text[start+1] == '/' || descriptorBoundary(p.s.Text, start+1)
+	}
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
 		if b == '\n' && (quoted || singleQuoted) && p.indent != "" && strings.HasPrefix(p.s.Text[p.pos+1:], p.indent) {
-			text.WriteByte(b)
+			literal(b)
 			p.pos += 1 + len(p.indent)
 			continue
 		}
@@ -841,7 +891,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			if b == '\'' {
 				singleQuoted = false
 			} else {
-				text.WriteByte(b)
+				literal(b)
 			}
 			continue
 		}
@@ -861,7 +911,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			continue
 		}
 		if !quoted && b == '(' {
-			p.addTextPart(e, &text, partStart, p.pos)
+			flush()
 			from := p.pos
 			previousKash := p.kash
 			p.kash = true
@@ -906,7 +956,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 					p.error(from, p.pos+1, "invalid Kash quoted escape")
 				}
 			}
-			text.WriteByte(escaped)
+			literal(escaped)
 			p.pos++
 			continue
 		}
@@ -917,7 +967,7 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			}
 		}
 		if b == '$' {
-			p.addTextPart(e, &text, partStart, p.pos)
+			flush()
 			from := p.pos
 			form := "$"
 			var inner *Expr
@@ -965,6 +1015,17 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			break
 		}
 		if !quoted {
+			if b == '[' && allowSpread {
+				if class := commandGlobClass(p.s.Text[p.pos:]); class != "" {
+					e.CommandGlob = true
+					text.WriteString(class)
+					if pattern.Len() != 0 {
+						pattern.WriteString(class)
+					}
+					p.pos += len(class)
+					continue
+				}
+			}
 			if b == '{' || b == '[' {
 				wordDelimiters++
 			}
@@ -972,10 +1033,18 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				wordDelimiters--
 			}
 		}
-		text.WriteByte(b)
+		if !quoted && allowSpread && b == '*' {
+			e.CommandGlob = true
+			text.WriteByte(b)
+			if pattern.Len() != 0 {
+				pattern.WriteByte(b)
+			}
+		} else {
+			literal(b)
+		}
 		p.pos++
 	}
-	p.addTextPart(e, &text, partStart, p.pos)
+	flush()
 	text.Reset()
 	if quoted || singleQuoted {
 		p.error(start, p.pos, "unclosed Kash quoted word")

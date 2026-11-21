@@ -51,6 +51,7 @@ type Invocation struct {
 	DiagnosticFormat   string
 	Grants             []eval.Grant
 	NoDefaultGrants    bool
+	ExplicitGrantsOnly bool // --no-default-grants, independent of source language
 	RequireRuleWork    bool
 	RequireProcessWork bool
 	Shell              []string
