@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,28 @@ func TestSessionPathCompletionAndHighlighting(t *testing.T) {
 		if got := editor.highlight([]rune(name)); strings.Contains(got, replUnknownCommandStyle) {
 			t.Errorf("PATH=%q marked executable unknown: %q", path, got)
 		}
+	}
+}
+
+func TestPathExecutablesKeepFirstMatch(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "first")
+	second := filepath.Join(root, "second")
+	tool := writeReplTool(t, first, "shared-tool", "exit 0")
+	writeReplTool(t, second, "shared-tool", "exit 0")
+	if err := os.Symlink(tool, filepath.Join(first, "shared-link")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := completionContext{Directory: root, Path: "first:second:first"}
+	var names []string
+	for directory, entry := range pathExecutables(ctx, specName.MatchString) {
+		if directory != first {
+			t.Errorf("%s came from %s, want %s", entry.Name(), directory, first)
+		}
+		names = append(names, entry.Name())
+	}
+	if !slices.Equal(names, []string{"shared-link", "shared-tool"}) || resolveExecutable("shared-tool", ctx) != tool {
+		t.Fatalf("PATH order: %v", names)
 	}
 }
 

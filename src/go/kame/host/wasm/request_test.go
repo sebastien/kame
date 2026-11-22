@@ -151,6 +151,19 @@ func TestABIReadRequestPromotions(t *testing.T) {
 	}
 }
 
+func TestABICommandGlobKeepsPlainScanPayload(t *testing.T) {
+	const scan = "/project/**/*.txt"
+	a := mem.System
+	key := host.CommandDiscoveryKey(a, scan, "/project")
+	defer mem.FreeString(a, key)
+	payload := host.FilePayload(a, host.OpWildcard, key)
+	defer payload.Free(a)
+	request := host.Request{Kind: host.RequestReadFile, Payload: payload}
+	if kind, path := ABIRequestKind(request), ABIRequestPayload(request); kind != 48 || path != scan {
+		t.Fatalf("command glob request = %d %q, want 48 %q", kind, path, scan)
+	}
+}
+
 func TestForwardedDeclarationSnapshotsReuseScansAndRetainFailure(t *testing.T) {
 	a := mem.System
 	started := NewRuntime(a, `if true

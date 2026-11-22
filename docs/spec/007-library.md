@@ -422,6 +422,19 @@ value display and ordinary text conversion never add terminal escapes.
 Portable regular-expression matching and replacement are specified in
 `029-pattern-extensions.md`.
 
+Command spec operations convert completion data into spec records and Usage
+KDL; their contracts are in
+[058 Kash command completion](058-kash-completion.md#kame-built-cache):
+
+| Name | Contract |
+| --- | --- |
+| `parse-usage` | Usage KDL text or bytes to a spec record; malformed KDL is `PARSE_ERR` |
+| `render-usage` | A spec record to canonical Usage KDL |
+| `merge-usage` | A list of spec records, highest precedence first, merged; `nil` items are skipped |
+| `parse-man` | A man page, plain, gzip or bzip2, to a spec record; unreadable pages give an empty record |
+| `man-redirect` | The `.so` target of a man page that only includes another, or `nil` |
+| `parse-fish-completions` | `parse-fish-completions NAME TEXT`: the static fish `complete` declarations for `NAME` as a spec record |
+
 ### Pattern Matching, Capture and Substitution
 
 Pattern dispatch over ordered arms is the `match` keyword (`055` §4.5), not a

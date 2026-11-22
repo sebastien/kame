@@ -30,7 +30,17 @@ type Node struct {
 	Latest                  Value
 	Signature               Signature
 	Observations            []Observation
-	Current                 bool
+	// observationEpoch changes whenever Observations changes other than by
+	// appending, so a recorded prefix length still names the same facts.
+	observationEpoch int64
+	// observationOrder indexes Observations by key and aspect as of orderEpoch.
+	observationOrder []int
+	orderEpoch       int64
+	// The first settledDynamic Dynamic edges were current and valid when the
+	// engine's change stamp was settledChanges (see Engine.ready).
+	settledDynamic int
+	settledChanges int64
+	Current        bool
 	// ValidationPending keeps accepted state while dependencies are refreshed.
 	ValidationPending bool
 	DisableReuse      bool
@@ -83,6 +93,7 @@ func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
 		if n.Current {
 			n.Latest.Free(e.Alloc)
 			n.Current = false
+			e.changes++
 		}
 	}
 	e.releasePreviousDependencies(n)

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"os"
 	"path/filepath"
@@ -308,7 +309,17 @@ func (e *editorReader) complete(line []rune, cursor int) readline.Completions {
 		if e.color {
 			style = c.Style
 		}
-		values[i] = readline.Completion{Value: lead + c.Text, Display: c.Display, Description: c.Description, Tag: c.Tag, Style: style}
+		display := c.Display
+		if display == "" {
+			display = c.Text
+		}
+		// A completed word is followed by a space unless it is a directory;
+		// readline drops that space again when the next key is a space.
+		value := lead + c.Text
+		if !strings.HasSuffix(value, "/") {
+			value += " "
+		}
+		values[i] = readline.Completion{Value: value, Display: display, Description: c.Description, Tag: c.Tag, Style: style}
 	}
 	completions := readline.CompleteRaw(values).NoSpace('/')
 	completions.PREFIX = lead + word
@@ -361,7 +372,10 @@ func (e *editorReader) commandKnown(text string, token script.KashToken) bool {
 		token.End < len(text) && !strings.ContainsRune(" \t\n;|&)<>", rune(text[token.End])) {
 		return true
 	}
-	word := completionUnescape(text[token.Start:token.End])
+	word, literal := expr.LiteralCommandWord(text[token.Start:token.End])
+	if !literal {
+		return true
+	}
 	if replSessionCommands[word] != "" {
 		return true
 	}
@@ -370,7 +384,10 @@ func (e *editorReader) commandKnown(text string, token script.KashToken) bool {
 		return true
 	}
 	if strings.Contains(word, "/") {
-		_, err := os.Stat(completionDirectory(word, ctx))
+		if !filepath.IsAbs(word) {
+			word = filepath.Join(ctx.Directory, word)
+		}
+		_, err := os.Stat(word)
 		return err == nil
 	}
 	if known, ok := e.known[word]; ok {

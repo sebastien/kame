@@ -19,60 +19,61 @@ import (
 	"strings"
 )
 
-func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, includes []diagnostic.Frame) program.PredicateResult {
-	return s.compositionValue(condition, out, program.CompileSource{Name: authored.Name, Text: authored.Text, Includes: includes}, authored, false)
-}
-
-func (s *buildSource) compositionValue(expression *expr.Expr, out io.Writer, operand program.CompileSource, authored *source.Source, batch bool) program.PredicateResult {
-	sources := slices.Clone(s.SelectionPrefix)
-	for i := range s.Parts {
-		sources = selectionDefinitions(sources, s.Parts[i], s.Parts[i].Lang)
-	}
-	defer mem.FreeSlice(nil, sources)
+func (s *buildSource) compositionInputs(file sourceFile, expression *expr.Expr, out io.Writer) ([]program.CompileSource, program.CompileSource, string) {
 	directory := s.SelectionDirectory
-	ownedDirectory := false
-	buffer := mem.AllocSlice[byte](mem.System, 4096, 4096)
-	defer mem.FreeSlice(mem.System, buffer)
 	if !path.IsAbs(directory) {
 		cwd, err := os.Getwd()
 		if err != nil || cwd == "" {
 			sourceError(out, "FS_ERR", "cannot resolve configuration evaluation directory", s.JSON)
 			s.Status = 1
-			return program.PredicateResult{Diagnostic: diagnostic.Diagnostic{Code: "FS_ERR"}}
+			return nil, program.CompileSource{}, ""
 		}
 		directory = path.Join(cwd, directory)
-		ownedDirectory = true
+	} else {
+		directory = cloneCommandText(directory)
 	}
+	sources := slices.Clone(s.SelectionPrefix)
+	for i := range s.Parts {
+		sources = selectionDefinitions(sources, s.Parts[i], s.Parts[i].Lang)
+	}
+	span := expression.Span
+	operand := program.CompileSource{Name: file.Name, Text: file.Text[span.Start:span.End], Offset: span.Start, SourceDirectory: file.SourceDirectory, Includes: file.Includes}
+	return sources, operand, directory
+}
+
+func (s *buildSource) compositionDiscovery(directory string) program.Options {
 	grants := effectiveGrants(s.SelectionGrants, []eval.Grant{{Capability: eval.Read, Names: []string{directory}}}, s.SelectionNoDefault)
-	discovery := program.Options{Host: posix.New(mem.System), Grants: grants}
-	operand.Offset = expression.Span.Start
-	operand.Text = operand.Text[expression.Span.Start:expression.Span.End]
-	evaluate := program.TrackedCompositionCondition
-	if batch {
-		evaluate = program.CompositionIncludePaths
-	}
-	result := evaluate(mem.System, sources, operand, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
-	s.Discoveries = append(s.Discoveries, result.Discoveries...)
-	mem.FreeSlice(nil, result.Discoveries)
-	result.Discoveries = nil
-	if ownedDirectory {
-		mem.FreeString(mem.System, directory)
-	}
-	if result.Diagnostic.Code != "" {
-		emitDiagnostic(out, result.Diagnostic, s.JSON, authored)
+	return program.Options{Host: posix.New(mem.System), Grants: grants}
+}
+
+func (s *buildSource) recordCompositionResult(d diagnostic.Diagnostic, discoveries []program.DeclarationSnapshot, out io.Writer, authored *source.Source) {
+	s.Discoveries = append(s.Discoveries, discoveries...)
+	mem.FreeSlice(nil, discoveries)
+	if d.Code != "" {
+		emitDiagnostic(out, d, s.JSON, authored)
 		s.Status = 1
 	}
-	return result
+}
+
+func (s *buildSource) compositionCondition(file sourceFile, condition *expr.Expr, out io.Writer, authored *source.Source) (bool, bool) {
+	sources, operand, directory := s.compositionInputs(file, condition, out)
+	if directory == "" {
+		return false, false
+	}
+	defer mem.FreeString(mem.System, directory)
+	defer mem.FreeSlice(nil, sources)
+	discovery := s.compositionDiscovery(directory)
+	result := program.TrackedCompositionCondition(mem.System, sources, operand, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
+	defer result.Diagnostic.Free(mem.System)
+	s.recordCompositionResult(result.Diagnostic, result.Discoveries, out, authored)
+	return result.Selected, result.Diagnostic.Code == ""
 }
 
 func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Signature, branches []script.DeclarationBranch, out io.Writer, authored *source.Source, lang string) bool {
 	for _, branch := range branches {
 		if branch.Condition != nil {
-			result := s.compositionCondition(branch.Condition, out, authored, s.Files[fileIndex].Includes)
-			selected := result.Selected
-			failed := result.Diagnostic.Code != ""
-			result.Diagnostic.Free(mem.System)
-			if failed {
+			selected, ok := s.compositionCondition(s.Files[fileIndex], branch.Condition, out, authored)
+			if !ok {
 				return false
 			}
 			if !selected {
@@ -86,13 +87,13 @@ func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Sign
 					return false
 				}
 			case script.Composition, script.Rule, script.DeclarationFor, script.Generate:
-				if item.Kind == script.Composition && script.CompositionLoadsSources(item.Branches) {
+				if item.ExpandsSources() {
 					if !s.expandSourceComposition(fileIndex, signature, item.Branches, out, authored, lang) {
 						return false
 					}
 					continue
 				}
-				s.RuleWork = s.RuleWork || declaresRuleWork(item)
+				s.RuleWork = s.RuleWork || item.DeclaresRuleWork()
 				file := s.Files[fileIndex]
 				s.Parts = append(s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[item.Span.Start:item.Span.End], Lang: "km", Signature: signature, SourceDirectory: file.SourceDirectory, Offset: item.Span.Start, Includes: file.Includes})
 			case script.DeclarationLet:
@@ -106,38 +107,26 @@ func (s *buildSource) expandSourceComposition(fileIndex int, signature core.Sign
 	return true
 }
 
-func declaresRuleWork(item script.ScriptItem) bool {
-	switch item.Kind {
-	case script.Rule, script.Generate:
-		return true
-	case script.Include:
-		return item.Expression != nil
-	case script.DeclarationFor:
-		for _, child := range item.Loop.Items {
-			if declaresRuleWork(child) {
-				return true
-			}
-		}
-	case script.Composition:
-		for _, branch := range item.Branches {
-			for _, child := range branch.Items {
-				if declaresRuleWork(child) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func (s *buildSource) expandSourceIncludeItem(fileIndex int, item script.ScriptItem, out io.Writer, authored *source.Source, lang string) bool {
 	if !item.BatchInclude {
 		return s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, out, authored, lang)
 	}
-	file := s.Files[fileIndex]
-	result := s.compositionValue(item.Expression, out, program.CompileSource{Name: file.Name, Text: file.Text, SourceDirectory: file.SourceDirectory, Includes: file.Includes}, authored, true)
+	sources, operand, directory := s.compositionInputs(s.Files[fileIndex], item.Expression, out)
+	if directory == "" {
+		return false
+	}
+	defer mem.FreeString(mem.System, directory)
+	defer mem.FreeSlice(nil, sources)
+	discovery := s.compositionDiscovery(directory)
+	result := program.CompositionIncludePaths(mem.System, sources, operand, s.SelectionDefines, s.SelectionEnvironment, directory, &discovery)
 	defer result.Diagnostic.Free(mem.System)
 	defer mem.FreeSlice(nil, result.Paths)
+	defer func() {
+		for _, name := range result.Paths {
+			mem.FreeString(mem.System, name)
+		}
+	}()
+	s.recordCompositionResult(result.Diagnostic, result.Discoveries, out, authored)
 	if result.Diagnostic.Code != "" {
 		return false
 	}

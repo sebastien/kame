@@ -47,7 +47,10 @@ func ABIRequestKind(r host.Request) uint32 {
 			return 30
 		case "readlink":
 			return 31
-		case "wildcard":
+		case host.OpWildcard:
+			if _, _, command := host.CommandDiscovery(host.PayloadText(r.Payload, host.FieldDiscoveryKey)); command {
+				return 48
+			}
 			return 6
 		case host.OpDeclarationFiles:
 			return 45

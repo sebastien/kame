@@ -47,6 +47,8 @@ func (p *Program) pipeInputValue(scope *Scope, c *Context) Result {
 	if !r.Waiting && !r.Completed && r.Stream == nil {
 		input.result = r
 		input.result.Value = borrowValue(scope.Alloc, r.Value)
+		// Each resumption reads the input again; share it so reads are O(1).
+		input.result.Value.Share(scope.Alloc)
 		input.result.Diagnostic = r.Diagnostic.Clone(scope.Alloc)
 		input.ready = true
 		if c.Engine != nil {

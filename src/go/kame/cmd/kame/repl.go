@@ -11,6 +11,7 @@ import (
 	"kame/host/posix"
 	"kame/internal/mem"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/program"
 	"os"
@@ -63,6 +64,7 @@ func runInteractive(run *sessionRun, in io.Reader) int {
 		terminal, _ = reader.(*editorReader)
 	}
 	repl.options = loadReplOptions(run.Err)
+	repl.specs = newCompletionSpecs()
 	if terminal != nil {
 		// Foreground commands receive the terminal, and entries are jobs.
 		session.Program.Eval.Terminal = true
@@ -181,6 +183,7 @@ type replSession struct {
 	contextRequests chan chan completionContext
 	history         *replHistory
 	options         *replOptions
+	specs           *completionSpecs
 }
 
 // warnStopped reports stopped jobs at the first attempt to end the session.
@@ -220,9 +223,40 @@ func (s *replSession) runEntry(name, text, parsed string, background bool) (int,
 	}
 	job := s.newJob(text, first, background)
 	if background {
+		s.refreshSpecs(text)
 		return 0, false
 	}
-	return s.foreground(job, false)
+	status, stop := s.foreground(job, false)
+	s.refreshSpecs(text)
+	return status, stop
+}
+
+// refreshSpecs refreshes the completion specs of the external commands an
+// entry names, in the background.
+func (s *replSession) refreshSpecs(text string) {
+	if s.specs == nil || !s.jobControl {
+		return
+	}
+	path, _ := s.shell.lookup("PATH")
+	ctx := completionContext{Directory: s.run.Session.Directory(), Path: path}
+	var names []string
+	for _, token := range script.KashTokens(text) {
+		if token.Kind != script.KashTokenCommand {
+			continue
+		}
+		name, literal := expr.LiteralCommandWord(text[token.Start:token.End])
+		if !literal {
+			continue
+		}
+		if alias := s.shell.aliases[name]; len(alias) != 0 {
+			name = alias[0].Text
+		}
+		name = strings.TrimPrefix(name, "x/")
+		if specName.MatchString(name) && replSessionCommands[name] == "" && resolveCommand(name, ctx) {
+			names = append(names, name)
+		}
+	}
+	s.specs.refreshUsed(names)
 }
 
 func (s *replSession) sessionCommand(name, text, parsed string, fields []string) (bool, int, bool) {
@@ -245,6 +279,9 @@ func (s *replSession) sessionCommand(name, text, parsed string, fields []string)
 	}
 	if fields[0] == "explain" && !strings.ContainsRune(text, '\n') {
 		return true, s.explain(len(fields)), false
+	}
+	if fields[0] == "complete" && !strings.ContainsRune(text, '\n') {
+		return true, s.specs.command(fields[1:], s.completion(), run.Out, run.Err), false
 	}
 	if fields[0] == "alias" || fields[0] == "unalias" {
 		status, stop := s.alias(fields[0], name, text, parsed)
@@ -439,7 +476,7 @@ func (s *replSession) completion() completionContext {
 		}
 		aliases[name] = words
 	}
-	return completionContext{Directory: s.run.Session.Directory(), Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases}
+	return completionContext{Directory: s.run.Session.Directory(), Home: home, Path: path, Names: p.Eval.InteractiveNames(), Aliases: aliases, Specs: s.specs}
 }
 
 // replEntry is one entry read from the input: Kash text, the byte offset of

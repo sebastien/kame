@@ -61,7 +61,7 @@ func (p *Program) awaitsJob(node *core.Node, seen map[*core.Node]bool) bool {
 			return true
 		}
 	}
-	for _, edge := range node.Dynamic {
+	for _, edge := range p.Engine.UnsettledDynamic(node) {
 		if (!edge.Current || edge.ValidationPending) && p.unfinishedJob(edge, seen) {
 			return true
 		}

@@ -193,8 +193,50 @@ func CompositionNeedsScope(branches []DeclarationBranch) bool {
 func CompositionLoadsSources(branches []DeclarationBranch) bool {
 	for _, branch := range branches {
 		for _, item := range branch.Items {
-			if item.Kind == Include || item.Kind == Composition && CompositionLoadsSources(item.Branches) {
+			if item.LoadsSources() {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+// LoadsSources reports whether the item is an include or a conditional with includes.
+func (item ScriptItem) LoadsSources() bool {
+	return item.Kind == Include || item.Kind == Composition && CompositionLoadsSources(item.Branches)
+}
+
+// ExpandsSources reports whether the source loader, rather than declaration
+// registration, must handle the item.
+func (item ScriptItem) ExpandsSources() bool {
+	switch item.Kind {
+	case Include:
+		return item.Expression == nil || item.BatchInclude
+	case Composition:
+		return CompositionLoadsSources(item.Branches) && !CompositionNeedsScope(item.Branches)
+	}
+	return false
+}
+
+// DeclaresRuleWork reports whether the item can register rules after flattening.
+func (item ScriptItem) DeclaresRuleWork() bool {
+	switch item.Kind {
+	case Rule, Generate:
+		return true
+	case Include:
+		return item.Expression != nil
+	case DeclarationFor:
+		for _, child := range item.Loop.Items {
+			if child.DeclaresRuleWork() {
+				return true
+			}
+		}
+	case Composition:
+		for _, branch := range item.Branches {
+			for _, child := range branch.Items {
+				if child.DeclaresRuleWork() {
+					return true
+				}
 			}
 		}
 	}

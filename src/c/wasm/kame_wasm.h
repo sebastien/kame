@@ -106,7 +106,9 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_PROCESS_POLICIES = 34,
   KAME_WASM_REQUEST_PROCESS_LOSSY = 35,
   /* Bounded I/O exchange with an evaluator-owned process stage. */
-  KAME_WASM_REQUEST_PROCESS_STAGE_IO = 46
+  KAME_WASM_REQUEST_PROCESS_STAGE_IO = 46,
+  /* Same path payload and completion as EXPAND_GLOB; skip implicit dot paths. */
+  KAME_WASM_REQUEST_COMMAND_GLOB = 48
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

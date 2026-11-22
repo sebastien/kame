@@ -61,3 +61,22 @@ printenv KASH_SOURCE_MODE
 		}
 	}
 }
+
+func TestNativeKashSourceRereadsRevisedFile(t *testing.T) {
+	dir := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(dir, "profile.kash"), `set env/KASH_SOURCE_VALUE = "before"`+"\n")
+	t.Setenv("KASH_SOURCE_VALUE", "initial")
+	t.Setenv("KASH_INIT", "")
+	code := `source ./profile.kash
+source ./profile.kash
+printenv KASH_SOURCE_VALUE
+/bin/echo 'set env/KASH_SOURCE_VALUE = "after"' > ./profile.kash
+source ./profile.kash
+printenv KASH_SOURCE_VALUE
+`
+	var out, errOut bytes.Buffer
+	runNativeCLIIn(t, dir, []string{"do", "run", "-i"}, strings.NewReader(code), &out, &errOut)
+	if out.String() != "before\nafter\n" || errOut.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}

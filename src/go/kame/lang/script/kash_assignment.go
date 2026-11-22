@@ -229,6 +229,16 @@ func (c *assignmentCheck) walk(e *expr.Expr, scope *assignmentScope) {
 		}
 		child := scope.child(false)
 		child.bind(e.Text, 0, false)
+		if e.Kind == expr.KashFor {
+			iterable := expr.Ungroup(branch.Items[0])
+			if iterable != nil && iterable.Kind == expr.Path && iterable.Pattern != nil && iterable.Pattern.References == 0 {
+				for _, name := range iterable.Pattern.Names {
+					if name != "" {
+						child.bind(name, 0, false)
+					}
+				}
+			}
+		}
 		c.block(branch.Body, child)
 		return
 	case expr.KashMatch:

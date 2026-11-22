@@ -110,9 +110,33 @@ func sameEnvironment(left []string, right []string) bool {
 
 // Bind lazy definition identity to the same snapshot as recipe evaluation.
 // The digest contains no plaintext environment values in graph/event keys.
+// definitionEnvironment caches the last definition namespace and its inputs.
+type definitionEnvironment struct {
+	base      *string
+	length    int
+	cwd       string
+	phase     eval.Phase
+	service   int
+	namespace [32]byte
+}
+
 func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
 	_ = p
 	if !context.HasEnvironment {
+		return
+	}
+	service := 0
+	for i := range context.RuleFrames {
+		if context.RuleFrames[i].ServiceRule {
+			service++
+		}
+	}
+	// Contexts share their environment slice and never mutate it in place, so
+	// the identity is reused while the same backing array and inputs recur.
+	cache := &p.definitionEnvironment
+	if len(context.Environment) != 0 && cache.base == &context.Environment[0] && cache.length == len(context.Environment) && cache.cwd == context.Cwd && cache.phase == context.Phase && cache.service == service {
+		context.DefinitionNamespace = cache.namespace
+		context.HasDefinitionNamespace = true
 		return
 	}
 	var identity hashSink
@@ -130,4 +154,8 @@ func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
 	}
 	identity.state.Sum(context.DefinitionNamespace[:])
 	context.HasDefinitionNamespace = true
+	if len(context.Environment) != 0 {
+		mem.FreeString(p.Alloc, cache.cwd)
+		*cache = definitionEnvironment{base: &context.Environment[0], length: len(context.Environment), cwd: cloneText(p.Alloc, context.Cwd), phase: context.Phase, service: service, namespace: context.DefinitionNamespace}
+	}
 }

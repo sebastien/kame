@@ -90,8 +90,8 @@ for backend in native wasm; do
 	check "$KASH_TEST_ENV" 'printf "%s" ${env/KASH_TEST_ENV}' --allow-run --allow-env=KASH_TEST_ENV
 	check "$KASH_TEST_ENV" 'KASH_TEST_ENV: child printf "%s" ${env/KASH_TEST_ENV}'
 	reject CAP_DENIED 'printf "%s" ${env/KASH_TEST_ENV}' --allow-run --allow-env=KASH_TEST_OTHER
-	reject CAP_DENIED 'let value = env/KASH_TEST_ENV ?? "forbidden"; printf "%s" $value' --allow-run
-	reject CAP_DENIED 'printf "%s" $(printf "%s" ${env/KASH_TEST_ENV})' --allow-run
+	reject CAP_DENIED 'let value = env/KASH_TEST_ENV ?? "forbidden"; printf "%s" $value' --no-default-grants --allow-run
+	reject CAP_DENIED 'printf "%s" $(printf "%s" ${env/KASH_TEST_ENV})' --no-default-grants --allow-run
 	check 'host value with spacestail' 'printf "%s" ${env/KASH_TEST_ENV} $(printf tail)'
 	check "$KASH_TEST_ENV" $'if true\n\tlet value = env/KASH_TEST_ENV\n\tprintf "%s" $value'
 	check found $'match env/KASH_TEST_ENV\n\t"host value with spaces" =>\n\t\tprintf found'

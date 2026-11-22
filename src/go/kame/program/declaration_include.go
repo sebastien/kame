@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/internal/mem"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"path"
@@ -21,13 +22,18 @@ func (p *Program) registerDeclarationInclude(item script.ScriptItem, scope *decl
 		location.Source, location.Span = author.Name, item.Span
 	}
 	span := diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
-	includeError := func(code, message string) diagnostic.Diagnostic {
-		d := failureAt(p.Alloc, code, span, message)
+	locateError := func(d *diagnostic.Diagnostic) {
+		d.Span = span
 		d.Source = cloneText(p.Alloc, location.Source)
-		appendIncludeFrames(p.Alloc, &d, author.Includes)
+		appendIncludeFrames(p.Alloc, d, author.Includes)
+	}
+	includeError := func(code, message string) diagnostic.Diagnostic {
+		d := failure(p.Alloc, code, message)
+		locateError(&d)
 		return d
 	}
 	name := item.Include
+	readDenied := ""
 	if item.BatchInclude {
 		return includeError("FEATURE_UNSUP", "batch includes require file source composition before declaration registration")
 	}
@@ -41,27 +47,14 @@ func (p *Program) registerDeclarationInclude(item script.ScriptItem, scope *decl
 		if !rootedIncludePath(r.Value) {
 			return includeError("EXPR_INVALID", "computed include requires a rooted local Path")
 		}
+		readDenied = "computed include requires read access; grant the required path with --allow-read=ROOT"
 	}
-	if suffix, homeRelative := strings.CutPrefix(name, "~/"); homeRelative {
-		home, _ := p.configuredEnvironment("HOME")
-		if !path.IsAbs(home) {
-			return includeError("FS_ERR", "cannot resolve home directory for include")
-		}
-		name = path.Join(home, suffix)
-	} else if path.IsAbs(name) {
-		name = path.Clean(name)
-	} else {
-		if author.Directory == "" {
-			return includeError("RES_INVALID", "relative include requires a file-backed source")
-		}
-		name = path.Join(author.Directory, name)
+	name, d := p.resolveDeclarationIncludePath(name, author.Directory, readDenied)
+	if d.Code != "" {
+		locateError(&d)
+		return d
 	}
-	if item.Expression != nil {
-		c := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
-		if !c.Allows(eval.Read, name) {
-			return includeError("CAP_DENIED", "computed include requires read access; grant the required path with --allow-read=ROOT")
-		}
-	}
+	defer mem.FreeString(p.Alloc, name)
 	if script.IsKashSource(author.Name) && !script.IsKashSource(name) {
 		return includeError("RES_INVALID", "Kash includes require a .kash or .ksh source")
 	}
@@ -149,6 +142,33 @@ func rootedIncludePath(value core.Value) bool {
 	name := value.Text
 	return value.Kind == core.Path && !strings.ContainsRune(name, 0) &&
 		(path.IsAbs(name) || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "~/"))
+}
+
+// Resolve against the author, then check the canonical path for computed
+// operands. Literal sources use the host's source-loading policy.
+func (p *Program) resolveDeclarationIncludePath(name string, directory string, readDenied string) (string, diagnostic.Diagnostic) {
+	if suffix, homeRelative := strings.CutPrefix(name, "~/"); homeRelative {
+		home, _ := p.configuredEnvironment("HOME")
+		if !path.IsAbs(home) {
+			return "", failure(p.Alloc, "FS_ERR", "cannot resolve home directory for include")
+		}
+		name = path.Join(home, suffix)
+	} else if path.IsAbs(name) {
+		name = path.Clean(name)
+	} else {
+		if directory == "" {
+			return "", failure(p.Alloc, "RES_INVALID", "relative include requires a file-backed source")
+		}
+		name = path.Join(directory, name)
+	}
+	if readDenied != "" {
+		c := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
+		if !c.Allows(eval.Read, name) {
+			mem.FreeString(p.Alloc, name)
+			return "", failure(p.Alloc, "CAP_DENIED", readDenied)
+		}
+	}
+	return name, diagnostic.Diagnostic{}
 }
 
 func (p *Program) includeScopeSignature(scope declarationScope, signature core.Signature, name string) core.Signature {

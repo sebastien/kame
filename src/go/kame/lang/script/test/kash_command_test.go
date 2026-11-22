@@ -8,7 +8,7 @@ import (
 func TestKashInteractiveBuiltinsRequireASession(t *testing.T) {
 	for _, input := range []string{
 		"jobs", "fg %1", "bg %1", "alias shortcut = [\"echo\"]", "unalias shortcut",
-		"history", "option", "explain", "echo a | jobs", "let value = $(jobs)",
+		"history", "option", "explain", "complete --show git", "echo a | jobs", "let value = $(jobs)",
 	} {
 		for _, parse := range []func() *script.Script{
 			func() *script.Script { return script.ParseKash(nil, "commands.kash", input) },

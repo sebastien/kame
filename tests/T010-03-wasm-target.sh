@@ -111,6 +111,6 @@ reject_run() {
 	fi
 }
 reject_run -f values.km -f build.km default
-reject_run --allow-read=. -f build.km default
+reject_run --no-default-grants --allow-read=. -f build.km default
 
 test-end

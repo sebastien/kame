@@ -407,6 +407,14 @@ of the exact matched list using the query/copy convention. A settled resource's
 `signature` field uses the same digest. The query does not change watch state.
 Pass the original snapshot name unchanged in invalidation batches.
 
+Kash command-word globs use kind 48 instead of ordinary wildcard kind 6.
+The payload is the same plain scan pattern and completion is a JSON array of
+path strings. Do not match or descend into a dot-prefixed entry unless the
+corresponding component starts with a literal dot. `**` never consumes a
+hidden component, but subsequent explicit components can. Command-glob watch
+records also include `commandGlob: true`; use the same traversal for their
+membership scans. Ordinary wildcards keep kind 6 and include dot-prefixed paths.
+
 Declaration-time `files`, `dirs`, and `wildcard` use read request kind 45.
 The payload for regular-file membership is the candidate wildcard. For other
 kind masks the wildcard follows NUL, one lowercase hexadecimal mask digit,

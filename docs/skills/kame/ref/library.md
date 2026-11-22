@@ -20,6 +20,10 @@ left and right operands. Variadic operations such as `str`, `concat`,
 | `str` | `(str VALUE...)` | Concatenate textual scalars without separators; reject collections. |
 | `json` | `(json VALUE)` | Encode JSON-compatible values with stable lexical record key order. |
 | `parse-json` | `(parse-json TEXT)` | Parse JSON into typed Kame values; malformed input reports `JSON_INVALID`. |
+| `parse-usage`, `render-usage` | `(parse-usage KDL)`, `(render-usage SPEC)` | Convert between Usage KDL and command spec records (`name`, `help`, `aliases`, `flags`, `args`, `commands`). [Completion](../../../spec/058-kash-completion.md) |
+| `merge-usage` | `(merge-usage [SPEC...])` | Merge specs, highest precedence first; `nil` items are skipped. |
+| `parse-man`, `man-redirect` | `(parse-man PAGE)`, `(man-redirect PAGE)` | A man page's options and synopsis as a spec record (empty when unreadable); the `.so` target of an include-only page, or `nil`. Plain, gzip and bzip2 pages. |
+| `parse-fish-completions` | `(parse-fish-completions NAME TEXT)` | The static fish `complete` declarations for `NAME` as a spec record. |
 | `fail!` | `(fail! MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
 | `get` | `(get KEY [DEFAULT] RECORD)` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |

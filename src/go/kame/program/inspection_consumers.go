@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/internal/mem"
 	"kame/lang/rule"
 	"kame/lang/template"
@@ -542,6 +543,9 @@ func (g *inspectionGraph) consumerDepths() []int {
 // Match glob path segments with the host's wildcard semantics: ** includes
 // zero or more directories; ordinary * never crosses a directory separator.
 func inspectionGlobMatch(pattern, name string) bool {
+	if scan, _, command := host.CommandDiscovery(pattern); command {
+		return host.MatchCommandGlob(scan, name)
+	}
 	end := strings.IndexByte(pattern, '/')
 	if end < 0 {
 		if pattern == "**" {

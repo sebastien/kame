@@ -1419,11 +1419,13 @@ func TestNativeComputedDeclarationIncludes(t *testing.T) {
 	directory := t.TempDir()
 	nativeCLIWrite(t, filepath.Join(directory, "a.km"), `rule ./from-a.txt = module`)
 	nativeCLIWrite(t, filepath.Join(directory, "b.km"), `rule ./from-b.txt = module`)
-	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `def enabled module = module != "missing"
+	nativeCLIWrite(t, filepath.Join(directory, "selection.km"), `def selected-path module = ./${module}.km`)
+	nativeCLIWrite(t, filepath.Join(directory, "Kamefile"), `include ./selection.km
+def enabled module = module != "missing"
 if true
   for module in ["b", "missing", "a"]
     if (enabled module)
-      include ./${module}.km
+      include (selected-path module)
   include? (joinpath ./ "optional.km")
   include? ./literal-optional.km
 `)

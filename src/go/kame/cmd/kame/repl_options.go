@@ -187,7 +187,7 @@ func (o *replOptions) save(name, value string) error {
 			fmt.Fprintf(&data, "%s: %s\n", option.name, value)
 		}
 	}
-	if err := historyReplace(o.path, []byte(data.String())); err != nil {
+	if err := replacePrivateFile(o.path, []byte(data.String())); err != nil {
 		return err
 	}
 	o.global = values

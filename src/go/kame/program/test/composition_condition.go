@@ -2,6 +2,7 @@ package programcheck
 
 import (
 	"kame/diagnostic"
+	"kame/internal/mem"
 	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/operations"
@@ -43,6 +44,25 @@ func TestCompositionConditionUsesEvaluationDirectory(t *testing.T) {
 		t.Error("declaration predicate lost evaluation directory")
 	}
 	result.Diagnostic.Free(a)
+
+	// Batch paths resolve against the operand's file, not the predicate cwd.
+	input := program.CompileSource{Name: "/sdk/main.km", SourceDirectory: "/sdk", Offset: 30, Text: `[./sub/../child.km, ~/other.km]`}
+	discovery := program.Options{Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"/sdk"}}}}
+	batch := program.CompositionIncludePaths(a, nil, input, nil, []string{"HOME=/sdk"}, "/workspace/project", &discovery)
+	if batch.Diagnostic.Code != "" || len(batch.Paths) != 2 || batch.Paths[0] != "/sdk/child.km" || batch.Paths[1] != "/sdk/other.km" {
+		t.Error("batch include lost its authored directory or HOME: " + batch.Diagnostic.Code)
+	}
+	for _, name := range batch.Paths {
+		mem.FreeString(a, name)
+	}
+	mem.FreeSlice(nil, batch.Paths)
+	batch.Diagnostic.Free(a)
+
+	batch = program.CompositionIncludePaths(a, nil, input, nil, []string{"HOME=/outside"}, "/workspace/project", &discovery)
+	defer batch.Diagnostic.Free(a)
+	if batch.Diagnostic.Code != "CAP_DENIED" || len(batch.Paths) != 0 || batch.Diagnostic.Source != input.Name || batch.Diagnostic.Span.Start != input.Offset {
+		t.Error("batch include must reject the whole batch and locate the operand when a path is denied")
+	}
 }
 
 func TestCompositionConditionSourcesLargePrefix(t *testing.T) {

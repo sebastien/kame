@@ -114,11 +114,11 @@ KASH
 	invoke --json ../scripts/broken.kash >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q '"kind":"include"' "$work/out" "$work/err" && grep -q 'lib/broken.kash' "$work/out" "$work/err"; then test-ok "$backend runtime failure retains included source and frame"; else test-fail "$backend runtime include provenance"; cat "$work/out" "$work/err"; fi
 	test-step "$backend includes preserve execution authority"
-	"${runner[@]}" do run -C "$work/caller" --allow-run ../scripts/main.kash >"$work/out" 2>"$work/err"
+	"${runner[@]}" do run -C "$work/caller" --no-default-grants --allow-run ../scripts/main.kash >"$work/out" 2>"$work/err"
 	printf '%s\n%s\n%s' "$work/scripts/lib" "$work/scripts/lib/nested" "$work/scripts" >"$work/expected"
 	if cmp -s "$work/expected" "$work/out"; then test-ok "$backend module/dir needs no filesystem grant"; else test-fail "$backend module/dir unnecessarily needs read authority"; fi
 	status=0
-	"${runner[@]}" do run -C "$work/caller" --allow-read ../scripts/main.kash >"$work/out" 2>"$work/err" || status=$?
+	"${runner[@]}" do run -C "$work/caller" --no-default-grants --allow-read ../scripts/main.kash >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend libraries cannot grant process authority"; else test-fail "$backend authority ($status)"; cat "$work/err"; fi
 done
 test-end

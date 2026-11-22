@@ -69,7 +69,7 @@ func startTerminalSessionAnswering(t *testing.T, answer func() string, binary, d
 	if err := os.MkdirAll(historyDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "INPUTRC=/dev/null", "KASH_HISTORY="+historyDir+"/history"), env...)
+	command.Dir, command.Env = directory, append(append(os.Environ(), "TERM=dumb", "KASH_INIT=", "INPUTRC=/dev/null", "KASH_HISTORY="+historyDir+"/history", "XDG_CACHE_HOME="+filepath.Join(directory, ".kash-cache")), env...)
 	command.Stdin, command.Stdout, command.Stderr = device, device, device
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {
@@ -539,6 +539,68 @@ func TestNativeInteractiveKashCompletion(t *testing.T) {
 	}
 }
 
+// A unique completion is followed by a space, which a typed space replaces;
+// a directory is not.
+func TestNativeInteractiveKashCompletionSpace(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/uniquefile.txt", "")
+	if err := os.Mkdir(directory+"/subdir", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, nil, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("echo uniq\t")
+	s.waitFor("echo uniquefile.txt ")
+	s.send(" x sub\t")
+	s.waitFor("subdir/")
+	s.send("y\r")
+	s.waitFor("uniquefile.txt x subdir/y\r\n")
+	s.waitReading()
+	s.send("exit\r")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("completion space session status %d: %q", status, s.text())
+	}
+}
+
+// Tab completes options and values from a command spec, which a refresh
+// caches; Tab never submits the entry.
+func TestNativeInteractiveKashSpecCompletion(t *testing.T) {
+	directory := t.TempDir()
+	nativeCLIWrite(t, directory+"/marker.txt", "")
+	for _, dir := range []string{"bin", "config/kash/completions", "man"} {
+		if err := os.MkdirAll(filepath.Join(directory, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nativeCLIWrite(t, directory+"/bin/specdemo", "#!/bin/sh\necho \"specdemo:$*\"\n")
+	if err := os.Chmod(directory+"/bin/specdemo", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, directory+"/config/kash/completions/specdemo.usage.kdl", "flag \"--format <f>\" help=\"Output format\" {\n    choices \"json\" \"yaml\"\n}\nflag \"--fast\"\n")
+	env := []string{"XDG_CONFIG_HOME=" + directory + "/config", "XDG_DATA_DIRS=/nonexistent", "MANPATH=" + directory + "/man", "PATH=" + directory + "/bin:/usr/bin:/bin"}
+	s := startTerminalSession(t, nativeCLIBinary(t), directory, env, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.send("specdemo --form\t")
+	s.waitFor("specdemo --format")
+	s.send(" y\t\r")
+	s.waitFor("specdemo:--format yaml")
+	s.waitReading()
+	s.send("specdemo --fa\t--x\r")
+	s.waitFor("specdemo:--fast --x")
+	s.waitReading()
+	s.send("complete --refresh specdemo\r")
+	s.waitFor("refreshed 1 command specs")
+	s.waitReading()
+	s.send("complete --show specdemo\r")
+	s.waitFor(filepath.Join(directory, ".kash-cache", "kash", "completions", "specs", "specdemo.usage.kdl"))
+	s.waitFor(`flag "--format <f>" help="Output format"`)
+	s.waitReading()
+	s.send("exit\r")
+	if status := s.finish(); status != 0 {
+		t.Fatalf("spec completion session status %d: %q", status, s.text())
+	}
+}
+
 func TestNativeInteractiveKashCompletionSeparator(t *testing.T) {
 	for _, mode := range []string{"colour", "no-colour", "dumb"} {
 		t.Run(mode, func(t *testing.T) {
@@ -615,7 +677,7 @@ func runOnTerminal(t *testing.T, directory string, args ...string) (int, string)
 	controller, device := openTestTerminal(t)
 	defer controller.Close()
 	command := exec.Command(binary, args...)
-	command.Dir, command.Env = directory, append(os.Environ(), "TERM=dumb")
+	command.Dir, command.Env = directory, append(os.Environ(), "TERM=dumb", "XDG_CACHE_HOME="+filepath.Join(directory, ".kash-cache"))
 	command.Stdin, command.Stdout, command.Stderr = device, device, device
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {

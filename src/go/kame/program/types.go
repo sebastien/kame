@@ -337,6 +337,8 @@ type Program struct {
 	productionValidation any
 	productionChanges    []core.ResourceKey
 	deferredTerminal     []int
+	// definitionEnvironment caches bindDefinitionEnvironment's last identity.
+	definitionEnvironment definitionEnvironment
 
 	RecordReaders       []recordReaderOwner
 	RecordRequests      []host.Request

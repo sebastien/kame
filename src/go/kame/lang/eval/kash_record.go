@@ -290,11 +290,8 @@ func (p *Program) retireRecordNode(node int64, path string) {
 		if state.NodeID != node || !callPathWithin(state.CallPath, path) {
 			continue
 		}
-		if state.Free != nil {
-			state.Free(p.Alloc, state.Value)
-		}
-		mem.FreeString(p.Alloc, state.CallPath)
-		p.OperationStates = slices.Delete(p.OperationStates, i, i+1)
+		// Swapping the last state in is safe: it was already visited.
+		p.removeOperationState(i)
 	}
 	for i := len(p.OperationMemos) - 1; i >= 0; i-- {
 		state := p.OperationMemos[i]

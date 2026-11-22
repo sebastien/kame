@@ -822,6 +822,15 @@ and built-in defaults. Initial options are `history-scope` (`local|global`),
 settings with their source and bounds; `option -g` lists saved overrides.
 Lowering history limits can prune saved entries at the next refresh/write.
 
+Tab completes external commands' subcommands, options and values from specs
+built in the background from man pages, static fish files, and Usage KDL in
+`$XDG_CONFIG_HOME/kash/completions/NAME.usage.kdl`. `complete --refresh
+NAME…|--all` rebuilds, `complete --show NAME` prints a spec, and `complete
+--live cobra|clap PATH` asks that executable on each Tab. A rule producing
+`./user/NAME.usage.kdl` in `$XDG_CONFIG_HOME/kash/completions.km` runs a
+spec-printing tool once per version, e.g. `mise usage > $outputs.0`.
+[Command completion](../../../spec/058-kash-completion.md)
+
 ```sh
 kash                              # REPL when stdin is a terminal
 kash -i ./lib.kash                # preload, then read entries

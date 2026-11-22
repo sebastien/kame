@@ -17,6 +17,8 @@ type kashSourceState struct {
 	path    string
 	request int64
 	source  *moduleSource
+	pending *kashModule
+	failure core.Diagnostic
 	defined map[string]bool
 	next    int
 	done    bool
@@ -25,6 +27,8 @@ type kashSourceState struct {
 
 func freeKashSource(a mem.Allocator, value any) {
 	state := value.(*kashSourceState)
+	state.pending.Free()
+	state.failure.Free(a)
 	FreeEffects(a, state.operand.Effects)
 	for _, path := range state.operand.WritePaths {
 		mem.FreeString(a, path)
@@ -103,6 +107,9 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 	if state.done {
 		return Result{}
 	}
+	if state.failure.Code != "" {
+		return Result{Diagnostic: state.failure.Clone(c.Run)}
+	}
 	if state.source == nil {
 		if c.Completion().RequestID != state.request {
 			return Result{Waiting: true}
@@ -135,34 +142,34 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 				state.defined[item.Definition.Name] = true
 			}
 		}
-		// Keep authored origins and their import bindings alive like module sources.
 		m := mem.Alloc[kashModule](p.Alloc)
 		m.Program = p
 		m.Sources = []moduleSource{{Path: owned(p.Alloc, state.path), Parsed: parsed, Signature: core.ContentSignature(completion.Value.Bytes)}}
+		state.pending = m
 		state.source = &m.Sources[0]
-		p.addModuleSourcePart(state.source)
-		p.SourceParts[state.source.Origin-1].moduleSource = state.source
-		p.Modules = append(p.Modules, m)
 	}
 	for state.next < len(state.source.Parsed.Items) {
 		item := state.source.Parsed.Items[state.next]
 		if item.Kind == script.ModuleImport || item.Kind == script.ModuleFrom {
 			r := p.loadImport(item.Module, c, state.path, nil)
-			if r.Waiting || r.Diagnostic.Code != "" {
-				if r.Diagnostic.Code != "" && r.Diagnostic.Source == "" {
-					r.Diagnostic.Source = owned(c.Run, state.path)
-				}
+			if r.Waiting {
 				return r
+			}
+			if r.Diagnostic.Code != "" {
+				return state.failImport(p.Alloc, c, r)
 			}
 			module := r.Value.Module.(*kashModule)
 			r.Free(c.Run)
 			bound := state.source.bindImport(c, item, module, state.defined)
 			if bound.Diagnostic.Code != "" {
-				bound.Diagnostic.Source = owned(c.Run, state.path)
-				return bound
+				return state.failImport(p.Alloc, c, bound)
 			}
 		}
 		state.next++
+	}
+	if state.pending != nil {
+		state.source = p.retainRuntimeSource(state.pending)
+		state.pending = nil
 	}
 	parent, directory := c.Unit, c.Cwd
 	c.Unit, c.Cwd, c.nativeSource = &state.unit, state.unit.directory, state
@@ -185,6 +192,39 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 	c.Cwd = parent.directory
 	state.done = true
 	return Result{}
+}
+
+func (state *kashSourceState) failImport(a mem.Allocator, c *Context, r Result) Result {
+	if r.Diagnostic.Source == "" {
+		r.Diagnostic.Source = owned(c.Run, state.path)
+	}
+	state.failure = r.Diagnostic.Clone(a)
+	state.pending.Free()
+	state.pending, state.source = nil, nil
+	return r
+}
+
+// Reuse immutable syntax and provenance for the same source revision and
+// imports. Every invocation still reads the file and resolves imports anew.
+// ponytail: keep distinct revisions until session teardown; add eviction when
+// all work referencing a source origin can be tracked through retirement.
+func (p *Program) retainRuntimeSource(candidate *kashModule) *moduleSource {
+	src := &candidate.Sources[0]
+	for _, module := range p.Modules {
+		if module.Scope != nil {
+			continue // ordinary import, not a runtime source
+		}
+		loaded := &module.Sources[0]
+		if loaded.Path == src.Path && loaded.Signature.Equal(src.Signature) &&
+			maps.Equal(loaded.imports, src.imports) && maps.Equal(loaded.namespaces, src.namespaces) {
+			candidate.Free()
+			return loaded
+		}
+	}
+	p.addModuleSourcePart(src)
+	p.SourceParts[src.Origin-1].moduleSource = src
+	p.Modules = append(p.Modules, candidate)
+	return src
 }
 
 func sourceFailure(c *Context, name, code string, span source.Span, message string) Result {

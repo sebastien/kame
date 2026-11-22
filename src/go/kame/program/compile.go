@@ -466,6 +466,8 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	mem.FreeString(p.Alloc, p.definitionEnvironment.cwd)
+	p.definitionEnvironment = definitionEnvironment{}
 	if !p.Forwarding {
 		p.Eval.BeginFinalization()
 		for p.Eval.Finalizing() {

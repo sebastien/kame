@@ -374,7 +374,7 @@ func (h *replHistory) update(entry *historyEntry, clear string) error {
 		data.Write(historyRecord(record))
 	}
 	if !bytes.Equal(original, data.Bytes()) {
-		if err := historyReplace(h.path, data.Bytes()); err != nil {
+		if err := replacePrivateFile(h.path, data.Bytes()); err != nil {
 			return err
 		}
 	}
@@ -408,25 +408,6 @@ func historyOpen(path string, create bool) (*os.File, error) {
 		return nil, err
 	}
 	return file, nil
-}
-
-func historyReplace(path string, data []byte) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".kash-history-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	defer file.Close()
-	if _, err := file.Write(data); err != nil {
-		return err
-	}
-	if err := file.Sync(); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(file.Name(), path)
 }
 
 // readline must not apply its own deduplication/cap policy when recording.

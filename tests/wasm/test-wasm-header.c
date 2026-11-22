@@ -11,6 +11,7 @@ _Static_assert(KAME_WASM_STATE_INVALID == 4, "invalid-state status");
 _Static_assert(KAME_WASM_DIAGNOSTIC == 5, "diagnostic status");
 _Static_assert(KAME_WASM_HOST_NEEDED == 6, "host-needed status");
 _Static_assert(KAME_WASM_REQUEST_EXPAND_GLOB == 6, "glob request");
+_Static_assert(KAME_WASM_REQUEST_COMMAND_GLOB == 48, "command glob request");
 _Static_assert(KAME_WASM_REQUEST_PLUGIN == 26, "existing request boundary");
 _Static_assert(KAME_WASM_REQUEST_FILE_CONTENT == 27, "file-content request");
 _Static_assert(KAME_WASM_REQUEST_TOOL_CONTENT == 28, "tool-content request");

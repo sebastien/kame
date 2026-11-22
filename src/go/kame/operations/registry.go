@@ -64,7 +64,8 @@ func Register(r *eval.Registry) bool {
 		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&
 		pure(r, "nop", opNop, 0, -1) &&
 		contract(r, "now", opNow, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock) &&
-		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock)
+		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock) &&
+		registerUsage(r)
 }
 
 func contract(r *eval.Registry, name string, call eval.OperationCall, min int, max int, category eval.OperationCategory, phases eval.PhaseMask, behavior eval.OperationBehavior) bool {

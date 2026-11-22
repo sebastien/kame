@@ -53,7 +53,7 @@ for backend in native wasm; do
 	printf '\0' >"$work/nul"
 	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c 'env: (nop {MODE: (text (read ./nul))}) printf forbidden'
 	reject PARSE_ERR do run --allow-run --lang kash -c 'env: (nop {}) env: (nop {}) true'
-	reject CAP_DENIED do run --allow-read --lang kash -c 'env: (nop {MODE: "denied"}) printf forbidden'
+	reject CAP_DENIED do run --no-default-grants --allow-read --lang kash -c 'env: (nop {MODE: "denied"}) printf forbidden'
 	test-step "$backend secrets are fetched only at execution and omitted from traces"
 	cat >"$work/Makefile.km" <<'KM'
 SHELL = kash
@@ -89,13 +89,13 @@ task cached chosen
 task source-read
 	(out! (read ./Makefile.km))
 KM
-	CACHE_TERMINAL_STDIN=1 check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
+	CACHE_TERMINAL_STDIN=1 check '' do run --no-default-grants --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
 	if ! grep -q INPUT_UNSTABLE "$work/err"; then test-ok "$backend validates loaded source without a read grant"; else test-fail "$backend source validation requires user read authority"; fi
-	CACHE_TERMINAL_STDIN=1 check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
+	CACHE_TERMINAL_STDIN=1 check '' do run --no-default-grants --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
 	if [ "$(cat "$work/runs")" = x ]; then test-ok "$backend computed env permits warm reuse"; else test-fail "$backend computed env reran"; fi
-	CACHE_TERMINAL_STDIN=1 K07_SECRET=changed check '' do run --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
+	CACHE_TERMINAL_STDIN=1 K07_SECRET=changed check '' do run --no-default-grants --allow-run --allow-env=K07_SECRET "$work/Makefile.km" chosen
 	if [ "$(cat "$work/runs")" = xx ] && [ "$(cat "$work/received")" = changed ]; then test-ok "$backend changed env invalidates task"; else test-fail "$backend stale computed env"; fi
-	reject CAP_DENIED do run --allow-run --allow-env=K07_SECRET "$work/Makefile.km" source-read
+	reject CAP_DENIED do run --no-default-grants --allow-run --allow-env=K07_SECRET "$work/Makefile.km" source-read
 	test-step "$backend named operands, function arguments and invalid context"
 	check '<one><two words>' do run --allow-run --lang kash -c 'printf "<%s>" $...args' -- one 'two words'
 	check 'one-two' do run --allow-run --lang kash -c $'def f one two = join "-" [one, two]\nprintf "%s" (f "one" "two")'

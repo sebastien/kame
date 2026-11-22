@@ -106,6 +106,11 @@ func TestPureOperations(t *testing.T) {
 		t.Error("list-consuming apply failed")
 	}
 	result.Free(a)
+	result = evaluate(t, program, `parse-usage "bin x\nflag /-"`)
+	if result.Diagnostic.Code != "PARSE_ERR" || result.Diagnostic.Message != "invalid Usage spec: line 2: expected a node or entry after /-" {
+		t.Errorf("parse-usage truncated slashdash: got %s: %s", result.Diagnostic.Code, result.Diagnostic.Message)
+	}
+	result.Free(a)
 	checkPureOperationObservations(t, program, registry)
 	engine.Free()
 	program.Free()
@@ -147,6 +152,9 @@ func checkPureOperationObservations(t *testing.T, program *eval.Program, registr
 		`basename ./dir/file.txt`, `dirname ./dir/file.txt`, `splitext ./dir/file.txt`,
 		`ext ./dir/file.txt`, `joinpath ./dir "file.txt"`, `relpath ./dir ./dir/file.txt`,
 		`abspath ./file.txt`, `nop 1`,
+		`parse-usage "bin \"x\"\nflag \"-a --all\""`, `render-usage {name: "x", flags: [{names: ["-a"]}]}`,
+		`merge-usage [{name: "x"}, nil, {help: "the x tool"}]`, `parse-man ".TP\n\\fB\\-a\\fR\nall\n"`,
+		`man-redirect ".so man1/x.1\n"`, `parse-fish-completions "x" "complete -c x -s a"`,
 	}
 	reached := make(map[string]bool)
 	program.AddSourcePart("/workspace/library.km", 0, 0, 0)

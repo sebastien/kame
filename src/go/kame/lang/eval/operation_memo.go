@@ -21,7 +21,10 @@ type operationMemo struct {
 	Scope      core.Signature
 	Values     []core.Value
 	Next       int
-	Inputs     []core.Observation
+	// Facts is how many accepted observations the retained operands consumed;
+	// Epoch is the node's observation epoch when they were retained.
+	Facts      int
+	Epoch      int64
 	Effects    []Effect
 	WritePaths []string
 }
@@ -37,7 +40,6 @@ func (p *Program) freeOperationMemo(state *operationMemo) {
 	_ = p
 	a := state.Alloc
 	freeValuesWithCallables(a, state.Values)
-	core.FreeObservations(a, state.Inputs)
 	FreeEffects(a, state.Effects)
 	for i := range state.WritePaths {
 		mem.FreeString(a, state.WritePaths[i])
@@ -181,61 +183,85 @@ func (p *Program) discardArgumentMemo(state *operationMemo) {
 		if p.OperationMemos[i] == state {
 			copy(p.OperationMemos[i:], p.OperationMemos[i+1:])
 			p.OperationMemos = p.OperationMemos[:len(p.OperationMemos)-1]
+			if !slices.ContainsFunc(p.OperationMemos, func(other *operationMemo) bool { return other.NodeID == state.NodeID }) {
+				delete(p.memoValidations, state.NodeID)
+			}
 			p.freeOperationMemo(state)
 			return
 		}
 	}
 }
 
+// memoValidation records that a node generation's first Facts accepted
+// observations were valid when the engine's change stamp was Changes.
+type memoValidation struct {
+	Generation, Epoch, Changes int64
+	Facts                      int
+}
+
 func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bool {
-	if state.Generation != c.Engine.Generation() || state.Alloc != c.Run || !state.Scope.Equal(p.memoScope(scope, c)) {
+	if state.Generation != c.Engine.Generation() || state.Epoch != c.Engine.ObservationEpoch() || state.Alloc != c.Run || !state.Scope.Equal(p.memoScope(scope, c)) {
 		return false
 	}
 	facts := c.Engine.AcceptedObservations()
-	if len(facts) < len(state.Inputs) {
+	if len(facts) < state.Facts {
 		return false
 	}
-	for i := range state.Inputs {
-		item, fact := state.Inputs[i], facts[i]
-		if fact.Key.Kind != item.Key.Kind || fact.Key.Name != item.Key.Name || fact.Aspect != item.Aspect || !fact.Signature.Equal(item.Signature) {
-			return false
-		}
-		if !item.Signature.Equal(item.Signature) || item.Aspect >= core.ObservationMetadata {
-			return false
-		}
-		node := p.Engine.Lookup(item.Key)
-		if node == nil {
-			if item.Key.Kind == core.ResourceEnvironment {
-				continue
-			}
-			if item.Key.Kind == core.ResourceOperation {
-				// Invocation-owned host results are retained within this generation,
-				// never used as a proof for another invocation or generation.
-				if item.Key.Name == UntrackedHostRead {
-					continue
-				}
-				operation := p.Registry.lookup(item.Key.Name)
-				if operation != nil && item.Signature.Equal(core.ValueSignature(core.Value{Kind: core.String, Text: operation.Version})) {
-					continue
-				}
-			}
-			return false
-		}
-		if !node.Current || node.ValidationPending {
-			return false
-		}
-		if item.Key.Kind != core.ResourceEnvironment && !c.Engine.HasDependency(item.Key) {
-			return false
-		}
-		signature := node.Signature
-		if item.Aspect == core.ObservationExistence {
-			signature = core.ValueSignature(core.Value{Kind: core.Bool, Bool: node.Latest.Kind != core.Nil})
-		}
-		if !item.Signature.Equal(signature) {
-			return false
-		}
+	// Facts only grow within an epoch, and nothing can falsify a validated one
+	// without changing the stamp, so only facts past the validated prefix are
+	// checked. Each resumption would otherwise recheck every earlier read.
+	node := c.Engine.NodeID()
+	validated := p.memoValidations[node]
+	if validated.Generation != state.Generation || validated.Epoch != state.Epoch || validated.Changes != c.Engine.Changes() {
+		validated = memoValidation{Generation: state.Generation, Epoch: state.Epoch, Changes: c.Engine.Changes()}
 	}
+	for i := validated.Facts; i < state.Facts; i++ {
+		if !p.factCurrent(facts[i], c) {
+			return false
+		}
+		validated.Facts = i + 1
+	}
+	if p.memoValidations == nil {
+		p.memoValidations = map[int64]memoValidation{}
+	}
+	p.memoValidations[node] = validated
 	return true
+}
+
+// factCurrent reports whether an accepted observation still holds.
+func (p *Program) factCurrent(item core.Observation, c *Context) bool {
+	if !item.Signature.Equal(item.Signature) || item.Aspect >= core.ObservationMetadata {
+		return false
+	}
+	node := p.Engine.Lookup(item.Key)
+	if node == nil {
+		if item.Key.Kind == core.ResourceEnvironment {
+			return true
+		}
+		if item.Key.Kind == core.ResourceOperation {
+			// Invocation-owned host results are retained within this generation,
+			// never used as a proof for another invocation or generation.
+			if item.Key.Name == UntrackedHostRead {
+				return true
+			}
+			operation := p.Registry.lookup(item.Key.Name)
+			if operation != nil && item.Signature.Equal(core.ValueSignature(core.Value{Kind: core.String, Text: operation.Version})) {
+				return true
+			}
+		}
+		return false
+	}
+	if !node.Current || node.ValidationPending {
+		return false
+	}
+	if item.Key.Kind != core.ResourceEnvironment && !c.Engine.HasDependency(item.Key) {
+		return false
+	}
+	signature := node.Signature
+	if item.Aspect == core.ObservationExistence {
+		signature = core.ValueSignature(core.Value{Kind: core.Bool, Bool: node.Latest.Kind != core.Nil})
+	}
+	return item.Signature.Equal(signature)
 }
 
 func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span) argumentResult {
@@ -253,7 +279,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, lexic
 		if p.memoCurrent(state, c, scope) && len(state.Values) == len(arguments) {
 			values, next = state.Values, state.Next
 			if next == len(arguments) {
-				facts = len(state.Inputs)
+				facts = state.Facts
 			}
 			state.Values = nil
 			for i := range state.Effects {
@@ -358,11 +384,7 @@ func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, op
 	state.Scope, state.Values, state.Next = signature, values, next
 	// ponytail: a conservative fact prefix avoids introducing expression nodes;
 	// collect precise per-operand provenance only if invalidation cost warrants it.
-	for i := 0; i < facts; i++ {
-		item := c.Engine.AcceptedObservations()[i]
-		item.Key = item.Key.Clone(c.Run)
-		state.Inputs = append(state.Inputs, item)
-	}
+	state.Facts, state.Epoch = facts, c.Engine.ObservationEpoch()
 	for i := effects; i < completedEffects; i++ {
 		effect := c.Effects[i]
 		effect.Data = slices.Clone(effect.Data)

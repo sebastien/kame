@@ -67,10 +67,11 @@ type Program struct {
 	// or literal replacements owned by their engine-node states.
 	Definitions []*definition.Definition
 	// Aggregates retains ownership even when a literal replaces the canonical AST.
-	Aggregates      []*definition.Definition
-	Nodes           []definitionNode
-	Diagnostics     []diagnostic.Diagnostic
-	OperationStates []operationState
+	Aggregates          []*definition.Definition
+	Nodes               []definitionNode
+	Diagnostics         []diagnostic.Diagnostic
+	OperationStates     []operationState
+	operationStateIndex map[operationStateKey]int
 	// environmentDigest* memoize the memo-scope digest of one environment list.
 	environmentDigestBase  *string
 	environmentDigestLen   int
@@ -80,6 +81,7 @@ type Program struct {
 	processEnvironmentLen   int
 	processEnvironmentValue core.Signature
 	OperationMemos          []*operationMemo
+	memoValidations         map[int64]memoValidation
 	Processes               []*processTask
 	callableProcessOutcomes map[*ProcessHandle]struct{}
 	nextProcess             int

@@ -89,6 +89,7 @@ type Context struct {
 	// operations. Embedders with an explicit request/completion loop use it to
 	// obtain each host value directly from their capability provider.
 	DirectHostRequests bool
+	CommandGlob        bool // The current wildcard call came from command argv.
 	ToolResolver       func(any, string) (string, bool)
 	// OperationObserver records the stable operation identity used by a render.
 	// It is observational only and must not mutate evaluation state.
@@ -143,53 +144,85 @@ type operationState struct {
 // OperationState survives a suspended application on one engine generation.
 // Independently parsed sources can reuse spans, so source origin is part of its key.
 // Operations use it only for progress that must not be replayed after a wait.
+// operationStateKey identifies a suspended operation's state.
+type operationStateKey struct {
+	CallPath     string
+	SourceOrigin int
+	EntrySource  *source.Source
+	NodeID       int64
+	Start, End   int
+}
+
+// operationStateIndex finds the context's state. A build reading N files
+// retains N states, so a linear search would make it quadratic.
+func (c *Context) operationStateIndex() (operationStateKey, int, bool) {
+	key := operationStateKey{CallPath: c.CallPath, SourceOrigin: c.SourceOrigin, EntrySource: c.EntrySource, NodeID: c.Engine.NodeID(), Start: c.operationStart, End: c.operationEnd}
+	i, ok := c.Program.operationStateIndex[key]
+	return key, i, ok
+}
+
+func (s *operationState) key() operationStateKey {
+	return operationStateKey{CallPath: s.CallPath, SourceOrigin: s.SourceOrigin, EntrySource: s.EntrySource, NodeID: s.NodeID, Start: s.Start, End: s.End}
+}
+
+// removeOperationState frees state i and moves the last state into its place.
+func (p *Program) removeOperationState(i int) {
+	state := &p.OperationStates[i]
+	if state.Free != nil {
+		state.Free(p.Alloc, state.Value)
+	}
+	delete(p.operationStateIndex, state.key())
+	mem.FreeString(p.Alloc, state.CallPath)
+	last := len(p.OperationStates) - 1
+	if i != last {
+		p.OperationStates[i] = p.OperationStates[last]
+		p.operationStateIndex[p.OperationStates[i].key()] = i
+	}
+	p.OperationStates[last] = operationState{}
+	p.OperationStates = p.OperationStates[:last]
+}
+
 func (c *Context) OperationState() any {
 	if c == nil || c.Program == nil || c.Engine == nil {
 		return nil
 	}
-	for i := range c.Program.OperationStates {
-		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
-			if state.Generation == c.Engine.Generation() {
-				return state.Value
-			}
-			if state.Free != nil {
-				state.Free(c.Program.Alloc, state.Value)
-			}
-			state.Generation, state.Value, state.Free = c.Engine.Generation(), nil, nil
-			return nil
-		}
+	_, i, ok := c.operationStateIndex()
+	if !ok {
+		return nil
 	}
+	state := &c.Program.OperationStates[i]
+	if state.Generation == c.Engine.Generation() {
+		return state.Value
+	}
+	if state.Free != nil {
+		state.Free(c.Program.Alloc, state.Value)
+	}
+	state.Generation, state.Value, state.Free = c.Engine.Generation(), nil, nil
 	return nil
 }
 func (c *Context) SetOperationState(value any, free ContextFree) {
 	if c == nil || c.Program == nil || c.Engine == nil {
 		return
 	}
-	for i := range c.Program.OperationStates {
+	key, i, ok := c.operationStateIndex()
+	if ok {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
-			state.Value, state.Free, state.Generation = value, free, c.Engine.Generation()
-			return
-		}
+		state.Value, state.Free, state.Generation = value, free, c.Engine.Generation()
+		return
 	}
-	c.Program.OperationStates = append(c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), SourceOrigin: c.SourceOrigin, EntrySource: c.EntrySource, NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
+	key.CallPath = owned(c.Program.Alloc, c.CallPath)
+	if c.Program.operationStateIndex == nil {
+		c.Program.operationStateIndex = map[operationStateKey]int{}
+	}
+	c.Program.operationStateIndex[key] = len(c.Program.OperationStates)
+	c.Program.OperationStates = append(c.Program.OperationStates, operationState{CallPath: key.CallPath, SourceOrigin: c.SourceOrigin, EntrySource: c.EntrySource, NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
 }
 func (c *Context) ClearOperationState() {
 	if c == nil || c.Program == nil || c.Engine == nil {
 		return
 	}
-	for i := range c.Program.OperationStates {
-		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.SourceOrigin == c.SourceOrigin && state.EntrySource == c.EntrySource && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
-			if state.Free != nil {
-				state.Free(c.Program.Alloc, state.Value)
-			}
-			mem.FreeString(c.Program.Alloc, state.CallPath)
-			copy(c.Program.OperationStates[i:], c.Program.OperationStates[i+1:])
-			c.Program.OperationStates = c.Program.OperationStates[:len(c.Program.OperationStates)-1]
-			return
-		}
+	if _, i, ok := c.operationStateIndex(); ok {
+		c.Program.removeOperationState(i)
 	}
 }
 

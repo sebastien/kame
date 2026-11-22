@@ -124,6 +124,10 @@ string `payload`, copied `data` bytes, optional `key`/`record` bytes (or `null`)
 `capability` (`read`/`write`/`run`/`env` or `null`), and cancellation `signal`.
 Declaration discovery requests (kind 45) carry the scan pattern as `payload`
 and a `kindMask` using the filesystem kind bits defined by the WASM ABI.
+The Node wrapper presents Kash command-glob requests as kind 6 with the extra
+field `commandGlob: true`. Hosts can use it to prune implicit dot paths before
+walking. Existing callbacks can still return ordinary wildcard candidates; the
+module filters their results, but cannot prevent traversal inside the callback.
 For example, pass these options to `program.evaluate('(read "data.txt")', ...)`:
 
 ```js

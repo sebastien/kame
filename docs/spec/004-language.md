@@ -807,6 +807,16 @@ on local `let` bindings. An empty list includes nothing.
   execution. Source tracking retains selected missing optional paths so watch
   notices their creation. AST JSON marks the statement `optional: true`.
 
+AST JSON marks includes and conditionals containing includes (directly or
+through nested conditionals) with `loadsSources: true`. Such nodes also carry
+`expandsSources`: `true` when the source loader handles them, and `false`
+when they must stay in the program for scoped declaration evaluation. Neither
+field indicates that a branch was selected or that a file exists.
+`declaresRuleWork: true` marks rules, generated declarations, computed includes,
+and conditionals or loops containing any of these. Unmarked nodes have no
+statically visible rule work of their own; a literal include's contents are
+classified after loading.
+
 Diagnostics for conflicting declarations retain include provenance
 (`011-diagnostics.md`).
 

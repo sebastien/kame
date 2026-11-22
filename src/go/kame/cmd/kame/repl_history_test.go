@@ -308,7 +308,7 @@ func TestHistoryMigrationAndUnsafeStorage(t *testing.T) {
 	if string(data) != historyHeader {
 		t.Fatal("legacy history was not discarded")
 	}
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(h.path), ".kash-history-*"))
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(h.path), ".kash-*"))
 	if len(matches) != 0 {
 		t.Fatal("temporary history files leaked")
 	}
@@ -411,10 +411,10 @@ func TestHistoryPrivateStorageAndFailedReplacement(t *testing.T) {
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := historyReplace(target, []byte("TOKEN=not-published")); err == nil {
+	if err := replacePrivateFile(target, []byte("TOKEN=not-published")); err == nil {
 		t.Fatal("replacement unexpectedly succeeded")
 	}
-	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(h.path), ".kash-history-*"))
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(h.path), ".kash-*"))
 	if len(matches) != 0 {
 		t.Fatal("failed replacement leaked temporary data")
 	}

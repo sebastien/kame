@@ -35,6 +35,8 @@ func (checkpoint *DependencyCheckpoint) Free(a mem.Allocator) {
 
 func (c *EngineContext) RestoreDependencies(checkpoint *DependencyCheckpoint) {
 	n := c.node
+	c.engine.changes++
+	n.observationEpoch++
 	for i := checkpoint.Dynamic; i < len(n.Dynamic); i++ {
 		dependency := n.Dynamic[i]
 		removeDependent(dependency, n)

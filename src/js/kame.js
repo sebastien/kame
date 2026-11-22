@@ -1116,18 +1116,58 @@ function globRoot(pattern) {
   return pattern.slice(0, cut - 1);
 }
 
-function collectPaths(directory, names) {
-  let entries;
+function globExplicitDot(segment) {
+  return segment.startsWith('.') || segment.startsWith('\\.');
+}
+
+function globEntries(directory) {
   try {
-    entries = readdirSync(directory, { withFileTypes: true });
+    return readdirSync(directory, { withFileTypes: true });
   } catch (error) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
-    return;
+    return [];
   }
-  for (const entry of entries) {
+}
+
+function collectPaths(directory, names, command = false) {
+  for (const entry of globEntries(directory)) {
+    if (command && entry.name.startsWith('.')) continue;
     const name = join(directory, entry.name);
     names.push(name);
-    if (entry.isDirectory()) collectPaths(name, names);
+    if (entry.isDirectory()) collectPaths(name, names, command);
+  }
+}
+
+function collectCommandGlob(directory, parts, pos, names) {
+  const segment = parts[pos];
+  const final = pos === parts.length - 1;
+  if (segment === '**' && final) {
+    collectPaths(directory, names, true);
+  } else if (segment === '**') {
+    collectCommandGlob(directory, parts, pos + 1, names);
+    for (const entry of globEntries(directory)) {
+      if (entry.isDirectory() && !entry.name.startsWith('.')) collectCommandGlob(join(directory, entry.name), parts, pos, names);
+    }
+  } else if (!/[*?\[\\]/.test(segment)) {
+    const name = join(directory, segment);
+    try {
+      if (final) {
+        lstatSync(name);
+        names.push(name);
+      } else if (statSync(name).isDirectory()) {
+        collectCommandGlob(name, parts, pos + 1, names);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    }
+  } else {
+    const dot = globExplicitDot(segment);
+    for (const entry of globEntries(directory)) {
+      if ((!dot && entry.name.startsWith('.')) || !matchSegment(segment, entry.name)) continue;
+      const name = join(directory, entry.name);
+      if (final) names.push(name);
+      else if (entry.isDirectory()) collectCommandGlob(name, parts, pos + 1, names);
+    }
   }
 }
 
@@ -1209,18 +1249,18 @@ function resourceExists(name) {
   return existsSync(filesystemPath(name));
 }
 
-function resourceWildcard(pattern) {
+function resourceWildcard(pattern, command = false) {
   if (isMemoryResource(pattern)) {
     const matches = [...new Set([...memoryResourceFiles.keys(), ...memoryResourceDirectories])]
       .filter((name) => matchSegments(pattern, 0, name, 0));
     return matches.sort(comparePathBytes);
   }
   if (isFileResource(pattern)) {
-    return wildcardPaths(filesystemPath(pattern)).map((name) => pathToFileURL(name).href).sort(comparePathBytes);
+    return wildcardPaths(filesystemPath(pattern), command).map((name) => pathToFileURL(name).href).sort(comparePathBytes);
   }
   const portable = (name) => process.platform === 'win32' ? name.replaceAll('\\', '/') : name;
   const prefix = portable(process.cwd()).replace(/\/$/, '') + '/';
-  return wildcardPaths(pattern).map((name) => {
+  return wildcardPaths(pattern, command).map((name) => {
     const absolute = portable(resolve(name));
     return absolute.startsWith(prefix) && absolute.length > prefix.length
       ? './' + absolute.slice(prefix.length)
@@ -1270,13 +1310,17 @@ function writeResource(name, data) {
   return writeFileAtomic(filesystemPath(name), data);
 }
 
-function wildcardPaths(pattern) {
+function wildcardPaths(pattern, command = false) {
   while (pattern.startsWith('./')) pattern = pattern.slice(2);
   const names = [];
   const root = globRoot(pattern);
   if (root === pattern) {
     try { lstatSync(root); names.push(root); }
     catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  } else if (command) {
+    const tail = (root === '.' ? pattern : pattern.slice(root.length)).replace(/^\//, '');
+    collectCommandGlob(root, tail.split('/'), 0, names);
+    return [...new Set(names)];
   } else collectPaths(root, names);
   const matches = [];
   for (const name of names) {
@@ -1842,7 +1886,7 @@ class Module {
       }
     }
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39, 42, 45].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39, 42, 45, 48].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -2002,9 +2046,9 @@ class Module {
         return this.completeFailure(instance, request, 'FS_ERR', 'cannot stat file');
       }
     }
-    if (kind === 6) {
+    if (kind === 6 || kind === 48) {
       if (!grants.read) return this.deny(instance, request, 'read');
-      try { return this.completeJSON(instance, request, resourceWildcard(payload)); }
+      try { return this.completeJSON(instance, request, resourceWildcard(payload, kind === 48)); }
       catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot traverse wildcard path'); }
     }
     if (kind === 45) {
@@ -2371,6 +2415,8 @@ class Module {
   }
 
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
+    const commandGlob = kind === 48;
+    if (commandGlob) kind = 6;
     const discovery = kind === 45 ? declarationScan(payload) : null;
     const capability = [1, 5, 6, 7, 20, 27, 30, 31, 45].includes(kind) ? 'read'
       : kind === 2 || kind === 39 ? 'write'
@@ -2405,6 +2451,7 @@ class Module {
       kind,
       payload: discovery?.pattern ?? payload,
       ...(discovery ? { kindMask: discovery.kinds } : {}),
+      ...(commandGlob ? { commandGlob: true } : {}),
       data: data?.slice() ?? new Uint8Array(0),
       key: key?.slice() ?? null,
       record: record?.slice() ?? null,
@@ -2703,7 +2750,7 @@ class Module {
         const directory = this.write(context.cwd ?? process.cwd(), 'inspectionDirectory');
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('inspection host forwarding unavailable'), { code: 'HOST_FAIL' });
         this.inspectionGrant(instance, '', '');
-        for (const grant of context.inspectionGrants ?? context.portableGrants ?? []) {
+        for (const grant of context.portableGrants ?? []) {
           if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
           else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
         }
@@ -3144,8 +3191,7 @@ class Module {
       const directory = this.write(process.cwd(), 'runDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       this.inspectionGrant(instance, '', '');
-      const grants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
-      for (const grant of grants) {
+      for (const grant of context.portableGrants) {
         if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
         else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
       }
@@ -3418,7 +3464,7 @@ export class Kame {
       let buildSource = source;
       if (language === 'km') {
         const hasModuleDeclaration = ast.ast.items.some((item) => ['import', 'from', 'export'].includes(item.kind));
-        if (ast.ast.items.some(itemLoadsSources)) {
+        if (ast.ast.items.some((item) => item.loadsSources)) {
           context.declarationScans = new Map();
           const selection = { defines: [], environment: context.environment, parts: [], context, discoveries: [] };
           buildSource = await expandSessionIncludes(module, context.cwd, name, source, 'km', [], isAbsolute(name), true, selection);
@@ -4902,31 +4948,28 @@ function runProcessAttempt(module, instance, script, context, request, rawReques
 }
 
 function effectiveGrants(inv) {
-  const grants = { read: false, write: false, run: false, env: false };
-  if (inv.grants && inv.grants.length !== 0) {
-    for (const grant of inv.grants) {
-      if (grant.capability in grants) grants[grant.capability] = true;
-    }
-  } else if (!inv.noDefaultGrants) {
-    grants.read = true;
-    grants.write = true;
-    grants.run = true;
-  }
-  return grants;
+  const explicit = inv.grants ?? [];
+  if (inv.noDefaultGrants || inv.explicitGrantsOnly) return explicit;
+  const cwd = process.cwd();
+  const defaults = [{ capability: 'read', names: [cwd] }, { capability: 'write', names: [cwd] }, { capability: 'run', names: [] }];
+  if (inv.inputs?.[0]?.lang === 'kash') defaults.push({ capability: 'env', names: [] });
+  return [...explicit, ...defaults.filter(({ capability }) => !explicit.some((grant) => grant.capability === capability))];
 }
 
 function contextFor(inv) {
-  const runGrants = (inv.grants ?? []).filter((grant) => grant.capability === 'run');
+  const portableGrants = effectiveGrants(inv);
+  const grants = { read: false, write: false, run: false, env: false };
+  for (const { capability } of portableGrants) grants[capability] = true;
   return {
     // Match native data-input policy without initializing process.stdin and
     // allowing libuv to change shared descriptor flags or read ahead.
     inputFD: inv.name === 'run' && !isatty(0) && !(inv.inputs ?? []).some((input) => input.kind === 'stdin') ? 0 : undefined,
-    portableGrants: inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }],
+    portableGrants,
     toolCache: new Map(),
-    grants: effectiveGrants(inv),
-    runRoots: runGrants.length === 0 || runGrants.some((grant) => grant.names.length === 0) ? null : runGrants.flatMap((grant) => grant.names.map((name) => resolve(name))),
-    readRoots: capabilityRoots(inv, 'read'),
-    writeRoots: capabilityRoots(inv, 'write'),
+    grants,
+    runRoots: grants.run ? capabilityRoots(portableGrants, 'run') : null,
+    readRoots: capabilityRoots(portableGrants, 'read'),
+    writeRoots: capabilityRoots(portableGrants, 'write'),
     shell: inv.shell ?? [],
     environment: inv.environment ?? [],
     json: inv.json === true,
@@ -4940,9 +4983,8 @@ function contextFor(inv) {
   };
 }
 
-function capabilityRoots(inv, capability) {
-  const grants = (inv.grants ?? []).filter((grant) => grant.capability === capability);
-  if ((inv.grants ?? []).length === 0 && !inv.noDefaultGrants) return [process.cwd()];
+function capabilityRoots(portableGrants, capability) {
+  const grants = portableGrants.filter((grant) => grant.capability === capability);
   if (grants.some((grant) => grant.names.length === 0)) return null;
   return grants.flatMap((grant) => grant.names.map((name) => resolve(name)));
 }
@@ -5045,7 +5087,8 @@ async function runSession(module, inv, sourceDirectory) {
     sourceTexts.set(name, text);
     if (input.lang === 'km' || input.lang === 'kash') {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection, [], sourceBytes);
-      if (i === 0 && input.lang === 'km' && selection.ruleWork) inv.noDefaultGrants = false;
+      // Older parsers collapsed both flags; only lift the inferred restriction.
+      if (i === 0 && input.lang === 'km' && selection.ruleWork && inv.explicitGrantsOnly === false) inv.noDefaultGrants = false;
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, ...(fileBacked ? { sourceDirectory: dirname(resolve(sourceDirectory, name)) } : {}), lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
@@ -5088,20 +5131,6 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   return { name, text: source.text, compiled, targets };
 }
 
-function declaresRuleWork(item) {
-  switch (item.kind) {
-    case 'rule':
-    case 'generate': return true;
-    case 'for': return item.items.some(declaresRuleWork);
-    case 'composition': return item.branches.some((branch) => branch.items.some(declaresRuleWork));
-    default: return false;
-  }
-}
-
-function itemLoadsSources(item) {
-  return item.kind === 'include' || (item.kind === 'composition' && item.branches.some((branch) => branch.items.some(itemLoadsSources)));
-}
-
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
 async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }, includes = [], sourceBytes = null) {
   const identity = resolve(sourceDirectory, name);
@@ -5126,7 +5155,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     appendPart(start, end, lang);
     for (const item of document.ast.items) {
       if (item.span.start < start || item.span.end > end) continue;
-      if (!selection.ruleWork && declaresRuleWork(item)) selection.ruleWork = true;
+      if (item.declaresRuleWork) selection.ruleWork = true;
       if (item.kind === 'definition') selection.parts.push({ name, text: slice(item.span), lang, offset: item.span.start, ...(includes.length ? { includes } : {}) });
     }
   };
@@ -5198,9 +5227,9 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       }
       for (const item of branch.items) {
         if (item.kind === 'include') await includeItem(item);
-        else if (item.kind === 'composition' && itemLoadsSources(item)) await compose(item.branches);
+        else if (item.expandsSources) await compose(item.branches);
         else if (item.kind === 'rule' || item.kind === 'for' || item.kind === 'generate' || item.kind === 'composition') {
-          if (!selection.ruleWork && declaresRuleWork(item)) selection.ruleWork = true;
+          if (item.declaresRuleWork) selection.ruleWork = true;
           appendPart(item.span.start, item.span.end, 'km');
         }
         else if (item.kind === 'let') {
@@ -5213,12 +5242,9 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       break;
     }
   };
-  const bindsLocals = (branches) => branches.some((branch) => branch.items.some((item) =>
-    item.kind === 'let' || item.kind === 'for' || (item.kind === 'include' && item.expression && !item.batch) ||
-    (item.kind === 'composition' && bindsLocals(item.branches))));
   let start = 0;
   for (const item of document.ast.items) {
-    if (!itemLoadsSources(item) || (item.kind === 'composition' && bindsLocals(item.branches))) continue;
+    if (!item.expandsSources) continue;
     append(item.span.start);
     if (item.kind === 'include') await includeItem(item);
     else await compose(item.branches);
@@ -5337,7 +5363,6 @@ async function runTools(module, inv, sourceDirectory) {
       context.inspection = true;
       context.grants.write = false;
       context.grants.run = false;
-      context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
       const text = module.decode0(await module.toolsCheck(source.compiled, target, source.name, context));
       let targetFailed = false;
       for (const line of text.split('\n').filter(Boolean)) {
@@ -5529,7 +5554,7 @@ async function scanWatchFingerprint(record, module, watch) {
     catch { return 'unavailable'; }
   }
   if (record.scan !== undefined) {
-    try { return module.watchGlobFingerprint(watch, record.name, resourceWildcard(record.scan)); }
+    try { return module.watchGlobFingerprint(watch, record.name, resourceWildcard(record.scan, record.commandGlob)); }
     catch { return 'unavailable'; }
   }
   if (record.source || record.kind !== 'file') return watchFingerprint(record.kind, record.name, record.metadata);

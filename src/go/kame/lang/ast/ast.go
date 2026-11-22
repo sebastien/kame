@@ -1014,6 +1014,16 @@ func (e *astEncoder) scriptItems(items []script.ScriptItem) {
 		e.Str(scriptKind(item.Kind))
 		e.Str("span")
 		e.span(item.Span)
+		if item.LoadsSources() {
+			e.Str("loadsSources")
+			e.Bool(true)
+			e.Str("expandsSources")
+			e.Bool(item.ExpandsSources())
+		}
+		if item.DeclaresRuleWork() {
+			e.Str("declaresRuleWork")
+			e.Bool(true)
+		}
 		if item.Kind == script.Comment || item.Kind == script.SessionCommand {
 			e.Str("text")
 			e.Str(item.Text)

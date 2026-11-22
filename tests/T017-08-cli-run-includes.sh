@@ -42,6 +42,15 @@ printf 'include ./empty.km\ninclude ./empty.km\ndefault = 42\n' >"$work/repeated
 printf 'include %s\ndefault = name\n' "$work/nested/values.km" >"$work/absolute.km"
 printf 'include ./values.km\ndefault = out! name\n' >"$work/nested/<command-file>.km"
 printf 'include ./values.km\ndefault = out! name\n' >"$work/nested/<stdin>"
+cat >"$work/conditional.km" <<'KM'
+if false
+	include ./absent.km
+else
+	if true
+		include? ./absent.km
+		include ./nested/values.km
+default = name
+KM
 
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$wasm_wrapper"); fi
@@ -63,6 +72,7 @@ for backend in native wasm; do
 	check '界childafter"Ada!"' do run --print-result -C "$work/cwd" "$work/main.km"
 	check '42' do run --print-result "$work/repeated.km"
 	check '"Ada"' do run --print-result "$work/absolute.km"
+	check '"Ada"' do run --print-result -C "$work/cwd" "$work/conditional.km"
 	check 'childmain' do run -C "$work" "$work/rules.km" build -c 'name = "Ada"' -c 'name'
 	check 'childmain' do run -C "$work" "$work/rules.km" build
 	# A physical file's spelling must not classify it as an inline/stdin source.

@@ -20,11 +20,19 @@ func (e *Engine) Teardown(n *Node) {
 	}
 }
 
+// LookupID finds a node by ID; e.nodes stays in creation (ID) order.
 func (e *Engine) LookupID(id int64) *Node {
-	for i := range e.nodes {
-		if e.nodes[i].ID == id {
-			return e.nodes[i]
+	lo, hi := 0, len(e.nodes)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if e.nodes[mid].ID < id {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
+	}
+	if lo < len(e.nodes) && e.nodes[lo].ID == id {
+		return e.nodes[lo]
 	}
 	return nil
 }
@@ -38,6 +46,7 @@ func (e *Engine) beginTeardown(n *Node, restart bool) bool {
 		return false
 	}
 	n.tearingDown, n.teardownRestart = true, restart
+	e.changes++ // a settled node becomes ready to tear down
 	if !n.TeardownPreserveRequest {
 		e.Interrupt(n)
 	}
@@ -58,6 +67,7 @@ func (e *Engine) Interrupt(n *Node) {
 		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 	n.Submitted, n.HostRequestID = false, 0
+	e.changes++ // a settled node can become ready again
 	if n.HasCompletion {
 		n.Completion.Value.Free(e.Alloc)
 		n.Completion.Diagnostic.Free(e.Alloc)

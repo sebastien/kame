@@ -81,6 +81,7 @@ func (c *EngineContext) HasDependency(key ResourceKey) bool {
 // execution uses it before cancelling invocation-owned asynchronous work.
 func (c *EngineContext) ForgetDependency(key ResourceKey) {
 	n := c.node
+	c.engine.changes++
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
 		if d.Key.Kind != key.Kind || d.Key.Name != key.Name {
@@ -239,7 +240,14 @@ func (c *EngineContext) NodeID() int64            { return c.node.ID }
 // RetainRoot pins the demanding generation for invocation-owned handles.
 func (c *EngineContext) RetainRoot() *Root { return c.engine.RequestRoot(c.node) }
 func (c *EngineContext) Generation() int64 { return c.node.Generation }
-func (c *EngineContext) Attempt() int64    { return c.node.Attempt }
+
+// Changes is the engine's change stamp (Engine.Changes).
+func (c *EngineContext) Changes() int64 { return c.engine.changes }
+
+// ObservationEpoch identifies this generation's facts up to appends: while it
+// is unchanged, a prefix of AcceptedObservations holds the same facts.
+func (c *EngineContext) ObservationEpoch() int64 { return c.node.observationEpoch }
+func (c *EngineContext) Attempt() int64          { return c.node.Attempt }
 func (c *EngineContext) Failed() bool {
 	return c.node.State == NodeFailed || c.node.State == NodeCancelled
 }

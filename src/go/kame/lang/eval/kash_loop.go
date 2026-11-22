@@ -195,6 +195,7 @@ func (p *Program) bindKashLoopCaptures(e *expr.Expr, state *kashLoopState, value
 		}
 		capture := core.NewString(p.Alloc, match.Captures[i])
 		state.Control.Scope.setValue(name, capture)
+		state.Control.Scope.localBinding(name).loopCapture = true
 		capture.Free(p.Alloc)
 	}
 	return Result{}

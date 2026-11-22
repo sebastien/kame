@@ -248,6 +248,16 @@ For example, `option -g history-max-age-days 15` saves retention globally.
 Lowering retention or size limits can prune saved history on the next refresh.
 See [shell options](spec/054-kash-options.md).
 
+Tab also completes the subcommands, options and values of external commands
+from specs discovered in man pages and fish completion files, or written as
+Usage KDL in `$XDG_CONFIG_HOME/kash/completions/NAME.usage.kdl`. A Kame build
+in `$XDG_CACHE_HOME/kash/completions` keeps them current in the background.
+`complete --refresh NAME…` (or `--all`) builds them now, `complete --show NAME`
+prints one, and `complete --live cobra|clap PATH` lets Tab ask a Cobra or clap
+executable directly. Rules in `$XDG_CONFIG_HOME/kash/completions.km` producing
+`./user/NAME.usage.kdl` can run a tool that prints its own spec.
+See [command completion](spec/058-kash-completion.md).
+
 ```text
 kash                                  # REPL when stdin is a terminal
 kash -i [FILE.kash…] [-- ARG…]        # preload sources, then interactive

@@ -36,6 +36,7 @@ func (e *Engine) Revalidate(n *Node) {
 	for i := range nodes {
 		if nodes[i] != n {
 			nodes[i].ValidationPending = true
+			e.changes++
 		}
 	}
 	mem.FreeSlice(nil, nodes)

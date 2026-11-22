@@ -132,6 +132,10 @@ func (r *Runtime) WatchStateJSON() PureResult {
 			if scan := host.DiscoveryScan(keys[i].Name); scan != keys[i].Name {
 				e.Str("scan")
 				e.Str(scan)
+				if _, _, command := host.CommandDiscovery(keys[i].Name); command {
+					e.Str("commandGlob")
+					e.Bool(true)
+				}
 				e.Str("pattern")
 				e.Str(host.DiscoveryPattern(keys[i].Name))
 				if node := r.Program.Engine.Lookup(keys[i]); node != nil && node.Current {

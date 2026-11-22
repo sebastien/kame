@@ -25,7 +25,64 @@ type Engine struct {
 	completions   []Completion
 	nextUpdate    int64
 	lastRun       *Node
+	// changes counts mutations that can falsify an accepted fact: a current
+	// node republished, failed or invalidated, a node removed, or an edge
+	// dropped. A first publication does not count; a fact needs a current node.
+	changes int64
+	// live holds, in e.nodes order, every node that might become ready: those
+	// not terminal or pending validation. A terminal node only leaves that
+	// state through a change (see changes), so live is rebuilt when the stamp
+	// moves and otherwise only gains new nodes. liveSeen counts e.nodes seen.
+	live        []*Node
+	liveSeen    int
+	liveChanges int64
 }
+
+func (n *Node) settled() bool {
+	return !n.ValidationPending && (n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled)
+}
+
+// candidates returns the nodes the scheduler must consider. Scanning every
+// node on each tick would make a build reading N files quadratic.
+func (e *Engine) candidates() []*Node {
+	if e.liveChanges != e.changes || e.liveSeen > len(e.nodes) {
+		e.live, e.liveSeen, e.liveChanges = e.live[:0], 0, e.changes
+	}
+	for ; e.liveSeen < len(e.nodes); e.liveSeen++ {
+		e.live = append(e.live, e.nodes[e.liveSeen])
+	}
+	return e.live
+}
+
+// UnsettledDynamic returns n's dynamic edges except a prefix Engine.ready
+// found current and valid, which stays so while the change stamp is unchanged.
+func (e *Engine) UnsettledDynamic(n *Node) []*Node {
+	if n.settledChanges != e.changes || n.settledDynamic > len(n.Dynamic) {
+		return n.Dynamic
+	}
+	return n.Dynamic[n.settledDynamic:]
+}
+
+// pruneSettled drops settled nodes from live after a full scan.
+func (e *Engine) pruneSettled() {
+	if e.liveChanges != e.changes {
+		return
+	}
+	kept := e.live[:0]
+	for _, n := range e.live {
+		if !n.settled() {
+			kept = append(kept, n)
+		}
+	}
+	for i := len(kept); i < len(e.live); i++ {
+		e.live[i] = nil
+	}
+	e.live = kept
+}
+
+// Changes returns the engine's change stamp. While it is unchanged, facts
+// validated against current nodes and edges remain valid.
+func (e *Engine) Changes() int64 { return e.changes }
 
 type nodeIndexEntry struct {
 	kind ResourceKind
@@ -335,6 +392,7 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 	}
 	if n.Current {
 		n.Latest.Free(e.Alloc)
+		e.changes++
 	}
 	n.Latest, n.Current = value.Clone(e.Alloc), true
 	n.Latest.Share(e.Alloc)
@@ -418,7 +476,13 @@ func (e *Engine) ready(n *Node) bool {
 			return false
 		}
 	}
-	for i := range n.Dynamic {
+	// Dependencies found settled stay settled until the change stamp moves:
+	// failing, cancelling, invalidating or marking a current node bumps it, as
+	// does any change to Dynamic other than an append. Only the rest are checked.
+	if n.settledChanges != e.changes {
+		n.settledChanges, n.settledDynamic = e.changes, 0
+	}
+	for i := n.settledDynamic; i < len(n.Dynamic); i++ {
 		dependency := n.Dynamic[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
 			if slices.Contains(n.Observed, dependency) {
@@ -431,6 +495,9 @@ func (e *Engine) ready(n *Node) bool {
 			dependency.Requested = true
 			return false
 		}
+		if i == n.settledDynamic {
+			n.settledDynamic++
+		}
 	}
 	return n.Requested && (e.CanRun == nil || e.CanRun(n))
 }
@@ -438,8 +505,7 @@ func (e *Engine) ready(n *Node) bool {
 func (e *Engine) choose(after *Node) *Node {
 	var first *Node
 	var selected *Node
-	for i := range e.nodes {
-		n := e.nodes[i]
+	for _, n := range e.candidates() {
 		if !e.ready(n) || n.offered {
 			continue
 		}
@@ -450,6 +516,7 @@ func (e *Engine) choose(after *Node) *Node {
 			selected = n
 		}
 	}
+	e.pruneSettled()
 	if selected != nil {
 		return selected
 	}
@@ -465,11 +532,12 @@ func (e *Engine) HasWork() bool {
 	if len(e.completions) != 0 {
 		return true
 	}
-	for i := range e.nodes {
-		if !e.nodes[i].offered && e.ready(e.nodes[i]) {
+	for _, n := range e.candidates() {
+		if !n.offered && e.ready(n) {
 			return true
 		}
 	}
+	e.pruneSettled()
 	return false
 }
 
@@ -633,11 +701,7 @@ func (e *Engine) Complete(c Completion) {
 }
 
 func (e *Engine) accept(c Completion) *Node {
-	for i := range e.nodes {
-		n := e.nodes[i]
-		if n.ID != c.NodeID {
-			continue
-		}
+	if n := e.LookupID(c.NodeID); n != nil {
 		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting {
 			c.Value.Free(e.Alloc)
 			c.Diagnostic.Free(e.Alloc)
@@ -691,6 +755,8 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	}
 	*seen = append(*seen, n)
 	n.invalidating = true
+	e.changes++
+	n.observationEpoch++
 	if e.beginTeardown(n, true) {
 		n.invalidating = false
 		return
@@ -812,6 +878,7 @@ func (e *Engine) cancel(n *Node) {
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
 		return
 	}
+	e.changes++
 	if e.beginTeardown(n, false) {
 		return
 	}
@@ -882,6 +949,7 @@ func (e *Engine) Free() {
 		mem.Free(e.Alloc, e.roots[i])
 	}
 	mem.FreeSlice(nil, e.roots)
+	mem.FreeSlice(nil, e.live)
 	for i := range e.nodes {
 		n := e.nodes[i]
 		e.freeNode(n)
@@ -912,6 +980,7 @@ func (e *Engine) Retire(n *Node) bool {
 	if index < 0 || n.Interest != 0 || len(n.Dependents) != 0 || len(n.Subs) != 0 || n.materializer != nil || n.Submitted || n.tearingDown || (n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled) {
 		return false
 	}
+	e.changes++
 	for i := range n.Static {
 		removeDependent(n.Static[i], n)
 	}
@@ -941,6 +1010,7 @@ func (e *Engine) freeNode(n *Node) {
 	mem.FreeSlice(nil, n.Subs)
 	mem.FreeSlice(nil, n.Static)
 	mem.FreeSlice(nil, n.Dynamic)
+	mem.FreeSlice(nil, n.observationOrder)
 	mem.FreeSlice(nil, n.previousDynamic)
 	mem.FreeSlice(nil, n.Dependents)
 	mem.FreeSlice(nil, n.Observed)

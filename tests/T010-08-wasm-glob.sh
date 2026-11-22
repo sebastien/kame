@@ -22,6 +22,7 @@ project="$TMPDIR/wasm-glob"
 mkdir -p "$project/src/a" "$project/src/b"
 printf x >"$project/a.md"
 printf x >"$project/b.md"
+printf x >"$project/.hidden.md"
 printf x >"$project/c.txt"
 printf x >"$project/src/a/one.km"
 printf x >"$project/src/two.km"
@@ -66,6 +67,65 @@ for backend in native wasm; do
 		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend symlink glob result: $(cat "$project/value")"; fi
 	done
 done
+
+test-step "command globs prune hidden traversal and match explicit dot components"
+mkdir -p "$project/glob/visible/poison" "$project/glob/visible/.blocked" "$project/glob/.explicit/.nested"
+touch "$project/glob/visible/poison/hit.txt" "$project/glob/.explicit/shown.txt" "$project/glob/.explicit/.nested/shown.txt"
+chmod 000 "$project/glob/visible/.blocked"
+command='printf "<%s>\n" glob/**/poison/*.txt glob/**/.exp*/**/shown*.txt glob/visible/**'
+expected=$'<./glob/visible/poison/hit.txt>\n<./glob/.explicit/shown.txt>\n<./glob/visible/poison>\n<./glob/visible/poison/hit.txt>'
+for backend in native wasm; do
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
+	if value=$(cd "$project" && "${runner[@]}" do run --lang kash --allow-read --allow-run -c "$command") && [ "$value" = "$expected" ]; then
+		test-ok "$backend prunes hidden subtrees and matches explicit dots"
+	else
+		test-fail "$backend command glob: $value"
+	fi
+done
+chmod 700 "$project/glob/visible/.blocked"
+
+test-step "command globs sort absolute argv after root-relative matches are normalized"
+mkdir -p "$project/sub" "$TMPDIR/a-outside"
+touch "$project/hit-two" "$TMPDIR/a-outside/hit-one"
+expected=$(printf '<%s>\n' "$TMPDIR/a-outside/hit-one" "$project/hit-two")
+for backend in native wasm; do
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$wasm_runner"); fi
+	if value=$(cd "$project" && "${runner[@]}" do run --lang kash --allow-read --allow-run -c 'cwd: ./sub printf "<%s>\n" ../../*/hit-*') && [ "$value" = "$expected" ]; then
+		test-ok "$backend sorts the final argument spellings"
+	else
+		test-fail "$backend command glob ordering: $value"
+	fi
+done
+
+test-step "custom callbacks keep kind 6 and may return ordinary candidates"
+if KAME_RUNNER="$wasm_runner" node --input-type=module - <<'NODE'; then test-ok "command glob callback compatibility"; else test-fail "command glob callback compatibility"; fi
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+const { Kame } = await import(pathToFileURL(process.env.KAME_RUNNER));
+const kame = await Kame.create();
+try {
+  const program = await kame.compile('');
+  const modes = [];
+  const options = {
+    grants: [{ capability: 'read' }, { capability: 'run' }],
+    async hostRequest(request) {
+      if (request.kind === 6) {
+        modes.push(request.commandGlob);
+        return { type: 'json', value: ['./.hidden', './visible'] };
+      }
+      if (request.kind === 18) return { type: 'text', value: request.payload };
+      assert.equal(request.kind, 13);
+      assert.deepEqual(JSON.parse(request.payload), ['/bin/printf', '%s', './visible']);
+      return { type: 'failure', code: 'EXEC_CANCELLED', message: 'argv observed' };
+    },
+  };
+  assert.equal(await program.evaluate('(wildcard ./*)', options), '[./.hidden, ./visible]');
+  await assert.rejects(program.evaluate('$(/bin/printf "%s" ./*)', options), /argv observed/);
+  assert.deepEqual(modes, [undefined, true]);
+} finally {
+  await kame.dispose();
+}
+NODE
 
 test-step "wildcard needs a read grant"
 set +e

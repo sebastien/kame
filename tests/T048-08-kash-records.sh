@@ -67,7 +67,7 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, process.env.WASM
   run('for line from "" :lines\n\tprintf forbidden', '', 1, 'EXPR_INVALID');
   run('for line from ./absent :lines\n\tprintf forbidden', '', 1, 'FS_ERR');
   run('for line from ./sub :lines\n\tprintf forbidden', '', 1, 'FS_ERR');
-  run('for line from ./final :lines\n\tprintf forbidden', '', 1, 'CAP_DENIED', ['--allow-run']);
+  run('for line from ./final :lines\n\tprintf forbidden', '', 1, 'CAP_DENIED', ['--no-default-grants', '--allow-run']);
   run('for line from ./absent :lines\n\tprintf forbidden\n\tdefer printf forbidden', '', 0, undefined, ['-n']);
   run('for line from ./many :lines\n\twith\n\t\tdefer (nop :nil)\n\t\tcontinue\nprintf X', 'X');
   run('defer printf D\nfor line from ./deadline :lines\n\tcontinue', 'D', 1, 'RECIPE_TIMEOUT', ['--timeout', '500']);

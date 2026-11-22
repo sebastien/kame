@@ -249,19 +249,24 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
 	}
-	if grouped {
+	commandGlob := op == host.OpWildcard && c.CommandGlob
+	if grouped || commandGlob {
 		root := c.Cwd
 		if c.Program != nil {
 			root = c.Program.DefinitionCwd
 		}
-		name = host.DiscoveryKey(c.Run, name, value.Text, c.Cwd, root)
+		if grouped {
+			name = host.DiscoveryKey(c.Run, name, value.Text, c.Cwd, root)
+		} else {
+			name = host.CommandDiscoveryKey(c.Run, name, root)
+		}
 		defer mem.FreeString(c.Run, name)
 	}
 	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}
 	}
 	result := request(c, host.RequestReadFile, host.FilePayload(c.Run, op, name))
-	if grouped && (c.Engine == nil || c.Program == nil) && !result.Waiting && result.Diagnostic.Code == "" {
+	if (grouped || commandGlob) && (c.Engine == nil || c.Program == nil) && !result.Waiting && result.Diagnostic.Code == "" {
 		result.Value, result.Diagnostic = host.FilterDiscovery(c.Run, name, result.Value)
 	}
 	if op == host.OpWildcard && !result.Waiting && result.Diagnostic.Code == "" {

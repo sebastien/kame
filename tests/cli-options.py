@@ -19,6 +19,27 @@ def invoke(host: list[str], args: list[str], cwd: Path, text: str = "", status: 
 	return result
 
 
+def checkGrants(host: list[str], project: Path) -> None:
+	(project / "grant-input.txt").write_text("contents")
+	output = project / "grant-output.txt"
+	(project / "grants.km").write_text('rule ./grant-output.txt\n\tif exists? "grant-input.txt"\n\t\tprintf contents > $outputs.0\n')
+	for command in [["do", "run", "grants.km"], ["-f", "grants.km"]]:
+		invoke(host, [*command, "--allow-env=KAME_GRANT_PROBE", "./grant-output.txt"], project)
+		assert output.read_text() == "contents"
+		output.unlink()
+		for flags in [["--no-default-grants"], ["--no-default-grants", "--allow-read=."], ["--allow-read=./nested"]]:
+			result = invoke(host, [*command, *flags, "./grant-output.txt"], project, status=1)
+			assert "CAP_DENIED" in result.stderr and not output.exists(), result
+
+	kash = ["do", "run", "-l", "kash", "--env", "KAME_GRANT_PROBE=visible", "-c", 'printf "%s" $KAME_GRANT_PROBE']
+	for flags in [[], ["--allow-read=./nested"], ["--allow-env=KAME_GRANT_PROBE"]]:
+		result = invoke(host, [*kash, *flags], project)
+		assert result.stdout == "visible", result
+	for flags in [["--no-default-grants", "--allow-run"], ["--allow-env=KAME_GRANT_OTHER"]]:
+		result = invoke(host, [*kash, *flags], project, status=1)
+		assert "CAP_DENIED" in result.stderr and not result.stdout, result
+
+
 def checkHost(host: list[str], project: Path) -> None:
 	unknown = invoke(host, ["do", "expr", "-c", "42"], project, status=2)
 	assert not unknown.stdout and "CMD_UNKNOWN" in unknown.stderr and "kame do run --lang expr -c TEXT" in unknown.stderr, unknown
@@ -127,8 +148,11 @@ def main() -> None:
 		for name in ["value.km", "-value.km"]:
 			(project / "nested" / name).write_text("42")
 		(project / "Makefile.km").write_text("task default\n")
-		for host in [[native], ["node", wasm]]:
+		hosts = [[native], ["node", wasm]]
+		for host in hosts:
 			checkHost(host, project)
+		for host in hosts:
+			checkGrants(host, project)
 		result = invoke([str(root / "bin/kame")], ["init", "--help"], project, status=1)
 		assert "retired" in result.stderr and not result.stdout, result
 		assert not (project / "Makefile.bootstrap").exists()

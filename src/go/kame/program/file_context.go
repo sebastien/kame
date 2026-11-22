@@ -59,38 +59,65 @@ func appendAcceptedObservation(a mem.Allocator, values []core.Observation, item 
 	return append(values, item)
 }
 
-func (p *Program) collectAcceptedInputs(node *core.Node, values *[]core.Observation, seen *[]*core.Node) {
-	if slices.Contains(*seen, node) || eval.IsModuleLoad(node) {
+// acceptedCollector gathers a record's inputs; a rule reading N files has N
+// facts, so membership and deduplication are indexed.
+type acceptedCollector struct {
+	values []core.Observation
+	index  map[acceptedKey]int
+	seen   map[*core.Node]bool
+}
+
+type acceptedKey struct {
+	kind   core.ResourceKind
+	name   string
+	aspect core.ObservationAspect
+}
+
+// add has appendAcceptedObservation's semantics.
+func (a *acceptedCollector) add(alloc mem.Allocator, item core.Observation) {
+	key := acceptedKey{item.Key.Kind, item.Key.Name, item.Aspect}
+	if i, ok := a.index[key]; ok {
+		if !a.values[i].Signature.Equal(item.Signature) {
+			a.values[i].Signature = core.Signature{}
+		}
 		return
 	}
-	*seen = append(*seen, node)
+	item.Key = item.Key.Clone(alloc)
+	key.name = item.Key.Name
+	a.index[key] = len(a.values)
+	a.values = append(a.values, item)
+}
+
+func (p *Program) collectAcceptedInputs(node *core.Node, collector *acceptedCollector) {
+	if collector.seen[node] || eval.IsModuleLoad(node) {
+		return
+	}
+	collector.seen[node] = true
 	for i := range node.Observations {
 		item := node.Observations[i]
 		if item.Key.Kind == core.ResourceDefinition {
 			item.Key.Name = eval.AuthoredDefinitionName(item.Key.Name)
 		}
-		*values = appendAcceptedObservation(p.Alloc, *values, item)
+		collector.add(p.Alloc, item)
 	}
 	for i := range node.Dynamic {
 		// A generated prerequisite is consumed through its published artifact
 		// signature, not through the producer's own implementation and inputs.
 		if !slices.Contains(node.OrderOnly, node.Dynamic[i]) && p.instanceIndex(node.Dynamic[i]) < 0 {
-			p.collectAcceptedInputs(node.Dynamic[i], values, seen)
+			p.collectAcceptedInputs(node.Dynamic[i], collector)
 		}
 	}
 	for i := range node.Static {
 		if p.instanceIndex(node.Static[i]) < 0 {
-			p.collectAcceptedInputs(node.Static[i], values, seen)
+			p.collectAcceptedInputs(node.Static[i], collector)
 		}
 	}
 }
 
 func (p *Program) acceptedInputs(entry *instance) []core.Observation {
-	var inputs []core.Observation
-	var seen []*core.Node
-	p.collectAcceptedInputs(entry.Node, &inputs, &seen)
-	mem.FreeSlice(nil, seen)
-	return inputs
+	collector := acceptedCollector{index: map[acceptedKey]int{}, seen: map[*core.Node]bool{}}
+	p.collectAcceptedInputs(entry.Node, &collector)
+	return collector.values
 }
 
 // Process/tool identity proves how a recipe ran, not that an inputless file

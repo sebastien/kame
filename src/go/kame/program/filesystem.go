@@ -33,6 +33,15 @@ func (p *Program) isSourcePath(name string) bool {
 
 func (p *Program) fileCompletion(request host.Request, op string, name string) core.Completion {
 	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID}
+	if op == host.OpWildcard {
+		key := host.PayloadText(request.Payload, host.FieldDiscoveryKey)
+		if _, _, command := host.CommandDiscovery(key); command {
+			name = key
+		}
+		result := p.wildcard(name)
+		completion.Value, completion.HasValue, completion.Diagnostic = result.Value, result.HasValue, result.Diagnostic
+		return completion
+	}
 	filename := p.canonicalTarget(name, true)
 	defer mem.FreeString(p.Alloc, filename)
 	if op == host.OpOutputContent {
@@ -151,17 +160,13 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		}
 		return completion
 	}
-	if op == host.OpWildcard {
-		result := p.wildcard(name)
-		completion.Value, completion.HasValue, completion.Diagnostic = result.Value, result.HasValue, result.Diagnostic
-		return completion
-	}
 	completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "unknown filesystem request")
 	return completion
 }
 
 func (p *Program) wildcard(pattern string) core.Completion {
 	key := pattern
+	_, _, command := host.CommandDiscovery(key)
 	pattern = p.canonicalTarget(host.DiscoveryScan(key), true)
 	defer mem.FreeString(p.Alloc, pattern)
 	root := globRoot(p.Alloc, pattern)
@@ -175,7 +180,7 @@ func (p *Program) wildcard(pattern string) core.Completion {
 		}
 	}
 	failed := false
-	p.collectGlob(pattern, start, root, &names, &failed)
+	p.collectGlob(pattern, start, root, &names, &failed, command)
 	if failed {
 		for i := range names {
 			mem.FreeString(p.Alloc, names[i])
@@ -211,6 +216,10 @@ func (p *Program) wildcard(pattern string) core.Completion {
 		values[i].Free(p.Alloc)
 	}
 	mem.FreeSlice(nil, values)
+	if command {
+		// Visibility was enforced during the walk.
+		return core.Completion{Value: result, HasValue: true}
+	}
 	value, d := host.FilterDiscovery(p.Alloc, key, result)
 	return core.Completion{Value: value, HasValue: d.Code == "", Diagnostic: d}
 }
@@ -309,7 +318,7 @@ func globRoot(a mem.Allocator, pattern string) string {
 	return cloneText(a, pattern[:cut-1])
 }
 
-func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string, failed *bool) {
+func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string, failed *bool, command bool) {
 	if *failed {
 		return
 	}
@@ -332,22 +341,23 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	}
 	if segment == "**" {
 		if end == len(pattern) {
-			p.collectDescendants(directory, names, failed)
+			p.collectDescendants(directory, names, failed, command)
 			return
 		}
-		p.collectGlob(pattern, next, directory, names, failed)
+		p.collectGlob(pattern, next, directory, names, failed, command)
 		entries, err := p.Host.ReadDir(p.Alloc, directory)
 		if err != nil {
 			*failed = *failed || p.globDirectoryFailed(directory)
 			return
 		}
 		for i := range entries {
-			name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
-			mem.FreeString(p.Alloc, entries[i].Name)
-			if entries[i].IsDir {
-				p.collectGlob(pattern, pos, name, names, failed)
+			entry := entries[i]
+			if entry.IsDir && (!command || !strings.HasPrefix(entry.Name, ".")) {
+				name := joinFilesystemPath(p.Alloc, directory, entry.Name)
+				p.collectGlob(pattern, pos, name, names, failed, command)
+				mem.FreeString(p.Alloc, name)
 			}
-			mem.FreeString(p.Alloc, name)
+			mem.FreeString(p.Alloc, entry.Name)
 		}
 		mem.FreeSlice(nil, entries)
 		return
@@ -377,7 +387,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		if end == len(pattern) {
 			*names = append(*names, cloneText(p.Alloc, name))
 		} else if info.Info.IsDir {
-			p.collectGlob(pattern, next, name, names, failed)
+			p.collectGlob(pattern, next, name, names, failed, command)
 		}
 		mem.FreeString(p.Alloc, name)
 		return
@@ -387,7 +397,12 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		*failed = *failed || p.globDirectoryFailed(directory)
 		return
 	}
+	dot := !command || host.GlobExplicitDot(segment)
 	for i := range entries {
+		if !dot && strings.HasPrefix(entries[i].Name, ".") {
+			mem.FreeString(p.Alloc, entries[i].Name)
+			continue
+		}
 		name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 		mem.FreeString(p.Alloc, entries[i].Name)
 		matched, matchErr := path.Match(segment, path.Base(name))
@@ -395,7 +410,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 			if end == len(pattern) {
 				*names = append(*names, cloneText(p.Alloc, name))
 			} else if entries[i].IsDir {
-				p.collectGlob(pattern, next, name, names, failed)
+				p.collectGlob(pattern, next, name, names, failed, command)
 			}
 		}
 		mem.FreeString(p.Alloc, name)
@@ -408,7 +423,7 @@ func (p *Program) globDirectoryFailed(directory string) bool {
 	return info.Failed || (info.Exists && info.Info.IsDir)
 }
 
-func (p *Program) collectDescendants(directory string, names *[]string, failed *bool) {
+func (p *Program) collectDescendants(directory string, names *[]string, failed *bool, command bool) {
 	if *failed {
 		return
 	}
@@ -419,11 +434,15 @@ func (p *Program) collectDescendants(directory string, names *[]string, failed *
 	}
 	defer mem.FreeSlice(nil, entries)
 	for i := range entries {
+		if command && strings.HasPrefix(entries[i].Name, ".") {
+			mem.FreeString(p.Alloc, entries[i].Name)
+			continue
+		}
 		name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 		mem.FreeString(p.Alloc, entries[i].Name)
 		*names = append(*names, name)
 		if entries[i].IsDir {
-			p.collectDescendants(name, names, failed)
+			p.collectDescendants(name, names, failed, command)
 		}
 	}
 }

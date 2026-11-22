@@ -472,6 +472,7 @@ yields `nil` when unset.
 | `history` | interactive | Select the history scope or clear history (`053`). |
 | `option` | interactive | Inspect or change shell options (`054`). |
 | `explain` | interactive | Show the full report of the latest failure. |
+| `complete` | interactive | Refresh or show command completion specs, or register live completion protocols (`058`). |
 
 An interactive-only builtin used in a script or rule body is `PARSE_ERR`.
 Foreign-shell command heads resolve after lexical names but before executable

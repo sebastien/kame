@@ -26,6 +26,7 @@ type binding struct {
 	Initialized bool
 	Captured    bool // A compiled source or session entry closes over this let.
 	LetBinding  *expr.LetBinding
+	loopCapture bool
 }
 
 type bindingIndexEntry struct {
@@ -207,6 +208,10 @@ func (s *Scope) localResolved(name string, let *expr.LetBinding) *binding {
 			return &s.Bindings[slot]
 		}
 		if !s.replaceBindings {
+			// Computed path patterns can introduce a nearer immutable binding.
+			if b := s.localBinding(name); b != nil && b.loopCapture {
+				return b
+			}
 			return nil
 		}
 	}

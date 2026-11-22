@@ -15,7 +15,7 @@ func completionFixture(t *testing.T) completionContext {
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	work := filepath.Join(root, "work")
-	for _, dir := range []string{bin, work, filepath.Join(work, "src"), filepath.Join(work, "spaced dir"), filepath.Join(root, "home", "docs")} {
+	for _, dir := range []string{bin, work, filepath.Join(work, "src"), filepath.Join(work, "spaced dir"), filepath.Join(work, "~"), filepath.Join(root, "home", "docs")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -29,6 +29,7 @@ func completionFixture(t *testing.T) completionContext {
 		filepath.Join(work, ".hidden"):                   0o644,
 		filepath.Join(work, "src", "main.go"):            0o644,
 		filepath.Join(work, "a(b).txt"):                  0o644,
+		filepath.Join(work, "~", "local.txt"):            0o644,
 		filepath.Join(root, "home", "docs", "notes.txt"): 0o644,
 	} {
 		if err := os.WriteFile(name, nil, mode); err != nil {
@@ -56,6 +57,10 @@ func TestCompletionWordStart(t *testing.T) {
 		{"(upper", "upper"},
 		{"cat a|gr", "gr"},
 		{"echo spaced\\ di", "spaced\\ di"},
+		{`echo slash\\ word`, "word"},
+		{`echo slash\\\ word`, `slash\\\ word`},
+		{`echo xx\\=val`, "val"},
+		{`echo xx\\\=val`, `xx\\\=val`},
 		{"x = $(ec", "ec"},
 		{"--out=./re", "./re"},
 		{"def f ()\n\tec", "ec"},
@@ -71,6 +76,7 @@ func TestCompletionCommandPosition(t *testing.T) {
 	for text, want := range map[string]bool{
 		"": true, "cat a |": true, "echo a;": true, "sleep 1 &": true, "x = $(": true,
 		"if": true, "if test -e a && while": true, "echo if": false, "echo": false, "echo a >": false,
+		`echo literal\|`: false, `echo literal\\|`: true, `echo \$(`: false,
 	} {
 		if got := completionCommandPosition(text); got != want {
 			t.Errorf("command position after %q = %v, want %v", text, got, want)
@@ -102,8 +108,10 @@ func TestCompletionsAt(t *testing.T) {
 		{name: "escaped directory", line: "cat sp", want: []string{"spaced\\ dir/|files|"}},
 		{name: "typed escape", line: "cat spaced\\ d", want: []string{"spaced\\ dir/|files|"}},
 		{name: "hidden needs dot", line: "cat .h", want: []string{".hidden|files|"}},
-		{name: "cd directories", line: "cd ", want: []string{"spaced\\ dir/|files|", "src/|files|"}},
+		{name: "cd directories", line: "cd ", want: []string{`\~/|files|`, "spaced\\ dir/|files|", "src/|files|"}},
 		{name: "home", line: "cat ~/do", want: []string{"~/docs/|files|"}},
+		{name: "escaped home", line: `cat \~/lo`, want: []string{`\~/local.txt|files|`}},
+		{name: "continuation in path", line: "cat rea\\\r\nd", want: []string{"readme.md|files|"}},
 		{name: "path in command position", line: "./sr", want: []string{"./src/|files|"}},
 		{name: "redirect target", line: "echo x > ./rel", want: []string{"./release.txt|files|"}},
 	} {

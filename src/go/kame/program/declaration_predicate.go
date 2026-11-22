@@ -11,7 +11,6 @@ import (
 	"kame/lang/source"
 	"kame/operations"
 
-	"path"
 	"strings"
 )
 
@@ -20,7 +19,26 @@ type PredicateResult struct {
 	Pending     bool
 	Diagnostic  diagnostic.Diagnostic
 	Discoveries []DeclarationSnapshot
+}
+
+// IncludePathsResult contains the batch's canonical paths, in operand order.
+type IncludePathsResult struct {
 	Paths       []string
+	Pending     bool
+	Diagnostic  diagnostic.Diagnostic
+	Discoveries []DeclarationSnapshot
+}
+
+type configurationResult struct {
+	Selected    bool
+	Paths       []string
+	Pending     bool
+	Diagnostic  diagnostic.Diagnostic
+	Discoveries []DeclarationSnapshot
+}
+
+func (r configurationResult) predicate() PredicateResult {
+	return PredicateResult{Selected: r.Selected, Pending: r.Pending, Diagnostic: r.Diagnostic, Discoveries: r.Discoveries}
 }
 
 type configurationConditionRequest struct {
@@ -77,7 +95,7 @@ func configurationDiagnostic(a mem.Allocator, value diagnostic.Diagnostic, locat
 // Future explicit overrides are validated by final registration, rather than
 // rejected merely because their declaration has not been loaded yet.
 func DeclarationPredicate(a mem.Allocator, name string, prefix string, predicate string, defines []string, environment []string, directory string) PredicateResult {
-	return configurationCondition(a, configurationConditionRequest{Name: name, Prefix: prefix, Predicate: predicate, Defines: defines, Environment: environment, Directory: directory, RequireBoolean: true})
+	return configurationCondition(a, configurationConditionRequest{Name: name, Prefix: prefix, Predicate: predicate, Defines: defines, Environment: environment, Directory: directory, RequireBoolean: true}).predicate()
 }
 
 // CompositionCondition uses ordinary expression truth without granting host
@@ -85,7 +103,7 @@ func DeclarationPredicate(a mem.Allocator, name string, prefix string, predicate
 // retain labels but no synthetic locations; use CompositionConditionSources for
 // authored provenance.
 func CompositionCondition(a mem.Allocator, name string, prefix string, predicate string, defines []string, environment []string, directory string) PredicateResult {
-	return configurationCondition(a, configurationConditionRequest{Name: name, Prefix: prefix, Predicate: predicate, Defines: defines, Environment: environment, Directory: directory})
+	return configurationCondition(a, configurationConditionRequest{Name: name, Prefix: prefix, Predicate: predicate, Defines: defines, Environment: environment, Directory: directory}).predicate()
 }
 
 // CompositionConditionSources accepts declaration-only fragments and an authored
@@ -98,15 +116,16 @@ func CompositionConditionSources(a mem.Allocator, sources []CompileSource, condi
 // TrackedCompositionCondition evaluates a file selection using the declaration
 // discovery host and grants. Its snapshots also belong to the final program.
 func TrackedCompositionCondition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options) PredicateResult {
-	return trackedComposition(a, sources, condition, defines, environment, directory, discovery, false)
+	return trackedComposition(a, sources, condition, defines, environment, directory, discovery, false).predicate()
 }
 
 // CompositionIncludePaths selects source paths before any of their rules register.
-func CompositionIncludePaths(a mem.Allocator, sources []CompileSource, operand CompileSource, defines []string, environment []string, directory string, discovery *Options) PredicateResult {
-	return trackedComposition(a, sources, operand, defines, environment, directory, discovery, true)
+func CompositionIncludePaths(a mem.Allocator, sources []CompileSource, operand CompileSource, defines []string, environment []string, directory string, discovery *Options) IncludePathsResult {
+	r := trackedComposition(a, sources, operand, defines, environment, directory, discovery, true)
+	return IncludePathsResult{Paths: r.Paths, Pending: r.Pending, Diagnostic: r.Diagnostic, Discoveries: r.Discoveries}
 }
 
-func trackedComposition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options, include bool) PredicateResult {
+func trackedComposition(a mem.Allocator, sources []CompileSource, condition CompileSource, defines []string, environment []string, directory string, discovery *Options, include bool) configurationResult {
 	b := strings.Builder{}
 	defer b.Reset()
 	for i := range sources {
@@ -141,21 +160,22 @@ func trackedComposition(a mem.Allocator, sources []CompileSource, condition Comp
 	return result
 }
 
-func configurationCondition(a mem.Allocator, request configurationConditionRequest) (answer PredicateResult) {
+func configurationCondition(a mem.Allocator, request configurationConditionRequest) (answer configurationResult) {
 	parseName := request.Name
 	if request.Located {
 		parseName = "<configuration>"
 	}
 	var parsed *script.Script
+	var offsets []int
 	if request.Located {
-		offsets := make([]int, len(request.Origins))
+		offsets = make([]int, len(request.Origins))
+		defer mem.FreeSlice(nil, offsets)
 		at := 0
 		for i := range request.Origins {
 			offsets[i] = at
 			at += len(request.Origins[i].Text) + 1
 		}
 		parsed = parseSourceFragments(a, parseName, request.Prefix, request.Origins, offsets)
-		mem.FreeSlice(nil, offsets)
 	} else {
 		parsed = script.ParseKameFile(a, parseName, request.Prefix)
 	}
@@ -184,43 +204,32 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		options.Grants = request.Discovery.Grants
 	}
 	var origins []CompileSource
-	var offsets []int
+	var lexicalOffsets []int
 	if request.Include != nil {
-		origins = request.Origins
-		at := 0
-		for _, origin := range origins {
-			offsets = append(offsets, at)
-			at += len(origin.Text) + 1
-		}
+		// Includes resolve lexical paths against their authors; conditions only
+		// retain provenance and still evaluate paths against the invocation cwd.
+		origins, lexicalOffsets = request.Origins, offsets
 	}
-	compiled := compileSources(a, parsed, registry, options, origins, offsets)
+	compiled := compileSources(a, parsed, registry, options, origins, lexicalOffsets)
 	defer compiled.Free(a)
 	if compiled.Program == nil {
 		if len(compiled.Diagnostics) != 0 {
 			d := configurationDiagnostic(a, compiled.Diagnostics[0], request.Located)
 			if request.Located {
-				offsets := make([]int, len(request.Origins))
-				at := 0
-				for i := range request.Origins {
-					offsets[i] = at
-					at += len(request.Origins[i].Text) + 1
-				}
 				qualifyCompileDiagnostic(a, &d, parseName, request.Origins, offsets)
-				mem.FreeSlice(nil, offsets)
 			}
-			return PredicateResult{Diagnostic: d}
+			return configurationResult{Diagnostic: d}
 		}
-		return PredicateResult{Diagnostic: failure(a, "PARSE_ERR", "conditional configuration could not be compiled")}
+		return configurationResult{Diagnostic: failure(a, "PARSE_ERR", "conditional configuration could not be compiled")}
 	}
 	p := compiled.Program
 	defer p.Free()
 	var expression *expr.Result
 	if request.Located {
 		if request.Include == nil {
-			at := 0
 			for i := range request.Origins {
-				p.Eval.AddSourcePart(request.Origins[i].Name, at, at+len(request.Origins[i].Text), request.Origins[i].Offset)
-				at += len(request.Origins[i].Text) + 1
+				origin := request.Origins[i]
+				p.Eval.AddSourcePart(origin.Name, offsets[i], offsets[i]+len(origin.Text), origin.Offset)
 			}
 		}
 		// Parse the predicate in a disjoint range, so helper-body offsets cannot
@@ -248,7 +257,7 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 		d := expression.Diagnostics[0]
 		location := p.Eval.LocateSource(parseName, d.Span)
 		portable := diagnostic.Diagnostic{Source: location.Source, Code: d.Code, Severity: diagnostic.Error, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}, Message: d.Message}
-		return PredicateResult{Diagnostic: configurationDiagnostic(a, portable, request.Located)}
+		return configurationResult{Diagnostic: configurationDiagnostic(a, portable, request.Located)}
 	}
 	state := planResolverState{Program: p}
 	defer mem.FreeSlice(nil, state.Resolving)
@@ -269,58 +278,46 @@ func configurationCondition(a mem.Allocator, request configurationConditionReque
 	defer eval.FreeEffects(a, context.Effects)
 	defer freeStrings(a, context.WritePaths)
 	if p.registrationPending {
-		return PredicateResult{Pending: true}
+		return configurationResult{Pending: true}
 	}
 	if result.Diagnostic.Code != "" {
 		if request.Include != nil {
-			return PredicateResult{Diagnostic: result.Diagnostic.Clone(a)}
+			return configurationResult{Diagnostic: result.Diagnostic.Clone(a)}
 		}
-		return PredicateResult{Diagnostic: configurationDiagnostic(a, result.Diagnostic, request.Located)}
+		return configurationResult{Diagnostic: configurationDiagnostic(a, result.Diagnostic, request.Located)}
 	}
 	if result.Waiting || result.Stream != nil || context.PhaseInvalid() || len(context.Effects) != 0 {
 		location := p.Eval.LocateSource(parseName, expression.Expr.Span)
-		return PredicateResult{Diagnostic: configurationDiagnostic(a, diagnostic.Diagnostic{Source: location.Source, Code: "PHASE_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}, request.Located)}
+		return configurationResult{Diagnostic: configurationDiagnostic(a, diagnostic.Diagnostic{Source: location.Source, Code: "PHASE_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}, request.Located)}
 	}
 	if request.RequireBoolean && result.Value.Kind != core.Bool {
 		d := diagnostic.Diagnostic{Source: request.Name, Code: "EXPR_INVALID", Severity: diagnostic.Error, Span: diagnostic.Span{Start: expression.Expr.Span.Start, End: expression.Expr.Span.End}, Message: "configuration predicate must return bool; got " + core.KindName(result.Value.Kind), Tips: []string{"Use an explicit comparison that returns true or false."}}
-		return PredicateResult{Diagnostic: configurationDiagnostic(a, d, request.Located)}
+		return configurationResult{Diagnostic: configurationDiagnostic(a, d, request.Located)}
 	}
 	if request.Include != nil {
-		includeError := func(code, message string) PredicateResult {
-			d := failure(a, code, message)
+		includeError := func(d diagnostic.Diagnostic) configurationResult {
 			d.Source = cloneText(a, request.Name)
 			d.Span = diagnostic.Span{Start: request.PredicateOffset, End: request.PredicateOffset + len(request.Predicate)}
-			return PredicateResult{Diagnostic: d}
+			return configurationResult{Diagnostic: d}
 		}
 		const expected = "batch include requires a list of rooted local paths"
 		if result.Value.Kind != core.List {
-			return includeError("EXPR_INVALID", expected)
+			return includeError(failure(a, "EXPR_INVALID", expected))
 		}
 		paths := make([]string, 0, len(result.Value.List))
 		for _, value := range result.Value.List {
 			if !rootedIncludePath(value) {
-				return includeError("EXPR_INVALID", expected)
+				freeStrings(a, paths)
+				return includeError(failure(a, "EXPR_INVALID", expected))
 			}
-			name := value.Text
-			if tail, relative := strings.CutPrefix(name, "~/"); relative {
-				home, _ := p.configuredEnvironment("HOME")
-				if !path.IsAbs(home) {
-					return includeError("FS_ERR", "cannot resolve home directory for include")
-				}
-				name = path.Join(home, tail)
-			} else if !path.IsAbs(name) {
-				if request.Include.SourceDirectory == "" {
-					return includeError("RES_INVALID", "relative include requires a file-backed source")
-				}
-				name = path.Join(request.Include.SourceDirectory, name)
-			}
-			name = path.Clean(name)
-			if !context.Allows(eval.Read, name) {
-				return includeError("CAP_DENIED", "batch include requires read access; grant the required path with --allow-read=ROOT")
+			name, d := p.resolveDeclarationIncludePath(value.Text, request.Include.SourceDirectory, "batch include requires read access; grant the required path with --allow-read=ROOT")
+			if d.Code != "" {
+				freeStrings(a, paths)
+				return includeError(d)
 			}
 			paths = append(paths, name)
 		}
-		return PredicateResult{Paths: paths}
+		return configurationResult{Paths: paths}
 	}
-	return PredicateResult{Selected: result.Value.Kind != core.Nil && !(result.Value.Kind == core.Bool && !result.Value.Bool)}
+	return configurationResult{Selected: result.Value.Kind != core.Nil && !(result.Value.Kind == core.Bool && !result.Value.Bool)}
 }

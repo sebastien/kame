@@ -46,6 +46,7 @@ printf '<%s>\n' $...matches after-*
 		pattern, read, code string
 	}{
 		{"not-here-*", "--allow-read", "GLOB_NO_MATCH"},
+		{"[.]plan-*", "--allow-read", "GLOB_NO_MATCH"},
 		{"plan-055*/", "--allow-read", "GLOB_NO_MATCH"},
 		{"sub*/../plan-055*", "--allow-read", "PAT_INVALID"},
 		{"plan-055*", "--allow-read=./sub", "CAP_DENIED"},
@@ -56,6 +57,67 @@ printf '<%s>\n' $...matches after-*
 		if status == 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "["+test.code+"]") {
 			t.Errorf("%s: status=%d stdout=%q stderr=%q, want %s", test.pattern, status, out.String(), errOut.String(), test.code)
 		}
+	}
+}
+
+func TestNativeKashCommandGlobsSkipHiddenTraversal(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"visible/poison/hit.txt",
+		"visible/.nested/secret.txt",
+		".private/shown-one.txt",
+		".private/.nested/shown-two.txt",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		nativeCLIWrite(t, path, "")
+	}
+	// Reaching this literal intermediate component fails even as root.
+	if err := os.Symlink("poison", filepath.Join(dir, ".private", "poison")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+	code := `printf '<%s>\n' **/poison/*.txt */poison/*.txt
+printf '<%s>\n' **/.private*/**/shown-*.txt .private/shown-*.txt
+printf '<%s>\n' visible/**
+let all = wildcard ./visible/**
+printf '<%s>\n' $...all
+`
+	var out, errOut bytes.Buffer
+	flags := []string{"do", "run", "--lang", "kash", "--allow-read", "--allow-run", "-c"}
+	status := runNativeCLIIn(t, dir, append(flags, code), nil, &out, &errOut)
+	want := strings.Repeat("<./visible/poison/hit.txt>\n", 2) +
+		strings.Repeat("<./.private/shown-one.txt>\n", 2) +
+		"<./visible/poison>\n<./visible/poison/hit.txt>\n" +
+		"<./visible/.nested>\n<./visible/.nested/secret.txt>\n<./visible/poison>\n<./visible/poison/hit.txt>\n"
+	if status != 0 || out.String() != want || errOut.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q, want stdout=%q", status, out.String(), errOut.String(), want)
+	}
+}
+
+func TestNativeKashCommandGlobsSortFinalSpellings(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "z-root")
+	outside := filepath.Join(parent, "a-outside", "hit-one")
+	inside := filepath.Join(dir, "hit-two")
+	if err := os.MkdirAll(filepath.Dir(outside), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub-more"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, outside, "")
+	nativeCLIWrite(t, inside, "")
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, dir, []string{"do", "run", "--lang", "kash", "--allow-read", "--allow-run", "-c",
+		"cwd: ./sub printf '<%s>\\n' ../../*/hit-*\nprintf '<%s>\\n' sub*/"}, nil, &out, &errOut)
+	want := "<" + filepath.ToSlash(outside) + ">\n<" + filepath.ToSlash(inside) + ">\n<./sub-more/>\n<./sub/>\n"
+	if status != 0 || out.String() != want || errOut.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q, want stdout=%q", status, out.String(), errOut.String(), want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"kame/internal/mem"
 	"kame/lang/expr"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -70,61 +71,31 @@ func (p *Program) commandArg(word *expr.Expr, c *Context, cwd string, glob bool)
 	if directoryOnly {
 		values = append(values, core.Value{Kind: core.Symbol, Text: "+dir"})
 	}
+	commandGlob := c.CommandGlob
+	c.CommandGlob = true
 	result := p.invokeOperation(operation, values, nil, c, word.Span)
+	c.CommandGlob = commandGlob
 	if result.Waiting || result.Completed || result.Diagnostic.Code != "" {
 		return result
 	}
+	if len(result.Value.List) == 0 {
+		result.Free(c.Run)
+		return failure(c.Run, "GLOB_NO_MATCH", word.Span, "no paths match the command argument")
+	}
 	result.Value.Unshare(c.Run)
-	kept := 0
-	for _, match := range result.Value.List {
-		absolute := canonicalPath(c.Run, p.DefinitionCwd, match.Text)
-		// The filesystem reader also serves explicit wildcard expressions,
-		// which include dotfiles. Apply the command-word rule after discovery.
-		if strings.Contains(absolute, "/.") && !commandGlobVisible(name, absolute) {
-			mem.FreeString(c.Run, absolute)
-			match.Free(c.Run)
-			continue
-		}
+	for i := range result.Value.List {
+		match := &result.Value.List[i]
 		if cwd != p.DefinitionCwd {
+			absolute := canonicalPath(c.Run, p.DefinitionCwd, match.Text)
 			mem.FreeString(c.Run, match.Text)
 			match.Text = absolute
-		} else {
-			mem.FreeString(c.Run, absolute)
 		}
 		if directoryOnly {
 			text := owned(c.Run, strings.TrimSuffix(match.Text, "/")+"/")
 			mem.FreeString(c.Run, match.Text)
 			match.Text = text
 		}
-		result.Value.List[kept] = match
-		kept++
 	}
-	result.Value.List = result.Value.List[:kept]
-	if kept == 0 {
-		result.Free(c.Run)
-		return failure(c.Run, "GLOB_NO_MATCH", word.Span, "no paths match the command argument")
-	}
+	slices.SortFunc(result.Value.List, func(a, b core.Value) int { return strings.Compare(a.Text, b.Text) })
 	return result
-}
-
-func commandGlobVisible(pattern, match string) bool {
-	parts, names := strings.Split(pattern, "/"), strings.Split(match, "/")
-	// Each reachable index is a prefix match after the current pattern part.
-	reached := make([]bool, len(names)+1)
-	reached[0] = true
-	for _, part := range parts {
-		if part == "**" {
-			for i, name := range names {
-				reached[i+1] = reached[i+1] || reached[i] && !strings.HasPrefix(name, ".")
-			}
-			continue
-		}
-		dot := strings.HasPrefix(part, ".") || strings.HasPrefix(part, `\.`)
-		for i := len(names) - 1; i >= 0; i-- {
-			matched, _ := path.Match(part, names[i])
-			reached[i+1] = reached[i] && matched && (dot || !strings.HasPrefix(names[i], "."))
-		}
-		reached[0] = false
-	}
-	return reached[len(names)]
 }
