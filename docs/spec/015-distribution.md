@@ -9,8 +9,8 @@ revision: 2
 Kame ships standalone Go native binaries and a Node/WebAssembly backend. The
 source-tree `bin/kame` launcher selects, verifies and caches a pinned release.
 `Kamefile` describes the build. The repository `Makefile` is only a portable
-make bootstrap that provisions Kame and forwards goals to it. Neither requires Solod
-or a C compiler.
+make bootstrap that provisions Kame and forwards goals to it. Building the Go
+release artifacts does not require a C compiler.
 
 ## Release Artifacts
 

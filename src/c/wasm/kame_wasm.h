@@ -4,10 +4,9 @@
 #include <stdint.h>
 
 /*
- * Freestanding ABI v1. All strings and byte payloads are pointer-plus-length
- * pairs in linear memory. No C structure containing a pointer crosses the ABI.
- * Symbol names remain implementation details until the generated Solod bridge
- * is linked; this header fixes only widths and envelope layout.
+ * Kame WASM ABI v1. Strings and byte payloads use pointer-plus-length pairs
+ * in linear memory. No C structure containing a pointer crosses the ABI.
+ * The reactor exports are implemented in src/go/kame/cmd/kame-wasm.
  */
 #define KAME_WASM_EVENT_SCHEMA 1u
 #define KAME_WASM_EVENT_HEADER_SIZE 48u

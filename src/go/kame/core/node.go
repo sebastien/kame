@@ -40,6 +40,7 @@ type Node struct {
 	// engine's change stamp was settledChanges (see Engine.ready).
 	settledDynamic int
 	settledChanges int64
+	touchQueued    bool // in Engine.touched
 	Current        bool
 	// ValidationPending keeps accepted state while dependencies are refreshed.
 	ValidationPending bool
@@ -86,6 +87,7 @@ func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
 		return
 	}
 	n.Diagnostic = diagnostic
+	e.touch(n)
 	if diagnostic.Code == "" {
 		n.State = NodeComplete
 	} else {

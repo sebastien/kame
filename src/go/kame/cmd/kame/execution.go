@@ -129,8 +129,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			redrawDashboard(errOut, progress)
 			publishDashboard(destination, messages.Bytes())
 			messages.Reset()
-			// C stdio buffers redirected streams. Publish drained events while the
-			// process or watch session is still alive, including JSON records.
+			// Publish buffered events before the process or watch session exits.
 			flushCLIOutput(out)
 			flushCLIOutput(destination)
 			return

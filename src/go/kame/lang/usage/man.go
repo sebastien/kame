@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"bufio"
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
@@ -13,22 +14,25 @@ import (
 // maxManBytes bounds a decompressed page; real pages are far smaller.
 const maxManBytes = 8 << 20
 
-// DecodeMan returns the roff text of a page, decompressing gzip and bzip2.
-func DecodeMan(data []byte) (string, error) {
-	var r io.Reader
+// manReader returns a reader of a page's roff text, decompressing gzip and
+// bzip2.
+func manReader(data []byte) (io.Reader, error) {
 	switch {
 	case bytes.HasPrefix(data, []byte{0x1f, 0x8b}):
-		z, err := gzip.NewReader(bytes.NewReader(data))
-		if err != nil {
-			return "", err
-		}
-		r = z
+		return gzip.NewReader(bytes.NewReader(data))
 	case bytes.HasPrefix(data, []byte("BZh")):
-		r = bzip2.NewReader(bytes.NewReader(data))
+		return bzip2.NewReader(bytes.NewReader(data)), nil
 	case bytes.HasPrefix(data, []byte{0xfd, '7', 'z', 'X', 'Z'}), bytes.HasPrefix(data, []byte{0x28, 0xb5, 0x2f, 0xfd}):
-		return "", errors.New("unsupported man page compression")
-	default:
-		return string(data), nil
+		return nil, errors.New("unsupported man page compression")
+	}
+	return bytes.NewReader(data), nil
+}
+
+// DecodeMan returns the roff text of a page, decompressing gzip and bzip2.
+func DecodeMan(data []byte) (string, error) {
+	r, err := manReader(data)
+	if err != nil {
+		return "", err
 	}
 	text, err := io.ReadAll(io.LimitReader(r, maxManBytes+1))
 	if err != nil {
@@ -38,6 +42,25 @@ func DecodeMan(data []byte) (string, error) {
 		return "", errors.New("man page too large")
 	}
 	return string(text), nil
+}
+
+// ManPageRedirect is ManRedirect for a page as stored. It decompresses only
+// up to the first line that is not a comment.
+func ManPageRedirect(data []byte) string {
+	r, err := manReader(data)
+	if err != nil {
+		return ""
+	}
+	lines := bufio.NewScanner(io.LimitReader(r, maxManBytes))
+	lines.Buffer(nil, maxManBytes)
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+		if line == "" || isRoffComment(line) {
+			continue
+		}
+		return ManRedirect(line)
+	}
+	return ""
 }
 
 // ManRedirect returns the target of a page that only includes another

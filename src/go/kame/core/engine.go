@@ -36,6 +36,28 @@ type Engine struct {
 	live        []*Node
 	liveSeen    int
 	liveChanges int64
+	// TrackTouched records the nodes published or ended (complete, failed or
+	// cancelled) for TakeTouched, so an observer need not scan every node.
+	TrackTouched bool
+	touched      []*Node
+}
+
+func (e *Engine) touch(n *Node) {
+	if e.TrackTouched && !n.touchQueued {
+		n.touchQueued = true
+		e.touched = append(e.touched, n)
+	}
+}
+
+// TakeTouched returns the nodes touched since the last call, each once, and
+// transfers the slice to the caller.
+func (e *Engine) TakeTouched() []*Node {
+	touched := e.touched
+	e.touched = nil
+	for _, n := range touched {
+		n.touchQueued = false
+	}
+	return touched
 }
 
 func (n *Node) settled() bool {
@@ -399,6 +421,7 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 	n.Signature = signature
 	value.Free(e.Alloc)
 	n.Revision++
+	e.touch(n)
 	e.releasePreviousDependencies(n)
 	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
 	dependents := slices.Clone(n.Dependents)
@@ -546,16 +569,54 @@ func (e *Engine) Ready(capacity int) []*Node {
 	if capacity <= 0 {
 		return nil
 	}
-	var nodes []*Node
-	after := e.lastRun
-	for len(nodes) < capacity {
-		selected := e.choose(after)
-		if selected == nil {
+	// Repeated choose calls pick, in key order, the ready nodes after
+	// lastRun and then wrap to the smallest. One scan keeps the first
+	// capacity of each group instead of rescanning every candidate per pick.
+	// ready has side effects; when they change the engine, scan again, as
+	// the next choose would have.
+	var later, wrapped []*Node
+	for pass := 0; pass < 3; pass++ {
+		changes := e.changes
+		later, wrapped = later[:0], wrapped[:0]
+		for _, n := range e.candidates() {
+			if !e.ready(n) || n.offered {
+				continue
+			}
+			if e.lastRun != nil && lessNode(e.lastRun, n) {
+				later = insertBounded(later, n, capacity)
+			} else {
+				wrapped = insertBounded(wrapped, n, capacity)
+			}
+		}
+		e.pruneSettled()
+		if changes == e.changes {
 			break
 		}
-		selected.offered = true
-		nodes = append(nodes, selected)
-		after = selected
+	}
+	nodes := append(later, wrapped...)
+	if len(nodes) > capacity {
+		nodes = nodes[:capacity]
+	}
+	for _, n := range nodes {
+		n.offered = true
+	}
+	mem.FreeSlice(nil, wrapped)
+	return nodes
+}
+
+// insertBounded inserts n into nodes, kept in key order, keeping at most
+// limit of the smallest.
+func insertBounded(nodes []*Node, n *Node, limit int) []*Node {
+	i := len(nodes)
+	for i > 0 && lessNode(n, nodes[i-1]) {
+		i--
+	}
+	if i >= limit {
+		return nodes
+	}
+	nodes = slices.Insert(nodes, i, n)
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
 	}
 	return nodes
 }
@@ -901,6 +962,7 @@ func (e *Engine) cancel(n *Node) {
 	n.Generation++
 	n.Requested = false
 	n.State = NodeCancelled
+	e.touch(n)
 	if n.teardownDiagnostic.Code != "" {
 		n.Diagnostic = n.teardownDiagnostic
 		n.teardownDiagnostic = Diagnostic{}
@@ -950,6 +1012,7 @@ func (e *Engine) Free() {
 	}
 	mem.FreeSlice(nil, e.roots)
 	mem.FreeSlice(nil, e.live)
+	mem.FreeSlice(nil, e.touched)
 	for i := range e.nodes {
 		n := e.nodes[i]
 		e.freeNode(n)
@@ -981,6 +1044,14 @@ func (e *Engine) Retire(n *Node) bool {
 		return false
 	}
 	e.changes++
+	if n.touchQueued {
+		for i := range e.touched {
+			if e.touched[i] == n {
+				e.touched = slices.Delete(e.touched, i, i+1)
+				break
+			}
+		}
+	}
 	for i := range n.Static {
 		removeDependent(n.Static[i], n)
 	}

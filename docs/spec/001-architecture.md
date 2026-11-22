@@ -13,7 +13,7 @@ or a particular host platform.
 
 The expression, template and rule languages are independently usable. The engine
 is lazy, incremental and stream-aware, with host requests for native and
-freestanding WebAssembly execution. Source/API compatibility with legacy
+Go WASI execution. Source/API compatibility with legacy
 TypeScript packages, JavaScript promises/thenables, unbounded stream history,
 C-style calls, arrow lambdas and JavaScript object syntax are not language goals.
 
@@ -41,7 +41,7 @@ src/go/kame/ownership/        historical output records and native cleanup
 src/go/kame/program/          planning, resources, execution
 src/go/kame/host/             portable request contracts
 src/go/kame/host/posix/       native filesystem and process execution
-src/go/kame/host/wasm/        freestanding host request/completion ABI
+src/go/kame/host/wasm/        WASI host request/completion ABI
 src/go/kame/cmd/kame/         CLI executable
 ```
 
@@ -67,9 +67,9 @@ host/wasm -> cli + program + plugins
 program -> language + operations + core
 program -> host contract
 cmd -> ownership -> native filesystem support
-host/posix -> platform and C interop
+host/posix -> Go standard library and platform system calls
 language -> core values where evaluation requires them
-core -> portable Solod standard library only
+core -> diagnostic + internal runtime helpers + portable Go standard library
 ```
 
 The host never owns graph policy. The engine never invokes POSIX directly.
@@ -79,10 +79,8 @@ not introduce an interface package containing speculative abstractions.
 
 ## Portable Boundary
 
-Portable packages must build for `wasm32-freestanding`. They may use packages
-such as `mem`, `slices`, `maps`, `strings`, `path`, and token-level JSON. They
-must not transitively import hosted-only packages including `os`, `conc`,
-`sync`, `flag`, or native C headers.
+Portable packages must build for `GOOS=wasip1 GOARCH=wasm` without cgo. They
+must not perform native filesystem, network, or process work directly.
 
 Host interaction is represented as requests and completions. Examples include
 reading a file, expanding a glob, running a process, reading a clock, and
@@ -91,13 +89,10 @@ WebAssembly may return it to JavaScript and receive a completion later.
 
 ## Extension Boundary
 
-Operations and host jobs use a named function pointer plus an opaque context
-pointer. Solod has no closures, and `any` has no runtime type information, so:
-
-- The function that created a context is responsible for interpreting it.
-- Context pointers never cross serialization or plugin boundaries.
-- Public language values are tagged values, not `any`.
-- Interfaces are reserved for boundaries with multiple real implementations.
+Operations and host jobs can use Go callbacks with private state. Callback
+state never crosses serialization or plugin boundaries. Public language values
+remain tagged values; plugins and external hosts exchange explicit requests
+and completions.
 
 ## Ownership
 
@@ -111,11 +106,9 @@ Kame uses four logical lifetimes:
 4. Run/message lifetime for call scopes, plans, command expansion, host requests,
    completions, and streamed events.
 
-An allocator supplies storage; an owner is responsible for releasing it, and a
-lifetime bounds how long an object or borrow remains valid. Different logical
-owners may share an allocator; a lifetime does not require a separate arena or
-bulk reset. An instance and compiled program each receive an allocator and free
-all retained objects as one ownership tree. Program ASTs are immutable and program-owned.
+Go manages ordinary object memory. Logical ownership still determines who may
+retain or mutate state and who must release resources. Program ASTs are immutable
+and program-owned.
 Top-level lexical functions reference program-owned AST and scope data. Call
 scopes and expression-local closures are run-owned and may not be published as
 engine values or retained after the run. Crossing ownership/lifetime boundaries
@@ -125,13 +118,13 @@ The instance and compiled program must outlive every engine node whose producer
 references them. Destruction cancels roots and waits for native process-group
 cleanup. Other outstanding host requests may be abandoned by transferring their
 payload ownership to the host and invalidating their engine handles; a later
-completion frees its own payload without accessing the engine. The runtime then
-frees subscriptions and engine nodes, the program, and finally the instance.
+completion disposes of its own payload without accessing the engine. The runtime
+then tears down subscriptions and engine nodes, the program, and finally the instance.
 Destroying a program with live nodes outside this sequence is `PHASE_INVALID`.
 
-No string or slice backed by a stack allocation may be stored in a node, map,
-queue, event, or returned result. Built-in fixed-capacity maps and slices are
-only for function-local data with a statically known bound.
+Copy borrowed mutable buffers before retaining them past their valid lifetime.
+Raw buffers exposed through the WASM ABI follow the explicit ownership and
+release rules in `010-wasm.md`.
 
 ## Glossary
 
@@ -146,8 +139,7 @@ only for function-local data with a statically known bound.
 
 ## Errors and Diagnostics
 
-Solod `error` values are sentinel control results. User-facing failures use a
-structured diagnostic value containing:
+User-facing failures use a structured diagnostic value containing:
 
 - Stable code such as `PARSE_ERR` or `RECIPE_FAIL`.
 - Severity.
@@ -156,9 +148,8 @@ structured diagnostic value containing:
 - Optional notes and suggestions.
 - Optional target and evaluation frames.
 
-Packages return a result plus sentinel error where required by Solod. The
-structured diagnostic is part of the result or execution event and is not
-encoded into dynamically allocated error implementations.
+Internal Go errors do not replace the diagnostic contract. Translate them to
+structured diagnostics when reporting user-facing failures.
 
 `011-diagnostics.md` is the authoritative diagnostic model, renderer contract,
 and registry for codes and severities. Other specifications must use a
@@ -188,10 +179,10 @@ its own specification; no host adapter owns graph policy.
 
 ## Acceptance Tests
 
-- A portable dependency audit finds no hosted imports reachable from `core`,
-  `lang/expr`, `lang/template`, or `lang/rule`.
-- A test using `mem.Tracker` creates and frees an engine with nodes, values, and
-  queued events without leaks.
+- The Go WASI reactor builds without cgo, and its linked import table passes
+  the checks in `010-wasm.md`.
+- Engine teardown releases nodes, subscriptions, and queued events and
+  invalidates outstanding handles.
 - A queued event remains valid after the function that created it returns.
 - Diagnostics can be formatted after their originating parser/evaluator stack
   has unwound.

@@ -4,7 +4,7 @@ Embed Kame to evaluate values, build targets, or consume watch events without
 parsing human CLI output. A **client** owns reusable **programs** compiled from
 source; a **watch** keeps a build session alive until explicitly closed.
 
-JavaScript runs the freestanding WASM engine with Node host services. Python is
+JavaScript runs the Go WASI reactor with Node host services. Python is
 an asynchronous subprocess client for the CLI, not a Python WASM binding.
 Compilation validates source; it does not build targets. Definitions are lazy.
 

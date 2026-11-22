@@ -461,4 +461,3 @@ runtime pattern construction are specified in `029-pattern-extensions.md`.
 - A string operation given a pattern is `EXPR_INVALID`.
 - Formatting sections, pipes and patterns is idempotent and preserves section
   form, pipe form and placeholder spelling.
-- Pattern and section tests under `mem.Tracker` leak no values.

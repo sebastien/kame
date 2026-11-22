@@ -33,8 +33,8 @@ through explicit Kame host requests and capability grants. The Node wrapper is
 server-side JavaScript; a browser embedding must provide a compatible WASI shim
 as well as its chosen Kame capabilities.
 
-Go defines integer wrapping and garbage collection. There is no Solod
-translation, C compiler, custom unwinder or freestanding libc link step.
+The Go runtime supplies garbage collection. The reactor build does not require
+a C compiler.
 
 ## Execution Model
 

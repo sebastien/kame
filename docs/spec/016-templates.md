@@ -542,4 +542,3 @@ and batch comment conventions, and canonical formatting.
 - A verbatim literal round-trips through parse and format byte for byte.
 - `kame do render --define k=v page.html` prints the rendered text; `--check`
   reports diagnostics without output.
-- Rendering under `mem.Tracker` leaks no values.

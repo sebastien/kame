@@ -48,7 +48,9 @@ func (p *Program) tickServiceRestartTimers() {
 		return
 	}
 	now := p.Host.Monotonic()
-	for i := range p.Instances {
+	// Only services set restart timers.
+	p.indexInstances()
+	for _, i := range p.serviceInstances {
 		entry := &p.Instances[i]
 		if entry.ServiceRestartTimerID == 0 || entry.ServiceRestartDeadline == 0 || now < entry.ServiceRestartDeadline {
 			continue

@@ -29,6 +29,8 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 		}
 	}
 	engine := core.NewEngine(a)
+	// observeInstances visits only the nodes the engine touched.
+	engine.TrackTouched = true
 	compiled := eval.CompileCheckedForProgram(a, engine, parsed, registry)
 	result := CompileResult{Diagnostics: slices.Clone(compiled.Diagnostics)}
 	mem.FreeSlice(nil, compiled.Diagnostics)
@@ -468,6 +470,14 @@ func (p *Program) Free() {
 	}
 	mem.FreeString(p.Alloc, p.definitionEnvironment.cwd)
 	p.definitionEnvironment = definitionEnvironment{}
+	for directory, known := range p.cacheDirectories {
+		for i := range known.records {
+			mem.FreeString(p.Alloc, known.records[i].Name)
+		}
+		mem.FreeSlice(nil, known.records)
+		mem.FreeString(p.Alloc, directory)
+	}
+	p.cacheDirectories = nil
 	if !p.Forwarding {
 		p.Eval.BeginFinalization()
 		for p.Eval.Finalizing() {
@@ -515,6 +525,7 @@ func (p *Program) Free() {
 			p.Instances[i].InspectionStatus.free(p.Alloc)
 		}
 		mem.FreeSlice(nil, p.Instances[i].Artifacts)
+		p.Instances[i].readyInputs.free(p.Alloc)
 		p.Instances[i].Plan.Free(p.Alloc)
 		p.Instances[i].Service.Free(p.Alloc)
 		freeStrings(p.Alloc, p.Instances[i].Environment)

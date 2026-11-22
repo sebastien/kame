@@ -141,39 +141,7 @@ func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 	return copy
 }
 
-func (d *Diagnostic) Free(a mem.Allocator) {
-	if d.Owned {
-		mem.FreeString(a, d.Code)
-		mem.FreeString(a, d.Source)
-		mem.FreeString(a, d.Message)
-		mem.FreeString(a, d.Target)
-		for i := range d.Notes {
-			mem.FreeString(a, d.Notes[i])
-		}
-		for i := range d.Related {
-			mem.FreeString(a, d.Related[i].Message)
-			mem.FreeString(a, d.Related[i].Source)
-		}
-		for i := range d.Frames {
-			mem.FreeString(a, d.Frames[i].Kind)
-			mem.FreeString(a, d.Frames[i].Label)
-			mem.FreeString(a, d.Frames[i].Source)
-		}
-		for i := range d.TargetStack {
-			mem.FreeString(a, d.TargetStack[i])
-		}
-		for i := range d.Tips {
-			mem.FreeString(a, d.Tips[i])
-		}
-		mem.FreeString(a, d.Cause.Kind)
-		mem.FreeString(a, d.Cause.Message)
-		mem.FreeString(a, d.Cause.Program)
-	}
-	mem.FreeSlice(nil, d.Frames)
-	mem.FreeSlice(nil, d.Notes)
-	mem.FreeSlice(nil, d.Related)
-	mem.FreeSlice(nil, d.TargetStack)
-	mem.FreeSlice(nil, d.Tips)
+func (d *Diagnostic) Free(_ mem.Allocator) {
 	*d = Diagnostic{}
 }
 

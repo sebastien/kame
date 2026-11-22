@@ -100,23 +100,14 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 		if frame.ServiceRule {
 			d.Text("service")
 		}
-		inputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Inputs})
-		outputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Outputs})
-		newer := core.ValueSignature(core.Value{Kind: core.List, List: frame.NewerInputs})
-		if !inputs.Equal(inputs) || !outputs.Equal(outputs) || !newer.Equal(newer) {
+		signature := frame.Signature
+		if signature.Mode == core.SignatureUnavailable {
+			signature = FrameSignature(&frame)
+		}
+		if !signature.Equal(signature) {
 			return core.Signature{}
 		}
-		d.Write(inputs.Digest[:])
-		d.Write(outputs.Digest[:])
-		d.Write(newer.Digest[:])
-		if len(frame.Captures) != 0 {
-			captures := core.ValueSignature(core.Value{Kind: core.List, List: frame.Captures})
-			if !captures.Equal(captures) {
-				return core.Signature{}
-			}
-			d.Text("captures")
-			d.Write(captures.Digest[:])
-		}
+		d.Write(signature.Digest[:])
 	}
 	for current := scope; current != nil; current = current.Parent {
 		if current == p.Scope {
@@ -183,9 +174,6 @@ func (p *Program) discardArgumentMemo(state *operationMemo) {
 		if p.OperationMemos[i] == state {
 			copy(p.OperationMemos[i:], p.OperationMemos[i+1:])
 			p.OperationMemos = p.OperationMemos[:len(p.OperationMemos)-1]
-			if !slices.ContainsFunc(p.OperationMemos, func(other *operationMemo) bool { return other.NodeID == state.NodeID }) {
-				delete(p.memoValidations, state.NodeID)
-			}
 			p.freeOperationMemo(state)
 			return
 		}
@@ -195,8 +183,27 @@ func (p *Program) discardArgumentMemo(state *operationMemo) {
 // memoValidation records that a node generation's first Facts accepted
 // observations were valid when the engine's change stamp was Changes.
 type memoValidation struct {
-	Generation, Epoch, Changes int64
-	Facts                      int
+	NodeID, Generation, Epoch, Changes int64
+	Facts                              int
+}
+
+// memoValidations caches validated prefixes for the nodes evaluated most
+// recently. It is bounded; an evicted node only revalidates its prefix.
+type memoValidations struct {
+	entries [8]memoValidation
+	next    int
+}
+
+func (v *memoValidations) find(node int64) *memoValidation {
+	for i := range v.entries {
+		if v.entries[i].NodeID == node {
+			return &v.entries[i]
+		}
+	}
+	entry := &v.entries[v.next]
+	v.next = (v.next + 1) % len(v.entries)
+	*entry = memoValidation{NodeID: node}
+	return entry
 }
 
 func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bool {
@@ -210,10 +217,9 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 	// Facts only grow within an epoch, and nothing can falsify a validated one
 	// without changing the stamp, so only facts past the validated prefix are
 	// checked. Each resumption would otherwise recheck every earlier read.
-	node := c.Engine.NodeID()
-	validated := p.memoValidations[node]
+	validated := p.memoValidations.find(c.Engine.NodeID())
 	if validated.Generation != state.Generation || validated.Epoch != state.Epoch || validated.Changes != c.Engine.Changes() {
-		validated = memoValidation{Generation: state.Generation, Epoch: state.Epoch, Changes: c.Engine.Changes()}
+		*validated = memoValidation{NodeID: validated.NodeID, Generation: state.Generation, Epoch: state.Epoch, Changes: c.Engine.Changes()}
 	}
 	for i := validated.Facts; i < state.Facts; i++ {
 		if !p.factCurrent(facts[i], c) {
@@ -221,10 +227,6 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 		}
 		validated.Facts = i + 1
 	}
-	if p.memoValidations == nil {
-		p.memoValidations = map[int64]memoValidation{}
-	}
-	p.memoValidations[node] = validated
 	return true
 }
 

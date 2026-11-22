@@ -1,4 +1,4 @@
-/* Standalone public ABI check; no generated Solod headers or runtime needed.
+/* Standalone public ABI check; no reactor build needed.
  * cc -std=c11 -Wall -Wextra -Werror -fsyntax-only tests/wasm/test-wasm-header.c
  */
 #include "../../src/c/wasm/kame_wasm.h"

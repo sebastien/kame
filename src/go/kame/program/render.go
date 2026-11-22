@@ -47,9 +47,27 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	if entry.Plan.Resolved {
 		resources = entry.Plan.ResolvedResourceInputs
 	}
-	inputs := makeRuleInputValues(p.Alloc, names, resources)
+	// A resumed body renders again with the same ready inputs; reuse their
+	// values and signature rather than rebuilding and hashing all N each time.
+	var inputs []core.Value
+	inputsSignature := core.Signature{}
+	if ready := entry.readyInputs; ready != nil && len(names) != 0 && len(ready.inputs) == len(names) && &ready.inputs[0] == &names[0] {
+		resourcesID := (*PlanInput)(nil)
+		if len(resources) != 0 {
+			resourcesID = &resources[0]
+		}
+		if !ready.valuesBuilt || ready.valuesResources != resourcesID {
+			freeValues(p.Alloc, ready.values)
+			ready.values = makeRuleInputValues(p.Alloc, names, resources)
+			ready.valuesSignature = core.ValueSignature(core.Value{Kind: core.List, List: ready.values})
+			ready.valuesResources, ready.valuesBuilt = resourcesID, true
+		}
+		inputs, inputsSignature = ready.values, ready.valuesSignature
+	} else {
+		inputs = makeRuleInputValues(p.Alloc, names, resources)
+		defer freeValues(p.Alloc, inputs)
+	}
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
-	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	captures := captureValues(p.Alloc, entry.Captures)
 	defer freeValues(p.Alloc, captures)
@@ -60,6 +78,9 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule, NewerInputs: newer, Captures: captures}}}
+	// Hash the frame once per render rather than in every memo scope.
+	context.RuleFrames[0].InputsSignature = inputsSignature
+	context.RuleFrames[0].Signature = eval.FrameSignature(&context.RuleFrames[0])
 	p.bindDefinitionEnvironment(context)
 	context.TrackUnvalidatedReads = true
 	scope := p.ruleScope(context, entry.Rule, entry.Captures, entry.Plan.Arguments)

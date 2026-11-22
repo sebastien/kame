@@ -7,8 +7,9 @@ revision: 2
 ## Purpose
 
 This specification defines the portable stream protocol used by the reactive
-engine. Sources use an explicit resumable state machine suitable for Solod. A
-batch is materialized as an immutable list, not as a nil update.
+engine. Sources resume through polling so the engine can schedule them across
+dependency and host waits. A batch is materialized as an immutable list,
+not as a nil update.
 
 This specification amends `002-engine.md`. Where they differ, this document
 wins for source, batch, and stream behavior.
@@ -39,15 +40,13 @@ empty implicit final batch.
 
 ## Source Protocol
 
-A source is a named poll function, an opaque state pointer, and a named free
-function. This follows the extension boundary in `001-architecture.md`; Solod
-has no closures, goroutines, or native async iterators.
+A source has a poll callback and can retain private state and register a cleanup
+callback.
 
 ```text
 Source {
-  poll(engine context, source state) -> emitted | waiting | completed | failed
-  free(source state)
-  state
+  poll(engine context) -> emitted | waiting | completed | failed
+  cleanup()
 }
 ```
 
@@ -63,12 +62,11 @@ chunk, collection control, nested source, or inner `EndStream`, is internal
 progress even when it produces no materialized value. The scheduler requeues
 that source behind other ready work; it does not expose a heartbeat value.
 
-The engine invokes `free` exactly once after normal completion, failure,
+The engine invokes registered cleanup exactly once after normal completion, failure,
 invalidation, cancellation, or engine teardown. A source transfers each emitted
 payload to the engine before returning from `poll`; `free` must not free a
-transferred payload. Source state must use an allocator that outlives every
-wait. It must not contain pointers to a run arena, stack string, stack slice,
-or caller-owned host-completion buffer.
+transferred payload. Retained source state must remain valid across waits. Copy
+borrowed host-completion data before retaining it.
 
 ## Protocol Atoms
 
@@ -261,7 +259,7 @@ allocated so that it outlives every wait.
 - An unbounded ready source cannot prevent a ready dependency or completion
   from being processed.
 - Repeated atom, batch, nested-source, cancellation, and stale-completion tests
-  using `mem.Tracker` leak no source state, builder, value, or message payload.
+  exercise teardown of source state, builders, values, and message payloads.
 - A generator yields its elements in order, one per pull, and a bare `return`
   ends its stream; `return EXPR` in a generator is `PARSE_ERR`.
 - A consumer that stops early cancels the generator, runs its `defer` cleanup
@@ -272,6 +270,6 @@ allocated so that it outlives every wait.
   fails with `EXPR_INVALID`.
 
 CLI stream publication must remain observable while the process is running.
-Native C stdio streams are flushed after event drains, including JSON records.
+Native output is published after event drains, including JSON records.
 WASM host callbacks drain copied ABI stream events during awaited host requests;
 waiting for terminal completion before publishing chunks violates this contract.

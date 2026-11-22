@@ -62,7 +62,7 @@ printf "%s" $value'
 	if [ "$(cat "$work/argument")" = 2 ]; then test-ok "$backend spaced 2 is an argument"; else test-fail "$backend spaced descriptor"; fi
 	printf preserve >"$work/preserve"
 	status=0
-	"${runner[@]}" do run -C "$work" --allow-run -l kash -c 'printf x 2> ./ungranted' >"$work/out" 2>"$work/err" || status=$?
+	"${runner[@]}" do run -C "$work" --no-default-grants --allow-run -l kash -c 'printf x 2> ./ungranted' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err" && [ ! -e "$work/ungranted" ]; then test-ok "$backend denied stderr write opens nothing"; else test-fail "$backend denied stderr ($status)"; cat "$work/err"; fi
 	if [ "$(cat "$work/preserve")" = preserve ]; then test-ok "$backend preflight left an existing file"; else test-fail "$backend truncated before rejection"; fi
 	test-step "$backend tee copies without hiding status"

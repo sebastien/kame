@@ -29,8 +29,8 @@ The runtime value model is a closed tagged union with these kinds:
 - Resource reference.
 - Pattern (match or expansion pattern text; `014-patterns.md`).
 
-Stored and serialized values exclude callables. Values retained outside their
-creating arena must be cloned into the destination allocator. Containers own
+Stored and serialized values exclude callables. Copy or transfer retained
+values so their backing data stays valid for the recipient. Containers own
 their elements. Values are immutable after publication. Patterns serialize as
 their canonical text.
 
@@ -64,7 +64,7 @@ A node has:
 - Optional latest value.
 - Static and dynamic dependency edges.
 - Reverse dependent edges.
-- Producer callback and opaque producer context.
+- Producer callback and any associated state.
 - Generation number used to reject stale completions.
 - Monotonic attempt number within the generation.
 - Optional terminal diagnostic.
@@ -110,7 +110,7 @@ invalidation updates may be omitted when that queue fills.
 
 ## Producers
 
-A producer is a named function pointer and context. It receives an engine
+A producer is a callback. It receives an engine
 context and node identity, never a mutable node, and returns one of:
 
 - Completed synchronously.
@@ -270,4 +270,4 @@ lines inside one build node remain one ordered shell script.
 - A host stop report reaches the owner without suspending the root.
 - Cancelling a suspended root requests resume and cancellation, and rejects
   late completions.
-- Engine teardown under `mem.Tracker` leaks no owned value, node, edge, or event.
+- Engine teardown drops retained values, nodes, edges, and events.

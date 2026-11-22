@@ -1,9 +1,14 @@
 ---
 created: 2026-09-27T22:53:25+00:00
-updated: 2026-09-27T22:53:25+00:00
+updated: 2026-11-22T21:03:37.347886+00:00
 uuid: 93d8d59c-bf85-4001-b8d0-a830ee0b20fa
+identity: c2c1d894-929e-4bf0-9f83-7a73db1431cb
 ---
-# Prepare migration to solod
+# Early Kame architecture brief
+
+Status: superseded. The implementation target has changed; see
+`docs/spec/001-architecture.md` for current architecture. The original brief
+is preserved in Git at `4289d6b094b69b4ee2f54b7da28f303972e439d5`.
 
 Using `../littlemake` as reference, and start to form a view of the domain, architecture
 and structure of littlemake.
@@ -45,5 +50,4 @@ Some recommendations:
   all the better.
 
 Implementation:
-- Using solod 4.0 as the target language
 - Clean, minimal

@@ -145,10 +145,11 @@ func (p *Program) timingSave(entry *instance) {
 	} else {
 		name := p.timingPath(entry)
 		if p.mkdirParent(name) {
-			_ = p.Host.WriteFileAtomic(name, data, 0o644, true)
-			directory := path.Dir(name)
-			p.pruneCacheDirectory(directory)
-			mem.FreeString(p.Alloc, directory)
+			if p.Host.WriteFileAtomic(name, data, 0o644, true) == nil {
+				directory := path.Dir(name)
+				p.pruneCacheDirectory(directory, path.Base(name))
+				mem.FreeString(p.Alloc, directory)
+			}
 		}
 		mem.FreeString(p.Alloc, name)
 	}

@@ -289,6 +289,11 @@ func TestDecodeManAndRedirect(t *testing.T) {
 	if _, err := DecodeMan([]byte{0x28, 0xb5, 0x2f, 0xfd}); err == nil {
 		t.Fatal("zstd should be unsupported")
 	}
+	for page, want := range map[string]string{b.String(): "man1/other.1", ".so man8/x.8\n": "man8/x.8", manPage: "", "\x28\xb5\x2f\xfd": ""} {
+		if got := ManPageRedirect([]byte(page)); got != want {
+			t.Errorf("ManPageRedirect: got %q, want %q", got, want)
+		}
+	}
 }
 
 const fishFile = `# Completions for demo

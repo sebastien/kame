@@ -14,12 +14,11 @@ the CLI grammar. The APIs cover source compilation, expression evaluation,
 builds and watches; copy all values and events that cross an API boundary; and
 provide explicit grants, cancellation and deterministic disposal.
 
-The JavaScript API uses the existing freestanding WASM module and host services.
+The JavaScript API uses the Go WASI reactor and JavaScript host services.
 It is an ESM library entry point that can be imported without starting the CLI.
-The Python API is an asynchronous client for the installed `kame` executable;
-it reuses the public CLI protocol instead of binding generated C internals. The
-Python client exposes copied parse/evaluation results, builds and watch events,
-and owns and reaps every subprocess it starts.
+The Python API is an asynchronous client for the installed `kame` executable.
+It uses the public CLI protocol, exposes copied parse/evaluation results,
+builds and watch events, and owns and reaps every subprocess it starts.
 
 ## JavaScript contract
 

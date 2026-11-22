@@ -6,9 +6,8 @@ revision: 2
 
 ## Purpose
 
-Evaluation turns language AST values into reactive core values. It is explicit,
-allocator-aware, asynchronous through engine requests, and independent of
-native threads or promises. The surface syntax is specified in
+Evaluation turns language AST values into reactive core values. It suspends and
+resumes through explicit engine requests. The surface syntax is specified in
 `055-unified-kame-kash-language.md` and `004-language.md`; this specification
 defines how that syntax evaluates.
 
@@ -18,7 +17,6 @@ Every evaluation receives a context containing:
 
 - Engine and current node identity.
 - Lexical scope.
-- Run allocator.
 - Current rule inputs and outputs, when applicable.
 - Current function arguments, when applicable.
 - Operation registry.
@@ -469,7 +467,7 @@ position, requires a list, and passes its elements as separate arguments.
 An operation registry entry contains:
 
 - Name.
-- Named call function and opaque context.
+- Call callback and any associated state.
 - Minimum and maximum arity, or variadic marker.
 - Capability requirements.
 - Stable implementation version used by cached tasks.
@@ -507,7 +505,7 @@ streams, and `|` never transforms values.
 runtime execution scope. Register its cleanup before invoking the body; retain
 the scope through failure, graceful cancellation, host suspension and bounded
 cleanup. Scope completion and old-generation teardown precede result publication
-or reactive replacement. Allocator destruction alone cannot run finalizers.
+or reactive replacement. Garbage collection does not run language finalizers.
 Cleanup retains the caller's authority and does not recover a body failure;
 cancellation and capability denial remain protected even when the primary
 diagnostic predates them. Deferred-effect-only and non-execution contexts reject
@@ -756,4 +754,4 @@ capability model.
   and preserves kinds; nested values use the same notation as top-level values.
 - `eval` evaluates one expression and rejects statements and unauthorized
   effects.
-- Evaluation teardown under `mem.Tracker` leaks no scope, closure, or value.
+- Evaluation teardown releases retained scopes, closures, and values.

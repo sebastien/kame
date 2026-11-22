@@ -342,8 +342,8 @@ def read-fish name path = if path then parse-fish-completions name (read path) e
 
 def man-page name = first-existing (man-dirs |> flatmap (dir => ["1", "8"] |> flatmap (section => compressed (joinpath dir "man${section}" "${name}.${section}"))))
 def man-spec path = parse-man (man-follow path (read path))
-def man-follow path page = man-read page (if man-redirect page then man-target path (man-redirect page) else nil)
-def man-target path target = if includes? ".." target then nil else first-existing (compressed (joinpath (dirname (dirname path)) target))
+def man-follow path page = man-read page (man-target path (man-redirect page))
+def man-target path target = if target and not (includes? ".." target) then first-existing (compressed (joinpath (dirname (dirname path)) target)) else nil
 def man-read page target = if target then read target else page
 def page-spec name = if man-page name then man-spec (man-page name) else nil
 

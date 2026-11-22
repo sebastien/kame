@@ -10,7 +10,7 @@ for system in linux darwin; do
 		label=${pair%:*}; arch=${pair#*:}
 		test-step "$system $label is a standalone Go binary"
 		metadata=$(go version -m "dist/kame-$system-$label")
-		if grep -q 'CGO_ENABLED=0' <<<"$metadata" && grep -q "GOOS=$system" <<<"$metadata" && grep -q "GOARCH=$arch" <<<"$metadata" && ! grep -q 'solod.dev' <<<"$metadata"; then
+		if grep -q 'path[[:space:]]*kame/cmd/kame' <<<"$metadata" && grep -q 'CGO_ENABLED=0' <<<"$metadata" && grep -q "GOOS=$system" <<<"$metadata" && grep -q "GOARCH=$arch" <<<"$metadata"; then
 			test-ok "Go build metadata matches the release platform"
 		else
 			test-fail "unexpected build metadata: $metadata"

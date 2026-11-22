@@ -6,8 +6,12 @@ import (
 )
 
 func TestFreeAcceptsBorrowedDiagnostic(t *testing.T) {
-	d := diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "unsupported"}
+	notes := []string{"borrowed note"}
+	d := diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "unsupported", Notes: notes}
 	d.Free(t.Allocator())
+	if d.Code != "" || d.Notes != nil || notes[0] != "borrowed note" {
+		t.Error("free should reset the diagnostic without changing borrowed data")
+	}
 }
 
 func TestCloneOwnsStructuredDiagnosticContext(t *testing.T) {

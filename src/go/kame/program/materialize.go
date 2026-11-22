@@ -8,6 +8,8 @@ import (
 	"kame/lang/rule"
 	"kame/lang/template"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 type Result struct {
@@ -549,14 +551,70 @@ func (h *Handle) poll(release bool) HandleResult {
 	return HandleResult{Done: true, Result: result}
 }
 
+// instanceKey identifies a rule instance: its rule, captures and arguments.
+type instanceKey struct {
+	rule     *rule.Rule
+	bindings string
+}
+
+func newInstanceKey(r *rule.Rule, captures []template.CaptureValue, arguments []ArgumentValue) instanceKey {
+	var b strings.Builder
+	field := func(text string) {
+		b.WriteString(strconv.Itoa(len(text)))
+		b.WriteByte(':')
+		b.WriteString(text)
+	}
+	for i := range captures {
+		field(captures[i].Name)
+		field(captures[i].Text)
+	}
+	b.WriteByte('|')
+	for i := range arguments {
+		field(arguments[i].Name)
+		field(arguments[i].Value)
+	}
+	return instanceKey{rule: r, bindings: b.String()}
+}
+
+// indexInstances extends the instance indexes to instances appended since
+// the last call. Instances are append-only and their rule, captures,
+// arguments and node never change; scanning them for every lookup made a
+// rule with N computed inputs quadratic.
+func (p *Program) indexInstances() {
+	if p.instanceNodes == nil {
+		p.instanceNodes, p.instanceKeys, p.nodeInstances = map[*core.Node]int{}, map[instanceKey]int{}, map[*core.Node][]int{}
+	}
+	for ; p.indexedInstances < len(p.Instances); p.indexedInstances++ {
+		i := p.indexedInstances
+		entry := &p.Instances[i]
+		p.indexInstanceNode(entry.Node, i)
+		p.nodeInstances[entry.Node] = append(p.nodeInstances[entry.Node], i)
+		if entry.Rule != nil && entry.Rule.Kind == rule.ServiceRule {
+			p.serviceInstances = append(p.serviceInstances, i)
+		}
+		for _, artifact := range entry.Artifacts {
+			p.indexInstanceNode(artifact, i)
+		}
+		if !entry.Inspection {
+			key := newInstanceKey(entry.Rule, entry.Captures, entry.Plan.Arguments)
+			if _, ok := p.instanceKeys[key]; !ok {
+				p.instanceKeys[key] = i
+			}
+		}
+	}
+}
+
+// indexInstanceNode keeps the first instance of a node, as a scan would find.
+func (p *Program) indexInstanceNode(node *core.Node, index int) {
+	if existing, ok := p.instanceNodes[node]; !ok || index < existing {
+		p.instanceNodes[node] = index
+	}
+}
+
 func (p *Program) instanceIndex(node *core.Node) int {
-	for i := range p.Instances {
-		if p.Instances[i].Node == node {
-			return i
-		}
-		if slices.Contains(p.Instances[i].Artifacts, node) {
-			return i
-		}
+	p.indexInstances()
+	if index, ok := p.instanceNodes[node]; ok {
+		return index
 	}
 	return -1
 }
@@ -577,6 +635,9 @@ func (p *Program) instanceFor(target string) instanceResult {
 		state.Artifact = cloneText(p.Alloc, name)
 		node = p.Engine.AddOwned(key, produceArtifact, state, freeInstanceState)
 		p.Instances[index].Artifacts = append(p.Instances[index].Artifacts, node)
+		if index < p.indexedInstances {
+			p.indexInstanceNode(node, index)
+		}
 	}
 	mem.FreeString(p.Alloc, name)
 	resolved.Node = node
@@ -615,11 +676,9 @@ func (p *Program) producerFor(target string) instanceResult {
 	if plan.Rule == nil {
 		return instanceResult{Plan: plan}
 	}
-	for i := range p.Instances {
-		entry := &p.Instances[i]
-		if !entry.Inspection && entry.Rule == plan.Rule && sameCaptures(entry.Captures, plan.Captures) && sameArguments(entry.Plan.Arguments, plan.Arguments) {
-			return instanceResult{Node: entry.Node, Plan: plan}
-		}
+	p.indexInstances()
+	if i, ok := p.instanceKeys[newInstanceKey(plan.Rule, plan.Captures, plan.Arguments)]; ok {
+		return instanceResult{Node: p.Instances[i].Node, Plan: plan}
 	}
 	state := mem.Alloc[instanceState](p.Alloc)
 	state.Program, state.Index = p, len(p.Instances)

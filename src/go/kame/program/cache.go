@@ -24,13 +24,63 @@ type retainedCacheFile struct {
 	Time int64
 }
 
+// cacheDirectory is a directory's records, oldest first, as of its first
+// scan in this program plus the records it has written since.
+type cacheDirectory struct {
+	records []retainedCacheFile
+}
+
 // pruneCacheDirectory bounds persistent records by removing the least recently
 // published regular files. Directory entries are sorted as a stable tie-break
 // for hosts whose filesystem timestamps have coarse resolution.
-func (p *Program) pruneCacheDirectory(directory string) {
+//
+// It runs after every record write, naming the record written. The directory
+// is scanned once per program; later writes update the remembered order, so a
+// build writing N records does not rescan (and lstat) the directory N times.
+// Records written meanwhile by another process are seen by its own pruning or
+// the next program's scan.
+func (p *Program) pruneCacheDirectory(directory, written string) {
+	known := p.cacheDirectories[directory]
+	if known == nil {
+		known = p.scanCacheDirectory(directory)
+		if known == nil {
+			return
+		}
+		if p.cacheDirectories == nil {
+			p.cacheDirectories = map[string]*cacheDirectory{}
+		}
+		p.cacheDirectories[cloneText(p.Alloc, directory)] = known
+	} else {
+		// The written record is now the newest; it may replace an older one.
+		newest := int64(0)
+		for i := 0; i < len(known.records); i++ {
+			if known.records[i].Name == written {
+				mem.FreeString(p.Alloc, known.records[i].Name)
+				known.records = slices.Delete(known.records, i, i+1)
+				i--
+				continue
+			}
+			newest = max(newest, known.records[i].Time)
+		}
+		known.records = append(known.records, retainedCacheFile{Name: cloneText(p.Alloc, written), Time: newest})
+	}
+	remove := len(known.records) - cacheRecordsPerBackend
+	for i := 0; i < remove; i++ {
+		name := path.Join(directory, known.records[i].Name)
+		_ = p.Host.Remove(name)
+		mem.FreeString(p.Alloc, name)
+		mem.FreeString(p.Alloc, known.records[i].Name)
+	}
+	if remove > 0 {
+		known.records = slices.Delete(known.records, 0, remove)
+	}
+}
+
+// scanCacheDirectory lists a directory's eviction candidates, oldest first.
+func (p *Program) scanCacheDirectory(directory string) *cacheDirectory {
 	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
-		return
+		return nil
 	}
 	var records []retainedCacheFile
 	for i := range entries {
@@ -41,7 +91,7 @@ func (p *Program) pruneCacheDirectory(directory string) {
 		info := p.Host.Lstat(name)
 		mem.FreeString(p.Alloc, name)
 		if info.Exists && info.Info.Regular {
-			records = append(records, retainedCacheFile{Name: entries[i].Name, Time: info.Info.ModTime})
+			records = append(records, retainedCacheFile{Name: cloneText(p.Alloc, entries[i].Name), Time: info.Info.ModTime})
 		}
 	}
 	for i := 1; i < len(records); i++ {
@@ -53,17 +103,11 @@ func (p *Program) pruneCacheDirectory(directory string) {
 		}
 		records[j] = value
 	}
-	remove := len(records) - cacheRecordsPerBackend
-	for i := 0; i < remove; i++ {
-		name := path.Join(directory, records[i].Name)
-		_ = p.Host.Remove(name)
-		mem.FreeString(p.Alloc, name)
-	}
-	mem.FreeSlice(nil, records)
 	for i := range entries {
 		mem.FreeString(p.Alloc, entries[i].Name)
 	}
 	mem.FreeSlice(nil, entries)
+	return &cacheDirectory{records: records}
 }
 
 type cacheRecord struct {
@@ -498,11 +542,11 @@ func (p *Program) cacheSave(entry *instance, r *cacheRecord) bool {
 	data := recordBytes(r)
 	ok := p.Host.WriteFileAtomic(name, data, 0o644, true) == nil
 	mem.FreeSlice(mem.System, data)
-	mem.FreeString(p.Alloc, name)
 	if ok {
 		directory := path.Join(p.Options.Directory, ".kame/cache/tasks")
-		p.pruneCacheDirectory(directory)
+		p.pruneCacheDirectory(directory, path.Base(name))
 		mem.FreeString(p.Alloc, directory)
 	}
+	mem.FreeString(p.Alloc, name)
 	return ok
 }

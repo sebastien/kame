@@ -327,6 +327,41 @@ type RuleFrame struct {
 	Captures    []core.Value
 	Inputs      []core.Value
 	Outputs     []core.Value
+	// Signature is FrameSignature of the lists, when the frame's creator
+	// computed it once; memo scopes otherwise hash the lists on every use.
+	Signature core.Signature
+	// InputsSignature, when available, is the signature of the Inputs list,
+	// which FrameSignature then does not recompute.
+	InputsSignature core.Signature
+}
+
+// FrameSignature digests a frame's inputs, outputs, newer inputs and
+// captures, or is unavailable when a value cannot be hashed.
+func FrameSignature(frame *RuleFrame) core.Signature {
+	d := core.NewDigest()
+	inputs := frame.InputsSignature
+	if inputs.Mode == core.SignatureUnavailable {
+		inputs = core.ValueSignature(core.Value{Kind: core.List, List: frame.Inputs})
+	}
+	outputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Outputs})
+	newer := core.ValueSignature(core.Value{Kind: core.List, List: frame.NewerInputs})
+	if !inputs.Equal(inputs) || !outputs.Equal(outputs) || !newer.Equal(newer) {
+		return core.Signature{}
+	}
+	d.Write(inputs.Digest[:])
+	d.Write(outputs.Digest[:])
+	d.Write(newer.Digest[:])
+	if len(frame.Captures) != 0 {
+		captures := core.ValueSignature(core.Value{Kind: core.List, List: frame.Captures})
+		if !captures.Equal(captures) {
+			return core.Signature{}
+		}
+		d.Text("captures")
+		d.Write(captures.Digest[:])
+	}
+	signature := core.Signature{Mode: core.SignatureContent}
+	d.Sum(signature.Digest[:])
+	return signature
 }
 
 func (c *Context) allowed(capability Capability) bool {

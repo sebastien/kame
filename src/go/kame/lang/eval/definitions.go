@@ -81,7 +81,7 @@ type Program struct {
 	processEnvironmentLen   int
 	processEnvironmentValue core.Signature
 	OperationMemos          []*operationMemo
-	memoValidations         map[int64]memoValidation
+	memoValidations         memoValidations
 	Processes               []*processTask
 	callableProcessOutcomes map[*ProcessHandle]struct{}
 	nextProcess             int

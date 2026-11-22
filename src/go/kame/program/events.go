@@ -59,50 +59,70 @@ func (p *Program) setServiceState(entry *instance, state string) {
 	p.emit(Event{Kind: ServiceState, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, State: state})
 }
 
+// observeInstances reports instance values and terminal states. Only the
+// instances of nodes the engine published or ended since the last call can
+// have something to report; they are visited in instance order, as a scan of
+// every instance would, without that scan on every tick.
 func (p *Program) observeInstances() {
 	p.flushDeferredTerminals()
-	for i := range p.Instances {
-		entry := &p.Instances[i]
-		if entry.Inspection {
-			continue
-		}
-		node := entry.Node
-		if node.Current && node.Revision != entry.valueRevision {
-			event := Event{Kind: TargetValue, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID, Value: node.Latest.Clone(p.Alloc)}
-			p.emit(event)
-			entry.valueRevision = node.Revision
-		}
-		if entry.terminalEmitted && entry.terminalGeneration == node.Generation {
-			continue
-		}
-		kind := EventKind(-1)
-		if node.State == core.NodeComplete {
-			kind = TargetCompleted
-		} else if node.State == core.NodeFailed {
-			kind = TargetFailed
-		} else if node.State == core.NodeCancelled {
-			kind = TargetCancelled
-		}
-		if kind < 0 {
-			continue
-		}
-		if entry.Rule.Kind == rule.ServiceRule {
-			p.setServiceState(entry, "terminal")
-		}
-		if kind == TargetCompleted || kind == TargetFailed || kind == TargetCancelled {
-			p.releaseCacheLock(entry)
-			p.releaseResources(entry)
-		}
-		if kind == TargetCompleted {
-			p.timingSave(entry)
-		}
-		if kind == TargetCompleted && p.productionDirty {
-			p.deferredTerminal = append(p.deferredTerminal, i)
-		} else {
-			p.emitTerminal(entry, kind)
-		}
-		entry.terminalEmitted, entry.terminalGeneration = true, node.Generation
+	touched := p.Engine.TakeTouched()
+	if len(touched) == 0 {
+		return
 	}
+	p.indexInstances()
+	var indexes []int
+	for _, node := range touched {
+		indexes = append(indexes, p.nodeInstances[node]...)
+	}
+	mem.FreeSlice(nil, touched)
+	slices.Sort(indexes)
+	for _, i := range slices.Compact(indexes) {
+		p.observeInstance(i)
+	}
+	mem.FreeSlice(nil, indexes)
+}
+
+func (p *Program) observeInstance(i int) {
+	entry := &p.Instances[i]
+	if entry.Inspection {
+		return
+	}
+	node := entry.Node
+	if node.Current && node.Revision != entry.valueRevision {
+		event := Event{Kind: TargetValue, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID, Value: node.Latest.Clone(p.Alloc)}
+		p.emit(event)
+		entry.valueRevision = node.Revision
+	}
+	if entry.terminalEmitted && entry.terminalGeneration == node.Generation {
+		return
+	}
+	kind := EventKind(-1)
+	if node.State == core.NodeComplete {
+		kind = TargetCompleted
+	} else if node.State == core.NodeFailed {
+		kind = TargetFailed
+	} else if node.State == core.NodeCancelled {
+		kind = TargetCancelled
+	}
+	if kind < 0 {
+		return
+	}
+	if entry.Rule.Kind == rule.ServiceRule {
+		p.setServiceState(entry, "terminal")
+	}
+	if kind == TargetCompleted || kind == TargetFailed || kind == TargetCancelled {
+		p.releaseCacheLock(entry)
+		p.releaseResources(entry)
+	}
+	if kind == TargetCompleted {
+		p.timingSave(entry)
+	}
+	if kind == TargetCompleted && p.productionDirty {
+		p.deferredTerminal = append(p.deferredTerminal, i)
+	} else {
+		p.emitTerminal(entry, kind)
+	}
+	entry.terminalEmitted, entry.terminalGeneration = true, node.Generation
 }
 
 func (p *Program) emitTerminal(entry *instance, kind EventKind) {
@@ -139,8 +159,13 @@ func (p *Program) NextEvent() EventResult {
 	if len(p.Events) == 0 {
 		return EventResult{}
 	}
+	// Dequeue in O(1): copying the rest down made a burst of N events cost
+	// O(N^2). Appends reallocate the shrinking backing array as needed.
 	event := p.Events[0]
-	copy(p.Events, p.Events[1:])
-	p.Events = p.Events[:len(p.Events)-1]
+	p.Events[0] = Event{}
+	p.Events = p.Events[1:]
+	if len(p.Events) == 0 {
+		p.Events = nil
+	}
 	return EventResult{Event: event, OK: true}
 }

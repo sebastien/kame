@@ -7,11 +7,9 @@ revision: 2
 ## Purpose
 
 This specification defines the end-to-end conformance suite for the compiled
-`kame` binary. Package tests (`cd src/go/kame && so test ./...`) transpile and
-compile So code to C and can catch translation and native memory defects through
-the exported package APIs. In-process Go CLI tests exercise `Run()` in Go's
-compatibility runtime. This suite adds actual compiled CLI/host orchestration
-against real files, processes, streams, and signals, and
+`kame` binary. Go package tests exercise the runtime directly, and in-process
+CLI tests exercise `Run()`. The end-to-end suite adds compiled CLI/host
+orchestration against real files, processes, streams, and signals, and
 asserts the behavior promised by the language, host, runtime and CLI specifications.
 
 The suite is strict: a test encodes specified behavior and must pass. When it
@@ -22,27 +20,25 @@ and no skipped assertions.
 
 | Layer | Command | Scope |
 | --- | --- | --- |
-| Package tests | `cd src/go/kame && so test ./...` | compiled exported-package API tests |
-| Native host tests | `make test-native-host` | C event/storage fault checks, argv lookup policy and Linux execution with ASan/UBSan |
-| Native CLI unit/lifetime tests | `make test-native-lifecycle` | exact generated Solod CLI, private renderer/AST checks and repeated calls with ASan/UBSan and allocator tracking |
-| Engine examples tests | `cd examples/engine && so test ./...` | external-consumer engine examples |
-| CLI black-box tests | `make test-go` | Go subprocess driver; behavior executes in the compiled Solod CLI |
+| Package tests | `cd src/go/kame && go test ./...` | Go runtime and package APIs |
+| Native host tests | `make test-native-host` | Go POSIX host and ownership tests with `checkptr` |
+| Native CLI lifecycle tests | `make test-native-lifecycle` | repeated in-process Go CLI calls with `checkptr` |
+| Engine examples tests | `cd examples/engine && go test ./...` | external-consumer engine examples |
+| CLI black-box tests | `make test-go` | Go subprocess drivers using the compiled debug CLI |
 | End-to-end | `tests/harness.sh`, `make test-cli` | compiled debug binary, real system calls |
-| Sanitized package tests | `make test-sanitize` | allocator tracking and native memory safety |
-| Leak gate | `make test-leaks` | sanitized package tests plus the compiled CLI end-to-end suite |
+| Pointer checks | `make test-sanitize` | Go package and example tests with `checkptr` |
+| Full pointer-check suite | `make test-leaks` | Go drivers, packages, examples, and CLI suites with `checkptr` |
 
-The So `test/` directories are separate consumer packages, not privileged access
+The `test/` directories are separate consumer packages, not privileged access
 to package internals. For example, `operations/test` imports `kame/operations`
 from package `operations_test`.
 
-Runtime assertions execute compiled Solod/native code. Go may drive subprocesses
-and inspect their output, but must not execute Solod runtime methods through Go
-compatibility stubs. `make test-go` supplies the compiled CLI and formatter binary
-paths; direct Go driver invocations without those paths skip native cases.
+`make test-go` supplies the compiled CLI and formatter binary paths; direct
+Go driver invocations without those paths skip native subprocess cases.
 
-General end-to-end conformance uses the checks-enabled debug build
-(`build/kame.debug`); the leak gate selects `build/kame.sanitize`. Artifact tests
-inspect release metadata and verify unchanged repository build incrementality.
+General end-to-end conformance uses the debug build (`build/kame.debug`); the
+pointer-check suite selects `build/kame.sanitize`. Artifact tests inspect
+release metadata and verify unchanged repository build incrementality.
 
 ## Naming and layout
 
@@ -345,7 +341,7 @@ Conformance for [043-kame-finalization.md](043-kame-finalization.md) covers:
 - Accepted and unaccepted effect ordering, visible cleanup effects after body
   failure, rejection of rendering/deferred-only contexts and effect-free dry-run.
 - Native/WASM graceful cancellation and disposal, unavailable host support,
-  backpressure and repeated tracker/sanitizer checks with harmless fixture work.
+  backpressure and repeated lifecycle checks with harmless fixture work.
 
 ## Suite acceptance criteria
 
@@ -356,43 +352,19 @@ Conformance for [043-kame-finalization.md](043-kame-finalization.md) covers:
 - Fixing a defect never weakens a test: assertions cite their governing spec in
   a header comment.
 
-## Leak verification
+## Pointer and lifecycle verification
 
-`make test-leaks` is the full native leak gate. It runs CLI unit tests with Go
-AddressSanitizer and Clang, package and external consumer tests with Clang and
-Solod's `-check=sanitize`, then builds the CLI with the same checks and
-executes `tests/harness.sh` against that binary.
-`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
-`UBSAN_OPTIONS=halt_on_error=1` are passed through the harness's otherwise
-hermetic command environment. New owning types and lifecycle paths require a
-tracker-backed regression test; high-churn paths should repeat construction and
-teardown in one process so retained allocations cannot hide behind process exit.
-The binary-contract meta test is excluded because it deliberately requires the
-normal debug binary path and verifies the harness's non-sanitized rebuild flow.
+`make test-leaks` runs Go package, example, and CLI-driver tests with
+`-gcflags "all=-d=checkptr=2"` and runs the CLI harness against the similarly
+instrumented `build/kame.sanitize`. The binary-contract meta test is excluded
+because it verifies the normal debug build.
 
-Solod production execution has no garbage collector. Its Go compatibility stubs
-are not equivalent to its C allocator: they use unscanned byte storage, retain
-addresses rather than allocation roots, and let Go slice growth bypass the
-allocator. Go byte-to-string copies also differ from Solod's aliasing conversion;
-such copied strings can become unreachable inside unscanned record storage.
-Rooting allocator buffers alone therefore does not repair this backend.
-The project therefore does not use this backend for runtime tests and does not
-disable Go GC. This is a test-strategy change, not a repair of upstream Go emulation.
-
-The mandatory `test-native-lifecycle` gate compiles the actual generated CLI and
-repeats 2304 invocations in one process using the real C allocator wrapped in a
-Tracker. It requires zero live bytes and balanced allocation/free counts after
-each invocation, with ASan/UBSan and LeakSanitizer enabled. This tests manual
-lifetimes directly, independently of Go stubs or GC settings.
-
-`tests/native/test-cli-{diagnostics,presentation,ast}.h` retain private-unit
-assertions against that generated CLI, including the partial AST error golden
-that differs from the public CLI diagnostic stream. These cases repeat under the
-same tracker and sanitizer gate. CLI subprocess tests use `*_native_test.go` and
-standard Go libraries only; version assertions compare compiled metadata rather
-than executing Go-only build-mode stubs.
-
-The harness preserves `-check=sanitize -panic=abort` and Clang when freshness requires rebuilding `build/kame.sanitize`. A stale sanitized binary must never be replaced by a checks-only executable during the leak gate.
+`make test-native-lifecycle` repeats successful and failing `Run()` calls in
+one process. `make test-native-host` checks native host and ownership paths.
+Use repeated teardown tests for lifecycle regressions, and assert resource
+release directly where possible. `checkptr` detects invalid unsafe-pointer
+operations, not leaks. `mem.Tracker` reports process-wide Go heap statistics
+for allocation-budget checks; it does not track individual owners.
 
 Live-output tests require human and JSON chunks before recipe completion and
 watch output before session termination. Embedding fixtures service the public

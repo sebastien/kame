@@ -146,7 +146,20 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			return core.ProducerWaiting
 		}
 	}
-	resolvedInputs := p.resolveInputs(c, entry)
+	// A body that suspends (on a read, say) resumes through produce. Once
+	// its inputs were resolved and all were current, nothing that could
+	// unsettle them happened while the generation, change stamp and run epoch
+	// are unchanged, so they are not resolved and requested again: that made
+	// a rule with N computed inputs replay O(N) planning per body suspension.
+	ready := entry.readyInputs != nil && entry.readyGeneration == c.Generation() && entry.readyChanges == c.Changes() && entry.readyEpoch == entry.runEpoch
+	var resolvedInputs inputsResult
+	if ready {
+		resolvedInputs = inputsResult{Inputs: entry.readyInputs.inputs, ResourceInputs: entry.readyInputs.resources}
+	} else {
+		entry.readyInputs.free(p.Alloc)
+		entry.readyInputs = nil
+		resolvedInputs = p.resolveInputs(c, entry)
+	}
 	inputs, resourceInputs := resolvedInputs.Inputs, resolvedInputs.ResourceInputs
 	defer freeOwnedStrings(p.Alloc, inputs, resolvedInputs.Owned)
 	defer freeStrings(p.Alloc, resolvedInputs.DynamicInputs)
@@ -162,13 +175,18 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.failRule(c, state.Index, resolvedInputs.Diagnostic)
 		return core.ProducerFailed
 	}
-	requested := p.requestInputs(c, state.Index, inputs, resourceInputs)
-	if requested.Diagnostic.Code != "" {
-		p.failRule(c, state.Index, requested.Diagnostic)
-		return core.ProducerFailed
-	}
-	if requested.Waiting {
-		return core.ProducerWaiting
+	if !ready {
+		requested := p.requestInputs(c, state.Index, inputs, resourceInputs)
+		if requested.Diagnostic.Code != "" {
+			p.failRule(c, state.Index, requested.Diagnostic)
+			return core.ProducerFailed
+		}
+		if requested.Waiting {
+			return core.ProducerWaiting
+		}
+		entry = &p.Instances[state.Index]
+		entry.readyInputs = &readyInputs{inputs: cloneStrings(p.Alloc, inputs), resources: clonePlanInputs(p.Alloc, resourceInputs)}
+		entry.readyGeneration, entry.readyChanges, entry.readyEpoch = c.Generation(), c.Changes(), entry.runEpoch
 	}
 	entry = &p.Instances[state.Index]
 	if entry.Rule.Kind == rule.FileRule && !entry.PreflightChecked && ((!entry.Rule.Always && !p.Options.Force) || p.needsNewerInputs(entry)) && !p.Options.DryRun {

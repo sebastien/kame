@@ -92,7 +92,7 @@ to validate an input is not evidence of changed bytes and must not be presented
 as a confirmed change. Existing debounce, reaping, source-reload and recovery
 obligations remain unchanged.
 
-## Freestanding boundary
+## WASM host boundary
 
 The module owns roots and dependency invalidation; it performs no filesystem
 watching or clock reads. Additive ABI calls accept a JSON array of target names,

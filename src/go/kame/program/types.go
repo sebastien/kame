@@ -339,6 +339,17 @@ type Program struct {
 	deferredTerminal     []int
 	// definitionEnvironment caches bindDefinitionEnvironment's last identity.
 	definitionEnvironment definitionEnvironment
+	// Instance indexes (indexInstances): the first indexedInstances instances
+	// are indexed by node and artifact, and by rule, captures and arguments.
+	instanceNodes    map[*core.Node]int
+	instanceKeys     map[instanceKey]int
+	indexedInstances int
+	// nodeInstances lists every instance of a node (inspection instances can
+	// share one); serviceInstances lists the service rule instances.
+	nodeInstances    map[*core.Node][]int
+	serviceInstances []int
+	// cacheDirectories remembers scanned cache directories (pruneCacheDirectory).
+	cacheDirectories map[string]*cacheDirectory
 
 	RecordReaders       []recordReaderOwner
 	RecordRequests      []host.Request
@@ -549,7 +560,34 @@ type instance struct {
 	valueRevision        int64
 	satisfiedEpoch       int64
 	runEpoch             int64
+	// readyInputs are this generation's resolved inputs, all requested and
+	// current when the engine's change stamp was readyChanges and the run
+	// epoch was readyEpoch (see produce).
+	readyInputs     *readyInputs
+	readyGeneration int64
+	readyChanges    int64
+	readyEpoch      int64
 }
+
+type readyInputs struct {
+	inputs    []string
+	resources []PlanInput
+	// values are the rule frame's input values built from inputs and the
+	// resources at valuesResources, with their signature (see render).
+	values          []core.Value
+	valuesSignature core.Signature
+	valuesResources *PlanInput
+	valuesBuilt     bool
+}
+
+func (r *readyInputs) free(a mem.Allocator) {
+	if r != nil {
+		freeStrings(a, r.inputs)
+		freePlanInputs(a, r.resources, true)
+		freeValues(a, r.values)
+	}
+}
+
 type selection struct {
 	Rule       *rule.Rule
 	Output     rule.Target // Borrowed matched declaration output and authored span.

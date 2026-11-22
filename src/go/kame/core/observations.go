@@ -75,7 +75,9 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 // conflicting observations make the generation non-reusable.
 func (n *Node) mergeObservation(i int, signature Signature) {
 	item := &n.Observations[n.observationOrder[i]]
-	if !item.Signature.Equal(signature) {
+	// Only a fact becoming unavailable changes the epoch; once unavailable,
+	// later observations of it change nothing.
+	if item.Signature.Equal(item.Signature) && !item.Signature.Equal(signature) {
 		item.Signature = Signature{}
 		n.observationEpoch++
 	}

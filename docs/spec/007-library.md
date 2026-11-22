@@ -54,8 +54,8 @@ phase. Syntax that is not a registry call (`match`, `$(…)`, `$?(…)`, `wait`)
 obeys the same contracts.
 
 An operation receives evaluated arguments and an evaluation context. It returns
-a value, a host request, or a structured diagnostic. Returned owned values use
-the run allocator unless explicitly transferred to the engine.
+a value, a host request, or a structured diagnostic. Values retained by the
+engine follow the ownership rules in `001-architecture.md`.
 
 An explicitly specified staged operand is the exception: pattern `subst`
 retains its replacement expression for evaluation after matching, as defined in
@@ -388,8 +388,8 @@ The text operations are:
 | `match?` | Anchored boolean pattern matching, directly or as a unary predicate |
 | `capture` | `capture PATTERN SUBJECT`: anchored match returning a capture record, or nil on no match |
 | `bind` | `bind TEMPLATE CAPTURES`: build a value from a template and a capture record |
-| `uppercase` | Unicode uppercase conversion supported by Solod |
-| `lowercase` | Unicode lowercase conversion supported by Solod |
+| `uppercase` | Unicode uppercase conversion (`strings.ToUpper`) |
+| `lowercase` | Unicode lowercase conversion (`strings.ToLower`) |
 | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
 | `bold`, `dim` | Wrap one string in the ANSI bold or dim sequence |
 
@@ -814,7 +814,6 @@ executable metadata checks do not grant access to user read operations.
 - Pattern replacement expressions resolve captures as local names, skip all
   replacement dependencies/effects on nonmatches, and leave literal-string
   replacement unchanged.
-- Operation tests using `mem.Tracker` leak no returned container or string.
 - `eq?`/`==` share one strict, kind-aware comparison; `ne?`/`!=` is its
   negation and `not` remains boolean negation. `=` is not an operator.
 - `eq?` treats values of different kinds as unequal; `nil` and `false` are

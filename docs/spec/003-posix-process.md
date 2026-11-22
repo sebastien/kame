@@ -7,9 +7,8 @@ revision: 2
 ## Purpose
 
 The POSIX host runs complete recipe scripts while streaming output and managing
-the entire process group. Solod's standard library does not provide child
-process creation, waiting, signals, or process groups, so this package uses a
-small C interop layer.
+the entire process group. The Go host uses `os/exec` and platform system calls
+for process creation, waiting, and signals.
 
 This specification defines the hosted POSIX adapter. Native Windows process
 management is specified separately in `035-native-windows-cli.md`.

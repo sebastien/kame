@@ -783,7 +783,8 @@ func (p *Program) tickServiceReadiness() {
 		return
 	}
 	now := p.Host.Monotonic()
-	for i := range p.Instances {
+	p.indexInstances()
+	for _, i := range p.serviceInstances {
 		entry := &p.Instances[i]
 		if entry.Inspection || entry.Rule == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceProbeID != 0 {
 			continue
