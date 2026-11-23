@@ -1,0 +1,20 @@
+---
+identity: "project:learnings"
+created: 2026-11-23T05:19:50.554467+00:00
+updated: 2026-11-23T05:19:50.554467+00:00
+---
+{
+  "version": 1,
+  "memory": {
+    "root": "root",
+    "nodes": {
+      "root": {
+        "title": "",
+        "text": "",
+        "children": [],
+        "sources": [],
+        "review": false
+      }
+    }
+  }
+}
