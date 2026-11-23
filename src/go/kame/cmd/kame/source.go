@@ -28,7 +28,6 @@ type sourceFile struct {
 	Name            string
 	Text            string
 	SourceDirectory string
-	Data            []byte
 	OwnedName       bool
 	FileBacked      bool
 	Parent          int
@@ -59,7 +58,6 @@ func freeBuildSource(source *buildSource) {
 	for i := range source.Files {
 		mem.FreeString(mem.System, source.Files[i].SourceDirectory)
 		mem.FreeSlice(nil, source.Files[i].Includes)
-		mem.FreeSlice(mem.System, source.Files[i].Data)
 		if source.Files[i].OwnedName {
 			mem.FreeString(mem.System, source.Files[i].Name)
 		}
@@ -168,9 +166,9 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, inv cli
 		return buildSource{Status: 1}
 	}
 	result := newCompositionSource(inv, defines, prefix)
-	result.Files = append(result.Files, sourceFile{Name: canonical, Text: string(data), SourceDirectory: fileSourceDirectory(canonical), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
+	result.Files = append(result.Files, sourceFile{Name: canonical, Text: string(data), SourceDirectory: fileSourceDirectory(canonical), OwnedName: true, FileBacked: true, Parent: -1})
 	if lang == "template" {
-		result.Parts = append(result.Parts, program.CompileSource{Name: canonical, Text: string(data), Lang: lang, SourceDirectory: result.Files[0].SourceDirectory})
+		result.Parts = append(result.Parts, program.CompileSource{Name: canonical, Text: result.Files[0].Text, Lang: lang, SourceDirectory: result.Files[0].SourceDirectory})
 	} else if !expandIncludesLanguage(&result, 0, errOut, lang) {
 		result.Status = 1
 	}
@@ -183,10 +181,10 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	file := s.Files[fileIndex]
 	var signature core.Signature
 	if file.FileBacked {
-		signature = core.ContentSignature(file.Data)
+		signature = core.ContentSignature([]byte(file.Text))
 	}
 	rememberDiagnosticSource(file.Name, file.Text)
-	authored := source.New(mem.System, file.Name, file.Text)
+	authored := source.Borrow(mem.System, file.Name, file.Text)
 	defer authored.Free(mem.System)
 	parseLang := lang
 	if lang == "km" && file.FileBacked {

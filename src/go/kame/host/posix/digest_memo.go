@@ -19,6 +19,9 @@ type fileIdentity struct {
 // within the same timestamp tick could otherwise keep identical metadata.
 const digestRacyWindow = 2 * time.Second
 
+// Eviction costs a rehash, not a loss of freshness information.
+const maxDigestEntries = 4096
+
 type digestMemo struct {
 	mu      sync.Mutex
 	entries map[string]digestMemoEntry
@@ -69,6 +72,14 @@ func (m *digestMemo) remember(path string, identity fileIdentity, signature core
 	defer m.mu.Unlock()
 	if m.entries == nil {
 		m.entries = map[string]digestMemoEntry{}
+	}
+	if len(m.entries) >= maxDigestEntries {
+		if _, known := m.entries[path]; !known {
+			for old := range m.entries {
+				delete(m.entries, old)
+				break
+			}
+		}
 	}
 	m.entries[path] = digestMemoEntry{Identity: identity, Signature: signature}
 }

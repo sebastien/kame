@@ -288,6 +288,26 @@ try {
       if (cycle % 50 === 0) { exports.kame_wasm_collect(); assert.ok(exports.kame_wasm_system_heap_used() < heap + 4 * 1024 * 1024, 'watch retained completed read values'); }
       assert.ok(exports.memory.buffer.byteLength < 256 * 1024 * 1024, 'watch memory grew without bound');
     }
+    // A pending next() must still publish a changed definition after idle polls,
+    // without formatting or cloning snapshots for those polls.
+    assert.equal((await watch.next()).value.snapshot.roots[0].value, String(expectedLength));
+    const snapshot = watch.snapshot.bind(watch);
+    let snapshots = 0;
+    watch.snapshot = () => { snapshots++; return snapshot(); };
+    const next = watch.next();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(snapshots, 0, 'idle iterator produced an undelivered snapshot');
+    await writeFile(input, 'abc');
+    watch.invalidate([{ kind: 'file', name: input }]);
+    let timer;
+    try {
+      const update = await Promise.race([next, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('iterator missed definition update')), 3000);
+      })]);
+      assert.equal(update.value.snapshot.roots[0].value, '3');
+      assert.ok(update.value.events.some(event => event.type === 'target-value'));
+      assert.equal(snapshots, 1);
+    } finally { clearTimeout(timer); }
   } finally { await watch.close(); }
   await reads.dispose();
 } finally {

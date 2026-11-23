@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"kame/cli"
 	"kame/core"
@@ -8,6 +10,7 @@ import (
 	"kame/host/posix"
 	"kame/internal/mem"
 	"kame/program"
+	"os"
 	"path"
 	"slices"
 	"strconv"
@@ -35,31 +38,21 @@ func freeWatchResources(items []watchResource) {
 	mem.FreeSlice(nil, items)
 }
 
-func watchStamp(p *program.Program, key core.ResourceKey, source bool) string {
-	if p != nil && !source {
-		return p.ResourceFingerprint(key)
+func watchSourceStamp(key core.ResourceKey) string {
+	// Compare source bytes even on hosts without reliable change timestamps.
+	file, err := os.Open(key.Name)
+	if os.IsNotExist(err) {
+		return "missing"
 	}
-	h := posix.New(mem.System)
-	info := h.Stat(key.Name)
-	h.Free()
-	if !info.Exists {
-		return cloneCommandText("missing")
-	}
-	// Source retry also detects content changes with preserved timestamps.
-	data, err := posixReadWatchFile(key.Name)
 	if err != nil {
-		return cloneCommandText("unreadable")
+		return "unreadable"
 	}
-	stamp := cloneCommandText(string(data))
-	mem.FreeSlice(nil, data)
-	return stamp
-}
-
-func posixReadWatchFile(name string) ([]byte, error) {
-	h := posix.New(mem.System)
-	data, err := h.ReadFile(mem.System, name)
-	h.Free()
-	return data, err
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "unreadable"
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func watchProbe(p *program.Program, key core.ResourceKey) string {
@@ -78,22 +71,25 @@ func watchProbe(p *program.Program, key core.ResourceKey) string {
 	return stamp
 }
 
-func scanWatchStamp(p *program.Program, item *watchResource) string {
+func scanWatchStamp(p *program.Program, observations program.WatchObservations, item *watchResource) string {
 	if isDeclarationWatchResource(item.Key.Kind) {
 		h := posix.New(mem.System)
 		defer h.Free()
 		return program.DeclarationFingerprint(mem.System, h, item.Directory, item.Key)
 	}
-	if p == nil || item.Source || item.Key.Kind != core.ResourceFile {
-		return watchStamp(p, item.Key, item.Source)
+	if p == nil || item.Source {
+		return watchSourceStamp(item.Key)
+	}
+	if item.Key.Kind != core.ResourceFile {
+		return observations.Fingerprint(item.Key)
 	}
 	probe := watchProbe(p, item.Key)
-	metadata := p.ResourceMetadataObserved(item.Key)
+	metadata := observations.MetadataObserved(item.Key)
 	if probe != "" && probe == item.Probe && metadata == item.Metadata {
 		mem.FreeString(mem.System, probe)
-		return cloneCommandText(item.Stamp)
+		return item.Stamp
 	}
-	stamp := watchStamp(p, item.Key, false)
+	stamp := observations.Fingerprint(item.Key)
 	// An edit during the read must force another content check next scan.
 	after := watchProbe(p, item.Key)
 	mem.FreeString(mem.System, item.Probe)
@@ -110,7 +106,15 @@ func isDeclarationWatchResource(kind core.ResourceKind) bool {
 	return kind == core.ResourceDiscovery || kind == core.ResourceDeclarationSource
 }
 
-func addWatchResource(items *[]watchResource, p *program.Program, key core.ResourceKey, source bool) {
+func queueWatchChange(pending *[]core.ResourceKey, key core.ResourceKey) bool {
+	if slices.Contains(*pending, key) {
+		return false
+	}
+	*pending = append(*pending, key.Clone(mem.System))
+	return true
+}
+
+func addWatchResource(items *[]watchResource, p *program.Program, observations program.WatchObservations, key core.ResourceKey, source bool) {
 	for i := range *items {
 		if (*items)[i].Key.Kind == key.Kind && (*items)[i].Key.Name == key.Name {
 			(*items)[i].Seen = true
@@ -120,9 +124,9 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 	}
 	stamp := ""
 	if !source && p != nil {
-		stamp = p.ResourceAcceptedFingerprint(key)
+		stamp = observations.AcceptedFingerprint(key)
 	} else {
-		stamp = watchStamp(p, key, source)
+		stamp = watchSourceStamp(key)
 	}
 	if !source && p != nil && key.Kind == core.ResourceFile {
 		if node := p.Engine.Lookup(key); node != nil && node.Current && node.Latest.Kind == core.Nil {
@@ -133,7 +137,8 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 	*items = append(*items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
 }
 
-func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) {
+func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) program.WatchObservations {
+	observations := session.Program.WatchObservations()
 	for i := range *items {
 		item := &(*items)[i]
 		item.Seen = item.Source || (session.Status != 0 && isDeclarationWatchResource(item.Key.Kind))
@@ -148,19 +153,19 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	}
 	if options.File != "" {
 		key := core.ResourceKey{Kind: core.ResourceFile, Name: options.File}
-		addWatchResource(items, session.Program, key, true)
+		addWatchResource(items, session.Program, observations, key, true)
 	} else if len(session.Source.Files) == 0 {
 		candidates := cli.BuildSourceCandidates()
 		for i := range candidates {
 			name := path.Join(options.Directory, candidates[i])
-			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
+			addWatchResource(items, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 			mem.FreeString(mem.System, name)
 		}
 	}
 	for i := range session.Source.Files {
 		name := session.Source.Files[i].Name
 		if session.Source.Files[i].FileBacked {
-			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
+			addWatchResource(items, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 		}
 	}
 	for _, discovery := range session.Discoveries {
@@ -176,7 +181,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	if session.Program != nil {
 		resources := session.Program.FilesystemResources()
 		for i := range resources {
-			addWatchResource(items, session.Program, resources[i], false)
+			addWatchResource(items, session.Program, observations, resources[i], false)
 			resources[i].Free(mem.System)
 		}
 		mem.FreeSlice(nil, resources)
@@ -186,6 +191,9 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 		if (*items)[i].Seen {
 			current = append(current, (*items)[i])
 		} else {
+			if session.Program != nil && !(*items)[i].Source {
+				session.Program.RetireWatchResource((*items)[i].Key)
+			}
 			(*items)[i].Key.Free(mem.System)
 			mem.FreeString(mem.System, (*items)[i].Stamp)
 			mem.FreeString(mem.System, (*items)[i].Probe)
@@ -194,6 +202,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	}
 	mem.FreeSlice(nil, *items)
 	*items = current
+	return observations
 }
 
 func freeWatchHandles(handles []*program.Handle) {
@@ -368,12 +377,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 		now := time.Now().UnixNano() / 1000000
 		if !busy && !validationQueued && session.Program != nil {
 			for _, key := range session.Program.ChangedProductionInputs() {
-				found := false
-				for i := range pending {
-					found = found || (pending[i].Kind == key.Kind && pending[i].Name == key.Name)
-				}
-				if !found {
-					pending = append(pending, key.Clone(mem.System))
+				if queueWatchChange(&pending, key) {
 					lastChange = now
 				}
 			}
@@ -393,20 +397,23 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			interval = 200
 		}
 		if dirty || now-lastScan >= interval {
+			var observations program.WatchObservations
 			if !cancelledForChange {
-				refreshWatchResources(&resources, &session, options)
+				observations = refreshWatchResources(&resources, &session, options)
 				notifications = syncWatchNotifications(watcher, session.Program, resources)
+			} else {
+				observations = session.Program.WatchObservations()
 			}
 			dirty = false
 			for i := range resources {
-				stamp := scanWatchStamp(session.Program, &resources[i])
+				stamp := scanWatchStamp(session.Program, observations, &resources[i])
 				if stamp != resources[i].Stamp {
 					session.Program.NoteProductionInputChange(resources[i].Key)
 					clearDashboard(errOut)
 					if !options.JSON {
 						io.WriteString(errOut, "info watch: change queued: "+host.DiscoveryPattern(resources[i].Key.Name)+"\n")
 					}
-					pending = append(pending, resources[i].Key.Clone(mem.System))
+					queueWatchChange(&pending, resources[i].Key)
 					recompile = recompile || resources[i].Source || isDeclarationWatchResource(resources[i].Key.Kind)
 					mem.FreeString(mem.System, resources[i].Stamp)
 					resources[i].Stamp = stamp

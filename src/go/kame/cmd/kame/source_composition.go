@@ -194,7 +194,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	}
 	includes := slices.Clone(file.Includes)
 	includes = append(includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
-	s.Files = append(s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
+	s.Files = append(s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
 	if kash {
 		lang = "kash"
 	}

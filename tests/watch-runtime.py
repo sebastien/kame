@@ -130,6 +130,16 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
             source.write_text('include ./values.km\ntask chosen : added ; {shell: "sh"}\n\tprintf %s @{MARK} >> source-log\ntask added :\n\tprintf dependency >> source-log\n')
             wait_for(process, lambda: read(log) == 'alphabravogammadependencygamma', error, 'changed source graph')
             cases += 1
+            replacement = project / 'replacement.km'
+            replacement.write_text('MARK = "delta"\n')
+            source.write_text(source.read_text().replace('./values.km', './replacement.km'))
+            wait_for(process, lambda: read(log).endswith('dependencydelta'), error, 'replacement include active')
+            offset = len(error.read_text())
+            included.write_text('MARK = "obsolete"\n')
+            replacement.write_text('MARK = "epsilon"\n')
+            wait_for(process, lambda: read(log).endswith('dependencyepsilon'), error, 'replacement include edit')
+            assert f'change queued: {included}' not in error.read_text()[offset:], 'obsolete include remained watched'
+            cases += 1
         finally:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()

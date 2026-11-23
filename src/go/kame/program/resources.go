@@ -5,8 +5,37 @@ import (
 	"kame/host"
 	"kame/internal/mem"
 	"slices"
-	"strings"
 )
+
+// RetireWatchResource drops a detached external producer when the
+// watcher unsubscribes. Revisiting the path must read its current contents.
+func (p *Program) RetireWatchResource(key core.ResourceKey) {
+	p.retireWatchNode(p.Engine.Lookup(key))
+}
+
+// RetireDetachedWatchResources removes obsolete producers from the previous
+// evaluation when the host invalidates roots without tracking subscriptions.
+func (p *Program) RetireDetachedWatchResources() {
+	for _, n := range p.Engine.TrackedNodes() {
+		p.retireWatchNode(n)
+	}
+}
+
+func (p *Program) retireWatchNode(n *core.Node) {
+	if n == nil || n.Interest != 0 || len(n.Dependents) != 0 {
+		return
+	}
+	switch state := n.Context.(type) {
+	case *externalFileState:
+		if !state.Tool {
+			p.Engine.Retire(n)
+		}
+	case *externalValueState:
+		if state.Kind == core.ResourceGlob {
+			p.Engine.Retire(n)
+		}
+	}
+}
 
 // FilesystemResources returns caller-owned external file and glob keys reachable
 // from retained roots. Produced outputs are excluded to avoid watching our writes.
@@ -80,6 +109,10 @@ func (p *Program) InvalidateResource(key core.ResourceKey) {
 // ResourceFingerprint polls content for files and membership for globs. It
 // does not change graph state or evaluate definitions.
 func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
+	return p.resourceFingerprint(key, key.Kind == core.ResourceFile && p.ResourceMetadataObserved(key))
+}
+
+func (p *Program) resourceFingerprint(key core.ResourceKey, metadataObserved bool) string {
 	if key.Kind == core.ResourceGlob {
 		result := p.wildcard(key.Name)
 		if result.Diagnostic.Code != "" {
@@ -87,23 +120,11 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 			return cloneText(p.Alloc, "unavailable")
 		}
 		value := result.Value
-		if host.DiscoveryScan(key.Name) != key.Name {
-			signature := core.ValueSignature(value)
-			value.Free(p.Alloc)
-			return cacheHex(p.Alloc, signature.Digest[:])
-		}
-		b := strings.Builder{}
-		for i := range value.List {
-			b.WriteString(value.List[i].Text)
-			b.WriteByte(0)
-		}
-		stamp := cloneText(p.Alloc, b.String())
-		b.Reset()
+		signature := core.ValueSignature(value)
 		value.Free(p.Alloc)
-		return stamp
+		return cacheHex(p.Alloc, signature.Digest[:])
 	}
 	name := p.canonicalTarget(key.Name, true)
-	metadataObserved := p.ResourceMetadataObserved(key)
 	completion := p.fileCompletion(host.Request{}, host.OpFileContent, name)
 	signature := contentObservation(completion.Value)
 	completion.Value.Free(p.Alloc)
@@ -144,38 +165,25 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 // that could swallow an edit made just after publication. Metadata views get
 // one conservative first scan when no combined accepted baseline is available.
 func (p *Program) ResourceAcceptedFingerprint(key core.ResourceKey) string {
+	return p.WatchObservations().AcceptedFingerprint(key)
+}
+
+func (w WatchObservations) AcceptedFingerprint(key core.ResourceKey) string {
+	p := w.program
 	if key.Kind != core.ResourceFile {
-		if key.Kind == core.ResourceGlob && host.DiscoveryScan(key.Name) != key.Name {
-			if node := p.Engine.Lookup(key); node != nil && node.Current {
+		if key.Kind == core.ResourceGlob {
+			if node := p.Engine.Lookup(key); node != nil && node.Current && node.Signature.Mode == core.SignatureContent {
 				return cacheHex(p.Alloc, node.Signature.Digest[:])
 			}
 		}
-		return p.ResourceFingerprint(key)
+		return w.Fingerprint(key)
 	}
-	if p.ResourceMetadataObserved(key) {
+	file := w.files[key.Name]
+	if file.metadata {
 		return cloneText(p.Alloc, "unobserved")
 	}
-	nodes := p.Engine.TrackedNodes()
-	var accepted core.Signature
-	found := false
-	for i := range nodes {
-		if nodes[i].Interest == 0 {
-			continue
-		}
-		for j := range nodes[i].Observations {
-			item := nodes[i].Observations[j]
-			if item.Key.Kind != key.Kind || item.Key.Name != key.Name || item.Aspect != core.ObservationContent {
-				continue
-			}
-			if found && !accepted.Equal(item.Signature) {
-				mem.FreeSlice(nil, nodes)
-				return cloneText(p.Alloc, "unobserved")
-			}
-			accepted, found = item.Signature, true
-		}
-	}
-	mem.FreeSlice(nil, nodes)
-	if found {
+	if file.content {
+		accepted := file.signature
 		if accepted.Mode == core.SignatureMissing {
 			return cloneText(p.Alloc, "missing")
 		}
@@ -195,30 +203,62 @@ func (p *Program) ResourceAcceptedFingerprint(key core.ResourceKey) string {
 	}
 	if node != nil {
 		// Pending file nodes have not consumed bytes yet; avoid a spurious change.
-		return p.ResourceFingerprint(key)
+		return w.Fingerprint(key)
 	}
 	return cloneText(p.Alloc, "unobserved")
 }
 
 // Intentional stat reads subscribe to metadata as well as resource content.
 func (p *Program) ResourceMetadataObserved(key core.ResourceKey) bool {
-	nodes := p.Engine.TrackedNodes()
-	observed := false
-	for i := range nodes {
-		if nodes[i].Interest == 0 {
+	return p.WatchObservations().MetadataObserved(key)
+}
+
+type watchFileObservation struct {
+	metadata, content bool
+	signature         core.Signature
+}
+
+// WatchObservations indexes accepted file views for one scan. Refresh it after
+// evaluation, since the same path can gain or lose a metadata observation.
+type WatchObservations struct {
+	program *Program
+	files   map[string]watchFileObservation
+}
+
+func (p *Program) WatchObservations() WatchObservations {
+	w := WatchObservations{program: p}
+	if p == nil {
+		return w
+	}
+	for _, n := range p.Engine.TrackedNodes() {
+		if n.Interest == 0 {
 			continue
 		}
-		for j := range nodes[i].Observations {
-			item := nodes[i].Observations[j]
-			if item.Key.Kind == key.Kind && item.Key.Name == key.Name && item.Aspect >= core.ObservationMetadata {
-				observed = true
-				break
+		for _, item := range n.Observations {
+			if item.Key.Kind != core.ResourceFile || (item.Aspect != core.ObservationContent && item.Aspect < core.ObservationMetadata) {
+				continue
 			}
-		}
-		if observed {
-			break
+			if w.files == nil {
+				w.files = make(map[string]watchFileObservation)
+			}
+			file := w.files[item.Key.Name]
+			if item.Aspect >= core.ObservationMetadata {
+				file.metadata = true
+			} else if !file.content {
+				file.content, file.signature = true, item.Signature
+			} else if !file.signature.Equal(item.Signature) {
+				file.signature = core.Signature{}
+			}
+			w.files[item.Key.Name] = file
 		}
 	}
-	mem.FreeSlice(nil, nodes)
-	return observed
+	return w
+}
+
+func (w WatchObservations) MetadataObserved(key core.ResourceKey) bool {
+	return key.Kind == core.ResourceFile && w.files[key.Name].metadata
+}
+
+func (w WatchObservations) Fingerprint(key core.ResourceKey) string {
+	return w.program.resourceFingerprint(key, w.MetadataObserved(key))
 }

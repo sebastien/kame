@@ -30,11 +30,11 @@ func rememberDiagnosticSource(name string, text string) {
 	for i := range diagnosticSources {
 		if diagnosticSources[i].Name == name {
 			diagnosticSources[i].Free(mem.System)
-			diagnosticSources[i] = source.New(mem.System, name, text)
+			diagnosticSources[i] = source.Borrow(mem.System, name, text)
 			return
 		}
 	}
-	diagnosticSources = append(diagnosticSources, source.New(mem.System, name, text))
+	diagnosticSources = append(diagnosticSources, source.Borrow(mem.System, name, text))
 }
 
 func restoreDiagnosticSources(previous []*source.Source) {

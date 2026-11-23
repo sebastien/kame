@@ -39,18 +39,14 @@ func freeOutputLedger(ledger *outputLedger) {
 
 func cleanupSource(source *buildSource) core.Signature {
 	digest := core.NewDigest()
-	// Authored Data retains edits to include/conditional directives that expanded
+	// Authored text retains edits to include/conditional directives that expanded
 	// texts might hide. Name/membership are part of the conservative guard.
 	for i := range source.Files {
 		name := cleanRoot(source.Files[i].Name)
 		digest.Write([]byte(name))
 		mem.FreeString(mem.System, name)
 		digest.Write([]byte{0})
-		if source.Files[i].Data != nil {
-			digest.Write(source.Files[i].Data)
-		} else {
-			digest.Write([]byte(source.Files[i].Text))
-		}
+		digest.Write([]byte(source.Files[i].Text))
 		digest.Write([]byte{0})
 	}
 	signature := core.Signature{Mode: core.SignatureContent}
@@ -257,11 +253,7 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 	for i := range session.Source.Files {
 		file := session.Source.Files[i]
 		if blocker.Location.Source != "" && file.Name == blocker.Location.Source {
-			text := file.Text
-			if file.Data != nil {
-				text = string(file.Data)
-			}
-			authored := source.Source{Text: text}
+			authored := source.Source{Text: file.Text}
 			position = authored.Position(blocker.Location.Span.Start)
 			break
 		}

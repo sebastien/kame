@@ -73,7 +73,6 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	for i := 0; i <= len(r.WatchHandles); i++ {
 		h := r.watchHandle(i)
 		polled := h.PollRetained()
-		r.Program.ObserveDefinition(h)
 		if !polled.Done {
 			busy = true
 		}
@@ -118,6 +117,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	e.Str("resources")
 	e.BeginArray()
 	keys := r.Program.FilesystemResources()
+	observations := r.Program.WatchObservations()
 	for i := range keys {
 		e.BeginObject()
 		e.Str("kind")
@@ -146,7 +146,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		}
 		if keys[i].Kind == core.ResourceFile {
 			e.Str("metadata")
-			e.Bool(r.Program.ResourceMetadataObserved(keys[i]))
+			e.Bool(observations.MetadataObserved(keys[i]))
 			node := r.Program.Engine.Lookup(keys[i])
 			if node != nil && node.Current && node.Signature.Mode == core.SignatureContent {
 				const hex = "0123456789abcdef"
@@ -292,6 +292,12 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 	}
 	defer freeWatchKeys(r.Alloc, batch.Keys)
 	defer mem.FreeSlice(nil, batch.Observed)
+	for _, observedOnly := range batch.Observed {
+		if !observedOnly {
+			r.Program.RetireDetachedWatchResources()
+			break
+		}
+	}
 	for i := range batch.Keys {
 		if batch.Observed[i] {
 			r.Program.NoteProductionInputChange(batch.Keys[i])

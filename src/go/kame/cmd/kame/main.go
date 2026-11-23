@@ -110,6 +110,10 @@ type buildSession struct {
 }
 
 func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bool) buildSession {
+	if options.Watch {
+		// Diagnostic excerpts belong to the current load, including failed loads.
+		restoreDiagnosticSources(nil)
+	}
 	return openBuildSessionForTools(options, errOut, reportMissing, false)
 }
 
@@ -150,7 +154,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	// CompileMany remaps spans to authored offsets, not its combined parse text.
 	var authored *source.Source
 	if len(session.Source.Files) != 0 {
-		authored = source.New(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
+		authored = source.Borrow(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
 	defer authored.Free(mem.System)
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool}

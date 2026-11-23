@@ -1043,6 +1043,12 @@ func (e *Engine) Retire(n *Node) bool {
 	if index < 0 || n.Interest != 0 || len(n.Dependents) != 0 || len(n.Subs) != 0 || n.materializer != nil || n.Submitted || n.tearingDown || (n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled) {
 		return false
 	}
+	// A restarting consumer keeps previous edges without a reverse edge.
+	for _, consumer := range e.nodes {
+		if slices.Contains(consumer.previousDynamic, n) {
+			return false
+		}
+	}
 	e.changes++
 	if n.touchQueued {
 		for i := range e.touched {
@@ -1058,12 +1064,10 @@ func (e *Engine) Retire(n *Node) bool {
 	for i := range n.Dynamic {
 		removeDependent(n.Dynamic[i], n)
 	}
-	copy(e.nodes[index:], e.nodes[index+1:])
-	e.nodes = e.nodes[:len(e.nodes)-1]
+	e.nodes = slices.Delete(e.nodes, index, index+1)
 	for i := range e.nodeIndex {
 		if e.nodeIndex[i].node == n {
-			copy(e.nodeIndex[i:], e.nodeIndex[i+1:])
-			e.nodeIndex = e.nodeIndex[:len(e.nodeIndex)-1]
+			e.nodeIndex = slices.Delete(e.nodeIndex, i, i+1)
 			break
 		}
 	}

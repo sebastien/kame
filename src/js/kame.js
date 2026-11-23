@@ -1211,8 +1211,11 @@ async function resourceDigest(name) {
     if (!data) throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
     hash.update(data);
   } else {
-    const file = await open(filesystemPath(name), 'r');
+    // Recheck the opened descriptor: a regular file can be replaced by a FIFO after stat.
+    const flags = process.platform === 'win32' ? 'r' : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
+    const file = await open(filesystemPath(name), flags);
     try {
+      if (!(await file.stat()).isFile()) return false;
       const buffer = Buffer.allocUnsafe(65536);
       for (;;) {
         const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
@@ -3681,11 +3684,10 @@ export class KameWatch {
       const state = module.drainWatch(this.watch);
       if (state === 1) module.serviceWatchRequest(this.watch);
       if (this.watch.hostError) throw this.watch.hostError;
-      const events = this.watch.context.events.splice(0);
-      const snapshot = this.snapshot();
-      if (!this.started || events.length !== 0) {
+      if (!this.started || this.watch.context.events.length !== 0) {
+        const events = this.watch.context.events.splice(0);
         this.started = true;
-        return { done: false, value: { snapshot, events: structuredClone(events) } };
+        return { done: false, value: { snapshot: this.snapshot(), events: structuredClone(events) } };
       }
       if (this.watch.pending.size) await Promise.race([...this.watch.pending, new Promise((resolveWait) => setTimeout(resolveWait, 10))]);
       else await new Promise((resolveWait) => setTimeout(resolveWait, 10));
@@ -5491,22 +5493,17 @@ function catPlainJSON(typed, depth = 0) {
 
 async function watchFingerprint(kind, name, metadata = false) {
   if (kind === 'glob') {
-    try { return JSON.stringify(resourceWildcard(name)); } catch { return 'unavailable'; }
+    try {
+      const digest = createHash('sha256');
+      for (const path of resourceWildcard(name)) digest.update(path).update('\0');
+      return digest.digest('hex');
+    } catch { return 'unavailable'; }
   }
   let content = 'not-file';
   try {
     if ((await statResource(name)).isFile()) {
-      if (isMemoryResource(name) || process.platform === 'win32') {
-        // ponytail: Windows retains the dispatcher's stat/read race; POSIX
-        // uses a nonblocking descriptor so a replacement FIFO cannot stall.
-        const bytes = await readResource(name);
-        content = createHash('sha256').update(bytes).digest('hex');
-      } else {
-        const file = await open(filesystemPath(name), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
-        try {
-          if ((await file.stat()).isFile()) content = createHash('sha256').update(await file.readFile()).digest('hex');
-        } finally { await file.close(); }
-      }
+      const digest = await resourceDigest(name);
+      if (digest) content = digest.sha256;
     }
   } catch (error) {
     content = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'missing' : `error:${error.code ?? error.message}`;
@@ -5720,7 +5717,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   const seedSources = async () => {
     for (const name of watchedSources) {
       const key = watchKey('file', name);
-      if (!fingerprints.has(key)) {
+      if (!fingerprints.get(key)?.source) {
         notifications.changed();
         fingerprints.set(key, { kind: 'file', name, stamp: await watchFingerprint('file', name), source: true });
       }
@@ -5740,6 +5737,9 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   };
   const compile = async () => {
     watchedSources.clear();
+    sourceTexts.clear();
+    source = null;
+    primarySource = null;
     startCycle();
     try {
       source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources, (resources) => seedDiscoveries(resources));
@@ -5753,14 +5753,23 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       lastDiagnostic = null;
       const targets = source.targets;
       watch = await module.beginWatch(source.compiled, targets, source.name, { ...context, signal: cancellation.signal, declarationState: seedDiscoveries });
-      cancellation.signal.addEventListener('abort', () => watch?.cancellation.abort(), { once: true });
       invocationCancellations.add(watch.cancellation);
       const snapshot = module.watchSnapshot(watch);
-      await syncWatchResources(snapshot);
       await seedSources();
+      // Failed loads retain attempted paths for repair. A successful load
+      // replaces them before runtime inputs claim any formerly included file.
+      for (const [key, record] of fingerprints) {
+        if (record.source && !watchedSources.has(record.name)) { fingerprints.delete(key); notifications.changed(); }
+      }
+      await syncWatchResources(snapshot);
       return true;
     } catch (error) {
       cycleFailed = true;
+      if (watch) {
+        invocationCancellations.delete(watch.cancellation);
+        await module.disposeWatch(watch);
+        watch = null;
+      }
       reportWatchError(error, source);
       await seedSources();
       return false;

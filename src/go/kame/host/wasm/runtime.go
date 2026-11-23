@@ -934,6 +934,11 @@ func (r *Runtime) Step() host.NextResult {
 		if r.Handle != nil || r.Finalizing {
 			r.Program.Tick(0)
 		}
+		if r.Watching {
+			for i := 0; i <= len(r.WatchHandles); i++ {
+				r.Program.ObserveDefinition(r.watchHandle(i))
+			}
+		}
 		if outbound := r.Program.NextOutbound(); outbound.OK {
 			r.trackFinalizationRequest(outbound)
 			return outbound

@@ -309,20 +309,26 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 	if len(sources) == 0 {
 		return CompileResult{}
 	}
-	var builder strings.Builder = strings.Builder{}
 	offsets := make([]int, len(sources))
-	for i := range sources {
-		offsets[i] = builder.Len()
-		builder.WriteString(sources[i].Text)
-		if i+1 < len(sources) {
-			builder.WriteByte('\n')
+	text := sources[0].Text
+	if len(sources) > 1 {
+		size := len(sources) - 1
+		for i := range sources {
+			size += len(sources[i].Text)
 		}
+		var builder strings.Builder
+		builder.Grow(size)
+		for i := range sources {
+			if i != 0 {
+				builder.WriteByte('\n')
+			}
+			offsets[i] = builder.Len()
+			builder.WriteString(sources[i].Text)
+		}
+		text = builder.String()
 	}
-	text := cloneText(a, builder.String())
-	builder.Reset()
 	parsed := parseSourceFragments(a, "<sources>", text, sources, offsets)
 	parsed.Source.Expanded = len(sources) > 1 || sources[0].Offset != 0
-	mem.FreeString(a, text)
 	result := compileSources(a, parsed, registry, options, sources, offsets)
 	if result.Program != nil {
 		result.Program.ParsedOwned = true
@@ -343,7 +349,7 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 
 func parseSourceFragments(a mem.Allocator, name string, text string, sources []CompileSource, offsets []int) *script.Script {
 	parsed := mem.Alloc[script.Script](a)
-	parsed.Alloc, parsed.Source = a, source.New(a, name, text)
+	parsed.Alloc, parsed.Source = a, source.Borrow(a, name, text)
 	for i := range sources {
 		input := sources[i]
 		if input.Lang == "" || (input.Lang == "km" && input.SourceDirectory != "") {

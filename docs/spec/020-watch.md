@@ -66,6 +66,14 @@ their attempted source paths; a successful compilation replaces that source set.
 Roots, environments, grants, tools, timeouts and retries use the invocation's
 original configuration. Watching never broadens language grants.
 
+Native watch retains diagnostic excerpts for the current source load (successful
+or failed), content digests rather than source bodies for change detection, and
+one pending invalidation per distinct resource. Detached external file and glob
+producers can be discarded and rediscovered if the path becomes relevant again.
+Glob watch stamps use fixed-size membership digests. Metadata subscriptions are
+collected once per scan from the current interested consumers, so an unchanged
+file is still rechecked when a new consumer starts observing its metadata.
+
 Live stdout/stderr and JSON events retain ordinary publication and backpressure
 contracts. An idle watcher publishes no repeated task events. SIGINT/SIGTERM
 cancel active processes, reap descendants, dispose the runtime and exit with
@@ -106,6 +114,11 @@ Automatic OS subscriptions are CLI-only; the JavaScript embedding API retains
 explicit `invalidate(resources)` for custom hosts. The Python wrapper inherits
 the selected CLI host's notification behavior.
 
+Ordinary WASM invalidation reclaims detached external file and glob producers
+from previous evaluations even if the host never requests a snapshot. Idle
+JavaScript iterator polls do not serialize a snapshot; the initial batch and
+subsequent event batches include the current snapshot.
+
 A file invalidation record with `observedOnly: true` instead records a host's
 fingerprinted change during active production without invalidating or cancelling
 the running graph. This preserves evidence of transient edits until completion
@@ -125,6 +138,9 @@ filesystem notification.
   output, without an additional inconsistent-build warning for the cancelled cycle.
 - Native and WASM reload an included source with preserved metadata, diagnose
   malformed input, recover after repair and replace changed dependency graphs.
+- A successful reload drops obsolete includes and their diagnostic excerpts.
+  Repeated reloads do not accumulate cancellation listeners. Watch hashing of
+  regular files uses bounded buffers even on the first scan.
 - An input changed after a recipe's read handshake produces a second build with
   the latest bytes even when the first output has a newer timestamp.
 - A burst of input changes produces one rebuild after the configured quiet period;
