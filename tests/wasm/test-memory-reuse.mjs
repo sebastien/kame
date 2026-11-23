@@ -285,7 +285,15 @@ try {
       watch.invalidate([{ kind: 'file', name: input }]);
       await settle();
       assert.equal(exports.kame_wasm_host_heap_used(), baseline, 'watch retained per-read host buffers');
-      if (cycle % 50 === 0) { exports.kame_wasm_collect(); assert.ok(exports.kame_wasm_system_heap_used() < heap + 4 * 1024 * 1024, 'watch retained completed read values'); }
+      if (cycle % 50 === 0 || cycle === 599) {
+        exports.kame_wasm_collect();
+        const live = exports.kame_wasm_system_heap_used();
+        assert.ok(live < heap + 4 * 1024 * 1024, 'watch retained completed read values');
+        if (process.env.KAME_WATCH_SOAK === '1') console.log(JSON.stringify({
+          cycle: cycle + 1, inputBytes: expectedLength, hostBytes: exports.kame_wasm_host_heap_used(), liveBytes: live,
+          linearBytes: exports.memory.buffer.byteLength, linearGrowthBytes: exports.memory.buffer.byteLength - linear,
+        }));
+      }
       assert.ok(exports.memory.buffer.byteLength < 256 * 1024 * 1024, 'watch memory grew without bound');
     }
     // A pending next() must still publish a changed definition after idle polls,

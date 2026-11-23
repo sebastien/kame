@@ -206,19 +206,10 @@ func (p *Program) bindDefinitionInput(key core.ResourceKey, context *Context) {
 	if key.Kind != core.ResourceDefinition {
 		return
 	}
-	name := AuthoredDefinitionName(key.Name)
-	for i := range p.Definitions {
-		if p.Definitions[i].Name != name {
-			continue
+	if node := p.Engine.Lookup(key); node != nil {
+		if state, ok := node.Context.(*definitionState); ok && state.Program == p && (!state.InputBound || state.InputGeneration != node.Generation) {
+			state.bindInputPolicy(node.Generation, context.InputClosed, context.RecordBody)
 		}
-		node := p.Engine.Lookup(key)
-		if node != nil {
-			state := node.Context.(*definitionState)
-			if !state.InputBound || state.InputGeneration != node.Generation {
-				state.bindInputPolicy(node.Generation, context.InputClosed, context.RecordBody)
-			}
-		}
-		return
 	}
 }
 

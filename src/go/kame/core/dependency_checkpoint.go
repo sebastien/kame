@@ -18,8 +18,7 @@ func (c *EngineContext) CheckpointDependencies() DependencyCheckpoint {
 	checkpoint := DependencyCheckpoint{Dynamic: len(c.node.Dynamic)}
 	checkpoint.OrderOnly = slices.Clone(c.node.OrderOnly)
 	checkpoint.Observed = slices.Clone(c.node.Observed)
-	for i := range c.node.Observations {
-		item := c.node.Observations[i]
+	for _, item := range c.node.observations {
 		item.Key = item.Key.Clone(c.engine.Alloc)
 		checkpoint.Observations = append(checkpoint.Observations, item)
 	}
@@ -36,16 +35,10 @@ func (checkpoint *DependencyCheckpoint) Free(a mem.Allocator) {
 func (c *EngineContext) RestoreDependencies(checkpoint *DependencyCheckpoint) {
 	n := c.node
 	c.engine.changes++
-	n.observationEpoch++
-	for i := checkpoint.Dynamic; i < len(n.Dynamic); i++ {
-		dependency := n.Dynamic[i]
-		removeDependent(dependency, n)
-		c.engine.edgeInterest(dependency, n, -1)
-	}
-	n.Dynamic = n.Dynamic[:checkpoint.Dynamic]
+	c.engine.dropDynamicDependencies(n, checkpoint.Dynamic, false)
 	mem.FreeSlice(nil, n.OrderOnly)
 	mem.FreeSlice(nil, n.Observed)
-	FreeObservations(c.engine.Alloc, n.Observations)
-	n.OrderOnly, n.Observed, n.Observations = checkpoint.OrderOnly, checkpoint.Observed, checkpoint.Observations
+	n.OrderOnly, n.Observed = checkpoint.OrderOnly, checkpoint.Observed
+	c.engine.replaceObservations(n, checkpoint.Observations)
 	*checkpoint = DependencyCheckpoint{}
 }

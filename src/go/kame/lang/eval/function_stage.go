@@ -404,7 +404,7 @@ func (s *captureState) joinCallableStages(c *Context) (core.Completion, bool) {
 	terminal := *s.GraphTerminal
 	s.GraphTerminal = nil
 	for _, stage := range s.CallableStages {
-		for _, observation := range stage.node.Observations {
+		for observation := range stage.node.AcceptedObservations().All {
 			c.Engine.ObserveAspect(observation.Key, observation.Aspect, observation.Signature)
 		}
 		// Security and phase diagnostics cannot become ordinary pipe exits.

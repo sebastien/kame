@@ -87,9 +87,7 @@ func (c *EngineContext) ForgetDependency(key ResourceKey) {
 		if d.Key.Kind != key.Kind || d.Key.Name != key.Name {
 			continue
 		}
-		removeDependent(d, n)
-		copy(n.Dynamic[i:], n.Dynamic[i+1:])
-		n.Dynamic = n.Dynamic[:len(n.Dynamic)-1]
+		n.Dynamic = slices.Delete(n.Dynamic, i, i+1)
 		for j := range n.Observed {
 			if n.Observed[j] == d {
 				copy(n.Observed[j:], n.Observed[j+1:])
@@ -104,7 +102,7 @@ func (c *EngineContext) ForgetDependency(key ResourceKey) {
 				break
 			}
 		}
-		c.engine.edgeInterest(d, n, -1)
+		c.engine.unlinkDependency(n, d, false)
 		return
 	}
 }
@@ -160,24 +158,11 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 		c.engine.Invalidate(dep)
 	}
 	if !slices.Contains(c.node.Dynamic, dep) {
-		c.node.Dynamic = append(c.node.Dynamic, dep)
+		c.engine.linkDependency(c.node, dep, false)
 		if observed {
 			c.node.Observed = append(c.node.Observed, dep)
 		}
-		dep.Dependents = append(dep.Dependents, c.node)
 		c.engine.emit(c.node, Event{Kind: UpdateDependency, DependencyID: dep.ID})
-		held := false
-		for i := range c.node.previousDynamic {
-			if c.node.previousDynamic[i] == dep {
-				copy(c.node.previousDynamic[i:], c.node.previousDynamic[i+1:])
-				c.node.previousDynamic = c.node.previousDynamic[:len(c.node.previousDynamic)-1]
-				held = true
-				break
-			}
-		}
-		if !held {
-			c.engine.edgeInterest(dep, c.node, 1)
-		}
 	}
 	for i := range c.node.OrderOnly {
 		if c.node.OrderOnly[i] == dep {
@@ -203,7 +188,7 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 		return false
 	}
 	if !dep.Current || dep.ValidationPending || dep.State == NodeFailed || dep.State == NodeCancelled {
-		request(dep)
+		c.engine.request(dep)
 		return false
 	}
 	return true

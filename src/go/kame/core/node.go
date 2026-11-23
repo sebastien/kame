@@ -29,19 +29,27 @@ type Node struct {
 	ContextFree             ContextFree
 	Latest                  Value
 	Signature               Signature
-	Observations            []Observation
-	// observationEpoch changes whenever Observations changes other than by
-	// appending, so a recorded prefix length still names the same facts.
+	observations            []Observation
+	// observationEpoch changes when facts are replaced or conflict, so an
+	// append alone leaves an already validated prefix valid.
 	observationEpoch int64
-	// observationOrder indexes Observations by key and aspect as of orderEpoch.
+	// observationOrder indexes observations by key and aspect as of orderEpoch.
 	observationOrder []int
 	orderEpoch       int64
 	// The first settledDynamic Dynamic edges were current and valid when the
-	// engine's change stamp was settledChanges (see Engine.ready).
-	settledDynamic int
-	settledChanges int64
-	touchQueued    bool // in Engine.touched
-	Current        bool
+	// engine's change stamp was settledChanges (see Engine.checkReadiness).
+	settledDynamic     int
+	settledChanges     int64
+	prerequisiteHeight int // longest prerequisite chain; leaves have height zero
+	validationBlockers int // number of edges to inputs still refreshing
+	checkIndex         int // one-based position in Engine.checks
+	heightDirty        bool
+	inClosure          bool // used only while collecting a revalidation wave
+	validationSettled  bool
+	runnable           bool
+	running            bool
+	touchQueued        bool // in Engine.touched
+	Current            bool
 	// ValidationPending keeps accepted state while dependencies are refreshed.
 	ValidationPending bool
 	DisableReuse      bool
@@ -100,9 +108,15 @@ func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
 	}
 	e.releasePreviousDependencies(n)
 	e.emit(n, terminal(n))
-	for i := range n.Dependents {
-		if n.Dependents[i].State == NodeWaiting && !n.Dependents[i].ValidationPending {
-			n.Dependents[i].State = NodeReady
+	e.syncValidationInput(n)
+	e.enqueue(n)
+	for _, d := range n.Dependents {
+		if n.State == NodeFailed {
+			d.offered = false
 		}
+		if d.State == NodeWaiting && !d.ValidationPending {
+			d.State = NodeReady
+		}
+		e.enqueue(d)
 	}
 }

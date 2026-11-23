@@ -1,0 +1,45 @@
+name: Retained graph performance
+on:
+  schedule:
+    - cron: '27 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch pinned dependencies
+        run: |
+          while read -r path url branch commit; do
+            git clone --quiet "https://github.com/${url#git@github.com:}" "$path"
+            git -C "$path" checkout --quiet "$commit"
+          done < .gitdeps
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/go/kame/go.mod
+          cache-dependency-path: src/go/kame/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build fixtures and measure
+        shell: bash
+        run: |
+          make build/kame.debug dist-wasm
+          mkdir -p build/perf
+          { git rev-parse HEAD; go version; node --version; uname -a; lscpu; } > build/perf/environment.txt
+          for i in 1 2 3; do
+            build/kame.debug bench-graph > build/perf/graph-$i.txt 2>&1
+            python3 src/sh/benchmark-watch.py > build/perf/watch-$i.jsonl
+          done
+          build/kame.debug bench-soak > build/perf/soak.txt 2>&1
+          KAME_WATCH_SOAK=1 node tests/wasm/test-memory-reuse.mjs > build/perf/wasm-soak.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: graph-perf-${{ github.sha }}
+          path: build/perf/

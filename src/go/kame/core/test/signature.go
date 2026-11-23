@@ -169,16 +169,17 @@ func TestEngineOwnsConsumedObservationsAndSignedPublication(t *testing.T) {
 	n := e.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "observe"}, observeThenPublish, nil)
 	e.Request(n)
 	e.Step()
-	if len(n.Observations) != 2 {
+	facts := n.AcceptedObservations()
+	if facts.Len() != 2 {
 		t.Error("file observations were not canonicalized and deduplicated")
-	} else if n.Observations[1].Signature.Mode != core.SignatureUnavailable {
+	} else if facts.At(1).Signature.Mode != core.SignatureUnavailable {
 		t.Error("conflicting reads accepted")
 	}
 	if !n.Signature.Equal(core.ContentSignature([]byte("bytes"))) || n.Latest.Text != "input" {
 		t.Error("file identity was replaced with path value identity")
 	}
 	e.Invalidate(n)
-	if len(n.Observations) != 0 {
+	if n.AcceptedObservations().Len() != 0 {
 		t.Error("new generation inherited old observations")
 	}
 	e.Step()
@@ -207,7 +208,8 @@ func TestValueReadRecordsDependencySignature(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		e.Step()
 	}
-	if len(consumer.Observations) != 1 || !consumer.Observations[0].Signature.Equal(source.Signature) {
+	facts := consumer.AcceptedObservations()
+	if facts.Len() != 1 || !facts.At(0).Signature.Equal(source.Signature) {
 		t.Error("value read lost dependency's semantic identity")
 	}
 	e.Free()
@@ -226,7 +228,7 @@ func TestFailedPublicationCannotReplaceSignatureOrObservations(t *testing.T) {
 	n := e.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "failed"}, failThenPublishSigned, nil)
 	e.Request(n)
 	e.Step()
-	if n.Current || n.Signature.Mode != core.SignatureUnavailable || len(n.Observations) != 0 {
+	if n.Current || n.Signature.Mode != core.SignatureUnavailable || n.AcceptedObservations().Len() != 0 {
 		t.Error("failed producer published a reusable identity")
 	}
 	e.Free()
@@ -248,13 +250,14 @@ func TestObservationViewsRejectConflictsWithoutPoisoningOtherViews(t *testing.T)
 	n := e.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "views"}, observeFileViews, nil)
 	e.Request(n)
 	e.Step()
-	if len(n.Observations) != 3 {
+	facts := n.AcceptedObservations()
+	if facts.Len() != 3 {
 		t.Error("resource views collapsed")
 	} else {
-		if n.Observations[0].Signature.Mode != core.SignatureUnavailable {
+		if facts.At(0).Signature.Mode != core.SignatureUnavailable {
 			t.Error("conflicting content reads were accepted")
 		}
-		if n.Observations[1].Signature.Mode != core.SignatureContent || n.Observations[2].Signature.Mode != core.SignatureContent {
+		if facts.At(1).Signature.Mode != core.SignatureContent || facts.At(2).Signature.Mode != core.SignatureContent {
 			t.Error("content conflict poisoned other views")
 		}
 	}

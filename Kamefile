@@ -404,6 +404,20 @@ task bench : ./build/kame.debug
 		(fail! "kame bench requires Linux (PTY and /proc RSS)")
 	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) KAME_NATIVE_CLI_TEST_BINARY: (abspath ./build/kame.debug) KAME_KASH_BENCH: "1" go test -v -count=3 -run '^TestKashInteractiveBenchmark$' ./cmd/kame
 
+task bench-graph
+	for size in [128, 1024, 8192]
+		cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -run '^$' -bench "^BenchmarkGraphFootprint/${size}" -benchtime=1x -count=1 ./core
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -run '^$' -bench '^BenchmarkGraphUpdate$' -benchtime=10000x -count=1 ./core
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -run '^$' -bench '^BenchmarkGraphJoin$' -benchtime=100x -count=1 ./core
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -run '^$' -bench '^BenchmarkGraphDeepChain$' -benchtime=5x -count=1 ./core
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) go test -run '^$' -bench '^BenchmarkProgramGraph$' -benchtime=100x -count=1 ./program/test
+
+task bench-watch : ./build/kame.debug dist-wasm
+	python3 ./src/sh/benchmark-watch.py
+
+task bench-soak : ./src/go/kame/cmd/kame/version_generated.go
+	cwd: $KAME_DIR CGO_ENABLED: "0" GOCACHE: (abspath ./build/go-cache) KAME_WATCH_SOAK: "1" go test -v -count=1 -run '^TestWatchRetiresDetachedInputAndRediscoversIt$' ./cmd/kame
+
 task test-cli : ./build/kame.debug dist-wasm ./dist/kame ${RELEASE_BINARIES} ./dist/kame-windows-x64.zip ./tests/harness.sh
 	KAME_TEST_PREBUILT: (abspath ".") ./tests/harness.sh
 

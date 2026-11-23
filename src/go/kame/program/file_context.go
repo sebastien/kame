@@ -93,8 +93,7 @@ func (p *Program) collectAcceptedInputs(node *core.Node, collector *acceptedColl
 		return
 	}
 	collector.seen[node] = true
-	for i := range node.Observations {
-		item := node.Observations[i]
+	for item := range node.AcceptedObservations().All {
 		if item.Key.Kind == core.ResourceDefinition {
 			item.Key.Name = eval.AuthoredDefinitionName(item.Key.Name)
 		}

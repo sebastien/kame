@@ -109,6 +109,21 @@ same machine: timing and RSS are reported, not enforced as pass/fail
 thresholds. The probe does not include terminal emulator rendering or measure
 peak memory.
 
+For retained build graphs, run the following from the repository root:
+
+| Target | Measurements |
+| --- | --- |
+| `kame bench-graph` | 128, 1,024 and 8,192 nodes. Collected heap above an empty engine per bare node, additional bytes per edge, and settled bytes per node. First evaluation nodes/s and latency and allocations for editing a three-node chain amid settled roots. Separate cases vary join width from 4 to 256 branches and measure first dispatch in consumer-first chains up to 4,096 nodes. Compiled programs measure single, duplicate and distinct input batches against an in-memory host. |
+| `kame bench-watch` | On POSIX, time 100 atomic edits on both native and Node/WASM CLIs with zero and 100 ms debounce. JSON reports edit-to-start, start-to-idle and end-to-end percentiles. The cancellation workload distinguishes edit-to-cancelled-idle from edit-to-replacement-start. The source reload workload is also separate. Every successful cycle must publish the matching file contents. Linux reports process RSS by watch cycle. |
+| `kame bench-soak` | 10,000 cycles with only one input selected at once. Every cycle checks the value, three retained graph nodes and removal of the obsolete watch. Every 1,000 cycles report post-GC heap, object count, heap change since warm-up and average update latency. |
+
+Compare several runs on the same machine. Heap deltas are process-wide estimates;
+the smallest graph is especially sensitive to runtime noise. RSS includes reserved
+memory and need not shrink. Nightly artifacts include the runner CPU and toolchain;
+hosted runners of the same OS version need not have identical hardware. Use the
+existing WASM memory-reuse gate for collected module heap and caller-buffer bounds;
+compare samples with the same input size.
+
 Release validation calls for separate native, leak, and WASM runs at one stable
 revision; see [TODO.md](../TODO.md). A workflow that only builds an artifact or
 runs `--version` is not evidence that the whole suite passed. In particular,

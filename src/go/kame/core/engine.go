@@ -28,14 +28,11 @@ type Engine struct {
 	// changes counts mutations that can falsify an accepted fact: a current
 	// node republished, failed or invalidated, a node removed, or an edge
 	// dropped. A first publication does not count; a fact needs a current node.
-	changes int64
-	// live holds, in e.nodes order, every node that might become ready: those
-	// not terminal or pending validation. A terminal node only leaves that
-	// state through a change (see changes), so live is rebuilt when the stamp
-	// moves and otherwise only gains new nodes. liveSeen counts e.nodes seen.
-	live        []*Node
-	liveSeen    int
-	liveChanges int64
+	changes       int64
+	checks        checkQueue
+	dirtyHeights  []*Node
+	runnable      []*Node // structurally ready, in resource-key order
+	fileObservers map[string]map[*Node]struct{}
 	// TrackTouched records the nodes published or ended (complete, failed or
 	// cancelled) for TakeTouched, so an observer need not scan every node.
 	TrackTouched bool
@@ -58,48 +55,6 @@ func (e *Engine) TakeTouched() []*Node {
 		n.touchQueued = false
 	}
 	return touched
-}
-
-func (n *Node) settled() bool {
-	return !n.ValidationPending && (n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled)
-}
-
-// candidates returns the nodes the scheduler must consider. Scanning every
-// node on each tick would make a build reading N files quadratic.
-func (e *Engine) candidates() []*Node {
-	if e.liveChanges != e.changes || e.liveSeen > len(e.nodes) {
-		e.live, e.liveSeen, e.liveChanges = e.live[:0], 0, e.changes
-	}
-	for ; e.liveSeen < len(e.nodes); e.liveSeen++ {
-		e.live = append(e.live, e.nodes[e.liveSeen])
-	}
-	return e.live
-}
-
-// UnsettledDynamic returns n's dynamic edges except a prefix Engine.ready
-// found current and valid, which stays so while the change stamp is unchanged.
-func (e *Engine) UnsettledDynamic(n *Node) []*Node {
-	if n.settledChanges != e.changes || n.settledDynamic > len(n.Dynamic) {
-		return n.Dynamic
-	}
-	return n.Dynamic[n.settledDynamic:]
-}
-
-// pruneSettled drops settled nodes from live after a full scan.
-func (e *Engine) pruneSettled() {
-	if e.liveChanges != e.changes {
-		return
-	}
-	kept := e.live[:0]
-	for _, n := range e.live {
-		if !n.settled() {
-			kept = append(kept, n)
-		}
-	}
-	for i := len(kept); i < len(e.live); i++ {
-		e.live[i] = nil
-	}
-	e.live = kept
 }
 
 // Changes returns the engine's change stamp. While it is unchanged, facts
@@ -196,42 +151,6 @@ func (e *Engine) AddOwned(key ResourceKey, producer Producer, context any, free 
 	return n
 }
 
-func (e *Engine) AddStatic(n *Node, dependency *Node) bool {
-	if n != nil && (n.Requested || n.State != NodeIdle) {
-		return false
-	}
-	if n == nil || dependency == nil || n == dependency || reaches(dependency, n) {
-		if n != nil {
-			n.complete(e, Diagnostic{Code: DiagnosticDependencyCycle})
-		}
-		return false
-	}
-	if slices.Contains(n.Static, dependency) {
-		return true
-	}
-	n.Static = append(n.Static, dependency)
-	dependency.Dependents = append(dependency.Dependents, n)
-	e.edgeInterest(dependency, n, 1)
-	return true
-}
-
-func reaches(from *Node, want *Node) bool {
-	if from == want {
-		return true
-	}
-	for i := range from.Static {
-		if reaches(from.Static[i], want) {
-			return true
-		}
-	}
-	for i := range from.Dynamic {
-		if reaches(from.Dynamic[i], want) {
-			return true
-		}
-	}
-	return false
-}
-
 func (e *Engine) RequestRoot(n *Node) *Root {
 	if n == nil {
 		return nil
@@ -240,7 +159,7 @@ func (e *Engine) RequestRoot(n *Node) *Root {
 	r.node, r.live = n, true
 	e.roots = append(e.roots, r)
 	e.interest(n, 1)
-	request(n)
+	e.request(n)
 	return r
 }
 
@@ -249,17 +168,24 @@ func (e *Engine) Request(n *Node) {
 	if n != nil && n.RequestInterest == 0 {
 		n.RequestInterest = 1
 		e.interest(n, 1)
-		request(n)
+		e.request(n)
 	}
 }
 
-func request(n *Node) {
-	n.Requested = true
+func (e *Engine) demand(n *Node) {
+	if !n.Requested {
+		n.Requested = true
+		e.enqueue(n)
+	}
+}
+
+func (e *Engine) request(n *Node) {
+	e.demand(n)
 	for i := range n.Static {
-		request(n.Static[i])
+		e.request(n.Static[i])
 	}
 	for i := range n.Dynamic {
-		request(n.Dynamic[i])
+		e.request(n.Dynamic[i])
 	}
 }
 
@@ -285,14 +211,6 @@ func (e *Engine) Release(r *Root) {
 
 func (e *Engine) interest(n *Node, delta int64) { e.adjustInterest(n, delta, 0) }
 
-// edgeInterest adds (sign 1) or removes (sign -1) the interest a dependent
-// passes along one edge, suspended part included.
-func (e *Engine) edgeInterest(dependency, dependent *Node, sign int64) {
-	if dependent.Interest != 0 {
-		e.adjustInterest(dependency, sign*dependent.Interest, sign*dependent.SuspendedInterest)
-	}
-}
-
 // adjustInterest changes a node's interest by delta, of which suspended comes
 // from suspended roots, and propagates it to dependencies. A node whose
 // suspension state flips while it holds host work queues a host request.
@@ -301,8 +219,12 @@ func (e *Engine) adjustInterest(n *Node, delta, suspended int64) {
 		e.beginTeardown(n, false)
 	}
 	was := n.suspended()
+	previous := n.Interest
 	n.Interest += delta
 	n.SuspendedInterest += suspended
+	if (previous == 0) != (n.Interest == 0) || was != n.suspended() {
+		e.enqueue(n)
+	}
 	for i := range n.Static {
 		e.adjustInterest(n.Static[i], delta, suspended)
 	}
@@ -371,7 +293,7 @@ func (e *Engine) Subscribe(n *Node) *Subscription {
 	s.Alloc, s.Node = e.Alloc, n
 	n.Subs = append(n.Subs, s)
 	e.interest(n, 1)
-	request(n)
+	e.request(n)
 	if n.Current {
 		s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.CloneOwned(e.Alloc), Revision: n.Revision})
 	}
@@ -422,21 +344,22 @@ func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 	value.Free(e.Alloc)
 	n.Revision++
 	e.touch(n)
+	e.syncValidationInput(n)
 	e.releasePreviousDependencies(n)
 	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
 	dependents := slices.Clone(n.Dependents)
 	for i := range dependents {
 		dependent := dependents[i]
-		if dependent.State != NodeWaiting || dependent.ValidationPending {
-			continue
-		}
 		// A host request was derived from an older dependency snapshot. Cancel it
 		// and restart from the newest values instead of accepting its completion.
-		if dependent.Submitted {
-			e.restartFromPublication(dependent)
-			continue
+		if dependent.State == NodeWaiting && !dependent.ValidationPending {
+			if dependent.Submitted {
+				e.restartFromPublication(dependent)
+				continue
+			}
+			dependent.State = NodeReady
 		}
-		dependent.State = NodeReady
+		e.enqueue(dependent)
 	}
 	mem.FreeSlice(nil, dependents)
 }
@@ -475,178 +398,6 @@ func (e *Engine) Fail(n *Node, d Diagnostic) {
 	n.complete(e, d)
 }
 
-func (e *Engine) ready(n *Node) bool {
-	if n.ValidationPending {
-		e.validatePending(n)
-		if n.ValidationPending {
-			return false
-		}
-	}
-	if n.Interest == 0 || n.suspended() || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting {
-		return false
-	}
-	for i := range n.Static {
-		dependency := n.Static[i]
-		if n.tearingDown {
-			continue
-		}
-		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
-			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
-			return false
-		}
-		if dependency.State != NodeComplete || dependency.ValidationPending {
-			dependency.Requested = true
-			return false
-		}
-	}
-	// Dependencies found settled stay settled until the change stamp moves:
-	// failing, cancelling, invalidating or marking a current node bumps it, as
-	// does any change to Dynamic other than an append. Only the rest are checked.
-	if n.settledChanges != e.changes {
-		n.settledChanges, n.settledDynamic = e.changes, 0
-	}
-	for i := n.settledDynamic; i < len(n.Dynamic); i++ {
-		dependency := n.Dynamic[i]
-		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
-			if slices.Contains(n.Observed, dependency) {
-				continue
-			}
-			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
-			return false
-		}
-		if !dependency.Current || dependency.ValidationPending {
-			dependency.Requested = true
-			return false
-		}
-		if i == n.settledDynamic {
-			n.settledDynamic++
-		}
-	}
-	return n.Requested && (e.CanRun == nil || e.CanRun(n))
-}
-
-func (e *Engine) choose(after *Node) *Node {
-	var first *Node
-	var selected *Node
-	for _, n := range e.candidates() {
-		if !e.ready(n) || n.offered {
-			continue
-		}
-		if first == nil || lessNode(n, first) {
-			first = n
-		}
-		if after != nil && lessNode(after, n) && (selected == nil || lessNode(n, selected)) {
-			selected = n
-		}
-	}
-	e.pruneSettled()
-	if selected != nil {
-		return selected
-	}
-	return first
-}
-
-func lessNode(left *Node, right *Node) bool {
-	return left.Key.Name < right.Key.Name || (left.Key.Name == right.Key.Name && left.Key.Kind < right.Key.Kind)
-}
-
-// HasWork reports local work that must run before waiting for host events.
-func (e *Engine) HasWork() bool {
-	if len(e.completions) != 0 {
-		return true
-	}
-	for _, n := range e.candidates() {
-		if !n.offered && e.ready(n) {
-			return true
-		}
-	}
-	e.pruneSettled()
-	return false
-}
-
-// Ready returns up to capacity ready nodes, rotating through resource-key order.
-func (e *Engine) Ready(capacity int) []*Node {
-	if capacity <= 0 {
-		return nil
-	}
-	// Repeated choose calls pick, in key order, the ready nodes after
-	// lastRun and then wrap to the smallest. One scan keeps the first
-	// capacity of each group instead of rescanning every candidate per pick.
-	// ready has side effects; when they change the engine, scan again, as
-	// the next choose would have.
-	var later, wrapped []*Node
-	for pass := 0; pass < 3; pass++ {
-		changes := e.changes
-		later, wrapped = later[:0], wrapped[:0]
-		for _, n := range e.candidates() {
-			if !e.ready(n) || n.offered {
-				continue
-			}
-			if e.lastRun != nil && lessNode(e.lastRun, n) {
-				later = insertBounded(later, n, capacity)
-			} else {
-				wrapped = insertBounded(wrapped, n, capacity)
-			}
-		}
-		e.pruneSettled()
-		if changes == e.changes {
-			break
-		}
-	}
-	nodes := append(later, wrapped...)
-	if len(nodes) > capacity {
-		nodes = nodes[:capacity]
-	}
-	for _, n := range nodes {
-		n.offered = true
-	}
-	mem.FreeSlice(nil, wrapped)
-	return nodes
-}
-
-// insertBounded inserts n into nodes, kept in key order, keeping at most
-// limit of the smallest.
-func insertBounded(nodes []*Node, n *Node, limit int) []*Node {
-	i := len(nodes)
-	for i > 0 && lessNode(n, nodes[i-1]) {
-		i--
-	}
-	if i >= limit {
-		return nodes
-	}
-	nodes = slices.Insert(nodes, i, n)
-	if len(nodes) > limit {
-		nodes = nodes[:limit]
-	}
-	return nodes
-}
-
-// Dispatch starts one node returned by Ready. A claimed node starts once.
-func (e *Engine) Dispatch(n *Node) *Node {
-	if !e.CanDispatch(n) {
-		if n != nil {
-			n.offered = false
-		}
-		return nil
-	}
-	return e.run(n)
-}
-
-// CanDispatch checks that a host-retained claim still belongs to live work.
-// Unlike Ready, this does not validate dependencies or advance the engine.
-func (e *Engine) CanDispatch(n *Node) bool {
-	return n != nil && n.offered && n.Interest != 0 && !n.suspended() && n.Requested && (n.State == NodeIdle || n.State == NodeReady) && (e.CanRun == nil || e.CanRun(n))
-}
-
-// DispatchRoot starts a newly requested independent root without reentering
-// the scheduler (and therefore without redispatching the current producer).
-func (e *Engine) DispatchRoot(n *Node) *Node {
-	if n == nil || !e.ready(n) {
-		return nil
-	}
-	return e.run(n)
-}
-
 // Step handles one completion or executes one deterministic ready node.
 func (e *Engine) Step() *Node {
 	if len(e.completions) != 0 {
@@ -672,6 +423,12 @@ func (e *Engine) DrainCompletions() {
 func (e *Engine) run(n *Node) *Node {
 	e.lastRun = n
 	n.offered = false
+	e.setRunnable(n, false)
+	n.running = true
+	defer func() {
+		n.running = false
+		e.enqueue(n)
+	}()
 	if n.materializer != nil && !n.tearingDown {
 		n.Attempt++
 		c := &EngineContext{engine: e, node: n}
@@ -771,6 +528,7 @@ func (e *Engine) accept(c Completion) *Node {
 		n.Submitted = false
 		n.HostRequestID = 0
 		n.Completion, n.HasCompletion, n.State = c, true, NodeReady
+		e.enqueue(n)
 		return n
 	}
 	c.Value.Free(e.Alloc)
@@ -779,26 +537,28 @@ func (e *Engine) accept(c Completion) *Node {
 }
 
 func (e *Engine) Invalidate(n *Node) {
-	var reasons []*Node
-	e.collectInvalidationReasons(n, false, &reasons)
-	mem.FreeSlice(nil, reasons)
-	var seen []*Node
-	e.invalidate(n, &seen, false, true)
-	mem.FreeSlice(nil, seen)
+	e.invalidateTree(n, false)
+}
+
+func (e *Engine) invalidateTree(n *Node, retain bool) {
+	seen := make(map[*Node]bool)
+	e.collectInvalidationReasons(n, false, seen)
+	clear(seen)
+	e.invalidate(n, seen, retain)
 }
 
 // Collect reasons before edges are removed, so a normal diamond path dominates
 // an order-only path regardless of traversal order.
-func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node) {
+func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen map[*Node]bool) {
 	if n == nil {
 		return
 	}
-	if slices.Contains(*seen, n) {
+	if seen[n] {
 		if !n.InvalidatedForOrderOnly || ordered {
 			return
 		}
 	} else {
-		*seen = append(*seen, n)
+		seen[n] = true
 	}
 	n.InvalidatedForOrderOnly = ordered
 	for i := range n.Dependents {
@@ -807,24 +567,27 @@ func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node
 	}
 }
 
-func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool) {
-	if n == nil {
+// A nil seen set refreshes this one node; its consumers retain their proofs.
+func (e *Engine) invalidate(n *Node, seen map[*Node]bool, retain bool) {
+	if n == nil || seen[n] {
 		return
 	}
-	if slices.Contains(*seen, n) {
-		return
+	if seen != nil {
+		seen[n] = true
 	}
-	*seen = append(*seen, n)
 	n.invalidating = true
 	e.changes++
-	n.observationEpoch++
 	if e.beginTeardown(n, true) {
+		n.observationEpoch++
 		n.invalidating = false
 		return
 	}
 	// Invalidating a child can remove its dynamic reverse edge from this node.
 	// Traverse a stable copy so that mutation cannot skip a sibling.
-	dependents := slices.Clone(n.Dependents)
+	var dependents []*Node
+	if seen != nil {
+		dependents = slices.Clone(n.Dependents)
+	}
 	if n.Submitted {
 		e.cancellations = append(e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
@@ -854,31 +617,20 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 		n.Latest.Free(e.Alloc)
 		n.Current = false
 	}
-	for i := range n.Dynamic {
-		d := n.Dynamic[i]
-		removeDependent(d, n)
-		if retain {
-			n.previousDynamic = append(n.previousDynamic, d)
-		} else {
-			e.edgeInterest(d, n, -1)
-		}
-	}
+	e.syncValidationInput(n)
+	e.enqueue(n)
+	e.dropDynamicDependencies(n, 0, retain)
 	if !retain {
 		e.releasePreviousDependencies(n)
 	}
-	mem.FreeSlice(nil, n.Dynamic)
-	n.Dynamic = nil
 	mem.FreeSlice(nil, n.Observed)
 	n.Observed = nil
 	mem.FreeSlice(nil, n.OrderOnly)
 	n.OrderOnly = nil
-	FreeObservations(e.Alloc, n.Observations)
-	n.Observations = nil
+	e.replaceObservations(n, nil)
 	e.emit(n, Event{Kind: UpdateInvalidated})
-	for i := range dependents {
-		if recursive {
-			e.invalidate(dependents[i], seen, retain, true)
-		}
+	for _, d := range dependents {
+		e.invalidate(d, seen, retain)
 	}
 	mem.FreeSlice(nil, dependents)
 	n.invalidating = false
@@ -888,31 +640,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 // its dependencies. Otherwise invalidating a sole consumer cancels the source
 // that is currently publishing the update which caused the restart.
 func (e *Engine) restartFromPublication(n *Node) {
-	var seen []*Node
-	e.collectInvalidationReasons(n, false, &seen)
-	mem.FreeSlice(nil, seen)
-	seen = nil
-	e.invalidate(n, &seen, true, true)
-	mem.FreeSlice(nil, seen)
-}
-
-func (e *Engine) releasePreviousDependencies(n *Node) {
-	previous := n.previousDynamic
-	n.previousDynamic = nil
-	for i := range previous {
-		e.edgeInterest(previous[i], n, -1)
-	}
-	mem.FreeSlice(nil, previous)
-}
-
-func removeDependent(n, dependent *Node) {
-	for i := range n.Dependents {
-		if n.Dependents[i] == dependent {
-			copy(n.Dependents[i:], n.Dependents[i+1:])
-			n.Dependents = n.Dependents[:len(n.Dependents)-1]
-			return
-		}
-	}
+	e.invalidateTree(n, true)
 }
 
 // Cancel removes the convenience Request interest. Roots use Release instead.
@@ -962,6 +690,8 @@ func (e *Engine) cancel(n *Node) {
 	n.Generation++
 	n.Requested = false
 	n.State = NodeCancelled
+	e.syncValidationInput(n)
+	e.enqueue(n)
 	e.touch(n)
 	if n.teardownDiagnostic.Code != "" {
 		n.Diagnostic = n.teardownDiagnostic
@@ -971,9 +701,11 @@ func (e *Engine) cancel(n *Node) {
 	}
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
+		n.Dependents[i].offered = false
 		if n.Dependents[i].State == NodeWaiting {
 			n.Dependents[i].State = NodeReady
 		}
+		e.enqueue(n.Dependents[i])
 	}
 }
 
@@ -1011,8 +743,8 @@ func (e *Engine) Free() {
 		mem.Free(e.Alloc, e.roots[i])
 	}
 	mem.FreeSlice(nil, e.roots)
-	mem.FreeSlice(nil, e.live)
 	mem.FreeSlice(nil, e.touched)
+	e.fileObservers = nil
 	for i := range e.nodes {
 		n := e.nodes[i]
 		e.freeNode(n)
@@ -1040,7 +772,7 @@ func (e *Engine) Retire(n *Node) bool {
 			break
 		}
 	}
-	if index < 0 || n.Interest != 0 || len(n.Dependents) != 0 || len(n.Subs) != 0 || n.materializer != nil || n.Submitted || n.tearingDown || (n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled) {
+	if index < 0 || n.Interest != 0 || len(n.Dependents) != 0 || len(n.Subs) != 0 || n.materializer != nil || n.Submitted || n.running || n.tearingDown || (n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled) {
 		return false
 	}
 	// A restarting consumer keeps previous edges without a reverse edge.
@@ -1058,12 +790,11 @@ func (e *Engine) Retire(n *Node) bool {
 			}
 		}
 	}
-	for i := range n.Static {
-		removeDependent(n.Static[i], n)
+	for _, dependency := range n.Static {
+		e.unlinkDependency(n, dependency, false)
 	}
-	for i := range n.Dynamic {
-		removeDependent(n.Dynamic[i], n)
-	}
+	e.dropDynamicDependencies(n, 0, false)
+	e.unschedule(n)
 	e.nodes = slices.Delete(e.nodes, index, index+1)
 	for i := range e.nodeIndex {
 		if e.nodeIndex[i].node == n {
@@ -1090,7 +821,7 @@ func (e *Engine) freeNode(n *Node) {
 	mem.FreeSlice(nil, n.Dependents)
 	mem.FreeSlice(nil, n.Observed)
 	mem.FreeSlice(nil, n.OrderOnly)
-	FreeObservations(e.Alloc, n.Observations)
+	e.replaceObservations(n, nil)
 	if n.Current {
 		n.Latest.Free(e.Alloc)
 	}

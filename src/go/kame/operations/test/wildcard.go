@@ -352,8 +352,8 @@ func checkWildcardKinds(t *testing.T, text string, want string, failMetadata boo
 			t.Error("wildcard filtering or request replay was incorrect")
 		}
 		observed := 0
-		for i := range node.Observations {
-			if node.Observations[i].Aspect == core.ObservationLinkMetadata {
+		for item := range node.AcceptedObservations().All {
+			if item.Aspect == core.ObservationLinkMetadata {
 				observed++
 			}
 		}

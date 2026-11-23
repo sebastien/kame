@@ -468,10 +468,7 @@ func (p *Program) PollFinalizers() {
 			p.Engine.Interrupt(p.Engine.LookupID(s.NodeID))
 		}
 		if (s.Stage == 1 || s.Stage == 3 || s.Expired) && p.FinalizationQuiet(p.FinalizationHost, s.NodeID, s.Generation) {
-			n := p.Engine.LookupID(s.NodeID)
-			if n != nil && !n.Submitted && n.State == core.NodeWaiting {
-				n.State = core.NodeReady
-			}
+			p.Engine.Wake(p.Engine.LookupID(s.NodeID))
 		}
 	}
 }

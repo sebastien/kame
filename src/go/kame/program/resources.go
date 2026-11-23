@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/internal/mem"
-	"slices"
 )
 
 // RetireWatchResource drops a detached external producer when the
@@ -50,8 +49,7 @@ func (p *Program) FilesystemResources() []core.ResourceKey {
 		if n.Interest == 0 {
 			continue
 		}
-		for j := range n.Observations {
-			item := n.Observations[j]
+		for item := range n.AcceptedObservations().All {
 			if item.Key.Kind != core.ResourceFile || item.Aspect != core.ObservationContent {
 				continue
 			}
@@ -81,28 +79,7 @@ func (p *Program) InvalidateResource(key core.ResourceKey) {
 	if key.Kind == core.ResourceFile && p.Eval != nil {
 		p.Eval.RevalidateModuleSource(key.Name)
 	}
-	node := p.Engine.Lookup(key)
-	if node != nil {
-		p.Engine.Revalidate(node)
-	}
-	if key.Kind == core.ResourceFile {
-		// Context-local reads can be observations without graph edges.
-		nodes := p.Engine.TrackedNodes()
-		for i := range nodes {
-			// Graph-backed consumers already participate in resource revalidation.
-			if nodes[i] == node || (node != nil && (slices.Contains(nodes[i].Static, node) || slices.Contains(nodes[i].Dynamic, node))) {
-				continue
-			}
-			for j := range nodes[i].Observations {
-				item := nodes[i].Observations[j]
-				if item.Key.Kind == key.Kind && item.Key.Name == key.Name && item.Aspect == core.ObservationContent {
-					p.Engine.Revalidate(nodes[i])
-					break
-				}
-			}
-		}
-		mem.FreeSlice(nil, nodes)
-	}
+	p.Engine.RevalidateResource(key)
 	p.drainCancellations()
 }
 
@@ -234,7 +211,7 @@ func (p *Program) WatchObservations() WatchObservations {
 		if n.Interest == 0 {
 			continue
 		}
-		for _, item := range n.Observations {
+		for item := range n.AcceptedObservations().All {
 			if item.Key.Kind != core.ResourceFile || (item.Aspect != core.ObservationContent && item.Aspect < core.ObservationMetadata) {
 				continue
 			}

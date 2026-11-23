@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// Ready picks, in one scan, what repeated choose calls picked: ready nodes
-// in key order after lastRun, then wrapping to the smallest.
-func TestReadyMatchesRepeatedChoose(t *testing.T) {
+// Compare the incremental scheduler to a full scan in resource-key order.
+func TestReadyMatchesKeyOrderReference(t *testing.T) {
 	random := rand.New(rand.NewSource(1))
 	build := func(seed int64) (*Engine, []*Node) {
 		r := rand.New(rand.NewSource(seed))
@@ -25,6 +24,7 @@ func TestReadyMatchesRepeatedChoose(t *testing.T) {
 			}
 			n.offered = r.Intn(6) == 0
 			e.nodes = append(e.nodes, n)
+			e.enqueue(n)
 			nodes = append(nodes, n)
 		}
 		if r.Intn(3) != 0 {
@@ -39,6 +39,12 @@ func TestReadyMatchesRepeatedChoose(t *testing.T) {
 		}
 		return out
 	}
+	before := func(a, b *Node) bool {
+		if a.Key.Name != b.Key.Name {
+			return a.Key.Name < b.Key.Name
+		}
+		return a.Key.Kind < b.Key.Kind
+	}
 	for trial := 0; trial < 2000; trial++ {
 		seed, capacity := random.Int63(), 1+random.Intn(10)
 		e, _ := build(seed)
@@ -47,7 +53,22 @@ func TestReadyMatchesRepeatedChoose(t *testing.T) {
 		var want []*Node
 		after := reference.lastRun
 		for len(want) < capacity {
-			selected := reference.choose(after)
+			var first, later *Node
+			for _, n := range reference.nodes {
+				if n.State != NodeIdle || !n.Requested || n.offered {
+					continue
+				}
+				if first == nil || before(n, first) {
+					first = n
+				}
+				if after != nil && before(after, n) && (later == nil || before(n, later)) {
+					later = n
+				}
+			}
+			selected := later
+			if selected == nil {
+				selected = first
+			}
 			if selected == nil {
 				break
 			}

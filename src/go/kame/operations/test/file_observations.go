@@ -74,8 +74,7 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 	}
 	content, existence, metadata := false, false, false
 	linkMetadata, linkTarget := false, false
-	for i := range node.Observations {
-		item := node.Observations[i]
+	for item := range node.AcceptedObservations().All {
 		if item.Key.Kind != core.ResourceFile {
 			continue
 		}
@@ -136,8 +135,7 @@ func TestFailedReadObservationIsNotMissingOrReusable(t *testing.T) {
 		engine.Step()
 	}
 	found := false
-	for i := range node.Observations {
-		item := node.Observations[i]
+	for item := range node.AcceptedObservations().All {
 		if item.Key.Kind != core.ResourceFile {
 			continue
 		}

@@ -1,7 +1,9 @@
 package core
 
 import (
+	"cmp"
 	"kame/internal/mem"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -26,15 +28,93 @@ type Observation struct {
 	Signature Signature
 }
 
-// AcceptedObservations returns a borrowed view of the active generation's facts.
-// Callers retaining it across evaluation must clone its keys and slice.
-func (c *EngineContext) AcceptedObservations() []Observation { return c.node.Observations }
+// ObservationView is a read-only, borrowed view of a generation's facts.
+// Do not retain the view across evaluation.
+type ObservationView struct{ items []Observation }
+
+func (v ObservationView) Len() int             { return len(v.items) }
+func (v ObservationView) At(i int) Observation { return v.items[i] }
+
+func (v ObservationView) All(yield func(Observation) bool) {
+	for _, item := range v.items {
+		if !yield(item) {
+			return
+		}
+	}
+}
+
+// AcceptedObservations returns facts recorded by this node's current generation.
+func (n *Node) AcceptedObservations() ObservationView { return ObservationView{n.observations} }
+
+// AcceptedObservations returns the active producer's accepted facts.
+func (c *EngineContext) AcceptedObservations() ObservationView { return c.node.AcceptedObservations() }
 
 func FreeObservations(a mem.Allocator, values []Observation) {
 	for i := range values {
 		values[i].Key.Free(a)
 	}
 	mem.FreeSlice(nil, values)
+}
+
+func (e *Engine) indexObservation(n *Node, item Observation) {
+	if item.Key.Kind != ResourceFile || item.Aspect != ObservationContent {
+		return
+	}
+	if e.fileObservers == nil {
+		e.fileObservers = make(map[string]map[*Node]struct{})
+	}
+	nodes := e.fileObservers[item.Key.Name]
+	if nodes == nil {
+		nodes = make(map[*Node]struct{})
+		e.fileObservers[item.Key.Name] = nodes
+	}
+	nodes[n] = struct{}{}
+}
+
+// replaceObservations takes ownership of facts and keeps the reverse index
+// consistent with the node and its per-generation observation order.
+func (e *Engine) replaceObservations(n *Node, facts []Observation) {
+	for _, item := range n.observations {
+		if item.Key.Kind == ResourceFile && item.Aspect == ObservationContent {
+			nodes := e.fileObservers[item.Key.Name]
+			delete(nodes, n)
+			if len(nodes) == 0 {
+				delete(e.fileObservers, item.Key.Name)
+			}
+		}
+	}
+	FreeObservations(e.Alloc, n.observations)
+	n.observations = facts
+	n.observationEpoch++
+	for _, item := range facts {
+		e.indexObservation(n, item)
+	}
+}
+
+// RevalidateResource refreshes a resource and any context-local content reads
+// without graph edges. Revalidating one observer can discard another's facts.
+func (e *Engine) RevalidateResource(key ResourceKey) {
+	resource := e.Lookup(key)
+	if resource != nil {
+		e.Revalidate(resource)
+	}
+	if key.Kind != ResourceFile || len(e.fileObservers) == 0 {
+		return
+	}
+	name, owned := canonicalName(e.Alloc, key)
+	if owned {
+		defer mem.FreeString(e.Alloc, name)
+	}
+	nodes := slices.SortedFunc(maps.Keys(e.fileObservers[name]), func(a, b *Node) int { return cmp.Compare(a.ID, b.ID) })
+	for _, n := range nodes {
+		if _, observed := e.fileObservers[name][n]; !observed || n == resource {
+			continue
+		}
+		if resource != nil && (slices.Contains(n.Static, resource) || slices.Contains(n.Dynamic, resource)) {
+			continue
+		}
+		e.Revalidate(n)
+	}
 }
 
 // Observe records what the computation actually consumed, not a later live
@@ -63,8 +143,10 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 	if found {
 		n.mergeObservation(i, signature)
 	} else {
-		n.Observations = append(n.Observations, Observation{Key: key.Clone(c.engine.Alloc), Aspect: aspect, Signature: signature})
-		n.observationOrder = slices.Insert(n.observationOrder, i, len(n.Observations)-1)
+		item := Observation{Key: key.Clone(c.engine.Alloc), Aspect: aspect, Signature: signature}
+		n.observationOrder = slices.Insert(n.observationOrder, i, len(n.observations))
+		n.observations = append(n.observations, item)
+		c.engine.indexObservation(n, item)
 	}
 	if owned {
 		mem.FreeString(c.engine.Alloc, name)
@@ -74,7 +156,7 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 // mergeObservation records a repeated observation of order position i;
 // conflicting observations make the generation non-reusable.
 func (n *Node) mergeObservation(i int, signature Signature) {
-	item := &n.Observations[n.observationOrder[i]]
+	item := &n.observations[n.observationOrder[i]]
 	// Only a fact becoming unavailable changes the epoch; once unavailable,
 	// later observations of it change nothing.
 	if item.Signature.Equal(item.Signature) && !item.Signature.Equal(signature) {
@@ -127,15 +209,15 @@ func orderObservations(items []Observation, order []int) ([]int, bool) {
 	return order, ok
 }
 
-// findObservation searches observationOrder, rebuilding it when Observations
+// findObservation searches observationOrder, rebuilding it when observations
 // was replaced rather than appended to. A rule reading N files observes N
 // facts, so a linear scan per observation would be quadratic.
 func (n *Node) findObservation(kind ResourceKind, name string, aspect ObservationAspect) (int, bool) {
-	if len(n.observationOrder) != len(n.Observations) || n.orderEpoch != n.observationEpoch {
-		n.observationOrder, _ = orderObservations(n.Observations, n.observationOrder[:0])
+	if len(n.observationOrder) != len(n.observations) || n.orderEpoch != n.observationEpoch {
+		n.observationOrder, _ = orderObservations(n.observations, n.observationOrder[:0])
 		n.orderEpoch = n.observationEpoch
 	}
-	return searchObservations(n.Observations, n.observationOrder, kind, name, aspect)
+	return searchObservations(n.observations, n.observationOrder, kind, name, aspect)
 }
 
 func validObservation(item *Observation) bool {

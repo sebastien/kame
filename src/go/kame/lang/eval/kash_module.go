@@ -589,24 +589,3 @@ func (p *Program) UsesChangedInputs() bool {
 	}
 	return false
 }
-
-// RevalidateModuleSource reloads retained module definitions when watch reports
-// a changed nested library. A recipe observation alone would re-run old ASTs.
-func (p *Program) RevalidateModuleSource(name string) {
-	if p == nil || p.Engine == nil {
-		return
-	}
-	for i := range p.Nodes {
-		n := p.Nodes[i].Node
-		if n.Latest.Kind != core.Module || n.Latest.ModuleOwner != p {
-			continue
-		}
-		module := n.Latest.Module.(*kashModule)
-		for j := range module.Sources {
-			if module.Sources[j].Path == name {
-				p.Engine.Revalidate(n)
-				break
-			}
-		}
-	}
-}

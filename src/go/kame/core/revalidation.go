@@ -1,7 +1,5 @@
 package core
 
-import "kame/internal/mem"
-
 import "slices"
 
 // Revalidate refreshes a resource before discarding consumers' accepted state.
@@ -11,11 +9,17 @@ func (e *Engine) Revalidate(n *Node) {
 	if n == nil {
 		return
 	}
-	var nodes []*Node
-	e.revalidationClosure(n, &nodes)
+	nodes := []*Node{n}
+	n.inClosure = true
 	stable := true
-	for i := range nodes {
+	for i := 0; i < len(nodes); i++ {
 		item := nodes[i]
+		for _, d := range item.Dependents {
+			if !d.inClosure {
+				d.inClosure = true
+				nodes = append(nodes, d)
+			}
+		}
 		// A repeated notification before dispatch only refreshes the already
 		// queued resource; it does not invalidate accepted consumers again.
 		if item == n && item.State == NodeIdle && item.Requested && !item.Current && !item.Submitted && !item.HasCompletion {
@@ -28,58 +32,34 @@ func (e *Engine) Revalidate(n *Node) {
 			break
 		}
 	}
+	// Release the traversal marks before invalidation can enter a teardown.
+	for _, d := range nodes {
+		d.inClosure = false
+	}
 	if !stable {
-		mem.FreeSlice(nil, nodes)
 		e.Invalidate(n)
 		return
 	}
-	for i := range nodes {
-		if nodes[i] != n {
-			nodes[i].ValidationPending = true
-			e.changes++
-		}
+	for _, d := range nodes[1:] {
+		d.ValidationPending = true
+		e.syncValidationInput(d)
+		e.changes++
 	}
-	mem.FreeSlice(nil, nodes)
-	var seen []*Node
-	e.invalidate(n, &seen, false, false)
-	mem.FreeSlice(nil, seen)
-}
-
-func (e *Engine) revalidationClosure(n *Node, nodes *[]*Node) {
-	if slices.Contains(*nodes, n) {
-		return
+	e.invalidate(n, nil, false)
+	for _, d := range nodes[1:] {
+		e.enqueue(d)
 	}
-	*nodes = append(*nodes, n)
-	for i := range n.Dependents {
-		e.revalidationClosure(n.Dependents[i], nodes)
-	}
-}
-
-func dependencySettled(n *Node) bool {
-	return !n.ValidationPending && (n.Current || n.State == NodeFailed || n.State == NodeCancelled)
 }
 
 func (e *Engine) validatePending(n *Node) {
-	if n.Interest == 0 {
+	if n.Interest == 0 || n.validationBlockers != 0 {
 		return
-	}
-	for i := range n.Static {
-		if !dependencySettled(n.Static[i]) {
-			n.Static[i].Requested = true
-			return
-		}
-	}
-	for i := range n.Dynamic {
-		if !dependencySettled(n.Dynamic[i]) {
-			n.Dynamic[i].Requested = true
-			return
-		}
 	}
 	unchanged := !n.DisableReuse && n.Signature.Equal(n.Signature)
 	// Named environment/operation observations need not own graph edges.
 	// Conflicting or unsupported reads still make the computation non-reusable.
-	for i := range n.Observations {
-		if !n.Observations[i].Signature.Equal(n.Observations[i].Signature) {
+	for _, item := range n.observations {
+		if !item.Signature.Equal(item.Signature) {
 			unchanged = false
 		}
 	}
@@ -100,12 +80,18 @@ func (e *Engine) validatePending(n *Node) {
 	}
 	n.ValidationPending = false
 	if unchanged {
+		e.syncValidationInput(n)
+		// A new consumer can join this dependency while validation is in flight.
+		for _, d := range n.Dependents {
+			if !d.ValidationPending && !d.Submitted {
+				e.Wake(d)
+				e.enqueue(d)
+			}
+		}
 		return
 	}
-	var seen []*Node
 	// Keep old dependency interest while the producer discovers its new edges.
-	e.invalidate(n, &seen, true, false)
-	mem.FreeSlice(nil, seen)
+	e.invalidate(n, nil, true)
 }
 
 func consumedDependencyUnchanged(consumer *Node, dependency *Node) bool {
@@ -113,10 +99,11 @@ func consumedDependencyUnchanged(consumer *Node, dependency *Node) bool {
 		return false
 	}
 	found := false
-	for i := range consumer.Observations {
-		item := consumer.Observations[i]
+	i, _ := consumer.findObservation(dependency.Key.Kind, dependency.Key.Name, ObservationValue)
+	for _, index := range consumer.observationOrder[i:] {
+		item := consumer.observations[index]
 		if item.Key.Kind != dependency.Key.Kind || item.Key.Name != dependency.Key.Name {
-			continue
+			break
 		}
 		found = true
 		signature := dependency.Signature

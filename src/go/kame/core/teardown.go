@@ -1,6 +1,9 @@
 package core
 
-import "kame/internal/mem"
+import (
+	"kame/internal/mem"
+	"slices"
+)
 
 func (c *EngineContext) SetTeardown(begin func(any, int64, int64) bool, advance Producer, state any) {
 	c.node.BeginTeardown, c.node.Teardown, c.node.TeardownContext = begin, advance, state
@@ -52,7 +55,7 @@ func (e *Engine) beginTeardown(n *Node, restart bool) bool {
 	}
 	n.teardownRoot = e.RequestRoot(n)
 	if !n.Submitted {
-		n.State = NodeReady
+		e.reopenForCleanup(n)
 	}
 	return true
 }
@@ -73,17 +76,28 @@ func (e *Engine) Interrupt(n *Node) {
 		n.Completion.Diagnostic.Free(e.Alloc)
 		n.Completion, n.HasCompletion = Completion{}, false
 	}
-	n.State = NodeReady
-	for i := range n.Dynamic {
-		d := n.Dynamic[i]
-		removeDependent(d, n)
-		e.edgeInterest(d, n, -1)
-	}
-	mem.FreeSlice(nil, n.Dynamic)
+	e.reopenForCleanup(n)
+	e.dropDynamicDependencies(n, 0, false)
 	mem.FreeSlice(nil, n.Observed)
 	mem.FreeSlice(nil, n.OrderOnly)
-	n.Dynamic, n.Observed, n.OrderOnly = nil, nil, nil
+	n.Observed, n.OrderOnly = nil, nil
 	e.releasePreviousDependencies(n)
+}
+
+func (e *Engine) reopenForCleanup(n *Node) {
+	// A current value still satisfies a dynamic edge, but reopening a completed
+	// prerequisite withdraws any static consumer's outstanding dispatch claim.
+	if n.State == NodeComplete {
+		for _, d := range n.Dependents {
+			if d.runnable && slices.Contains(d.Static, n) {
+				d.offered = false
+				e.enqueue(d)
+			}
+		}
+	}
+	n.State = NodeReady
+	e.syncValidationInput(n)
+	e.enqueue(n)
 }
 
 func (e *Engine) finishTeardown(n *Node) {

@@ -211,7 +211,7 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 		return false
 	}
 	facts := c.Engine.AcceptedObservations()
-	if len(facts) < state.Facts {
+	if facts.Len() < state.Facts {
 		return false
 	}
 	// Facts only grow within an epoch, and nothing can falsify a validated one
@@ -222,7 +222,7 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 		*validated = memoValidation{NodeID: validated.NodeID, Generation: state.Generation, Epoch: state.Epoch, Changes: c.Engine.Changes()}
 	}
 	for i := validated.Facts; i < state.Facts; i++ {
-		if !p.factCurrent(facts[i], c) {
+		if !p.factCurrent(facts.At(i), c) {
 			return false
 		}
 		validated.Facts = i + 1
@@ -310,7 +310,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, lexic
 		if i >= next {
 			facts, completedEffects, completedPaths := 0, len(c.Effects), len(c.WritePaths)
 			if c.Engine != nil {
-				facts = len(c.Engine.AcceptedObservations())
+				facts = c.Engine.AcceptedObservations().Len()
 			}
 			operandScope := scope
 			if lexical != nil {
@@ -362,7 +362,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, lexic
 		position += count
 	}
 	if facts < 0 && c.Engine != nil {
-		facts = len(c.Engine.AcceptedObservations())
+		facts = c.Engine.AcceptedObservations().Len()
 	}
 	return argumentResult{Values: values, Facts: facts, ReplacementIndex: replacementIndex}
 }

@@ -285,8 +285,24 @@ func moduleImportDependencies(from, to *core.Node) []string {
 	return nil
 }
 
+func moduleSourceKey(name string) core.ResourceKey {
+	return core.ResourceKey{Kind: core.ResourceDefinition, Name: "<module-source:" + name + ">"}
+}
+
+// RevalidateModuleSource refreshes the loader, including an in-flight read.
+// Its reverse edges reach imports and definitions using the old source.
+func (p *Program) RevalidateModuleSource(name string) {
+	if p == nil || p.Engine == nil {
+		return
+	}
+	name = path.Clean(name)
+	if p.HasAuthoredSourceRequest(name) {
+		p.Engine.Revalidate(p.Engine.Lookup(moduleSourceKey(name)))
+	}
+}
+
 func (p *Program) moduleSource(c *Context, name string, loadBytes bool) Result {
-	key := core.ResourceKey{Kind: core.ResourceDefinition, Name: "<module-source:" + name + ">"}
+	key := moduleSourceKey(name)
 	node := p.Engine.Lookup(key)
 	if node == nil {
 		node = p.Engine.Add(key, runModuleSource, &moduleSourceLoad{program: p, path: name})

@@ -76,3 +76,62 @@ func TestAuthoredImportsLoadEachNormalizedSourceOnce(t *testing.T) {
 	}
 	t.Fatal("module result did not settle")
 }
+
+func TestModuleSourceEditRejectsInFlightCompletion(t *testing.T) {
+	a := mem.System
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	compiled := CompileMany(a, []CompileSource{{
+		Name: "/project/main.km", SourceDirectory: "/project",
+		Text: "import ./lib.kash as lib\nresult = lib/value\n",
+	}}, registry, Options{Directory: "/project", ForwardRequests: true, Watch: true})
+	defer compiled.Free(a)
+	p := compiled.Program
+	if p == nil {
+		t.Fatal("module program failed to compile")
+	}
+	defer p.Free()
+	root := p.Start("result").Handle
+	if root == nil {
+		t.Fatal("module result could not start")
+	}
+	defer root.Free()
+	loads := 0
+	for range 100 {
+		p.Tick(0)
+		for next := p.NextOutbound(); next.OK; next = p.NextOutbound() {
+			request := next.Request
+			value := core.Value{}
+			switch request.Kind {
+			case host.RequestLoadSource:
+				if request.Payload.Text != "/project/lib.kash" {
+					t.Fatalf("unexpected source request %q", request.Payload.Text)
+				}
+				loads++
+				text := "def value = 2\nexport value\n"
+				if loads == 1 {
+					p.InvalidateResource(core.ResourceKey{Kind: core.ResourceFile, Name: "/project/./lib.kash"})
+					text = "def value = 1\nexport value\n"
+				}
+				value = core.NewBytes(a, []byte(text))
+			case host.RequestProcessCancel:
+			default:
+				t.Fatalf("unexpected host request %d", request.Kind)
+			}
+			p.Complete(request, value, core.Diagnostic{})
+			request.Free(a)
+		}
+		poll := root.PollRetained()
+		if poll.Done {
+			got, code := poll.Result.Value.Int, poll.Result.Diagnostic.Code
+			poll.Result.Free(a)
+			if loads != 2 || got != 2 || code != "" {
+				t.Fatalf("module loaded %d times; result %d, diagnostic %q", loads, got, code)
+			}
+			return
+		}
+		poll.Result.Free(a)
+	}
+	t.Fatal("module result did not settle")
+}

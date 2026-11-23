@@ -471,12 +471,12 @@ func (p *Program) SetDefinitionCwd(cwd string) {
 }
 
 func (p *Program) Definition(name string) *core.Node {
-	if p == nil || !p.Valid {
+	if p == nil || !p.Valid || p.Engine == nil {
 		return nil
 	}
-	for i := range p.Nodes {
-		if p.Nodes[i].Name == name {
-			return p.Nodes[i].Node
+	if n := p.Engine.Lookup(core.ResourceKey{Kind: core.ResourceDefinition, Name: name}); n != nil {
+		if state, ok := n.Context.(*definitionState); ok && state.Program == p && !state.Scoped {
+			return n
 		}
 	}
 	return nil

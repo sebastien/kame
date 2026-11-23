@@ -162,6 +162,14 @@ One owner calls the engine step function. A step processes queued completions,
 propagates invalidations, and emits ready work in deterministic resource-key
 order.
 
+A retained edit starts at the changed input and follows reverse edges. Readiness
+checks use cached prerequisite height (zero for leaves, one plus the greatest
+prerequisite height otherwise). Edge edits repair affected heights with
+prerequisites before consumers, regardless of edge registration order. Height
+is not a barrier: a join waits for its own unresolved inputs, and other ready
+work still rotates in resource-key order. Reusing an unchanged result can
+release a join without a new publication.
+
 A source protocol atom consumed without a materialized value is internal
 progress, not waiting. The engine requeues that source behind other ready work;
 only a source that explicitly returns waiting blocks for a dependency or host

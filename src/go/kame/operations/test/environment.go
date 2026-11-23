@@ -99,13 +99,12 @@ func TestBoundEnvironmentObservesOnlyConsumedNames(t *testing.T) {
 	if node.Diagnostic.Code != "" {
 		t.Error(node.Diagnostic.Code)
 	}
-	if len(node.Observations) != 2 {
+	if node.AcceptedObservations().Len() != 2 {
 		t.Error("expected one operation and one consumed environment observation")
 	}
 	var first core.Signature
 	var operation core.Signature
-	for i := range node.Observations {
-		observation := node.Observations[i]
+	for observation := range node.AcceptedObservations().All {
 		if observation.Key.Kind == core.ResourceEnvironment {
 			if observation.Key.Name != "MODE" {
 				t.Error("unread environment name was observed")
@@ -129,9 +128,9 @@ func TestBoundEnvironmentObservesOnlyConsumedNames(t *testing.T) {
 	engine.Invalidate(node)
 	engine.Step()
 	var second core.Signature
-	for i := range node.Observations {
-		if node.Observations[i].Key.Kind == core.ResourceEnvironment {
-			second = node.Observations[i].Signature
+	for observation := range node.AcceptedObservations().All {
+		if observation.Key.Kind == core.ResourceEnvironment {
+			second = observation.Signature
 		}
 	}
 	if !second.Equal(first) {
@@ -141,9 +140,9 @@ func TestBoundEnvironmentObservesOnlyConsumedNames(t *testing.T) {
 	engine.Invalidate(node)
 	engine.Step()
 	var missing core.Signature
-	for i := range node.Observations {
-		if node.Observations[i].Key.Kind == core.ResourceEnvironment {
-			missing = node.Observations[i].Signature
+	for observation := range node.AcceptedObservations().All {
+		if observation.Key.Kind == core.ResourceEnvironment {
+			missing = observation.Signature
 		}
 	}
 	if !missing.Equal(core.ValueSignature(core.Value{Kind: core.Nil})) || missing.Equal(first) {
@@ -152,8 +151,8 @@ func TestBoundEnvironmentObservesOnlyConsumedNames(t *testing.T) {
 	state.Allowed = false
 	engine.Invalidate(node)
 	engine.Step()
-	for i := range node.Observations {
-		if node.Observations[i].Key.Kind == core.ResourceEnvironment {
+	for observation := range node.AcceptedObservations().All {
+		if observation.Key.Kind == core.ResourceEnvironment {
 			t.Error("denied environment read observed a value")
 		}
 	}
@@ -193,9 +192,9 @@ func TestHostEnvironmentCompletionRecordsConsumedValue(t *testing.T) {
 		engine.Step()
 	}
 	var observed core.Signature
-	for i := range node.Observations {
-		if node.Observations[i].Key.Kind == core.ResourceEnvironment {
-			observed = node.Observations[i].Signature
+	for observation := range node.AcceptedObservations().All {
+		if observation.Key.Kind == core.ResourceEnvironment {
+			observed = observation.Signature
 		}
 	}
 	if !observed.Equal(core.ValueSignature(core.Value{Kind: core.String, Text: "host-value"})) || !node.Current || node.Latest.Text != "host-value" {

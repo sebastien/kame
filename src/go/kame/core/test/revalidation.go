@@ -273,7 +273,7 @@ func TestRejectedReuseRestoresDependenciesAndObservations(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		e.Step()
 	}
-	if root.State != core.NodeComplete || len(root.Dynamic) != 1 || root.Dynamic[0] != source || len(root.OrderOnly) != 1 || root.OrderOnly[0] != source || len(root.Observed) != 0 || len(root.Observations) != 0 || len(failed.Dependents) != 0 || failed.Interest != 1 {
+	if root.State != core.NodeComplete || len(root.Dynamic) != 1 || root.Dynamic[0] != source || len(root.OrderOnly) != 1 || root.OrderOnly[0] != source || len(root.Observed) != 0 || root.AcceptedObservations().Len() != 0 || len(failed.Dependents) != 0 || failed.Interest != 1 {
 		t.Error("rejected reuse retained speculative edges, reads or failure interest")
 	}
 	e.Free()

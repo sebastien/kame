@@ -73,6 +73,21 @@ deterministic gates. Wall-clock measurements are reported as repeated medians
 and are informational, not brittle pass/fail thresholds. Native and
 portable-runtime results are recorded separately.
 
+For retained builds, measure graph size independently from the size of the
+affected branch. Report live heap above an empty engine, marginal edge storage,
+first evaluation throughput, and edit-to-settled latency. A fixed three-node
+change must publish the expected values without rerunning unrelated settled
+producers. Measure host notification and debounce separately from engine work.
+Steady-state scheduler work for that edit must not scan unrelated settled or
+waiting nodes. Measure wide joins separately, where the affected set grows,
+and time first dispatch in deep chains registered consumer-first.
+File invalidation looks up accepted content observers by canonical path; a
+speculative rollback, generation replacement or retirement drops obsolete facts.
+Fixed-working-set and fresh-path watch cycles must discard detached external
+resources; shrinking the working set after repeated peaks must restore the live
+node, edge and watch counts. Sample collected heap outside timed updates; RSS
+and WASM linear memory are additional footprint observations, not liveness proofs.
+
 Prepared lexical scopes and resource indexes resolve repeated lookups without
 tracked allocation. Allocation checks cover both wide and deep scopes and at
 least 512 indexed resource lookups, preserving lexical shadowing and node identity.
