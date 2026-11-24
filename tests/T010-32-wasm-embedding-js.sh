@@ -203,17 +203,23 @@ for (let i = 0; i < 3; i++) {
 assert.ok(retainedClosedWatches.every((closed) => closed.module === null && closed.watch === null));
 
 // Retaining the descriptor must not retain a growing operational host heap.
-for (let i = 0; i < 100; i++) {
-  const previous = answer.module.exports.memory;
-  assert.equal(await answer.evaluate('answer'), '42');
-  assert.notEqual(answer.module.exports.memory, previous);
+const compileWasm = WebAssembly.compile;
+WebAssembly.compile = () => assert.fail('an existing Kame client must not recompile its WASM code');
+try {
+  for (let i = 0; i < 100; i++) {
+    const previous = answer.module.exports.memory;
+    assert.equal(await answer.evaluate('answer'), '42');
+    assert.notEqual(answer.module.exports.memory, previous);
+  }
+  const evaluatedMemory = answer.module.exports.memory;
+  await answer.build('answer');
+  assert.notEqual(answer.module.exports.memory, evaluatedMemory);
+  const builtMemory = answer.module.exports.memory;
+  await (await answer.watch('answer')).close();
+  assert.notEqual(answer.module.exports.memory, builtMemory);
+} finally {
+  WebAssembly.compile = compileWasm;
 }
-const evaluatedMemory = answer.module.exports.memory;
-await answer.build('answer');
-assert.notEqual(answer.module.exports.memory, evaluatedMemory);
-const builtMemory = answer.module.exports.memory;
-await (await answer.watch('answer')).close();
-assert.notEqual(answer.module.exports.memory, builtMemory);
 assert.equal(answer.ast.ast.items[0].kind, 'definition');
 
 const preAborted = new AbortController();
@@ -542,6 +548,9 @@ for (const disposeOwner of [false, true]) {
   assert.equal(owner.watches.size, 0);
   assert.equal(owner.operations.size, 0);
   assert.equal(pendingProgram.module, null);
+  assert.equal(pendingProgram.source, '');
+  assert.equal(pendingProgram._ast, null);
+  assert.throws(() => pendingProgram.ast, (error) => error.code === 'DISPOSED');
   await owner.dispose();
 }
 

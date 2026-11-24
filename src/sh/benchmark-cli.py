@@ -21,9 +21,10 @@ def main():
     if args.samples < 1:
         parser.error('--samples must be positive')
     native, wrapper = args.native.resolve(), args.wrapper.resolve()
+    wasm = Path(os.environ.get('KAME_WASM') or wrapper.with_name('kame.wasm')).resolve()
     result = {'platform': platform.platform(), 'node': subprocess.check_output(['node', '--version'], text=True).strip(),
               'samples': args.samples, 'artifacts': {}, 'results': {}}
-    for name, path in [('native', native), ('wrapper', wrapper), ('wasm', wrapper.with_name('kame.wasm'))]:
+    for name, path in [('native', native), ('wrapper', wrapper), ('wasm', wasm)]:
         result['artifacts'][name] = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     with tempfile.TemporaryDirectory(prefix='kame-perf-') as tmp:
         root = Path(tmp)
@@ -42,6 +43,14 @@ def main():
         graph = root / 'graph-512.km'
         graph.write_text(''.join(f'task target{i}\n\tout! ok\n' for i in range(512)))
         workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: [producer['target'] for producer in json.loads(p.stdout)['producers']] == ['target511'])
+
+        for count in (512, 2048):
+            rules = root / f'file-rules-{count}.km'
+            rules.write_text(''.join(f'rule ./r{i} = "ok"\n' for i in range(count)))
+            target = f'./r{count - 1}'
+            workloads[f'plan-literal-file-{count}'] = (
+                ['do', 'plan', '--json', '-f', str(rules), target],
+                lambda p, target=target: [producer['target'] for producer in json.loads(p.stdout)['producers']] == [target])
 
         tree = root / 'tree'
         for i in range(128):

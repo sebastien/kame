@@ -399,11 +399,12 @@ func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, op
 	return true
 }
 
-// environmentDigest fingerprints an environment list for memo scopes. Contexts
-// share their environment slice and never mutate it in place, so the digest
-// is reused while the same backing array and length are presented.
+// A resumed scope can reconstruct the same ordered environment in a new slice.
 func (p *Program) environmentDigest(environment []string) core.Signature {
-	if len(environment) != 0 && p.environmentDigestLen == len(environment) && p.environmentDigestBase == &environment[0] {
+	cached := p.environmentDigestInput
+	if p.environmentDigestValue.Mode == core.SignatureContent &&
+		(len(environment) == len(cached) && len(cached) != 0 && &environment[0] == &cached[0] ||
+			slices.Equal(environment, cached)) {
 		return p.environmentDigestValue
 	}
 	d := core.NewDigest()
@@ -413,8 +414,6 @@ func (p *Program) environmentDigest(environment []string) core.Signature {
 	}
 	signature := core.Signature{Mode: core.SignatureContent}
 	d.Sum(signature.Digest[:])
-	if len(environment) != 0 {
-		p.environmentDigestBase, p.environmentDigestLen, p.environmentDigestValue = &environment[0], len(environment), signature
-	}
+	p.environmentDigestInput, p.environmentDigestValue = environment, signature
 	return signature
 }

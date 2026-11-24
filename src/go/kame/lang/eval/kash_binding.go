@@ -34,9 +34,8 @@ func (p *Program) kashLet(scope *Scope, e *expr.Expr, c *Context) Result {
 	// Initializers can create other bindings, reallocating the binding slice.
 	// Reacquire the slot before transferring its immutable value.
 	b = scope.localResolved(e.Text, e.LetBinding)
-	b.Value, b.Initialized = r.Value.Clone(scope.Alloc), true
+	b.Value, b.Initialized = r.Value, true
 	b.Value.Share(scope.Alloc)
-	r.Value.Free(c.Run)
 	return Result{}
 }
 
@@ -80,9 +79,8 @@ func (p *Program) kashSet(scope *Scope, e *expr.Expr, c *Context) Result {
 	// The operand can grow the scope's binding storage.
 	b = owner.localResolved(e.Text, e.LetBinding)
 	old := b.Value
-	b.Value = r.Value.Clone(owner.Alloc)
+	b.Value = r.Value
 	b.Value.Share(owner.Alloc)
-	r.Value.Free(c.Run)
 	freeValueWithCallables(owner.Alloc, &old)
 	return Result{}
 }

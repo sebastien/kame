@@ -81,6 +81,8 @@ SH
 	test-step "$backend eager callback captures resume without replay"
 	invoke -l kash -c 'let result = (map (item => line $(sh -c "printf x >> capture-calls; printf %s \"\$1\"" sh $item)) ["one", "two words", "one"]); printf %s (json result)' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = '["one","two words","one"]' ] && [ "$(cat "$work/capture-calls")" = xxx ]; then test-ok "$backend eager captures retain callback ownership and order"; else test-fail "$backend eager capture replay or corrupted callback"; fi
+	invoke -l kash -c 'let items = map (x => () => x) {a: 1, b: 2}; let saved = items; set items = (map (x => () => x) {a: 3}); printf "%s" (json (map (f => f ()) saved)) (json (split "::" "::a::::b::"))' >"$work/out" 2>"$work/err"
+	if [ "$(cat "$work/out")" = '{"a":1,"b":2}["","a","","b",""]' ]; then test-ok "$backend moved collections preserve capture lifetimes and empty fields"; else test-fail "$backend collection ownership or split"; fi
 	status=0
 	invoke -l kash -c 'let result = (map (item => line $(sh -c "exit 75")) [1, 2]); printf forbidden' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 75 ] && [ ! -s "$work/out" ]; then test-ok "$backend eager capture failure propagates"; else test-fail "$backend eager capture lost failure"; fi

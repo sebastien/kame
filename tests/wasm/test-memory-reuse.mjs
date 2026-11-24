@@ -18,8 +18,11 @@ const alloc = (size, alignment = 1) => {
 const first = alloc(1024 * 1024, 65536);
 const second = alloc(1024 * 1024, 16);
 const blocker = alloc(64, 8);
+const peak = 2 * 1024 * 1024 + 64;
+assert.equal(e.kame_wasm_host_heap_peak(), peak);
 assert.equal(e.kame_wasm_free(first, 1024 * 1024 - 1), 4);
 assert.equal(e.kame_wasm_free(first + 1, 1024 * 1024), 4);
+assert.equal(e.kame_wasm_host_heap_used(), peak);
 assert.equal(e.kame_wasm_free(first, 1024 * 1024), 0);
 assert.equal(e.kame_wasm_free(first, 1024 * 1024), 4);
 assert.equal(e.kame_wasm_free(second, 1024 * 1024), 0);
@@ -58,6 +61,8 @@ const blocks = Array.from({ length: 4096 }, (_, i) => {
   new Uint8Array(e.memory.buffer, pointer, size).fill(i % 251);
   return { pointer, size };
 });
+let liveBytes = blocks.reduce((total, block) => total + block.size, 0);
+assert.equal(e.kame_wasm_host_heap_used(), liveBytes);
 assert.equal(e.kame_wasm_free(0xffffffff, 1), 4);
 assert.equal(e.kame_wasm_free(1, 1), 4);
 for (let i = 0; i < blocks.length; i++) {
@@ -68,8 +73,11 @@ for (let i = 0; i < blocks.length; i++) {
   assert.equal(e.kame_wasm_free(pointer + 1, size), 4);
   assert.equal(e.kame_wasm_free(pointer, size), 0);
   assert.equal(e.kame_wasm_free(pointer, size), 4);
+  liveBytes -= size;
+  assert.equal(e.kame_wasm_host_heap_used(), liveBytes);
 }
 assert.equal(e.kame_wasm_host_heap_used(), 0);
+assert.equal(e.kame_wasm_host_heap_peak(), peak);
 
 // Caller-owned payload can forge a plausible header and back-reference, but
 // an interior pointer must never free part of a live allocation.

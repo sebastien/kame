@@ -40,7 +40,7 @@ type replHistory struct {
 	global   bool
 	disabled bool
 	warned   bool
-	entries  []historyEntry // last successful store snapshot, or memory-only entries
+	entries  []historyEntry // screened store snapshot or memory-only entries
 	view     []historyEntry // stable indices during a readline invocation
 	expireAt time.Time
 	cwd      string
@@ -277,7 +277,7 @@ func (h *replHistory) record(text string) {
 	}
 	if err := h.update(&entry, ""); err != nil {
 		h.warning("persistence unavailable; using filtered session memory")
-		h.entries = h.merge(h.prune(h.entries), entry)
+		h.entries = h.merge(h.pruneWith(h.entries, h.current), entry)
 	}
 	h.selectView()
 }
@@ -359,7 +359,17 @@ func (h *replHistory) update(entry *historyEntry, clear string) error {
 			}
 		}
 	}
-	entries = h.prune(entries)
+	known := make(map[string]int, len(h.entries))
+	for i := range h.entries {
+		known[h.entries[i].ID] = i
+	}
+	entries = h.pruneWith(entries, func(record historyEntry, now time.Time) bool {
+		// The freshly read record must match every field before reusing screening.
+		if i, ok := known[record.ID]; ok && h.entries[i] == record {
+			return h.current(record, now)
+		}
+		return h.valid(record, now)
+	})
 	if clear != "" {
 		entries = slices.DeleteFunc(entries, func(e historyEntry) bool {
 			return clear == "global" || e.Scope == h.scope

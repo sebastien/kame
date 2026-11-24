@@ -114,13 +114,11 @@ func queueWatchChange(pending *[]core.ResourceKey, key core.ResourceKey) bool {
 	return true
 }
 
-func addWatchResource(items *[]watchResource, p *program.Program, observations program.WatchObservations, key core.ResourceKey, source bool) {
-	for i := range *items {
-		if (*items)[i].Key.Kind == key.Kind && (*items)[i].Key.Name == key.Name {
-			(*items)[i].Seen = true
-			(*items)[i].Source = (*items)[i].Source || source
-			return
-		}
+func addWatchResource(items *[]watchResource, lookup map[core.ResourceKey]int, p *program.Program, observations program.WatchObservations, key core.ResourceKey, source bool) {
+	if i, known := lookup[key]; known {
+		(*items)[i].Seen = true
+		(*items)[i].Source = (*items)[i].Source || source
+		return
 	}
 	stamp := ""
 	if !source && p != nil {
@@ -134,13 +132,18 @@ func addWatchResource(items *[]watchResource, p *program.Program, observations p
 			stamp = cloneCommandText("missing")
 		}
 	}
+	lookup[key] = len(*items)
 	*items = append(*items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
 }
 
 func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) program.WatchObservations {
 	observations := session.Program.WatchObservations()
+	lookup := make(map[core.ResourceKey]int, len(*items))
 	for i := range *items {
 		item := &(*items)[i]
+		if _, known := lookup[item.Key]; !known {
+			lookup[item.Key] = i
+		}
 		item.Seen = item.Source || (session.Status != 0 && isDeclarationWatchResource(item.Key.Kind))
 	}
 	// Keep failed included sources until a successful compile replaces them.
@@ -153,19 +156,19 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	}
 	if options.File != "" {
 		key := core.ResourceKey{Kind: core.ResourceFile, Name: options.File}
-		addWatchResource(items, session.Program, observations, key, true)
+		addWatchResource(items, lookup, session.Program, observations, key, true)
 	} else if len(session.Source.Files) == 0 {
 		candidates := cli.BuildSourceCandidates()
 		for i := range candidates {
 			name := path.Join(options.Directory, candidates[i])
-			addWatchResource(items, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
+			addWatchResource(items, lookup, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 			mem.FreeString(mem.System, name)
 		}
 	}
 	for i := range session.Source.Files {
 		name := session.Source.Files[i].Name
 		if session.Source.Files[i].FileBacked {
-			addWatchResource(items, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
+			addWatchResource(items, lookup, session.Program, observations, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 		}
 	}
 	for _, discovery := range session.Discoveries {
@@ -181,7 +184,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	if session.Program != nil {
 		resources := session.Program.FilesystemResources()
 		for i := range resources {
-			addWatchResource(items, session.Program, observations, resources[i], false)
+			addWatchResource(items, lookup, session.Program, observations, resources[i], false)
 			resources[i].Free(mem.System)
 		}
 		mem.FreeSlice(nil, resources)

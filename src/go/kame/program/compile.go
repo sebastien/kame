@@ -169,8 +169,21 @@ func (p *Program) registerProgram(result CompileResult, options Options) (finish
 		}
 	}()
 	parsed := p.Parsed
+	p.buildShell = authoredShell(parsed)
+	base := declarationScope{Scope: p.Eval.Scope}
 	for i := range parsed.Items {
-		if d := p.registerDeclarationBlock(parsed.Items[i:i+1], declarationScope{Scope: p.Eval.Scope}); d.Code != "" {
+		item := &parsed.Items[i]
+		var d diagnostic.Diagnostic
+		switch item.Kind {
+		case script.Rule:
+			_, d = p.registerScopedRule(item.Rule, base)
+		case script.DeclarationLet, script.DeclarationFor, script.Composition, script.Generate, script.Include:
+			d = p.registerDeclarationBlock(parsed.Items[i:i+1], base)
+		default:
+			// Definitions and statements are already handled by the evaluator or session.
+			continue
+		}
+		if d.Code != "" {
 			result.Diagnostics = append(result.Diagnostics, d)
 		}
 		if p.registrationPending {
@@ -428,46 +441,46 @@ func appendIncludeFrames(a mem.Allocator, d *diagnostic.Diagnostic, frames []dia
 	}
 }
 
-func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
-	for i := range candidate.Outputs {
-		if candidate.Outputs[i].Template {
+func (p *Program) registerRule(candidate *rule.Rule) diagnostic.Diagnostic {
+	index := len(p.Rules)
+	file := candidate.Kind == rule.FileRule
+	for i, output := range candidate.Outputs {
+		if output.Template {
 			continue
 		}
-		for j := 0; j < i; j++ {
-			if candidate.Outputs[j].Template {
-				continue
+		key := p.literalOutputKey(output.Text, file)
+		if prior, exists := p.literalOutputs[key]; exists {
+			p.rollbackLiteralOutputs(candidate, i)
+			if prior.rule == index {
+				return p.outputDiagnostic(output.Span, "PARSE_ERR", "duplicate rule output")
 			}
-			first := p.canonicalTarget(candidate.Outputs[j].Text, candidate.Kind == rule.FileRule)
-			second := p.canonicalTarget(candidate.Outputs[i].Text, candidate.Kind == rule.FileRule)
-			equal := first == second
-			mem.FreeString(p.Alloc, first)
-			mem.FreeString(p.Alloc, second)
-			if equal {
-				return p.outputDiagnostic(candidate.Outputs[i].Span, "PARSE_ERR", "duplicate rule output")
-			}
+			other := p.Rules[prior.rule].Rule
+			return p.producerAmbiguity(output.Text,
+				producerCandidate{Rule: other, Output: other.Outputs[prior.output]},
+				producerCandidate{Rule: candidate, Output: output})
 		}
-		for j := range p.Rules {
-			other := p.Rules[j].Rule
-			if (other.Kind == rule.FileRule) != (candidate.Kind == rule.FileRule) {
-				continue
-			}
-			for k := range other.Outputs {
-				if !other.Outputs[k].Template {
-					first := p.canonicalTarget(other.Outputs[k].Text, candidate.Kind == rule.FileRule)
-					second := p.canonicalTarget(candidate.Outputs[i].Text, candidate.Kind == rule.FileRule)
-					equal := first == second
-					mem.FreeString(p.Alloc, first)
-					mem.FreeString(p.Alloc, second)
-					if equal {
-						return p.producerAmbiguity(candidate.Outputs[i].Text,
-							producerCandidate{Rule: other, Output: other.Outputs[k]},
-							producerCandidate{Rule: candidate, Output: candidate.Outputs[i]})
-					}
-				}
-			}
+		if p.literalOutputs == nil {
+			p.literalOutputs = make(map[core.ResourceKey]literalProducer)
+		}
+		p.literalOutputs[key] = literalProducer{rule: index, output: i}
+	}
+	for _, argument := range candidate.Arguments {
+		if p.Eval.Definition(argument.Name) != nil {
+			p.rollbackLiteralOutputs(candidate, len(candidate.Outputs))
+			return p.outputDiagnostic(argument.Span, "TGT_ARGUMENT", "target argument shadows definition: "+argument.Name)
 		}
 	}
+	p.Rules = append(p.Rules, registeredRule{Rule: candidate})
 	return diagnostic.Diagnostic{}
+}
+
+// A rejected rule must not claim any outputs in subsequent diagnostics.
+func (p *Program) rollbackLiteralOutputs(candidate *rule.Rule, end int) {
+	for _, output := range candidate.Outputs[:end] {
+		if !output.Template {
+			delete(p.literalOutputs, p.literalOutputKey(output.Text, candidate.Kind == rule.FileRule))
+		}
+	}
 }
 
 func (p *Program) Free() {
@@ -591,6 +604,7 @@ func (p *Program) Free() {
 	mem.FreeSlice(nil, p.Instances)
 	mem.FreeSlice(nil, p.Events)
 	mem.FreeSlice(nil, p.Rules)
+	p.literalOutputs = nil
 	mem.FreeSlice(nil, p.Tools)
 	for i := range p.Pending {
 		freePendingRequest(p.Alloc, &p.Pending[i])

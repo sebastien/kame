@@ -854,11 +854,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 		}
 		mem.FreeSlice(nil, state.Environment)
 		state.Environment = nil
-		state.Stages = append(state.Stages, core.NewList(state.Alloc, state.Argv))
-		for i := range state.Argv {
-			state.Argv[i].Free(state.Alloc)
-		}
-		mem.FreeSlice(nil, state.Argv)
+		argv := core.Value{Kind: core.List, List: state.Argv}
+		argv.Share(state.Alloc)
+		state.Stages = append(state.Stages, argv)
 		state.Argv = nil
 		state.Stage++
 		state.Index = 0

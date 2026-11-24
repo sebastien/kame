@@ -372,6 +372,8 @@ type Program struct {
 	BackgroundNode          func(nodeID int64) bool
 	Options                 Options
 	Rules                   []registeredRule
+	literalOutputs          map[core.ResourceKey]literalProducer
+	buildShell              *expr.Expr
 	ResolvedRules           []*rule.Rule
 	ScopedRules             []*rule.Rule
 	RuleDeclarations        map[*rule.Rule]declarationScope

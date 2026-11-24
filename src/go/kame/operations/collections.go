@@ -107,12 +107,8 @@ func suspendCallback(c *eval.Context, state *callbackState) {
 	}
 }
 func finishCallback(c *eval.Context, state *callbackState) core.Value {
-	result := core.NewList(c.Run, state.Values)
-	// Callable leaves transferred into result; cleanup now owns storage only.
-	for i := range state.Values {
-		state.Values[i].Free(state.Alloc)
-	}
-	mem.FreeSlice(nil, state.Values)
+	// Move the owned values (including callable leaves) out of suspended state.
+	result := core.Value{Kind: core.List, List: slices.Clip(state.Values)}
 	state.Values = nil
 	discardCallback(c, state)
 	return result
@@ -124,15 +120,9 @@ func finishRecordCallback(c *eval.Context, state *callbackState) core.Value {
 	for i := range state.Values {
 		fields[i] = core.RecordField{Key: state.Keys[i], Value: state.Values[i]}
 	}
-	result := core.NewRecord(c.Run, fields)
-	state.Keys = nil
-	for i := range state.Values {
-		state.Values[i].Free(state.Alloc)
-	}
-	mem.FreeSlice(nil, state.Values)
 	state.Values = nil
 	discardCallback(c, state)
-	return result
+	return core.Value{Kind: core.Record, Record: fields}
 }
 
 // collectionItem returns the item at index of a list or record subject, and
@@ -170,7 +160,14 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	}
 	defer discardArgCallables(c, v)
 	state := callbackProgress(c)
-	for state.Index < collectionLength(v[1]) {
+	length := collectionLength(v[1])
+	if !flatten && state.Values == nil {
+		state.Values = make([]core.Value, 0, length)
+		if record {
+			state.Keys = make([]string, 0, length)
+		}
+	}
+	for state.Index < length {
 		item, key := collectionItem(v[1], state.Index)
 		effects, paths := len(c.Effects), len(c.WritePaths)
 		result := c.CallEachAt(*callback, []core.Value{item}, key, state.Index)
@@ -196,8 +193,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 			}
 			result.Value.Free(c.Run)
 		} else {
-			state.Values = append(state.Values, result.Value.Clone(c.Run))
-			result.Value.Free(c.Run)
+			state.Values = append(state.Values, result.Value)
 			if record {
 				state.Keys = append(state.Keys, strings.Clone(key.Text))
 			}

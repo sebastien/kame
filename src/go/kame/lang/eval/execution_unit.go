@@ -167,7 +167,10 @@ func setStageEnvironment(a mem.Allocator, setup *core.Value, c *Context) {
 			continue
 		}
 		masks = c.environmentOverrides(field.Value.List)
-		environment := slices.Clone(base)
+		environment := base
+		if len(field.Value.List) != 0 {
+			environment = slices.Clone(base)
+		}
 		for _, assignment := range field.Value.List {
 			environment = replaceEnvironmentAssignment(environment, assignment.Text)
 		}
@@ -175,9 +178,12 @@ func setStageEnvironment(a mem.Allocator, setup *core.Value, c *Context) {
 		for i, assignment := range environment {
 			replacement[i] = core.Value{Kind: core.String, Text: assignment}
 		}
-		updated := core.NewList(a, replacement)
 		field.Value.Free(a)
-		field.Value = updated
+		field.Value = core.Value{Kind: core.List, List: replacement}
+		if len(replacement) != 0 {
+			// Request copies can share the immutable environment, not the setup record.
+			field.Value.Share(a)
+		}
 		break
 	}
 	if len(masks) != 0 {
@@ -186,7 +192,7 @@ func setStageEnvironment(a mem.Allocator, setup *core.Value, c *Context) {
 			values[i] = core.Value{Kind: core.String, Text: name}
 		}
 		setup.Record = append(setup.Record, core.RecordField{
-			Key: owned(a, stageEnvironmentOverrides), Value: core.NewList(a, values),
+			Key: stageEnvironmentOverrides, Value: core.Value{Kind: core.List, List: values},
 		})
 	}
 	if exact {

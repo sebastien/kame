@@ -79,6 +79,7 @@ func alloc(size, alignment uint32) uint32 {
 	offset := (-base) & uintptr(alignment-1)
 	p := uint32(base + offset)
 	buffers[p] = b[offset : offset+uintptr(size)]
+	hostBufferBytes += uint64(size)
 	hostBufferPeak = max(hostBufferPeak, hostHeapUsed())
 	return p
 }
@@ -93,6 +94,7 @@ func free(p, size uint32) uint32 {
 		return 4
 	}
 	delete(buffers, p)
+	hostBufferBytes -= uint64(size)
 	return 0
 }
 

@@ -147,7 +147,11 @@ func (p *Program) EnableAutomaticClean(callback func(any, *Program) diagnostic.D
 	r := mem.Alloc[rule.Rule](p.Alloc)
 	r.Kind = rule.TaskRule
 	r.Outputs = append(r.Outputs, rule.Target{Kind: rule.TargetName, Text: "clean"})
-	p.Rules = append(p.Rules, registeredRule{Rule: r})
+	if d := p.registerRule(r); d.Code != "" {
+		d.Free(p.Alloc)
+		rule.FreeRule(p.Alloc, r)
+		return
+	}
 	p.automaticCleanRule, p.AutomaticClean, p.AutomaticCleanState = r, callback, state
 }
 

@@ -23,64 +23,43 @@ func (p *Program) canonicalTarget(target string, file bool) string {
 	return path.Join(p.Options.Directory, target)
 }
 
+type literalProducer struct {
+	rule, output int
+}
+
+func (p *Program) literalOutputKey(target string, file bool) core.ResourceKey {
+	if file {
+		return core.ResourceKey{Kind: core.ResourceFile, Name: p.canonicalTarget(target, true)}
+	}
+	return core.ResourceKey{Kind: core.ResourceTarget, Name: target}
+}
+
 func (p *Program) selectRule(target string) selection {
 	requested := target
 	assignments := ""
 	if split := firstSpace(target); split >= 0 {
 		name := target[:split]
-		for i := range p.Rules {
-			candidate := p.Rules[i].Rule
-			if candidate == nil || len(candidate.Arguments) == 0 || candidate.Kind == rule.FileRule {
-				continue
-			}
-			for j := range candidate.Outputs {
-				if !candidate.Outputs[j].Template && candidate.Outputs[j].Text == name {
-					assignments = target[skipSpaces(target, split):]
-					target = name
-					break
-				}
-			}
-			if target == name {
-				break
-			}
+		if p.hasNamedArgumentTarget(name) {
+			assignments = target[skipSpaces(target, split):]
+			target = name
 		}
 	}
 	selectedTarget := target
 	file := isPath(target) || hasSlash(target)
-	if file {
-		target = p.canonicalTarget(target, true)
+	if candidate, ok := p.literalOutputs[p.literalOutputKey(target, file)]; ok {
+		r := p.Rules[candidate.rule].Rule
+		selected := selection{Rule: r, Output: r.Outputs[candidate.output]}
+		if !file {
+			selected.Target = cloneText(p.Alloc, selectedTarget)
+			if len(r.Arguments) != 0 {
+				binding := p.bindTargetArguments(r, assignments)
+				selected.Arguments, selected.Diagnostic = binding.Values, binding.Diagnostic
+			}
+		}
+		return selected
 	}
 	var candidates []producerCandidate
 	defer freeProducerCandidates(p.Alloc, &candidates)
-	for i := range p.Rules {
-		r := p.Rules[i].Rule
-		if (r.Kind == rule.FileRule) != file {
-			continue
-		}
-		for j := range r.Outputs {
-			output := r.Outputs[j]
-			if output.Template {
-				continue
-			}
-			if !file && output.Text == target {
-				selected := selection{Rule: r, Output: output, Target: cloneText(p.Alloc, selectedTarget)}
-				if len(r.Arguments) != 0 {
-					binding := p.bindTargetArguments(r, assignments)
-					selected.Arguments, selected.Diagnostic = binding.Values, binding.Diagnostic
-				}
-				return selected
-			}
-			if file {
-				literal := p.canonicalTarget(output.Text, true)
-				matches := literal == target
-				mem.FreeString(p.Alloc, literal)
-				if matches {
-					mem.FreeString(p.Alloc, target)
-					return selection{Rule: r, Output: output}
-				}
-			}
-		}
-	}
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
 		if (r.Kind == rule.FileRule) != file {
@@ -112,9 +91,6 @@ func (p *Program) selectRule(target string) selection {
 				if relativeOwned {
 					mem.FreeString(p.Alloc, matchTarget)
 				}
-				if file {
-					mem.FreeString(p.Alloc, target)
-				}
 				return selection{Diagnostic: diagnostic.Diagnostic{Source: cloneText(p.Alloc, p.Parsed.Source.Name), Code: cloneText(p.Alloc, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneText(p.Alloc, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: output.Span.Start, End: output.Span.End}, Target: cloneText(p.Alloc, selectedTarget), Owned: true}}
 			}
 			for k := range candidates {
@@ -122,9 +98,6 @@ func (p *Program) selectRule(target string) selection {
 					match.Free(p.Alloc)
 					if relativeOwned {
 						mem.FreeString(p.Alloc, matchTarget)
-					}
-					if file {
-						mem.FreeString(p.Alloc, target)
 					}
 					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[k], producerCandidate{Rule: r, Output: output})}
 				}
@@ -135,9 +108,6 @@ func (p *Program) selectRule(target string) selection {
 				mem.FreeString(p.Alloc, matchTarget)
 			}
 		}
-	}
-	if file {
-		mem.FreeString(p.Alloc, target)
 	}
 	winner := -1
 	for i := range candidates {
@@ -337,18 +307,8 @@ func (p *Program) hasLogicalTarget(name string) bool {
 	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) {
 		return false
 	}
-	for i := range p.Rules {
-		r := p.Rules[i].Rule
-		if r.Kind == rule.FileRule {
-			continue
-		}
-		for j := range r.Outputs {
-			if !r.Outputs[j].Template && r.Outputs[j].Text == name {
-				return true
-			}
-		}
-	}
-	return p.Eval.Definition(name) != nil
+	_, literal := p.literalOutputs[p.literalOutputKey(name, false)]
+	return literal || p.Eval.Definition(name) != nil
 }
 
 func isTargetAssignment(text string) bool {
@@ -361,16 +321,6 @@ func isTargetAssignment(text string) bool {
 }
 
 func (p *Program) hasNamedArgumentTarget(name string) bool {
-	for i := range p.Rules {
-		r := p.Rules[i].Rule
-		if r == nil || len(r.Arguments) == 0 || r.Kind == rule.FileRule {
-			continue
-		}
-		for j := range r.Outputs {
-			if !r.Outputs[j].Template && r.Outputs[j].Text == name {
-				return true
-			}
-		}
-	}
-	return false
+	candidate, ok := p.literalOutputs[p.literalOutputKey(name, false)]
+	return ok && len(p.Rules[candidate.rule].Rule.Arguments) != 0
 }

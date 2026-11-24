@@ -396,6 +396,15 @@ func TestHistoryMalformedRecords(t *testing.T) {
 	if h.Len() != 1 {
 		t.Fatal("invalid record prevented recovery of valid record")
 	}
+	changed := h.entries[0]
+	changed.Text = "TOKEN=disk-edited-secret"
+	if err := os.WriteFile(h.path, append([]byte(historyHeader), historyRecord(changed)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.refresh(cwd)
+	if data, err := os.ReadFile(h.path); err != nil || string(data) != historyHeader || h.Len() != 0 {
+		t.Fatal("a disk edit bypassed screening by reusing a known entry ID")
+	}
 }
 
 func TestHistoryPrivateStorageAndFailedReplacement(t *testing.T) {

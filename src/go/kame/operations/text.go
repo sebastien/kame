@@ -40,19 +40,12 @@ func opSplit(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.String || v[0].Text == "" {
 		return invalidArgument(c, v, 0, "non-empty string")
 	}
-	var out []core.Value
-	for {
-		cut := strings.Index(left, v[0].Text)
-		if cut < 0 {
-			out = append(out, core.NewString(c.Run, left))
-			break
-		}
-		out = append(out, core.NewString(c.Run, left[:cut]))
-		left = left[cut+len(v[0].Text):]
+	separator := v[0].Text
+	out := make([]core.Value, 0, strings.Count(left, separator)+1)
+	for part := range strings.SplitSeq(left, separator) {
+		out = append(out, core.NewString(c.Run, part))
 	}
-	result := core.NewList(c.Run, out)
-	freeValues(c, out)
-	return eval.Result{Value: result}
+	return eval.Result{Value: core.Value{Kind: core.List, List: out}}
 }
 func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

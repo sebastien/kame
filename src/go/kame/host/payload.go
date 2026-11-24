@@ -248,13 +248,11 @@ func ArgvPayload(a mem.Allocator, argv []core.Value) core.Value {
 	}
 	e.EndArray()
 	e.Flush()
-	fields := []core.RecordField{{Key: FieldArgv, Value: core.NewList(a, argv)}, {Key: FieldData, Value: core.NewString(a, b.String())}, {Key: FieldPath, Value: core.NewString(a, argv[0].Text)}}
-	payload := core.NewRecord(a, fields)
-	for i := range fields {
-		fields[i].Value.Free(a)
-	}
-	b.Reset()
-	return payload
+	return core.Value{Kind: core.Record, Record: []core.RecordField{
+		{Key: FieldArgv, Value: core.NewList(a, argv)},
+		{Key: FieldData, Value: core.Value{Kind: core.String, Text: b.String()}},
+		{Key: FieldPath, Value: core.NewString(a, argv[0].Text)},
+	}}
 }
 
 // ServiceProbePayload carries a direct-argv readiness probe and its execution
@@ -430,13 +428,11 @@ func PipelinePayload(a mem.Allocator, stages []core.Value) core.Value {
 			break
 		}
 	}
-	fields := []core.RecordField{{Key: FieldStages, Value: core.NewList(a, stages)}, {Key: FieldData, Value: core.NewString(a, b.String())}, {Key: FieldPath, Value: core.NewString(a, program)}}
-	payload := core.NewRecord(a, fields)
-	for i := range fields {
-		fields[i].Value.Free(a)
-	}
-	b.Reset()
-	return payload
+	return core.Value{Kind: core.Record, Record: []core.RecordField{
+		{Key: FieldStages, Value: core.NewList(a, stages)},
+		{Key: FieldData, Value: core.Value{Kind: core.String, Text: b.String()}},
+		{Key: FieldPath, Value: core.NewString(a, program)},
+	}}
 }
 
 func PayloadStages(payload core.Value) []core.Value {
@@ -468,12 +464,11 @@ func ConfigureRedirections(a mem.Allocator, payload *core.Value, input string, o
 }
 
 func StageSetupPayload(a mem.Allocator, cwd string, timeout int64, environment []core.Value) core.Value {
-	fields := []core.RecordField{{Key: FieldCwd, Value: core.NewString(a, cwd)}, {Key: FieldTimeout, Value: core.Value{Kind: core.Int, Int: timeout}}, {Key: FieldEnvironment, Value: core.NewList(a, environment)}}
-	value := core.NewRecord(a, fields)
-	for i := range fields {
-		fields[i].Value.Free(a)
-	}
-	return value
+	return core.Value{Kind: core.Record, Record: []core.RecordField{
+		{Key: FieldCwd, Value: core.NewString(a, cwd)},
+		{Key: FieldTimeout, Value: core.Value{Kind: core.Int, Int: timeout}},
+		{Key: FieldEnvironment, Value: core.NewList(a, environment)},
+	}}
 }
 
 func ConfigureStages(a mem.Allocator, payload *core.Value, setups []core.Value) {

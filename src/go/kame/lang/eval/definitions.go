@@ -72,9 +72,8 @@ type Program struct {
 	Diagnostics         []diagnostic.Diagnostic
 	OperationStates     []operationState
 	operationStateIndex map[operationStateKey]int
-	// environmentDigest* memoize the memo-scope digest of one environment list.
-	environmentDigestBase  *string
-	environmentDigestLen   int
+	// environmentDigest* memoize the memo-scope digest of one immutable snapshot.
+	environmentDigestInput []string
 	environmentDigestValue core.Signature
 	// processEnvironment* memoize the process-environment observation signature.
 	processEnvironmentBase  *string
@@ -166,7 +165,7 @@ func compileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		}
 		result.Diagnostics = append(result.Diagnostics, diagnostic.Diagnostic{Code: parsed.Diagnostics[i].Code, Severity: diagnostic.Error, Message: parsed.Diagnostics[i].Message, Span: diagnostic.Span{Start: parsed.Diagnostics[i].Span.Start, End: parsed.Diagnostics[i].Span.End}})
 	}
-	var names []*definition.Definition
+	names := make(map[string]*definition.Definition)
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.SessionCommand {
@@ -179,14 +178,7 @@ func compileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		if item.Kind != script.Definition || item.Definition == nil {
 			continue
 		}
-		var previous *definition.Definition
-		for j := range names {
-			if names[j].Name == item.Definition.Name {
-				previous = names[j]
-				break
-			}
-		}
-		if previous != nil {
+		if previous := names[item.Definition.Name]; previous != nil {
 			if item.Definition.Eager && previous.Eager {
 				continue
 			}
@@ -198,10 +190,9 @@ func compileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			}
 			result.Diagnostics = append(result.Diagnostics, duplicateDefinition(a, parsed, previous, item.Definition))
 		} else {
-			names = append(names, item.Definition)
+			names[item.Definition.Name] = item.Definition
 		}
 	}
-	mem.FreeSlice(nil, names)
 	if len(result.Diagnostics) != 0 {
 		return result
 	}

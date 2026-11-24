@@ -555,8 +555,6 @@ func TestNativeInteractiveKashCompletionSpace(t *testing.T) {
 	s.waitFor("subdir/")
 	s.send("y\r")
 	s.waitFor("uniquefile.txt x subdir/y\r\n")
-	s.waitReading()
-	s.send("exit\r")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("completion space session status %d: %q", status, s.text())
 	}
@@ -594,8 +592,6 @@ func TestNativeInteractiveKashSpecCompletion(t *testing.T) {
 	s.send("complete --show specdemo\r")
 	s.waitFor(filepath.Join(directory, ".kash-cache", "kash", "completions", "specs", "specdemo.usage.kdl"))
 	s.waitFor(`flag "--format <f>" help="Output format"`)
-	s.waitReading()
-	s.send("exit\r")
 	if status := s.finish(); status != 0 {
 		t.Fatalf("spec completion session status %d: %q", status, s.text())
 	}

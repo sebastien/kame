@@ -139,7 +139,6 @@ func visitRecipeToolReferences(r *rule.Rule, visit func(name string, span source
 }
 
 func (p *Program) declareBuildTools(parsed *script.Script) {
-	shell := authoredShell(parsed)
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		p.declareExpressionTools(item.Expression)
@@ -147,7 +146,7 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
 			p.declareExpressionTools(item.Definition.Expression)
 		}
 		if item.Rule != nil {
-			p.declareRuleTools(item.Rule, shell, false)
+			p.declareRuleTools(item.Rule, p.buildShell, false)
 		}
 	}
 }

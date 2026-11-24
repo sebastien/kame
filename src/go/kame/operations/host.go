@@ -151,7 +151,8 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 				return readRequestValue(c, state)
 			}
 		}
-		state.Value, state.Done = completion.Value.Clone(state.Alloc), true
+		// The engine handed off this completion; retain its value for replay.
+		state.Value, state.Done = completion.Value, true
 		if state.Kind == host.RequestReadFile && state.Op == host.OpRead {
 			if state.Value.Kind == core.Bytes {
 				state.Signature = core.ContentSignature(state.Value.Bytes)
@@ -161,7 +162,6 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 		} else {
 			state.Signature = core.ValueSignature(state.Value)
 		}
-		completion.Value.Free(c.Run)
 		return readRequestValue(c, state)
 	}
 	state.ID = c.Submit(kind, payload)

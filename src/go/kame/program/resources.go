@@ -41,10 +41,17 @@ func (p *Program) retireWatchNode(n *core.Node) {
 func (p *Program) FilesystemResources() []core.ResourceKey {
 	nodes := p.Engine.TrackedNodes()
 	var keys []core.ResourceKey
+	seen := make(map[core.ResourceKey]bool)
+	add := func(key core.ResourceKey) {
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key.Clone(p.Alloc))
+		}
+	}
 	for i := range nodes {
 		n := nodes[i]
 		if n.Interest != 0 && (n.Key.Kind == core.ResourceFile || n.Key.Kind == core.ResourceGlob) && p.instanceIndex(n) < 0 {
-			keys = append(keys, n.Key.Clone(p.Alloc))
+			add(n.Key)
 		}
 		if n.Interest == 0 {
 			continue
@@ -57,16 +64,7 @@ func (p *Program) FilesystemResources() []core.ResourceKey {
 			if resource := p.Engine.Lookup(item.Key); resource != nil && (resource.Interest != 0 || p.instanceIndex(resource) >= 0) {
 				continue
 			}
-			present := false
-			for k := range keys {
-				if keys[k].Kind == item.Key.Kind && keys[k].Name == item.Key.Name {
-					present = true
-					break
-				}
-			}
-			if !present {
-				keys = append(keys, item.Key.Clone(p.Alloc))
-			}
+			add(item.Key)
 		}
 	}
 	mem.FreeSlice(nil, nodes)

@@ -47,9 +47,11 @@ program descriptor and validates it before returning. JavaScript compilation
 defaults to the Kame program grammar, also selected explicitly with
 `language: 'km'`. Program operations may
 be repeated; each operation owns an isolated ABI instance so parser/runtime
-state cannot leak across operations. Within long-lived watches, copied inputs
-and results reuse bounded scratch slots and freed heap blocks; linear memory
-must plateau for repeated warm workloads (see `010-wasm.md`).
+state cannot leak across operations. Operations reuse the compiled WASM code
+loaded when the owning `Kame` was created, not its linear memory. Within
+long-lived watches, copied inputs and results reuse bounded scratch slots and
+freed heap blocks; linear memory must plateau for repeated warm workloads
+(see `010-wasm.md`).
 `evaluate(expression, options)` returns a copied UTF-8 string in canonical
 Kame display form. `build(targets, options)` returns copied target values in
 canonical display form and a copied ordered event list.
@@ -75,8 +77,8 @@ backend and is not forwarded to the callback.
 processes to settle, releases active watches and cache leases, and makes later
 operations fail with `DISPOSED`. A host callback may finish after cancellation;
 its late result is ignored and its promise does not hold disposal open. A
-`KameProgram` is invalid after its own
-`dispose()` or the owning `Kame.dispose()`.
+`KameProgram` is invalid after its own `dispose()` or the owning
+`Kame.dispose()`; a disposed descriptor no longer holds its source or AST.
 
 ## Python contract
 

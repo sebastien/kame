@@ -1,6 +1,7 @@
 package core
 
 import (
+	"crypto/sha256"
 	"math"
 	"math/bits"
 )
@@ -120,11 +121,7 @@ func (s *Digest) compress(block []byte) {
 }
 
 func ContentSignature(data []byte) Signature {
-	s := NewDigest()
-	s.Write(data)
-	out := Signature{Mode: SignatureContent}
-	s.Sum(out.Digest[:])
-	return out
+	return Signature{Mode: SignatureContent, Digest: sha256.Sum256(data)}
 }
 
 func (s *Digest) Uint64(n uint64) {

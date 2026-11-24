@@ -180,27 +180,22 @@ func (p *Program) registerScopedRule(authored *rule.Rule, scope declarationScope
 		return nil, resolved.Diagnostic
 	}
 	candidate := resolved.Rule
-	if d := duplicateLiteral(p, candidate); d.Code != "" {
+	scoped := scope.Scope != p.Eval.Scope || scope.Iteration != nil || scope.Generation != nil
+	if scoped && candidate == authored {
+		candidate = mem.Alloc[rule.Rule](p.Alloc)
+		*candidate = *authored
+		p.ScopedRules = append(p.ScopedRules, candidate)
+	}
+	if d := p.registerRule(candidate); d.Code != "" {
 		return nil, d
 	}
-	for _, argument := range authored.Arguments {
-		if p.Eval.Definition(argument.Name) != nil {
-			return nil, p.outputDiagnostic(argument.Span, "TGT_ARGUMENT", "target argument shadows definition: "+argument.Name)
-		}
-	}
-	if scope.Scope != p.Eval.Scope || scope.Iteration != nil || scope.Generation != nil {
-		if candidate == authored {
-			candidate = mem.Alloc[rule.Rule](p.Alloc)
-			*candidate = *authored
-			p.ScopedRules = append(p.ScopedRules, candidate)
-		}
+	if scoped {
 		if p.RuleDeclarations == nil {
 			p.RuleDeclarations = make(map[*rule.Rule]declarationScope)
 		}
 		scope.Scope.Retain()
 		p.RuleDeclarations[candidate] = scope
 	}
-	p.Rules = append(p.Rules, registeredRule{Rule: candidate})
-	p.declareRuleTools(authored, authoredShell(p.Parsed), true)
+	p.declareRuleTools(authored, p.buildShell, true)
 	return candidate, diagnostic.Diagnostic{}
 }

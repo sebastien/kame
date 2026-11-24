@@ -1461,9 +1461,10 @@ const REQUIRED_EXPORTS = [
 ];
 
 class Module {
-  constructor(exports) {
+  constructor(exports, path, compiled) {
     this.exports = exports;
-    this.path = wasmPath;
+    this.path = path;
+    this.compiled = compiled;
     this.scratchBuffers = new Map();
     this.cacheLeases = new Map();
     this.processGroups = new Map();
@@ -1477,7 +1478,14 @@ class Module {
     } catch (error) {
       throw Object.assign(new Error(`cannot read ${path}: ${error.message}`), { code: 'FS_ERR' });
     }
-    const compiled = await WebAssembly.compile(bytes);
+    return Module.instantiate(path, await WebAssembly.compile(bytes));
+  }
+
+  fresh() {
+    return Module.instantiate(this.path, this.compiled);
+  }
+
+  static async instantiate(path, compiled) {
     let wasi;
     const imports = {};
     if (WebAssembly.Module.imports(compiled).some(entry => entry.module === 'wasi_snapshot_preview1')) {
@@ -1506,9 +1514,7 @@ class Module {
     const missing = REQUIRED_EXPORTS.filter((name) => !(name in exports));
     if (missing.length !== 0) throw Object.assign(new Error(`WASM ABI is incomplete: missing ${missing.join(', ')}`), { code: 'FEATURE_UNSUP' });
     if (exports.kame_wasm_abi_version() !== 1) throw Object.assign(new Error('unsupported WASM ABI schema'), { code: 'FEATURE_UNSUP' });
-    const module = new Module(exports);
-    module.path = path;
-    return module;
+    return new Module(exports, path, compiled);
   }
 
   abiInfo() {
@@ -1600,15 +1606,19 @@ class Module {
     return this.exports.kame_wasm_complete_failure(instance, request, codeBytes.pointer, codeBytes.length, messageBytes.pointer, messageBytes.length);
   }
 
-  // copyResult runs a query-then-copy through a "did the call copy a value"
-  // helper. call(pointer, length, lengthPointer) returns a kame_wasm_status.
+  // Try the retained capacity first so repeatable queries serialize only once.
   copyQuery(call, instance) {
     const lengthPointer = this.scratch('queryLength', 4, 4);
-    const query = call(instance, 0, 0, lengthPointer);
-    if (query !== 0 && query !== 3) throw diagnosticError(this.instanceDiagnostic(instance), 'EXPR_INVALID');
+    const available = this.scratchBuffers.get('queryOutput');
+    let output = available?.pointer ?? 0;
+    let status = call(instance, output, available?.capacity ?? 0, lengthPointer);
+    if (status === 3) {
+      const required = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+      output = this.scratch('queryOutput', required || 1);
+      status = call(instance, output, required, lengthPointer);
+    }
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'EXPR_INVALID');
     const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
-    const output = this.scratch('queryOutput', length || 1);
-    if (call(instance, output, length, lengthPointer) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'EXPR_INVALID');
     return new Uint8Array(this.exports.memory.buffer, output, length).slice();
   }
 
@@ -3436,7 +3446,7 @@ export class Kame {
 
   async parse(language, source, options = {}) {
     return this.operation(null, options, async (context) => {
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       if (context.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
       const bytes = await module.parse(language, options.name ?? 'input.km', source);
       return JSON.parse(module.decode0(bytes));
@@ -3445,7 +3455,7 @@ export class Kame {
 
   async format(language, source, options = {}) {
     return this.operation(null, options, async (context) => {
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       if (context.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
       const bytes = await module.format(language, options.name ?? 'input.km', source, options.indentStyle ?? 'tab', options.indentWidth ?? 4);
       return module.decode0(bytes);
@@ -3459,7 +3469,7 @@ export class Kame {
       throw diagnosticError('unsupported compilation language', 'OPT_VALUE_INVALID');
     }
     return this.operation(null, options, async (context) => {
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       const bytes = await module.parse(language === 'km' ? 'km-file' : language, name, source);
       const ast = JSON.parse(module.decode0(bytes));
       const error = ast.diagnostics?.find((diagnostic) => diagnostic.severity === 'error');
@@ -3505,13 +3515,7 @@ export class Kame {
     for (const operation of this.operations) operation.controller.abort();
     await Promise.allSettled([...this.watches].map((watch) => watch.close()));
     await Promise.allSettled([...this.operations].map((operation) => operation.promise));
-    for (const program of this.programs) {
-      program.disposed = true;
-      program.source = '';
-      program._ast = null;
-      program.module = null;
-    }
-    this.programs.clear();
+    await Promise.allSettled([...this.programs].map((program) => program.dispose()));
     this.module = null;
   }
 }
@@ -3550,7 +3554,7 @@ export class KameProgram {
     return this.owner.operation(this, options, async (context) => this.serialized(async () => {
       // Isolate operation state; never reset an allocator that an active watch
       // or another owner can still use. Long-lived watches reuse their buffers.
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       this.module = module;
       context.sourceRoots = this.#sourceRoots;
       const result = await module.evaluate(this.source, expression, context, this.name);
@@ -3562,7 +3566,7 @@ export class KameProgram {
     const requested = Array.isArray(targets) ? [...targets] : [targets];
     if (requested.some((target) => typeof target !== 'string')) throw Object.assign(new Error('build targets must be strings'), { code: 'OPT_VALUE_INVALID' });
     return this.owner.operation(this, options, async (base) => this.serialized(async () => {
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       this.module = module;
       base.sourceRoots = this.#sourceRoots;
       const results = await module.materializeMany(this.source, requested, base, this.name);
@@ -3587,7 +3591,7 @@ export class KameProgram {
     const token = { program: this, controller, promise: null };
     token.promise = this.serialized(async () => {
       if (controller.signal.aborted || this.disposed || this.owner.disposed) throw Object.assign(new Error('watch creation cancelled'), { code: 'EXEC_CANCELLED' });
-      const module = await Module.load(this.module.path);
+      const module = await this.module.fresh();
       this.module = module;
       const watch = await module.beginWatch(this.source, names, this.name, context);
       if (controller.signal.aborted || this.disposed || this.owner.disposed) {
@@ -3622,6 +3626,9 @@ export class KameProgram {
     for (const operation of operations) operation.controller.abort();
     await Promise.allSettled(operations.map((operation) => operation.promise));
     this.owner.programs.delete(this);
+    this.source = '';
+    this._ast = null;
+    this.#sourceRoots = [];
     this.module = null;
   }
 }
@@ -3645,7 +3652,7 @@ export class KameWatch {
 
   snapshot() {
     this.assertLive();
-    return structuredClone(this.module.watchSnapshot(this.watch));
+    return this.module.watchSnapshot(this.watch);
   }
 
   invalidate(resources) {
@@ -5799,6 +5806,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       if (!record.source && !isDeclarationWatchResource(record.kind) && !active.has(key)) { fingerprints.delete(key); notifications.changed(); }
     }
   };
+  const shouldScan = (now) => notifications.dirty || now - lastScan >= (notifications.complete ? 10000 : 200);
 
   try {
     let active = await compile();
@@ -5809,32 +5817,36 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         const step = module.drainWatch(watch);
         if (step === 1) module.serviceWatchRequest(watch);
         if (watch.hostError) throw watch.hostError;
-        const snapshot = module.watchSnapshot(watch);
-        busy = snapshot.busy;
-        if (!busy && !cycleFinished) {
-          for (const resource of snapshot.changedInputs ?? []) {
-            const key = watchKey(resource.kind, resource.name);
-            if (!pending.has(key)) { pending.set(key, resource); lastChange = Date.now(); }
+        // Check each active tick for newly observed inputs; idle ticks only
+        // need the graph when reconciling notifications or servicing host work.
+        if (!cycleFinished || step === 1 || shouldScan(Date.now())) {
+          const snapshot = module.watchSnapshot(watch);
+          busy = snapshot.busy;
+          if (!busy && !cycleFinished) {
+            for (const resource of snapshot.changedInputs ?? []) {
+              const key = watchKey(resource.kind, resource.name);
+              if (!pending.has(key)) { pending.set(key, resource); lastChange = Date.now(); }
+            }
           }
+          await syncWatchResources(snapshot);
+          for (const root of snapshot.roots ?? []) {
+            if (!root.done || !root.diagnosticJSON) continue;
+            const key = `${root.index}:${root.revision}:${root.generation}`;
+            if (reported.has(key)) continue;
+            reported.add(key);
+            cycleFailed = true;
+            const encoded = JSON.parse(root.diagnosticJSON);
+            const detail = encoded.diagnostic ?? encoded;
+            if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+            else stderr.write(renderDiagnostic(detail, source, 80));
+          }
+          if (!busy) finishCycle();
         }
-        await syncWatchResources(snapshot);
-        for (const root of snapshot.roots ?? []) {
-          if (!root.done || !root.diagnosticJSON) continue;
-          const key = `${root.index}:${root.revision}:${root.generation}`;
-          if (reported.has(key)) continue;
-          reported.add(key);
-          cycleFailed = true;
-          const encoded = JSON.parse(root.diagnosticJSON);
-          const detail = encoded.diagnostic ?? encoded;
-          if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
-          else stderr.write(renderDiagnostic(detail, source, 80));
-        }
-        if (!snapshot.busy) finishCycle();
       }
       if (!active) finishCycle();
 
       const now = Date.now();
-      if (notifications.dirty || now - lastScan >= (notifications.complete ? 10000 : 200)) {
+      if (shouldScan(now)) {
         await seedSources();
         notifications.dirty = false;
         notifications.sync(fingerprints.values());
@@ -5873,7 +5885,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         finishCycle();
       }
 
-      if (pending.size && now - lastChange >= debounceMS && (!active || !module.watchSnapshot(watch).busy)) {
+      if (pending.size && now - lastChange >= debounceMS && (!active || !busy)) {
         const sourceChanged = [...pending.values()].some((item) => item.kind === 'source' || isDeclarationWatchResource(item.kind));
         if (sourceChanged && active) {
           invocationCancellations.delete(watch.cancellation);

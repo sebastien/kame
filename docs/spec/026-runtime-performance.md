@@ -31,6 +31,10 @@ Engine resource lookup and lexical scope lookup use indexes for repeated key
 queries. Indexes confirm complete keys after hash matches, preserve last-binding
 shadowing, and remain consistent when nodes or bindings are added and released.
 
+Index resolved literal outputs by canonical resource identity for registration
+and selection. Preserve authored output spans and template precedence. Measure
+registration separately from parsing and from work reachable by the chosen root.
+
 Glob expansion visits only directories compatible with the literal and
 wildcard path segments. `**` retains recursive semantics, results remain
 sorted and duplicate-free, and watch invalidation continues to use the complete
@@ -49,11 +53,13 @@ host-backed values, and denied effects.
 ## File content signatures
 
 Native hosts compute file and executable content digests with the platform
-SHA-256, byte-identical to the portable `core.Digest`. A process-wide memo
-reuses a digest while the file's device, inode, size, modification time and
-change time are unchanged. Files changed within two seconds before hashing are
-not memoized, so a same-tick rewrite cannot keep identical metadata and a stale
-digest. Signatures remain content signatures; the memo only avoids re-reading.
+SHA-256, byte-identical to the portable `core.Digest`. Content signatures for
+bytes already in memory also use the standard SHA-256 implementation. A
+process-wide memo reuses a digest while the file's device, inode, size,
+modification time and change time are unchanged. Files changed within two
+seconds before hashing are not memoized, so a same-tick rewrite cannot keep
+identical metadata and a stale digest. Signatures remain content signatures;
+the memo only avoids re-reading.
 
 Files of at least 256 KiB (typically executables) also persist their memo
 entry in the user cache directory (`kame/digests` below `os.UserCacheDir`),

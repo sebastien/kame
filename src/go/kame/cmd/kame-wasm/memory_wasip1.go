@@ -4,15 +4,12 @@ import "runtime"
 
 // Host buffers have explicit ownership even though their backing storage is
 // reclaimed by Go. Runtime heap measurements include all logical instances.
+var hostBufferBytes uint64
 var hostBufferPeak uint32
 
 //go:wasmexport kame_wasm_host_heap_used
 func hostHeapUsed() uint32 {
-	var bytes uint64
-	for _, b := range buffers {
-		bytes += uint64(len(b))
-	}
-	return uint32(min(bytes, uint64(^uint32(0))))
+	return uint32(min(hostBufferBytes, uint64(^uint32(0))))
 }
 
 //go:wasmexport kame_wasm_host_heap_peak
