@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,48 @@ def check_watch(command, environment):
 				except subprocess.TimeoutExpired:
 					os.killpg(process.pid, signal.SIGKILL)
 					process.wait(timeout=5)
+
+
+def check_digest_store(binary, command, environment):
+	"""Use the same digest record on both hosts, without trusting stale metadata."""
+	with tempfile.TemporaryDirectory() as directory:
+		project = Path(directory).resolve()
+		environment = dict(environment, HOME=str(project), XDG_CACHE_HOME=str(project / 'cache'))
+		cache = project / ('Library/Caches' if sys.platform == 'darwin' else 'cache')
+		source = project / 'input'
+		data = b'x' * (256 << 10)
+		source.write_bytes(data)
+		(project / 'Makefile.km').write_text('rule ./hash : ./input = digest "sha256" (read ./input)\n')
+		record = cache / 'kame/digests' / hashlib.sha256(os.fsencode(source)).hexdigest()
+		stamp = source.stat()
+		expected = struct.pack('<4sQQQqq32s', b'KDM1', stamp.st_dev, stamp.st_ino, stamp.st_size,
+		                       stamp.st_mtime_ns, stamp.st_ctime_ns, hashlib.sha256(data).digest())
+		# The store deliberately excludes files touched in the last two seconds.
+		time.sleep(2.1)
+
+		def build(runner, rebuild, disabled=False):
+			result = subprocess.run(runner + ['--json', './hash'], cwd=project,
+			                        env=dict(environment, KAME_DIGEST_CACHE='0' if disabled else '1'),
+			                        text=True, capture_output=True, timeout=20)
+			assert result.returncode == 0, (result.stdout, result.stderr)
+			assert (project / 'hash').read_text() == hashlib.sha256(data).hexdigest()
+			events = [json.loads(line) for line in result.stdout.splitlines()]
+			assert any(e['type'] == 'effect' for e in events) == rebuild, events
+
+		build(command, True, disabled=True)
+		assert not record.exists()
+		build([binary], True)
+		assert record.read_bytes() == expected
+		native_record = record.stat()
+		build(command, False)
+		assert record.stat().st_ino == native_record.st_ino
+		record.write_bytes(b'truncated')
+		build(command, False)
+		assert record.read_bytes() == expected
+		data = b'y' + data[1:]
+		source.write_bytes(data)
+		os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+		build(command, True)
 
 
 def main():
@@ -160,6 +203,9 @@ def main():
 			assert (project / 'seen').read_text() == target
 		assert (project / 'runs').read_text() == 'xx', 'link target observation was not revalidated'
 		checks += 1
+	if backend == 'wasm' and sys.platform in ('linux', 'darwin'):
+		check_digest_store(binary, command, environment)
+		checks += 1
 	if part == 'all':
 		check_watch(command, environment)
 		checks += 1
@@ -168,3 +214,5 @@ def main():
 
 if __name__ == '__main__':
 	main()
+
+# EOF

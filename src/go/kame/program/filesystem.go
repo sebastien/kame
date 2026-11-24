@@ -8,6 +8,7 @@ import (
 	"kame/host"
 	"kame/internal/mem"
 	"path"
+	"slices"
 
 	"strings"
 )
@@ -188,34 +189,17 @@ func (p *Program) wildcard(pattern string) core.Completion {
 		mem.FreeSlice(nil, names)
 		return core.Completion{Diagnostic: failure(p.Alloc, "FS_ERR", "cannot traverse wildcard path")}
 	}
-	var values []core.Value
-	for i := range names {
-		relative := p.relativePath(names[i])
-		values = append(values, core.NewString(p.Alloc, relative))
-		mem.FreeString(p.Alloc, relative)
-		mem.FreeString(p.Alloc, names[i])
+	for i, name := range names {
+		names[i] = p.relativePath(name)
+		mem.FreeString(p.Alloc, name)
 	}
-	mem.FreeSlice(nil, names)
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j].Text < values[j-1].Text; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
+	slices.Sort(names)
+	names = slices.Compact(names)
+	values := make([]core.Value, len(names))
+	for i, name := range names {
+		values[i] = core.Value{Kind: core.String, Text: name}
 	}
-	unique := 0
-	for i := range values {
-		if unique > 0 && values[i].Text == values[unique-1].Text {
-			values[i].Free(p.Alloc)
-			continue
-		}
-		values[unique] = values[i]
-		unique++
-	}
-	values = values[:unique]
-	result := core.NewList(p.Alloc, values)
-	for i := range values {
-		values[i].Free(p.Alloc)
-	}
-	mem.FreeSlice(nil, values)
+	result := core.Value{Kind: core.List, List: values}
 	if command {
 		// Visibility was enforced during the walk.
 		return core.Completion{Value: result, HasValue: true}

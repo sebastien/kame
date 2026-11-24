@@ -32,5 +32,9 @@ for backend in native wasm; do
  "${runner[@]}" -C "$project" ./out >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/out")" = abcliteral ]; then test-ok "$backend glob membership invalidates output"; else test-fail "$backend stale membership"; fi
  rm "$project/src/nested/c.c"
+ touch "$project/src/z.c"
+ "${runner[@]}" do run -C "$project" --allow-read -l expr -c 'map str (files ./src/**/**/*.c)' >"$project/value" 2>"$project/error"
+ if [ "$(cat "$project/value")" = '["./src/a.c", "./src/nested/b.c", "./src/z.c"]' ]; then test-ok "$backend recursive wildcard sorts and deduplicates"; else test-fail "$backend recursive wildcard order or duplicates"; fi
+ rm "$project/src/z.c"
 done
 test-end

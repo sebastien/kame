@@ -47,8 +47,8 @@ for backend in native wasm; do
 	if [ "$(cat "$work/out")" = '{count: 2, status: 0}' ] && [ "$(cat "$work/attempts")" = xx ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend lazy run calls are correlated"; else test-fail "$backend lazy run replay"; fi
 	rm "$work/attempts"
 	check 'firstsecond0' '((r => r.status) (run! "printf" "%s%s" $(printf first) $(printf second)))'
-	check '0' '((r later => r.status) (run! "sh" "-c" "printf x >> attempts") $(printf later))'
-	if [ "$(cat "$work/attempts")" = x ]; then test-ok "$backend completed graph is not replayed across a later wait"; else test-fail "$backend replayed graph"; fi
+	check '[7, 0, 7, 0]' '((r later => [r.status, r.effectiveStatus, r.stages.0.status, r.stages.0.effectiveStatus]) (run! :accept-exit [7] "sh" "-c" "printf x >> attempts; exit 7") $(printf later))'
+	if [ "$(cat "$work/attempts")" = x ]; then test-ok "$backend raw and effective statuses survive a later wait without replay"; else test-fail "$backend replayed graph"; fi
 	rm "$work/attempts"
 	check 'nil' '(if false then (run! "touch" "forbidden") else nil)'
 	"${command[@]}" do run --allow-run -C "$work" -l kash -c $'if true\n\tlet result = (pipe! (run! "printf" "branch") (run! "cat"))\n\tprintf "%s" $result.status\nprintf done' >"$work/out" 2>"$work/err"

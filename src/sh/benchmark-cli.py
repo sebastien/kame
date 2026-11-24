@@ -1,15 +1,68 @@
 #!/usr/bin/env python3
-"""Measure checked parser/runtime CLI workloads, including host startup."""
+"""Measure checked parser, runtime and file-build CLI workloads."""
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import statistics
 import subprocess
 import tempfile
 import time
+
+
+def timings(samples):
+    return {'median_ms': round(statistics.median(samples), 2), 'min_ms': round(min(samples), 2),
+            'max_ms': round(max(samples), 2)}
+
+
+def publication(command, env, root, count):
+    fixture = Path(__file__).resolve().parents[2] / 'examples/rules/publication'
+    outputs = ('public/hello.txt', 'public/world.txt', 'public/index.txt')
+    phases = {'clean': set(outputs), 'no-op': set(), 'edit': {'public/hello.txt', 'public/index.txt'}}
+    samples = {phase: [] for phase in phases}
+    for _ in range(count):
+        with tempfile.TemporaryDirectory(dir=root, prefix='publication-') as tmp:
+            project = Path(tmp).resolve()
+            (project / 'notes').mkdir()
+            for name in ('Makefile.km', 'banner.txt', 'notes/hello.txt', 'notes/world.txt'):
+                shutil.copyfile(fixture / name, project / name)
+            hello, world = project / 'notes/hello.txt', project / 'notes/world.txt'
+            banner = (project / 'banner.txt').read_bytes()
+            stamps = {}
+            for phase, writes in phases.items():
+                if phase == 'edit':
+                    original = hello.read_bytes()
+                    edited = original.replace(b'kame', b'kash')
+                    assert len(original) == len(edited) and original != edited
+                    stamp = hello.stat()
+                    hello.write_bytes(edited)
+                    os.utime(hello, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                started = time.perf_counter()
+                process = subprocess.run(command + ['--json', 'default'], cwd=project, env=env,
+                                         stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+                elapsed = (time.perf_counter() - started) * 1000
+                if process.returncode:
+                    raise RuntimeError(f'publication {phase} failed: {(process.stderr or process.stdout)[-1800:]!r}')
+                pages = [banner + path.read_bytes().upper() for path in (hello, world)]
+                events = [json.loads(line) for line in process.stdout.splitlines()]
+                executed = {e['resource']['name'] for e in events if e['type'] == 'target-reason'
+                            and e['decision'] == 'execute' and e['resource']['kind'] == 'file'}
+                if phase == 'no-op' and any(e['type'] == 'process-started' for e in events):
+                    raise RuntimeError('publication no-op launched a process')
+                if executed != {str(project / name) for name in writes}:
+                    raise RuntimeError(f'publication {phase}: unexpected rebuild set {executed}')
+                for name, expected in zip(outputs, (*pages, b''.join(pages))):
+                    output = project / name
+                    info = output.stat()
+                    stamp = (info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
+                    if output.read_bytes() != expected or (name not in writes and stamp != stamps[name]):
+                        raise RuntimeError(f'publication {phase}: unexpected output or rewrite of {name}')
+                    stamps[name] = stamp
+                samples[phase].append(elapsed)
+    return samples
 
 
 def main():
@@ -22,6 +75,7 @@ def main():
         parser.error('--samples must be positive')
     native, wrapper = args.native.resolve(), args.wrapper.resolve()
     wasm = Path(os.environ.get('KAME_WASM') or wrapper.with_name('kame.wasm')).resolve()
+    wasm_env = dict(os.environ, KAME_WASM=str(wasm))
     result = {'platform': platform.platform(), 'node': subprocess.check_output(['node', '--version'], text=True).strip(),
               'samples': args.samples, 'artifacts': {}, 'results': {}}
     for name, path in [('native', native), ('wrapper', wrapper), ('wasm', wasm)]:
@@ -61,12 +115,12 @@ def main():
         invocation = ['do', 'run', '--lang', 'expr', '--allow-read', '-c', f'count (files {pattern})']
         workloads['glob-selective-128-siblings'] = (invocation, lambda p: p.stdout == b'1')
 
-        for host, command in [('native', [str(native)]), ('wasm', ['node', str(wrapper)])]:
+        for host, command, env in [('native', [str(native)], None), ('wasm', ['node', str(wrapper)], wasm_env)]:
             for name, (invocation, validate) in workloads.items():
                 samples = []
                 for _ in range(args.samples):
                     started = time.perf_counter()
-                    process = subprocess.run(command + invocation, capture_output=True, timeout=60)
+                    process = subprocess.run(command + invocation, env=env, capture_output=True, timeout=60)
                     if process.returncode != 0:
                         detail = process.stderr.decode(errors='replace').strip().splitlines()
                         message = detail[-1] if detail else f'exit status {process.returncode}'
@@ -74,10 +128,13 @@ def main():
                     samples.append((time.perf_counter() - started) * 1000)
                     if not validate(process):
                         raise RuntimeError(f'unexpected output for {name} on {host}: {process.stdout[:200]!r}')
-                result['results'][f'{host}-{name}'] = {key: round(value, 2) for key, value in
-                    [('median_ms', statistics.median(samples)), ('min_ms', min(samples)), ('max_ms', max(samples))]}
+                result['results'][f'{host}-{name}'] = timings(samples)
+            for phase, samples in publication(command, env, root, args.samples).items():
+                result['results'][f'{host}-publication-{phase}'] = timings(samples)
     print(json.dumps(result, indent=2))
 
 
 if __name__ == '__main__':
     main()
+
+# EOF

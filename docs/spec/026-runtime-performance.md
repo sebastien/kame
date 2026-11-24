@@ -69,6 +69,11 @@ atomically; any read, write or format failure falls back to hashing.
 `KAME_DIGEST_CACHE=0` disables the store. It is a per-user optimization, not
 project cache state, so `kame do cache clean` does not manage it.
 
+Ordinary Node/WASM CLI builds on Linux and macOS can use the same store.
+They read and hash the opened file if no matching record is available,
+including for files within the race window. Inspection, dry runs, watch,
+and JavaScript embedding do not write to this store through the Node host.
+
 ## Measurements
 
 The acceptance suite records tracker total allocations for ownership-sensitive
@@ -78,6 +83,11 @@ with irrelevant directory trees. Memory and traversal-count assertions are
 deterministic gates. Wall-clock measurements are reported as repeated medians
 and are informational, not brittle pass/fail thresholds. Native and
 portable-runtime results are recorded separately.
+
+The CLI benchmark also runs clean, no-op, and one-input rebuilds of the
+publication example. It checks the written bytes and the exact rebuild set,
+including that unaffected outputs are not rewritten after an edit that preserves
+the input size and modification time.
 
 For retained builds, measure graph size independently from the size of the
 affected branch. Report live heap above an empty engine, marginal edge storage,

@@ -136,40 +136,32 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 	if status == 0 && signal != 0 {
 		status = 128 + signal
 	}
-	var stages []core.Value
 	completed := host.PayloadStages(completion)
+	stages := make([]core.Value, len(completed))
 	for i := range completed {
 		stage := completed[i]
-		parts := []core.RecordField{
+		fields := []core.RecordField{
 			{Key: "status", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "status")}},
 			{Key: "signal", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "signal")}},
 			{Key: "outcome", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "outcome")}},
+			{Key: "effectiveStatus", Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(stage)}},
 		}
-		stages = append(stages, core.NewRecord(a, parts))
-		v := &stages[len(stages)-1]
-		v.Record = append(v.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(stage)}})
 		for _, field := range stage.Record {
 			if field.Key == "state" || field.Key == "error" {
-				v.Record = append(v.Record, core.RecordField{Key: owned(a, field.Key), Value: field.Value.Clone(a)})
+				fields = append(fields, core.RecordField{Key: owned(a, field.Key), Value: field.Value.Clone(a)})
 			}
 		}
+		stages[i] = core.Value{Kind: core.Record, Record: fields}
 	}
-	fields := []core.RecordField{
+	return Result{Value: core.Value{Kind: core.Record, Record: []core.RecordField{
 		{Key: "status", Value: core.Value{Kind: core.Int, Int: status}},
 		{Key: "signal", Value: core.Value{Kind: core.Int, Int: signal}},
-		{Key: "stages", Value: core.NewList(a, stages)},
+		{Key: "stages", Value: core.Value{Kind: core.List, List: stages}},
 		{Key: "stdoutCaptured", Value: core.Value{Kind: core.Bool}},
 		{Key: "stderrCaptured", Value: core.Value{Kind: core.Bool}},
-	}
-	value := core.NewRecord(a, fields)
-	value.Record = append(value.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(completion)}})
-	value.Record = append(value.Record, core.RecordField{Key: owned(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: host.EffectiveSignal(completion)}})
-	fields[2].Value.Free(a)
-	for i := range stages {
-		stages[i].Free(a)
-	}
-	mem.FreeSlice(nil, stages)
-	return Result{Value: value}
+		{Key: "effectiveStatus", Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(completion)}},
+		{Key: "effectiveSignal", Value: core.Value{Kind: core.Int, Int: host.EffectiveSignal(completion)}},
+	}}}
 }
 
 // captureOutcome exposes process status without turning an ordinary nonzero

@@ -10,7 +10,7 @@ test-step "extract the authored recipes into an isolated stub project"
 work="$TMPDIR/project"
 mkdir -p "$work/bin" "$work/src/go/kame"
 sed -n '/^include .\/src\/kash\/release\.kash$/,/^# --- Source sets/p; /^# --- Native binaries/,/^# --- WebAssembly/p' \
-	"$CLI_ROOT/Kamefile" | sed 's/${KAME_INPUTS}/.\/seed/g' >"$work/Makefile.km"
+	"$CLI_ROOT/Kamefile" | sed 's/${KAME_VERSION_SOURCE}, ${KAME_INPUTS}/.\/seed/g' >"$work/Makefile.km"
 printf seed >"$work/seed"
 # The extracted header includes the repository's Kash libraries.
 cp -R "$CLI_ROOT/src/kash" "$work/src/kash"
@@ -41,6 +41,24 @@ run() {
 		exit 1
 	fi
 }
+test-step "the first unchanged self-build does not recompile"
+self="$TMPDIR/self-build"
+mkdir -p "$self/src/go/kame/cmd/kame"
+cp "$CLI_ROOT/VERSION" "$self/VERSION"
+touch "$self/src/go/kame/go.mod" "$self/src/go/kame/go.sum"
+printf 'package main\n' >"$self/src/go/kame/cmd/kame/main.go"
+sed -n '/^KAME_DIR = /p; /^KAME_VERSION_SOURCE = /,/^$/p; /^rule \.\/src\/go\/kame\/cmd\/kame\/version_generated\.go :/,/^$/p; /^rule \.\/build\/kame\.debug :/,/^$/p' \
+	"$CLI_ROOT/Kamefile" >"$self/Kamefile"
+timeout 20 "$CLI_BIN" --json -C "$self" ./build/kame.debug >"$self/first"
+timeout 20 "$CLI_BIN" --json -C "$self" ./build/kame.debug >"$self/repeat"
+if [ -s "$self/src/go/kame/cmd/kame/version_generated.go" ] && [ -s "$self/build/kame.debug" ] &&
+   ! grep -q INPUT_UNSTABLE "$self/first" && ! grep -q '"type":"process-started"' "$self/repeat"; then
+	test-ok "generating the version source leaves reusable build inputs"
+else
+	test-fail "expected a valid clean build followed by a no-op"
+	cat "$self/first" "$self/repeat"
+fi
+
 test-step "native recipes disable cgo and select Go artifact modes"
 for pair in build/kame.debug:debug dist/kame:release build/kame.sanitize:sanitize; do
 	target=${pair%:*}; mode=${pair#*:}

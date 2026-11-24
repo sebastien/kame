@@ -1202,29 +1202,86 @@ function readResource(name) {
   return readFile(filesystemPath(name));
 }
 
+function digestCacheDirectory() {
+  if (env.KAME_DIGEST_CACHE === '0') return '';
+  let base = '';
+  if (process.platform === 'linux') base = env.XDG_CACHE_HOME || (env.HOME && join(env.HOME, '.cache'));
+  if (process.platform === 'darwin' && env.HOME) base = join(env.HOME, 'Library', 'Caches');
+  return base && isAbsolute(base) ? join(base, 'kame', 'digests') : '';
+}
+
+function digestIdentity(info) {
+  // Same fixed-size, little-endian record as host/posix/digest_store.go.
+  const identity = Buffer.allocUnsafe(44);
+  identity.write('KDM1');
+  [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].forEach((value, i) => {
+    identity.writeBigUInt64LE(BigInt.asUintN(64, value), 4 + i * 8);
+  });
+  return identity;
+}
+
+async function readDigestRecord(path, identity) {
+  try {
+    const file = await open(path, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+    try {
+      const info = await file.stat();
+      const size = identity.length + 32;
+      if (!info.isFile() || info.size !== size || info.uid !== process.getuid() || (info.mode & 0o022)) return;
+      const record = Buffer.allocUnsafe(size);
+      const { bytesRead } = await file.read(record, 0, size, 0);
+      if (bytesRead === size && record.subarray(0, identity.length).equals(identity)) {
+        return record.toString('hex', identity.length);
+      }
+    } finally { await file.close(); }
+  } catch { /* Cache problems are misses. */ }
+}
+
 // Content observations return an exact SHA-256, not a stat-based cache key.
 // Keep raw reads separate: only callers that need bytes materialize the file.
-async function resourceDigest(name) {
-  const hash = createHash('sha256');
+async function resourceDigest(name, digestDirectory) {
   if (isMemoryResource(name)) {
     const data = memoryResourceFiles.get(name);
     if (!data) throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
-    hash.update(data);
-  } else {
-    // Recheck the opened descriptor: a regular file can be replaced by a FIFO after stat.
-    const flags = process.platform === 'win32' ? 'r' : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
-    const file = await open(filesystemPath(name), flags);
-    try {
-      if (!(await file.stat()).isFile()) return false;
-      const buffer = Buffer.allocUnsafe(65536);
-      for (;;) {
-        const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
-        if (!bytesRead) break;
-        hash.update(buffer.subarray(0, bytesRead));
-      }
-    } finally { await file.close(); }
+    return { sha256: createHash('sha256').update(data).digest('hex') };
   }
-  return { sha256: hash.digest('hex') };
+  // Recheck the opened descriptor: a regular file can be replaced by a FIFO after stat.
+  const flags = process.platform === 'win32' ? 'r' : fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
+  const filename = filesystemPath(name);
+  const file = await open(filename, flags);
+  try {
+    const info = await file.stat({ bigint: Boolean(digestDirectory) });
+    if (!info.isFile()) return false;
+    let cachePath, identity;
+    if (digestDirectory && isAbsolute(filename) && info.size >= 262144n) {
+      // Match the native race window; same-tick writes can have identical metadata.
+      const limit = (BigInt(Date.now()) - 2000n) * 1000000n;
+      if (info.mtimeNs < limit && info.ctimeNs < limit) {
+        identity = digestIdentity(info);
+        cachePath = join(digestDirectory, createHash('sha256').update(filename).digest('hex'));
+        const cached = await readDigestRecord(cachePath, identity);
+        if (cached !== undefined) {
+          const current = await file.stat({ bigint: true }).catch(() => null);
+          if (current && digestIdentity(current).equals(identity)) return { sha256: cached };
+        }
+      }
+    }
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(65536);
+    for (;;) {
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    if (!cachePath) return { sha256: hash.digest('hex') };
+    const digest = hash.digest();
+    try {
+      if (digestIdentity(await file.stat({ bigint: true })).equals(identity)) {
+        await mkdir(digestDirectory, { recursive: true, mode: 0o700 });
+        await writeFileAtomic(cachePath, Buffer.concat([identity, digest]), false, 0o600);
+      }
+    } catch { /* Reuse is optional; the digest is already available. */ }
+    return { sha256: digest.toString('hex') };
+  } finally { await file.close(); }
 }
 
 function statResource(name, options, noFollow = false) {
@@ -1332,14 +1389,14 @@ function wildcardPaths(pattern, command = false) {
   return matches;
 }
 
-async function writeFileAtomic(name, data, durable = false) {
+async function writeFileAtomic(name, data, durable = false, mode = 0o644) {
   name = filesystemPath(name);
   const directory = dirname(name);
   await mkdir(directory, { recursive: true });
   const staging = await mkdtemp(join(directory, '.kame-write-'));
   try {
     const temporary = join(staging, 'output');
-    const file = await open(temporary, 'wx', 0o644);
+    const file = await open(temporary, 'wx', mode);
     try {
       await file.writeFile(data);
       if (durable) await file.sync();
@@ -1983,7 +2040,7 @@ class Module {
       // The host supplies content identity, never a freshness decision. Hash
       // bounded chunks instead of copying executables into the instance heap.
       let digest;
-      try { digest = await resourceDigest(payload); }
+      try { digest = await resourceDigest(payload, context.digestDirectory); }
       catch { return this.completeJSON(instance, request, true); }
       return this.completeJSON(instance, request, digest);
     }
@@ -5962,6 +6019,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
     }));
     return module.runSession(fragments, inv, context);
   }
+  if (context.grants.write) context.digestDirectory = digestCacheDirectory();
   let failed = false;
   try {
     lastDiagnostic = null;

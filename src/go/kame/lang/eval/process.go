@@ -399,6 +399,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 		}
 		freeValueWithCallables(c.Run, &completion.Value)
 		if r.Diagnostic.Code == "" {
+			if IsProcessResult(r.Value) {
+				// Plain status records are finished; suspended blocks can share them.
+				r.Value.Share(c.Run)
+			}
 			state.Value, state.Done = borrowValue(state.Alloc, r.Value), true
 		}
 		return p.captureRecovery(e, c, state, r)

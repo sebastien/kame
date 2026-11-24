@@ -1506,37 +1506,36 @@ func effectiveStatus(status int, signal int, effective int, has bool) int {
 }
 
 func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
-	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}}, {Key: "stdout", Value: core.NewBytes(a, event.Stdout)}, {Key: "stderr", Value: core.NewBytes(a, event.Stderr)}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}}}
-	value := core.NewRecord(a, fields)
 	// Always publish the effective fields so every completion has one shape.
 	effectiveSignal := event.Signal
 	if event.HasEffectiveStatus {
 		effectiveSignal = event.EffectiveSignal
 	}
-	value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(event.Status, event.Signal, event.EffectiveStatus, event.HasEffectiveStatus))}})
-	value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: int64(effectiveSignal)}})
-	for i := range fields {
-		fields[i].Value.Free(a)
-	}
+	fields := append(make([]core.RecordField, 0, 8),
+		core.RecordField{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}},
+		core.RecordField{Key: "stdout", Value: core.NewBytes(a, event.Stdout)},
+		core.RecordField{Key: "stderr", Value: core.NewBytes(a, event.Stderr)},
+		core.RecordField{Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}},
+		core.RecordField{Key: "effectiveStatus", Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(event.Status, event.Signal, event.EffectiveStatus, event.HasEffectiveStatus))}},
+		core.RecordField{Key: "effectiveSignal", Value: core.Value{Kind: core.Int, Int: int64(effectiveSignal)}},
+	)
 	if len(event.Stages) != 0 {
-		var stages []core.Value
+		stages := make([]core.Value, len(event.Stages))
 		for i := range event.Stages {
 			stage := event.Stages[i]
-			parts := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(stage.Status)}}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(stage.Signal)}}, {Key: "outcome", Value: core.Value{Kind: core.Int, Int: int64(stage.Outcome)}}}
-			stages = append(stages, core.NewRecord(a, parts))
-			v := &stages[len(stages)-1]
-			v.Record = append(v.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(stage.Status, stage.Signal, stage.EffectiveStatus, stage.HasEffectiveStatus))}})
+			stages[i] = core.Value{Kind: core.Record, Record: []core.RecordField{
+				{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(stage.Status)}},
+				{Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(stage.Signal)}},
+				{Key: "outcome", Value: core.Value{Kind: core.Int, Int: int64(stage.Outcome)}},
+				{Key: "effectiveStatus", Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(stage.Status, stage.Signal, stage.EffectiveStatus, stage.HasEffectiveStatus))}},
+			}}
 		}
-		value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
-		for i := range stages {
-			stages[i].Free(a)
-		}
-		mem.FreeSlice(nil, stages)
+		fields = append(fields, core.RecordField{Key: "stages", Value: core.Value{Kind: core.List, List: stages}})
 	}
 	if len(event.EdgeMetrics) != 0 {
-		value.Record = append(value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)})
+		fields = append(fields, core.RecordField{Key: "edgeMetrics", Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)})
 	}
-	return value
+	return core.Value{Kind: core.Record, Record: fields}
 }
 
 // Captured stdout is private to the expression; stderr remains a live stream.
