@@ -24,6 +24,7 @@ jobs:
         shell: bash
         run: |
           while read -r path url branch commit; do
+            case "$path" in ''|\#*) continue ;; esac
             git clone --quiet "https://github.com/${url#git@github.com:}" "$path"
             git -C "$path" checkout --quiet "$commit"
           done < .gitdeps
@@ -40,6 +41,8 @@ jobs:
         run: make dist-native dist-wasm wasm-check
       - name: Verify native compiler identity
         run: bash tests/native/test-toolchain.sh
+      - name: Verify native-to-WASM digest reuse
+        run: python3 tests/native-data.py "$PWD" wasm "$PWD/dist/kame" digest-store
       - uses: actions/upload-artifact@v4
         with:
           name: go-${{ runner.os }}-${{ runner.arch }}

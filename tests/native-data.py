@@ -48,6 +48,9 @@ def check_digest_store(binary, command, environment):
 		source = project / 'input'
 		data = b'x' * (256 << 10)
 		source.write_bytes(data)
+		# A whole-second mtime can be restored exactly on either platform.
+		now = int(time.time())
+		os.utime(source, (now, now))
 		(project / 'Makefile.km').write_text('rule ./hash : ./input = digest "sha256" (read ./input)\n')
 		record = cache / 'kame/digests' / hashlib.sha256(os.fsencode(source)).hexdigest()
 		stamp = source.stat()
@@ -78,19 +81,29 @@ def check_digest_store(binary, command, environment):
 		data = b'y' + data[1:]
 		source.write_bytes(data)
 		os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+		edited = source.stat()
+		assert (edited.st_size, edited.st_mtime_ns) == (stamp.st_size, stamp.st_mtime_ns)
+		# Test the identity comparison, not the recent-write bypass.
+		time.sleep(2.1)
 		build(command, True)
 
 
 def main():
 	root, backend, binary = sys.argv[1:4]
 	part = sys.argv[4] if len(sys.argv) > 4 else 'all'
-	if part not in ('all', 'values', 'watch'):
-		raise SystemExit('expected all, values or watch')
+	if part not in ('all', 'values', 'watch', 'digest-store'):
+		raise SystemExit('expected all, values, watch or digest-store')
 	command = [binary] if backend == 'native' else ['node', os.environ.get('KAME_TEST_WASM_WRAPPER', str(Path(root) / 'dist/kame.js'))]
 	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_') or key == 'KAME_WASM'}
 	if part == 'watch':
 		check_watch(command, environment)
 		print(f'{backend}: native data watch passed')
+		return
+	if part == 'digest-store':
+		if backend != 'wasm' or sys.platform not in ('linux', 'darwin'):
+			raise SystemExit('digest-store requires the wasm backend on Linux or macOS')
+		check_digest_store(binary, command, environment)
+		print('native-to-WASM digest reuse passed')
 		return
 	checks = 0
 	with tempfile.TemporaryDirectory() as directory:

@@ -16,6 +16,7 @@ jobs:
       - name: Fetch pinned dependencies
         run: |
           while read -r path url branch commit; do
+            case "$path" in ''|\#*) continue ;; esac
             git clone --quiet "https://github.com/${url#git@github.com:}" "$path"
             git -C "$path" checkout --quiet "$commit"
           done < .gitdeps
