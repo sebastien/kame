@@ -232,7 +232,7 @@ func (p *Program) loadImport(m *script.ModuleDeclaration, c *Context, author str
 		return Result{Diagnostic: d}
 	}
 	value := c.Engine.Value(moduleNode.Key).Value
-	module := value.Module.(*kashModule)
+	module := value.Module.Handle.(*kashModule)
 	for _, selected := range m.Names {
 		if !module.exports(selected.Name) {
 			return failure(c.Run, "REF_MISSING", selected.Span, "module does not export "+selected.Name)
@@ -404,7 +404,7 @@ func (c *Context) importedValue(imp *authoredImport, member string, span source.
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
 		}
-		return c.importedModuleMember(imp.node.Latest.Module.(*kashModule), member, span)
+		return c.importedModuleMember(imp.node.Latest.Module.Handle.(*kashModule), member, span)
 	}
 	if !c.Engine.TryDependency(imp.node.Key) {
 		return Result{Waiting: true}
@@ -412,7 +412,7 @@ func (c *Context) importedValue(imp *authoredImport, member string, span source.
 	if d := c.Engine.DependencyDiagnostic(imp.node.Key); d.Code != "" {
 		return Result{Diagnostic: d.Clone(c.Run)}
 	}
-	return c.importedModuleMember(imp.node.Latest.Module.(*kashModule), member, span)
+	return c.importedModuleMember(imp.node.Latest.Module.Handle.(*kashModule), member, span)
 }
 
 type moduleBinding struct {

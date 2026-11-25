@@ -274,6 +274,9 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		freeValuesWithCallables(context.Run, operands.Values)
 	} else {
 		freeValues(context.Run, operands.Values)
+		if len(operands.Values) == 2 && operation.Category == PureOperation && !result.Waiting && !result.Completed && result.Diagnostic.Code == "" {
+			p.spareOperandPair = operands.Values
+		}
 	}
 	return result
 }

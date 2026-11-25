@@ -22,6 +22,7 @@ type Grant struct {
 	Names      []string
 }
 
+// OperationCall borrows the operand slice for the duration of the call.
 type OperationCall func(*Context, any, []core.Value) Result
 type ContextFree func(mem.Allocator, any)
 

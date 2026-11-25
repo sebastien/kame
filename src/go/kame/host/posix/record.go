@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"kame/internal/c"
 	"kame/internal/mem"
+	"slices"
 	"syscall"
 )
 
@@ -125,9 +126,17 @@ func (h *Host) ReadRecord(a mem.Allocator, id int64, name string, delimiter int,
 	if stdin {
 		return h.readStdinRecord(a, cursor)
 	}
-	buffer := make([]byte, host.RecordLimit+1)
-	defer mem.FreeSlice(nil, buffer)
+	// Re-read at the current offset: a loop body may rewrite the next record.
+	var short [256]byte
+	buffer := short[:]
 	size := int(km_record_next(cursor.FD, &cursor.Offset, delimiter, buffer))
+	if size == -2 {
+		if cursor.Data == nil {
+			cursor.Data = make([]byte, host.RecordLimit+1)
+		}
+		buffer = cursor.Data
+		size = int(km_record_next(cursor.FD, &cursor.Offset, delimiter, buffer))
+	}
 	if size < 0 {
 		code := "FS_ERR"
 		if size == -2 {
@@ -187,8 +196,7 @@ func (h *Host) CloseRecord(id int64) {
 			if h.StdinRecord == id {
 				h.StdinRecord = 0
 			}
-			copy(h.Readers[i:], h.Readers[i+1:])
-			h.Readers = h.Readers[:len(h.Readers)-1]
+			h.Readers = slices.Delete(h.Readers, i, i+1)
 			return
 		}
 	}

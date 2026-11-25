@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Compare Kash with bash on shell-style workloads, by per-process CPU time.
+"""Compare Kash with Bash or an earlier Kash build on checked shell workloads.
 
-CPU time (user + system of the shell and its children, from wait4) is used
-instead of wall time so results stay meaningful on a loaded machine. Commands
-are interleaved per sample so drift affects every workload alike.
+CPU includes waited-for children. On Linux, --rss runs a separate pass with
+GNU time: peak RSS is the largest single process, not the sum of a pipeline.
 """
 import argparse
 import os
 from pathlib import Path
 import statistics
 import subprocess
+import sys
 import tempfile
+import time
 
 WORKLOADS = {
     # name: (Kash source, Bash source, expected stdout or count of zero bytes)
@@ -30,6 +31,10 @@ WORKLOADS = {
         'let big = (split "\\n" (strip $(seq 20000)))\nfor i in (split "\\n" (strip $(seq 1000)))\n\t(nop (count big))\necho (count big)\n',
         'mapfile -t big < <(seq 20000); for i in $(seq 1000); do n=${#big[@]}; done; echo "$n"\n',
         b'20000\n'),
+    'file-records-1000': (
+        'for item from ./records :lines\n\techo $item\n',
+        'while IFS= read -r item; do echo "$item"; done < records\n',
+        b''.join(f'{i:07d}\n'.encode() for i in range(1000))),
     'map-filter-100k': (
         'let xs = (split "\\n" (strip $(seq 100000)))\nlet ys = (map (x => str x "!") xs)\necho (count (filter (x => ends? "0!" x) ys))\n',
         'mapfile -t xs < <(seq 100000); for x in "${xs[@]}"; do ys+=("$x!"); done; '
@@ -40,7 +45,7 @@ WORKLOADS = {
 
 
 def validate(argv, cwd, env, expected):
-    with subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE) as process:
+    with subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE) as process:
         if isinstance(expected, int):
             size, only_zeroes = 0, True
             while chunk := process.stdout.read(64 << 10):
@@ -53,37 +58,49 @@ def validate(argv, cwd, env, expected):
             raise SystemExit(f'failed validation: {" ".join(argv)}')
 
 
-def cpu_ms(argv, cwd, env):
-    pid = os.fork()
-    if pid == 0:
-        devnull = os.open(os.devnull, os.O_WRONLY)
-        os.dup2(devnull, 1)
-        os.dup2(devnull, 2)
-        os.chdir(cwd)
-        try:
-            os.execvpe(argv[0], argv, env)
-        finally:
-            os._exit(127)
-    _, status, usage = os.wait4(pid, 0)
-    if os.waitstatus_to_exitcode(status) != 0:
+def measure(argv, cwd, env):
+    start = time.perf_counter_ns()
+    with subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as process:
+        _, status, usage = os.wait4(process.pid, 0)
+        process.returncode = os.waitstatus_to_exitcode(status)
+    wall = (time.perf_counter_ns() - start) / 1e6
+    if process.returncode != 0:
         raise SystemExit(f'failed: {" ".join(argv)}')
-    return (usage.ru_utime + usage.ru_stime) * 1000
+    return (usage.ru_utime + usage.ru_stime) * 1000, wall
+
+
+def peak_rss(argv, cwd, env):
+    # wait4 directly from Python includes the Python parent's pre-exec RSS floor.
+    meter = cwd / 'peak-rss'
+    subprocess.run(['/usr/bin/time', '-f', '%M', '-o', str(meter), *argv], cwd=cwd, env=env,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, check=True)
+    return int(meter.read_text()) / 1024
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--samples', type=int, default=5)
     parser.add_argument('--kash', type=Path, default=Path(os.environ.get('KASH_BIN', 'dist/kash')))
-    parser.add_argument('--bash', default='bash')
+    against = parser.add_mutually_exclusive_group()
+    against.add_argument('--bash', default='bash')
+    against.add_argument('--baseline-kash', type=Path, help='compare against this Kash build on identical scripts')
+    parser.add_argument('--rss', action='store_true', help='also measure peak MiB (Linux with GNU time)')
     parser.add_argument('workloads', nargs='*', default=list(WORKLOADS))
     args = parser.parse_args()
     if args.samples < 1:
         parser.error('--samples must be positive')
-    kash = str(args.kash.resolve())
+    if args.rss and (sys.platform != 'linux' or not Path('/usr/bin/time').is_file()):
+        parser.error('--rss requires Linux with GNU /usr/bin/time')
+    # Kash dispatches on argv[0]; dist/kash is a symlink to the kame binary.
+    kash = str(args.kash.absolute())
+    other, suffix, label = (str(args.baseline_kash.absolute()), 'kash', 'base') if args.baseline_kash else (args.bash, 'sh', 'bash')
     with tempfile.TemporaryDirectory(prefix='kash-bench-') as tmp:
         root = Path(tmp)
         # Do not let previous benchmark runs seed the tool digest store.
         env = dict(os.environ, XDG_CACHE_HOME=str(root / 'cache'))
+        if 'file-records-1000' in args.workloads:
+            (root / 'records').write_bytes(WORKLOADS['file-records-1000'][2])
         if 'large-tool-64MiB' in args.workloads:
             tool = root / 'large-tool'
             with tool.open('wb') as f:
@@ -96,16 +113,24 @@ def main():
             (root / f'{name}.kash').write_text(kash_source)
             (root / f'{name}.sh').write_text(bash_source)
             validate([kash, f'{name}.kash'], root, env, expected)
-            validate([args.bash, f'{name}.sh'], root, env, expected)
+            validate([other, f'{name}.{suffix}'], root, env, expected)
             results[name] = ([], [])
-        for _ in range(args.samples):
+        for sample in range(args.samples):
             for name in args.workloads:
-                results[name][0].append(cpu_ms([kash, f'{name}.kash'], root, env))
-                results[name][1].append(cpu_ms([args.bash, f'{name}.sh'], root, env))
-        print(f'{"workload":24} {"kash ms":>10} {"bash ms":>10} {"ratio":>7}')
-        for name, (kash_ms, bash_ms) in results.items():
-            k, b = statistics.median(kash_ms), statistics.median(bash_ms)
-            print(f'{name:24} {k:10.2f} {b:10.2f} {k / b if b else float("inf"):7.2f}')
+                commands = ([kash, f'{name}.kash'], [other, f'{name}.{suffix}'])
+                for i in ((0, 1) if sample % 2 == 0 else (1, 0)):
+                    values = measure(commands[i], root, env)
+                    if args.rss:
+                        values += (peak_rss(commands[i], root, env),)
+                    results[name][i].append(values)
+        print('Median CPU and wall time in ms' + ('; peak RSS in MiB' if args.rss else ''))
+        print(f'workload                   kash CPU   {label} CPU   ratio  kash wall  {label} wall'
+              + (f'   kash RSS   {label} RSS' if args.rss else ''))
+        for name, pair in results.items():
+            k, b = ([statistics.median(column) for column in zip(*runs)] for runs in pair)
+            ratio = k[0] / b[0] if b[0] else float('inf')
+            print(f'{name:24} {k[0]:10.2f} {b[0]:10.2f} {ratio:7.2f} {k[1]:10.2f} {b[1]:10.2f}'
+                  + (f' {k[2]:10.2f} {b[2]:10.2f}' if args.rss else ''))
 
 
 if __name__ == '__main__':

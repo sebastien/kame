@@ -23,11 +23,11 @@ type moduleSource struct {
 }
 
 type kashModule struct {
-	Program   *Program
-	Scope     *Scope
-	Sources   []moduleSource
-	Fields    []string
-	Signature core.Signature
+	core.ModuleRef
+	Program *Program
+	Scope   *Scope
+	Sources []moduleSource
+	Fields  []string
 }
 
 func (m *kashModule) Free() {
@@ -380,6 +380,7 @@ func (p *Program) loadModule(name string, c *Context, span source.Span) Result {
 			}
 		}
 	}
+	m.Handle = m
 	p.Modules = append(p.Modules, m)
 	state.Module, state.Completed = nil, m
 	return Result{Value: m.Value()}
@@ -479,7 +480,7 @@ func (state *moduleLoad) bindImports(p *Program, c *Context, defined map[string]
 				return r
 			}
 			if r.Diagnostic.Code == "" {
-				module := r.Value.Module.(*kashModule)
+				module := r.Value.Module.Handle.(*kashModule)
 				r = src.bindImport(c, item, module, defined)
 				if r.Diagnostic.Code == "" {
 					state.Dependencies = append(state.Dependencies, module.Signature)
@@ -533,7 +534,7 @@ func (src *moduleSource) bindImport(c *Context, item script.ScriptItem, module *
 }
 
 func (m *kashModule) Value() core.Value {
-	return core.Value{Kind: core.Module, Module: m, ModuleOwner: m.Program, ModuleSignature: &m.Signature}
+	return core.Value{Kind: core.Module, Module: &m.ModuleRef}
 }
 
 func (m *kashModule) exports(name string) bool {
@@ -553,10 +554,13 @@ type ModuleFieldResult struct {
 }
 
 func (c *Context) ModuleField(value core.Value, key string, span source.Span) ModuleFieldResult {
-	if c.Program == nil || value.Kind != core.Module || value.ModuleOwner != c.Program || value.Module == nil {
+	var m *kashModule
+	if value.Kind == core.Module && value.Module != nil {
+		m, _ = value.Module.Handle.(*kashModule)
+	}
+	if m == nil || c.Program == nil || m.Program != c.Program {
 		return ModuleFieldResult{Result: failure(c.Run, "EXPR_INVALID", span, "module belongs to another invocation"), Found: true}
 	}
-	m := value.Module.(*kashModule)
 	if !m.exports(key) {
 		return ModuleFieldResult{}
 	}

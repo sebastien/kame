@@ -1096,6 +1096,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context, heads commandHeads) R
 	if c.RecipeNode == 0 && (e.Kind == expr.CommandCapture || e.TypedCapture) {
 		c.UnvalidatedRead()
 	}
+	// The queue can own the finished payload without copying its stage records.
+	payload.Share(c.Run)
 	state.ID = c.Submit(host.RequestProcess, payload)
 	payload.Free(c.Run)
 	if state.ID == 0 {

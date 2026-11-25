@@ -22,6 +22,7 @@ const files = {
   invalid: Buffer.from([0xff, 10]), tail: Buffer.from([97, 10, 0xff]),
   max: 'x'.repeat(65536), maxlf: 'x'.repeat(65535) + '\n',
   excess: 'x'.repeat(65537), excesslf: 'x'.repeat(65536) + '\n',
+  boundary: [255, 256, 257].map(n => 'x'.repeat(n)).join('\n'),
   many: 'a\n'.repeat(1000), 'sub/items': 'scoped\n',
   deadline: 'a\n'.repeat(1000000),
 };
@@ -61,6 +62,7 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, process.env.WASM
   run('for line from ./invalid :lines\n\tprintf forbidden', '', 1, 'KASH_FRAME_ENCODING');
   run('for line from ./max :lines\n\tprintf %s (count line)', '65536');
   run('for line from ./maxlf :lines\n\tprintf %s (count line)', '65535');
+  run('for line from ./boundary :lines\n\techo (count line)', '255\n256\n257\n');
   run('for line from ./excess :lines\n\tprintf forbidden', '', 1, 'KASH_RECORD_LIMIT');
   run('for line from ./excesslf :lines\n\tprintf forbidden', '', 1, 'KASH_RECORD_LIMIT');
   run('for line from [] :lines\n\tprintf forbidden', '', 1, 'EXPR_INVALID');
@@ -74,6 +76,8 @@ for (const runner of [[process.env.CLI_BIN], [process.execPath, process.env.WASM
   run('def probe ()\n\tfor line from ./invalid :lines\n\t\tprintf forbidden\nlet result = $?(probe)\nif result.state != :failed\n\t(fail! "expected a failed record reader")\nfor line from ./final :lines\n\tprintf %s $line', 'a');
   writeFileSync(join(work, 'replace'), 'old1\nold2\n'); writeFileSync(join(work, 'replacement'), 'new\n');
   run('for line from ./replace :lines\n\tif line == "old1"\n\t\tmv ./replacement ./replace\n\tprintf "%s;" $line', 'old1;old2;');
+  writeFileSync(join(work, 'mutating'), 'first\nold!!\n');
+  run(`for line from ./mutating :lines\n\tif line == "first"\n\t\tsh -c 'printf "first\\nnew!!\\n" > mutating'\n\techo $line`, 'first\nnew!!\n');
   const formatted = spawnSync(runner[0], [...runner.slice(1), 'do', 'fmt', '-l', 'kash', '-c', 'for line from ./final :lines\n\tprintf %s $line'], { encoding: 'utf8', timeout: 6000 });
   assert.equal(formatted.status, 0, formatted.stderr); run(formatted.stdout, 'a');
   const ast = spawnSync(runner[0], [...runner.slice(1), 'do', 'parse', '--json', '-l', 'kash', '-c', formatted.stdout], { encoding: 'utf8', timeout: 6000 });

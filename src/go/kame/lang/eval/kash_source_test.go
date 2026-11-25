@@ -30,6 +30,10 @@ func TestRuntimeSourceReusesAuthoredRevision(t *testing.T) {
 	if len(p.Modules) != 1 || len(p.SourceParts) != 1 {
 		t.Fatal("retained duplicate source storage")
 	}
+	value := p.Modules[0].Value()
+	if value.Module.Handle != p.Modules[0] || core.ValueSignature(value).Mode != core.SignatureUnavailable {
+		t.Fatal("retained runtime source lost its handle or acquired an import signature")
+	}
 	if got := p.retainRuntimeSource(makeSource("/profile", "let x = 2", firstImport)); got == initial {
 		t.Fatal("changed file reused stale syntax")
 	}

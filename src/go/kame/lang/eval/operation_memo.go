@@ -296,7 +296,11 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, lexic
 		p.discardArgumentMemo(state)
 	}
 	if values == nil {
-		values = make([]core.Value, len(arguments))
+		if len(arguments) == 2 && operation != "" && p.spareOperandPair != nil {
+			values, p.spareOperandPair = p.spareOperandPair, nil
+		} else {
+			values = make([]core.Value, len(arguments))
+		}
 	}
 	position, replacementIndex := 0, -1
 	firstPattern := false

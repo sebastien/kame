@@ -80,6 +80,12 @@ type RecordField struct {
 	Value Value
 }
 
+// ModuleRef is owned by the invocation and shared by every value of that module.
+type ModuleRef struct {
+	Handle    any
+	Signature Signature
+}
+
 // Value is immutable after publication. Its referenced storage is owned by the
 // allocator passed to its constructor or Clone and must be released with Free.
 type Value struct {
@@ -106,10 +112,7 @@ type Value struct {
 	// handles retain Go-owned snapshots rather than keeping execution graphs live.
 	Process any
 	Stream  *OwnedStream
-	// Module is an opaque invocation-owned library; its owner outlives snapshots.
-	Module          any
-	ModuleOwner     any
-	ModuleSignature *Signature
+	Module  *ModuleRef
 	// Rule is an opaque declaration and lexical scope owned by its evaluator.
 	Rule     any
 	Resource ResourceKey

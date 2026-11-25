@@ -147,6 +147,15 @@ func TestHistoryExpiryAndRescan(t *testing.T) {
 	if h.Len() != 0 {
 		t.Fatal("expired entry was retained")
 	}
+	h.now = func() time.Time { return now }
+	h.record("echo older")
+	now = now.Add(time.Hour)
+	h.record("echo newer")
+	now = now.Add(-time.Hour)
+	h.refresh(cwd)
+	if len(h.entries) != 1 || h.entries[0].Text != "echo older" || strings.Contains(nativeCLIRead(h.path), "echo newer") {
+		t.Fatal("clock rollback kept a future entry when the oldest was still valid")
+	}
 }
 
 func TestHistoryScopeAndQuota(t *testing.T) {
@@ -234,7 +243,7 @@ func TestHistoryQuotaIndependentScopes(t *testing.T) {
 		})
 	}
 	h.maxBytes = len(historyRecord(entries[0]))
-	kept := h.prune(entries)
+	kept := h.pruneWith(entries, h.valid)
 	if len(kept) != 2 || kept[0].ID != entries[2].ID || kept[1].ID != entries[3].ID {
 		t.Fatal("quota did not retain newest record independently in each scope")
 	}
@@ -341,6 +350,7 @@ func TestHistoryMigrationAndUnsafeStorage(t *testing.T) {
 
 func TestHistoryLockAndConfiguration(t *testing.T) {
 	h, cwd := historyFixture(t)
+	h.record("echo persisted")
 	lock, err := historyOpen(h.path+".lock", false)
 	if err != nil {
 		t.Fatal(err)
@@ -351,13 +361,15 @@ func TestHistoryLockAndConfiguration(t *testing.T) {
 	}
 	start := time.Now()
 	h.record("echo memory-only")
-	if time.Since(start) > time.Second || h.Len() != 1 {
+	if time.Since(start) > time.Second || h.Len() != 2 {
 		t.Fatal("lock contention blocked execution or lost session memory")
 	}
 	syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	h.refresh(cwd)
-	if h.Len() != 0 {
-		t.Fatal("memory-only cached entries were written back later")
+	h.record("echo recovered")
+	other := historyClone(h)
+	other.refresh(cwd)
+	if len(other.entries) != 2 || other.entries[0].Text != "echo persisted" || other.entries[1].Text != "echo recovered" {
+		t.Fatal("recovery republished memory-only history or lost a persisted command")
 	}
 	for _, setting := range []struct{ name, value string }{
 		{"KASH_HISTORY_MAX_AGE_DAYS", "0"},
@@ -396,9 +408,16 @@ func TestHistoryMalformedRecords(t *testing.T) {
 	if h.Len() != 1 {
 		t.Fatal("invalid record prevented recovery of valid record")
 	}
+	info, err := os.Stat(h.path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	changed := h.entries[0]
-	changed.Text = "TOKEN=disk-edited-secret"
+	changed.Text = "TOKEN=abcd" // same length as "echo valid"
 	if err := os.WriteFile(h.path, append([]byte(historyHeader), historyRecord(changed)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(h.path, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
 	h.refresh(cwd)
@@ -518,5 +537,9 @@ func TestHistoryEditorCacheAndToggle(t *testing.T) {
 	e.shell.Keymap.Commands()["previous-history"]()
 	if got := string(*e.shell.Line()); got != "" {
 		t.Fatal("readline cached history bypassed expiration")
+	}
+	h.refresh(cwd)
+	if nativeCLIRead(h.path) != historyHeader {
+		t.Fatal("idle expiry left already-forgotten entries on disk")
 	}
 }

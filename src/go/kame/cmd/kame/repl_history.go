@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,12 @@ type historyEntry struct {
 	Scope historyScope `json:"scope"`
 }
 
+type historySnapshot struct {
+	digest   [sha256.Size]byte
+	maxAge   time.Duration
+	maxBytes int
+}
+
 type replHistory struct {
 	path     string
 	maxAge   time.Duration
@@ -40,8 +47,9 @@ type replHistory struct {
 	global   bool
 	disabled bool
 	warned   bool
-	entries  []historyEntry // screened store snapshot or memory-only entries
-	view     []historyEntry // stable indices during a readline invocation
+	entries  []historyEntry  // screened store snapshot or memory-only entries
+	snapshot historySnapshot // matches entries only after a successful locked update
+	view     []historyEntry  // stable indices during a readline invocation
 	expireAt time.Time
 	cwd      string
 	scope    historyScope
@@ -66,7 +74,7 @@ func (h *replHistory) applyOptions() {
 			h.maxBytes, _ = strconv.Atoi(value)
 		}
 	}
-	h.entries = h.prune(h.entries)
+	h.pruneMemory()
 	h.selectView()
 }
 
@@ -161,11 +169,12 @@ func (h *replHistory) refresh(directory string) {
 	h.cwd, h.scope = historyContext(directory)
 	if h.disabled {
 		h.entries, h.view = nil, nil
+		h.snapshot = historySnapshot{}
 		return
 	}
 	if err := h.update(nil, ""); err != nil {
 		h.warning("persistence unavailable; using filtered session memory")
-		h.entries = h.prune(h.entries)
+		h.pruneMemory()
 	}
 	h.selectView()
 }
@@ -224,8 +233,9 @@ func historyRecord(entry historyEntry) []byte {
 	return append(data, '\n')
 }
 
-func (h *replHistory) prune(entries []historyEntry) []historyEntry {
-	return h.pruneWith(entries, h.valid)
+func (h *replHistory) pruneMemory() {
+	h.snapshot = historySnapshot{}
+	h.entries = h.pruneWith(h.entries, h.valid)
 }
 
 func (h *replHistory) pruneWith(entries []historyEntry, accept func(historyEntry, time.Time) bool) []historyEntry {
@@ -303,9 +313,11 @@ func (h *replHistory) add(entries []historyEntry, entry historyEntry) []historyE
 	return append(entries, entry)
 }
 
-// update never republishes cached entries: only this invocation's new entry is
-// merged with freshly locked disk state. A stale reader cannot undo a clear.
+// A stale reader cannot undo a clear: reuse entries only after checking the
+// current locked file, retention settings and timestamps.
 func (h *replHistory) update(entry *historyEntry, clear string) error {
+	previous := h.snapshot
+	h.snapshot = historySnapshot{} // on failure callers may change session memory alone
 	if h.path == "" {
 		return errors.New("history storage disabled")
 	}
@@ -351,25 +363,18 @@ func (h *replHistory) update(entry *historyEntry, clear string) error {
 	if legacy && bytes.HasPrefix(original, []byte("kash-history-")) {
 		return errors.New("unsupported history version")
 	}
-	if !legacy && len(original) != 0 {
-		for line := range bytes.SplitSeq(original[len(historyHeader):], []byte{'\n'}) {
-			var record historyEntry
-			if len(line) <= h.maxBytes && json.Unmarshal(line, &record) == nil {
-				entries = append(entries, record)
-			}
+	key := historySnapshot{sha256.Sum256(original), h.maxAge, h.maxBytes}
+	now := h.now()
+	// Entries are sorted by time: the endpoints cover both expiry and clock rollback.
+	if previous == key && (len(h.entries) == 0 || h.current(h.entries[0], now) && h.current(h.entries[len(h.entries)-1], now)) {
+		if entry == nil && clear == "" {
+			h.snapshot = key
+			return nil
 		}
+		entries = slices.Clone(h.entries)
+	} else if !legacy && len(original) != 0 {
+		entries = h.decodeEntries(original[len(historyHeader):])
 	}
-	known := make(map[string]int, len(h.entries))
-	for i := range h.entries {
-		known[h.entries[i].ID] = i
-	}
-	entries = h.pruneWith(entries, func(record historyEntry, now time.Time) bool {
-		// The freshly read record must match every field before reusing screening.
-		if i, ok := known[record.ID]; ok && h.entries[i] == record {
-			return h.current(record, now)
-		}
-		return h.valid(record, now)
-	})
 	if clear != "" {
 		entries = slices.DeleteFunc(entries, func(e historyEntry) bool {
 			return clear == "global" || e.Scope == h.scope
@@ -387,12 +392,33 @@ func (h *replHistory) update(entry *historyEntry, clear string) error {
 		if err := replacePrivateFile(h.path, data.Bytes()); err != nil {
 			return err
 		}
+		key.digest = sha256.Sum256(data.Bytes())
 	}
-	h.entries = entries
+	h.entries, h.snapshot = entries, key
 	if legacy && h.out != nil {
 		fmt.Fprintln(h.out, "kash: history: discarded untimestamped legacy history")
 	}
 	return nil
+}
+
+func (h *replHistory) decodeEntries(data []byte) []historyEntry {
+	var entries []historyEntry
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		var record historyEntry
+		if len(line) <= h.maxBytes && json.Unmarshal(line, &record) == nil {
+			entries = append(entries, record)
+		}
+	}
+	known := make(map[string]int, len(h.entries))
+	for i := range h.entries {
+		known[h.entries[i].ID] = i
+	}
+	return h.pruneWith(entries, func(record historyEntry, now time.Time) bool {
+		if i, ok := known[record.ID]; ok && h.entries[i] == record {
+			return h.current(record, now)
+		}
+		return h.valid(record, now)
+	})
 }
 
 // O_NOFOLLOW and O_NONBLOCK avoid following final-component symlinks or
@@ -465,7 +491,7 @@ func (h *replHistory) expireView() bool {
 		}
 	}
 	if changed {
-		h.entries = h.prune(h.entries)
+		h.pruneMemory()
 	}
 	return changed
 }
@@ -506,9 +532,11 @@ func (h *replHistory) command(text string, out, errOut io.Writer) (bool, int) {
 				return true, 0
 			}
 			err := h.update(nil, fields[2])
-			h.entries = slices.DeleteFunc(h.entries, func(e historyEntry) bool {
-				return fields[2] == "global" || e.Scope == h.scope
-			})
+			if err != nil {
+				h.entries = slices.DeleteFunc(h.entries, func(e historyEntry) bool {
+					return fields[2] == "global" || e.Scope == h.scope
+				})
+			}
 			h.selectView()
 			if err != nil {
 				fmt.Fprintln(errOut, "kash: history: could not clear persistent history")

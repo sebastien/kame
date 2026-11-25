@@ -620,6 +620,7 @@ func (h *Host) Free() {
 		for _, r := range h.Readers {
 			km_record_close(r.FD)
 		}
+		h.Readers, h.StdinRecord = nil, 0
 		for stripe := range h.native.locks {
 			km_host_cache_unlock(h.native, c.Int(stripe))
 		}

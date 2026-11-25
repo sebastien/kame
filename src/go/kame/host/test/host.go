@@ -95,14 +95,21 @@ func TestServiceCancellationPayloadPreservesProcessIDAndGrace(t *testing.T) {
 func TestQueueReleasesRecordPayload(t *testing.T) {
 	a := t.Allocator()
 	queue := host.NewQueue(a)
-	payload := host.FilePayload(a, host.OpRead, "input")
-	queue.Submit(1, 1, 1, host.RequestReadFile, payload)
+	defer queue.Free()
+	payload := host.ProcessPayload(a, "printf ok")
+	payload.Share(a)
+	owners := payload.Shared
+	if queue.Submit(0, 1, 1, host.RequestProcess, payload) != 0 || owners.References != 1 {
+		t.Fatal("rejected process request took ownership")
+	}
+	queue.Submit(1, 1, 1, host.RequestProcess, payload)
 	payload.Free(a)
 	next := queue.Next()
-	if !next.OK {
-		t.Fatal("request missing")
-		return
+	if !next.OK || owners.References != 1 || host.PayloadText(next.Request.Payload, host.FieldScript) != "printf ok" {
+		t.Fatal("caller cleanup invalidated the queued process")
 	}
 	next.Request.Free(a)
-	queue.Free()
+	if owners.References != 0 {
+		t.Error("consumed process request kept a payload owner")
+	}
 }

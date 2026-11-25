@@ -158,7 +158,7 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 			if r.Diagnostic.Code != "" {
 				return state.failImport(p.Alloc, c, r)
 			}
-			module := r.Value.Module.(*kashModule)
+			module := r.Value.Module.Handle.(*kashModule)
 			r.Free(c.Run)
 			bound := state.source.bindImport(c, item, module, state.defined)
 			if bound.Diagnostic.Code != "" {
@@ -223,6 +223,7 @@ func (p *Program) retainRuntimeSource(candidate *kashModule) *moduleSource {
 	}
 	p.addModuleSourcePart(src)
 	p.SourceParts[src.Origin-1].moduleSource = src
+	candidate.Handle = candidate
 	p.Modules = append(p.Modules, candidate)
 	return src
 }

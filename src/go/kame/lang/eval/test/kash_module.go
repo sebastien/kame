@@ -6,6 +6,7 @@ import (
 	"kame/internal/testing"
 	"kame/lang/eval"
 	"kame/lang/script"
+	"kame/lang/source"
 	"kame/operations"
 )
 
@@ -115,6 +116,20 @@ func TestModuleSuspendsLoadsAndKeepsIdentity(t *testing.T) {
 		extra.Request.Free(a)
 		t.Error("replayed a completed module load")
 	}
+	value := program.Modules[0].Value()
+	clone := value.Clone(a)
+	value.Free(a)
+	again := program.Modules[0].Value()
+	if clone.Module != again.Module || !core.ValueSignature(clone).Equal(core.ValueSignature(again)) {
+		t.Error("repeated module references lost their identity or content signature")
+	}
+	foreign := eval.Context{Program: &eval.Program{}, Run: a}
+	field := foreign.ModuleField(clone, "value", source.Span{})
+	if field.Result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("another invocation accessed this module")
+	}
+	field.Result.Free(a)
+	clone.Free(a)
 }
 
 func TestModuleHostCanRejectSourceLoad(t *testing.T) {

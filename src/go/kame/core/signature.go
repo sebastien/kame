@@ -208,10 +208,10 @@ func (s *Digest) value(v Value, depth int) bool {
 		}
 		s.Write(v.CallableSignature.Digest[:])
 	case Module:
-		if v.ModuleSignature == nil || v.ModuleSignature.Mode != SignatureContent {
+		if v.Module == nil || v.Module.Signature.Mode != SignatureContent {
 			return false
 		}
-		s.Write(v.ModuleSignature.Digest[:])
+		s.Write(v.Module.Signature.Digest[:])
 	case List:
 		s.Uint64(uint64(len(v.List)))
 		for i := range v.List {

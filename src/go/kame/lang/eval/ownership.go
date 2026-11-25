@@ -374,13 +374,12 @@ func wouldStrandCapture(scope *Scope, value core.Value) bool {
 	return false
 }
 
-// freeValues releases storage only. Use after values were cloned into a
-// result, child scope, or operation state (transfer).
+// freeValues releases each value's storage, leaving zeroed slots in the Go slice.
+// Use after values were cloned into a result, child scope, or operation state.
 func freeValues(a mem.Allocator, values []core.Value) {
 	for i := range values {
 		values[i].Free(a)
 	}
-	mem.FreeSlice(nil, values)
 }
 
 // freeValuesWithCallables releases scopes in addition to storage. Use when

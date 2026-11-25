@@ -81,6 +81,7 @@ type Program struct {
 	processEnvironmentValue core.Signature
 	OperationMemos          []*operationMemo
 	memoValidations         memoValidations
+	spareOperandPair        []core.Value // empty slots; kept on the program because contexts can be copied
 	Processes               []*processTask
 	callableProcessOutcomes map[*ProcessHandle]struct{}
 	nextProcess             int
