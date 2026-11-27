@@ -376,7 +376,8 @@ An interactive-only alias declaration in an ordinary script reports
   `.git`/`.jj` root), or CWD outside repositories. Ctrl-X h toggles local/global
   recall without changing input; `history` lists the current view with hints,
   and `history -l|--local` or `history -g|--global` selects and lists a view.
-  `history clear local|global` deletes retained entries.
+  `history clear local|global` deletes retained entries. Ctrl-X r opens the
+  history picker (fzf, falling back to sk).
 - In Ctrl-R history search, Alt-G switches local/global without clearing the
   query. Results show when each command was submitted, in local time.
 - History defaults to 15 days and 1 MiB **per scope**, controlled by

@@ -50,13 +50,13 @@ does not create copies or a separate global persistence scope.
 
 `history` lists the selected view, oldest first. Its first line reports the
 view and, in the local view, the current scope root; it ends with hints for the
-other view and Ctrl-R search. `history -l|--local` and `history -g|--global`
-select and list that view; the initial view is local. These are forms of the
-interactive `history` builtin (`055` §6), not executables or Kame functions;
-the builtin is `PARSE_ERR` in a script or rule body. They are not themselves
-recorded. Switching views preserves unsubmitted input and changes both
-navigation and incremental history search. Listing and recall never execute an
-entry.
+other view, Ctrl-R search and Ctrl-X r picking. `history -l|--local` and
+`history -g|--global` select and list that view; the initial view is local.
+These are forms of the interactive `history` builtin (`055` §6), not
+executables or Kame functions; the builtin is `PARSE_ERR` in a script or rule
+body. They are not themselves recorded. Switching views preserves unsubmitted
+input and changes both navigation and incremental history search. Listing and
+recall never execute an entry.
 
 Tab completes the view flags and `clear`, then `local` or `global` after
 `clear`.
@@ -64,6 +64,10 @@ Tab completes the view flags and `clear`, then `local` or `global` after
 Ctrl-X h toggles local/global recall while editing, preserving the input buffer
 and cursor. The editor must invalidate its own cached recalled edits when scope
 or eligibility changes; filtering only the persistence source is insufficient.
+
+Ctrl-X r presents the selected view's entries most recent first and replaces
+the edited entry with the chosen one, without executing it (`057`). Dismissal
+leaves the entry and cursor unchanged.
 
 Within Ctrl-R incremental history search, Alt-G switches scope without leaving
 search or clearing the query. The search label shows the current scope and
@@ -244,5 +248,9 @@ history and destroyed.
 - Startup sources, prompt calls, history controls, and unsubmitted interrupted
   input remain absent from history.
 - Bare `history` lists the selected view oldest first and ends with the other
-  view and Ctrl-R hints; `-l`/`--local` and `-g`/`--global` select and list the
-  view; Tab completes the flags, `clear`, and `clear`'s `local`/`global`.
+  view, Ctrl-R search and Ctrl-X r picker hints; `-l`/`--local` and
+  `-g`/`--global` select and list the view; Tab completes the flags, `clear`,
+  and `clear`'s `local`/`global`.
+- Ctrl-X r offers the selected view most recent first and replaces the edited
+  entry without executing it; dismissal and an empty selection leave it
+  unchanged.

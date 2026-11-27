@@ -525,6 +525,7 @@ func (h *replHistory) list(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "  history %s  show %s history\n", other, description)
 	fmt.Fprintln(out, "  Ctrl-R      search history")
+	fmt.Fprintln(out, "  Ctrl-X r    pick from history")
 }
 
 func (h *replHistory) command(text string, out, errOut io.Writer) (bool, int) {

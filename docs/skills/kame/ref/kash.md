@@ -906,7 +906,8 @@ Entries are syntax-highlighted, with unknown commands in red; `NO_COLOR`
 disables it. History defaults to repository/CWD-local recall, 15-day retention,
 and 1 MiB per scope. Ctrl-X h toggles local/global recall; `history` lists the
 current view with hints, `history -l|--local` or `history -g|--global` selects
-and lists a view, and `history clear local|global` deletes entries. Likely
+and lists a view, and `history clear local|global` deletes entries. Ctrl-X r
+opens the history picker (fzf, falling back to sk). Likely
 secrets and space/tab-prefixed commands are not recorded;
 detection is best-effort. `KASH_HISTORY_MAX_AGE_DAYS`, `KASH_HISTORY_MAX_BYTES`,
 and `KASH_HISTORY_SCOPE` configure defaults. Persistence uses `$KASH_HISTORY`

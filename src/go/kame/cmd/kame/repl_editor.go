@@ -89,6 +89,7 @@ func (e *editorReader) resetEditor() {
 	e.shell.HistorySearchLabel = func() string { return "history: " + e.historyScopeLabel() }
 	e.shell.Keymap.Register(map[string]func(){
 		"kash-history-search-toggle": func() { e.shell.UpdateHistorySearch(e.switchHistoryScope) },
+		"kash-pick-history":          e.pickHistory,
 	})
 	const searchToggle = "kash-history-search-toggle"
 	if _, bound := e.shell.Config.Binds["isearch"]["\x1bg"]; !bound {
@@ -120,8 +121,10 @@ func (e *editorReader) resetEditor() {
 		// line. (This readline never dispatches ESC Enter, so not Alt-Enter.)
 		e.shell.Config.Bind(keymap, "\x18\r", "kash-insert-newline", false)
 		e.shell.Config.Bind(keymap, "\x18h", "kash-history-toggle", false)
+		e.bindPicker(keymap)
 	}
 	e.shell.Config.Bind("vi-command", "\x18h", "kash-history-toggle", false)
+	e.bindPicker("vi-command")
 	if e.context != nil {
 		e.shell.Completer = e.complete
 		if e.color {
@@ -176,6 +179,20 @@ func (e *editorReader) historyScopeLabel() string {
 		return "global"
 	}
 	return "local"
+}
+
+// bindPicker installs Ctrl-X r as the history picker, replacing readline's
+// default search binding but not another binding.
+func (e *editorReader) bindPicker(keymap string) {
+	if bind, bound := e.shell.Config.Binds[keymap]["\x18r"]; bound && (bind.Macro || bind.Action != "reverse-search-history") {
+		return
+	}
+	for _, bind := range e.shell.Config.Binds[keymap] {
+		if bind.Action == "kash-pick-history" && !bind.Macro {
+			return
+		}
+	}
+	e.shell.Config.Bind(keymap, "\x18r", "kash-pick-history", false)
 }
 
 // completionSeparator lives in readline's hint area, so resize and cleanup

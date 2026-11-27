@@ -112,7 +112,7 @@ func TestHistoryCommand(t *testing.T) {
 	if handled, status := h.command("history", &out, &errOut); !handled || status != 0 {
 		t.Fatalf("bare history: handled=%v status=%d", handled, status)
 	}
-	want := "history: local " + fmt.Sprintf("%q", root) + "\necho one\necho two\n\n  history -g  show global history\n  Ctrl-R      search history\n"
+	want := "history: local " + fmt.Sprintf("%q", root) + "\necho one\necho two\n\n  history -g  show global history\n  Ctrl-R      search history\n  Ctrl-X r    pick from history\n"
 	if out.String() != want {
 		t.Fatalf("bare history output:\n%s\nwant:\n%s", out.String(), want)
 	}
