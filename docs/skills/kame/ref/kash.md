@@ -904,9 +904,10 @@ Type colours are disabled by `NO_COLOR` or `TERM=dumb`; only a directory's
 usual trailing slash is included in inserted paths, not the extra type marks.
 Entries are syntax-highlighted, with unknown commands in red; `NO_COLOR`
 disables it. History defaults to repository/CWD-local recall, 15-day retention,
-and 1 MiB per scope. Ctrl-X h toggles local/global recall; `history scope
-[local|global]` reports/selects the view, and `history clear local|global`
-deletes entries. Likely secrets and space/tab-prefixed commands are not recorded;
+and 1 MiB per scope. Ctrl-X h toggles local/global recall; `history` lists the
+current view with hints, `history -l|--local` or `history -g|--global` selects
+and lists a view, and `history clear local|global` deletes entries. Likely
+secrets and space/tab-prefixed commands are not recorded;
 detection is best-effort. `KASH_HISTORY_MAX_AGE_DAYS`, `KASH_HISTORY_MAX_BYTES`,
 and `KASH_HISTORY_SCOPE` configure defaults. Persistence uses `$KASH_HISTORY`
 or the XDG state path; explicitly empty `KASH_HISTORY` disables all history.

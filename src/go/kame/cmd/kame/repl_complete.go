@@ -53,7 +53,7 @@ const (
 )
 
 var (
-	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "source": "run a file in the session", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background", "wait": "wait for jobs to finish", "history": "select history scope or clear history", "option": "inspect or change shell options", "explain": "show the full report of the latest failure", "complete": "refresh or show command completion specs"}
+	replSessionCommands = map[string]string{"alias": "define or list command aliases", "unalias": "remove command aliases", "cd": "change the session directory", "source": "run a file in the session", "jobs": "list jobs", "fg": "resume a job in the foreground", "bg": "resume a job in the background", "wait": "wait for jobs to finish", "history": "list history, select the view, or clear history", "option": "inspect or change shell options", "explain": "show the full report of the latest failure", "complete": "refresh or show command completion specs"}
 	replKeywords        = []string{"def", "defer", "elif", "else", "exit", "for", "if", "let", "match", "return", "while", "with"}
 )
 
@@ -119,6 +119,34 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 					if strings.HasPrefix(choice, word) {
 						candidates = append(candidates, completionCandidate{Text: choice, Tag: tagSession})
 					}
+				}
+			}
+		}
+		return candidates
+	}
+	if fields := strings.Fields(before); len(fields) != 0 && fields[0] == "history" {
+		args := fields[1:]
+		var candidates []completionCandidate
+		switch {
+		case len(args) == 0:
+			for _, c := range []struct{ text, description, tag string }{
+				{"-l", "show local history", tagOptions},
+				{"--local", "show local history", tagOptions},
+				{"-g", "show global history", tagOptions},
+				{"--global", "show global history", tagOptions},
+				{"clear", "delete retained entries", tagCommand},
+			} {
+				if strings.HasPrefix(c.text, word) {
+					candidates = append(candidates, completionCandidate{Text: c.text, Description: c.description, Tag: c.tag})
+				}
+			}
+		case len(args) == 1 && args[0] == "clear":
+			for _, c := range []struct{ text, description string }{
+				{"local", "this repository or directory"},
+				{"global", "all retained scopes"},
+			} {
+				if strings.HasPrefix(c.text, word) {
+					candidates = append(candidates, completionCandidate{Text: c.text, Description: c.description, Tag: tagValues})
 				}
 			}
 		}

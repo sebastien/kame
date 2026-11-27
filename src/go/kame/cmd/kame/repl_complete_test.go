@@ -114,6 +114,12 @@ func TestCompletionsAt(t *testing.T) {
 		{name: "continuation in path", line: "cat rea\\\r\nd", want: []string{"readme.md|files|"}},
 		{name: "path in command position", line: "./sr", want: []string{"./src/|files|"}},
 		{name: "redirect target", line: "echo x > ./rel", want: []string{"./release.txt|files|"}},
+		{name: "history operands", line: "history ", want: []string{"--global|options|show global history", "--local|options|show local history", "-g|options|show global history", "-l|options|show local history", "clear|subcommands|delete retained entries"}},
+		{name: "history short flags", line: "history -", want: []string{"--global|options|show global history", "--local|options|show local history", "-g|options|show global history", "-l|options|show local history"}},
+		{name: "history long flags", line: "history --", want: []string{"--global|options|show global history", "--local|options|show local history"}},
+		{name: "history clear views", line: "history clear ", want: []string{"global|values|all retained scopes", "local|values|this repository or directory"}},
+		{name: "history clear view prefix", line: "history clear g", want: []string{"global|values|all retained scopes"}},
+		{name: "history stops after a flag", line: "history -g "},
 	} {
 		_, candidates := completionsAt(c.line, len(c.line), ctx)
 		var got []string

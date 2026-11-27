@@ -84,7 +84,7 @@ func TestNativeInteractiveHistoryRecordsOnlySubmittedEntries(t *testing.T) {
 	s.waitFor("^C")
 	s.waitReading()
 	before := len(s.raw())
-	s.send("history scope global\r")
+	s.send("history -g\r")
 	s.waitReadingAfterSubmission(before)
 	s.send("printf '%s%s\\n' kept- entry\r")
 	s.waitFor("kept-entry")

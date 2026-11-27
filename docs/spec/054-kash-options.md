@@ -53,9 +53,10 @@ The initial consumers are existing history settings:
 
 History's local/global **recall view** is independent of option storage scope.
 For example, `option -g history-scope local` saves local recall as the user
-default. `history scope local|global` and Ctrl-X h update the same session-local
-option. `KASH_HISTORY` still controls storage location and explicit disabling;
-invalid history environment configuration continues to disable history safely.
+default. `history -l|--local`, `history -g|--global`, and Ctrl-X h update the
+same session-local option. `KASH_HISTORY` still controls storage location and
+explicit disabling; invalid history environment configuration continues to
+disable history safely.
 
 History settings affect recall immediately after a successful command and
 persistence on the next refresh/write. Lowering age or byte limits can prune

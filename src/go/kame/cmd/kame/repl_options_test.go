@@ -215,7 +215,7 @@ func TestOptionsHistoryUsesSharedState(t *testing.T) {
 	if nativeCLIRead(h.path) != historyHeader {
 		t.Fatal("lowered retention did not prune persisted history")
 	}
-	h.command("history scope local", &bytes.Buffer{}, &bytes.Buffer{})
+	h.command("history -l", &bytes.Buffer{}, &bytes.Buffer{})
 	if value, scope := optionValue(o, "history-scope"); value != "local" || scope != "local" {
 		t.Fatal("history scope did not update local option")
 	}

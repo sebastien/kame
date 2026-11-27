@@ -41,7 +41,7 @@ func TestNativeInteractiveOptionsHistory(t *testing.T) {
 	if frame := s.redraw(); !strings.Contains(frame, "option-local") || strings.Contains(frame, "option-other") {
 		t.Fatal("local option did not change history recall")
 	}
-	s.send("\x01\x0bhistory scope global\roption history-scope\r")
+	s.send("\x01\x0bhistory -g\roption history-scope\r")
 	s.waitFor("history-scope: global (local;")
 	s.waitReading()
 	s.send("\x18hoption history-scope\r")

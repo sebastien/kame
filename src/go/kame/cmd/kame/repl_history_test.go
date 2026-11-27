@@ -81,7 +81,7 @@ func TestHistorySecrets(t *testing.T) {
 
 func TestHistoryRoundTripAndPrivacy(t *testing.T) {
 	h, cwd := historyFixture(t)
-	for _, text := range []string{"echo one", "echo one", "echo α\n\techo β", " TOKEN=hidden", "echo ghp_abcdefghijklmnopqrst1234567890", "history scope global", "   "} {
+	for _, text := range []string{"echo one", "echo one", "echo α\n\techo β", " TOKEN=hidden", "echo ghp_abcdefghijklmnopqrst1234567890", "history", "history -g", "   "} {
 		h.record(text)
 	}
 	if len(h.entries) != 2 {
@@ -101,6 +101,41 @@ func TestHistoryRoundTripAndPrivacy(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatal("history files must be private")
 		}
+	}
+}
+
+func TestHistoryCommand(t *testing.T) {
+	h, root := historyFixture(t)
+	h.record("echo one")
+	h.record("echo two")
+	var out, errOut bytes.Buffer
+	if handled, status := h.command("history", &out, &errOut); !handled || status != 0 {
+		t.Fatalf("bare history: handled=%v status=%d", handled, status)
+	}
+	want := "history: local " + fmt.Sprintf("%q", root) + "\necho one\necho two\n\n  history -g  show global history\n  Ctrl-R      search history\n"
+	if out.String() != want {
+		t.Fatalf("bare history output:\n%s\nwant:\n%s", out.String(), want)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("bare history error: %q", errOut.String())
+	}
+	out.Reset()
+	if _, status := h.command("history --global", &out, &errOut); status != 0 || !h.global {
+		t.Fatal("--global did not select the global view")
+	}
+	if !strings.HasPrefix(out.String(), "history: global\n") || !strings.Contains(out.String(), "history -l  show local history") {
+		t.Fatalf("global history output: %q", out.String())
+	}
+	out.Reset()
+	if _, status := h.command("history -l", &out, &errOut); status != 0 || h.global {
+		t.Fatal("-l did not select the local view")
+	}
+	if !strings.HasPrefix(out.String(), "history: local ") {
+		t.Fatalf("local history output: %q", out.String())
+	}
+	out.Reset()
+	if _, status := h.command("history -x", &out, &errOut); status != 1 {
+		t.Fatal("unknown history flag was accepted")
 	}
 }
 
@@ -207,11 +242,11 @@ func TestHistoryScopeAndQuota(t *testing.T) {
 		t.Fatal("local recall crossed scopes")
 	}
 	h.record("echo other")
-	h.command("history scope global", &bytes.Buffer{}, &bytes.Buffer{})
+	h.command("history -g", &bytes.Buffer{}, &bytes.Buffer{})
 	if h.Len() != 2 {
 		t.Fatal("global recall did not combine scopes")
 	}
-	h.command("history scope local", &bytes.Buffer{}, &bytes.Buffer{})
+	h.command("history --local", &bytes.Buffer{}, &bytes.Buffer{})
 	if h.Len() != 1 {
 		t.Fatal("local view was not restored")
 	}
@@ -482,7 +517,7 @@ func TestHistoryLocalClearAndDeduplication(t *testing.T) {
 		t.Fatal("deduplication was not per owning scope or refreshed retention")
 	}
 	// Global selection must not change the meaning of clear local.
-	h.command("history scope global", &bytes.Buffer{}, &bytes.Buffer{})
+	h.command("history -g", &bytes.Buffer{}, &bytes.Buffer{})
 	if _, status := h.command("history clear local", &bytes.Buffer{}, &bytes.Buffer{}); status != 0 {
 		t.Fatal("local clear failed")
 	}

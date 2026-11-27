@@ -48,13 +48,18 @@ Recompute the current scope before each prompt, so directory changes immediately
 affect recall. `global` is the chronological union of all retained scopes; it
 does not create copies or a separate global persistence scope.
 
-`history scope local` and `history scope global` select the session's recall
-view. `history scope` reports the selected view and current local root without
-printing command text. These are forms of the interactive `history` builtin
-(`055` §6), not executables or Kame functions; the builtin is `PARSE_ERR` in a
-script or rule body. They are not themselves recorded. Switching views preserves
-unsubmitted input and changes both navigation and incremental history search.
-Neither switching nor recall executes an entry.
+`history` lists the selected view, oldest first. Its first line reports the
+view and, in the local view, the current scope root; it ends with hints for the
+other view and Ctrl-R search. `history -l|--local` and `history -g|--global`
+select and list that view; the initial view is local. These are forms of the
+interactive `history` builtin (`055` §6), not executables or Kame functions;
+the builtin is `PARSE_ERR` in a script or rule body. They are not themselves
+recorded. Switching views preserves unsubmitted input and changes both
+navigation and incremental history search. Listing and recall never execute an
+entry.
+
+Tab completes the view flags and `clear`, then `local` or `global` after
+`clear`.
 
 Ctrl-X h toggles local/global recall while editing, preserving the input buffer
 and cursor. The editor must invalidate its own cached recalled edits when scope
@@ -238,3 +243,6 @@ history and destroyed.
   preserved. Invalid configuration and explicit history disabling fail safely.
 - Startup sources, prompt calls, history controls, and unsubmitted interrupted
   input remain absent from history.
+- Bare `history` lists the selected view oldest first and ends with the other
+  view and Ctrl-R hints; `-l`/`--local` and `-g`/`--global` select and list the
+  view; Tab completes the flags, `clear`, and `clear`'s `local`/`global`.

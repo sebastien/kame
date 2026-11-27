@@ -508,43 +508,65 @@ func (h *replHistory) Dump() any {
 
 func (h *replHistory) Close() {}
 
+// list prints the selected view oldest first, then the ways out of it.
+func (h *replHistory) list(out io.Writer) {
+	other, description := "-g", "global"
+	if h.global {
+		other, description = "-l", "local"
+		fmt.Fprintln(out, "history: global")
+	} else {
+		fmt.Fprintf(out, "history: local %q\n", h.scope.Root)
+	}
+	for i := range h.view {
+		if line, _ := h.GetLine(i); line != "" {
+			fmt.Fprintln(out, line)
+		}
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  history %s  show %s history\n", other, description)
+	fmt.Fprintln(out, "  Ctrl-R      search history")
+}
+
 func (h *replHistory) command(text string, out, errOut io.Writer) (bool, int) {
 	fields := strings.Fields(text)
 	if len(fields) == 0 || fields[0] != "history" || strings.ContainsAny(text, "\n;|&") {
 		return false, 0
 	}
-	if len(fields) == 2 && fields[1] == "scope" {
-		view := "local"
-		if h.global {
-			view = "global"
-		}
-		fmt.Fprintf(out, "history scope %s %q\n", view, h.scope.Root)
+	if len(fields) == 1 {
+		h.list(out)
 		return true, 0
 	}
-	if len(fields) == 3 && (fields[2] == "local" || fields[2] == "global") {
+	if len(fields) == 2 {
 		switch fields[1] {
-		case "scope":
-			h.setScope(fields[2] == "global")
-			h.selectView()
-			return true, 0
-		case "clear":
-			if h.disabled {
-				return true, 0
-			}
-			err := h.update(nil, fields[2])
-			if err != nil {
-				h.entries = slices.DeleteFunc(h.entries, func(e historyEntry) bool {
-					return fields[2] == "global" || e.Scope == h.scope
-				})
-			}
-			h.selectView()
-			if err != nil {
-				fmt.Fprintln(errOut, "kash: history: could not clear persistent history")
-				return true, 1
-			}
+		case "-l", "--local":
+			h.setScope(false)
+		case "-g", "--global":
+			h.setScope(true)
+		default:
+			fmt.Fprintln(errOut, "history: expected [-l|--local|-g|--global] or clear local|global")
+			return true, 1
+		}
+		h.selectView()
+		h.list(out)
+		return true, 0
+	}
+	if len(fields) == 3 && fields[1] == "clear" && (fields[2] == "local" || fields[2] == "global") {
+		if h.disabled {
 			return true, 0
 		}
+		err := h.update(nil, fields[2])
+		if err != nil {
+			h.entries = slices.DeleteFunc(h.entries, func(e historyEntry) bool {
+				return fields[2] == "global" || e.Scope == h.scope
+			})
+		}
+		h.selectView()
+		if err != nil {
+			fmt.Fprintln(errOut, "kash: history: could not clear persistent history")
+			return true, 1
+		}
+		return true, 0
 	}
-	fmt.Fprintln(errOut, "history: expected scope [local|global] or clear local|global")
+	fmt.Fprintln(errOut, "history: expected [-l|--local|-g|--global] or clear local|global")
 	return true, 1
 }

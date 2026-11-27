@@ -469,7 +469,7 @@ yields `nil` when unset.
 | `jobs` | interactive | List session jobs. |
 | `fg [JOB]`, `bg [JOB]` | interactive | Resume a job in the foreground or background. |
 | `alias`, `unalias` | interactive | Define, list or remove whole-line command aliases. |
-| `history` | interactive | Select the history scope or clear history (`053`). |
+| `history` | interactive | List history, select the view, or clear history (`053`). |
 | `option` | interactive | Inspect or change shell options (`054`). |
 | `explain` | interactive | Show the full report of the latest failure. |
 | `complete` | interactive | Refresh or show command completion specs, or register live completion protocols (`058`). |
