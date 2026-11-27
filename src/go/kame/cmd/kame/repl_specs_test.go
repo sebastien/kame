@@ -114,6 +114,39 @@ func TestCommandSpecCompletions(t *testing.T) {
 	}
 }
 
+func TestOptionHint(t *testing.T) {
+	ctx := specFixture(t)
+	ctx.Aliases["format"] = []string{"kashtool", "--format"}
+	const format = "-f, --format <format> — Output format · json, text"
+	for _, tc := range []struct {
+		line, want string
+	}{
+		{"kashtool --", "--format  --out"},
+		{"kashtool --fo", format},
+		{"kashtool -f", format},
+		{"kashtool --format=j", format},
+		{"kashtool --format j", format},
+		{"kashtool --format j ", ""},
+		{"kashtool -- --fo", ""},
+		{"kashtool serve --p", "--port <port>"},
+		{"kashtool serve --fo", ""},
+		{"kt --fo", format},
+		{"format j", format},
+		{"echo $(kashtool --fo", format},
+		{"echo | kashtool --fo", format},
+		{"kashtool > --fo", ""},
+		{"kashtool # --fo", ""},
+		{`kashtool "--fo`, ""},
+		{"kashtest --f", ""},
+		{"history --g", "--global — show global history"},
+		{"option --l", "--local — option scope"},
+	} {
+		if got := optionHint(tc.line, ctx); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestCompleteBuiltin(t *testing.T) {
 	ctx := specFixture(t)
 	var out, errOut bytes.Buffer

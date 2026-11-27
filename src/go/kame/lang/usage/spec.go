@@ -149,77 +149,127 @@ type Candidate struct {
 	Kind       string // command, flag, or value
 }
 
-// Complete returns the candidates for word, the argument being typed, after
-// the arguments words that follow the executable.
-func (s *Spec) Complete(words []string, word string) ([]Candidate, Files) {
-	cmd, globals := s, []Flag(nil)
-	flags := func() []Flag { return append(slices.Clone(cmd.Flags), globals...) }
-	find := func(name string) *Flag {
-		for _, f := range flags() {
-			if slices.Contains(f.Names, name) {
-				return &f
-			}
-		}
-		return nil
+type commandPosition struct {
+	cmd        *Spec
+	globals    []Flag
+	pending    *Flag
+	positional int
+	dashdash   bool
+}
+
+func (p commandPosition) flag(name string) *Flag {
+	if f := p.cmd.flag(name); f != nil {
+		return f
 	}
-	var pending *Flag
-	positional, dashdash := 0, false
+	for i := range p.globals {
+		if slices.Contains(p.globals[i].Names, name) {
+			return &p.globals[i]
+		}
+	}
+	return nil
+}
+
+func (s *Spec) position(words []string) commandPosition {
+	p := commandPosition{cmd: s}
 	for _, w := range words {
 		switch {
-		case pending != nil:
-			pending = nil
-		case !dashdash && w == "--":
-			dashdash = true
-		case !dashdash && len(w) > 1 && w[0] == '-':
-			if f, attached := lookup(w, find); f != nil && f.Value != "" && !f.Optional && !attached {
-				pending = f
+		case p.pending != nil:
+			p.pending = nil
+		case !p.dashdash && w == "--":
+			p.dashdash = true
+		case !p.dashdash && len(w) > 1 && w[0] == '-':
+			if f, attached := lookup(w, p.flag); f != nil && f.Value != "" && !f.Optional && !attached {
+				p.pending = f
 			}
-		case positional == 0 && !dashdash && cmd.command(w) != nil:
-			for _, f := range cmd.Flags {
+		case p.positional == 0 && !p.dashdash:
+			sub := p.cmd.command(w)
+			if sub == nil {
+				p.positional++
+				continue
+			}
+			for _, f := range p.cmd.Flags {
 				if f.Global {
-					globals = append(globals, f)
+					p.globals = append(p.globals, f)
 				}
 			}
-			cmd = cmd.command(w)
+			p.cmd = sub
 		default:
-			positional++
+			p.positional++
 		}
 	}
-	if pending != nil {
-		return values(pending.Choices, pending.Complete, word, "")
-	}
-	if !dashdash && strings.HasPrefix(word, "--") && strings.Contains(word, "=") {
-		name, value, _ := strings.Cut(word, "=")
-		if f := find(name); f != nil && f.Value != "" {
-			return values(f.Choices, f.Complete, value, name+"=")
-		}
-		return nil, NoFiles
-	}
-	if !dashdash && strings.HasPrefix(word, "-") {
-		var candidates []Candidate
-		for _, f := range flags() {
+	return p
+}
+
+func (p commandPosition) flagCandidates(word string) []Candidate {
+	var candidates []Candidate
+	for _, flags := range [][]Flag{p.cmd.Flags, p.globals} {
+		for _, f := range flags {
 			for _, name := range f.Names {
-				if strings.HasPrefix(name, word) && (len(word) < 2 || word[1] != '-' || strings.HasPrefix(name, "--")) {
+				if strings.HasPrefix(name, word) {
 					candidates = append(candidates, Candidate{Text: name, Help: f.Help, Kind: "flag"})
 				}
 			}
 		}
-		return candidates, NoFiles
+	}
+	return candidates
+}
+
+// OptionHint returns the flag at the cursor or whose value is being edited.
+// If a prefix is ambiguous, it returns the matching spellings instead.
+func (s *Spec) OptionHint(words []string, word string) (*Flag, []Candidate) {
+	p := s.position(words)
+	switch {
+	case p.pending != nil:
+		return p.pending, nil
+	case p.dashdash || !strings.HasPrefix(word, "-"):
+		return nil, nil
+	}
+	if f := p.flag(word); f != nil {
+		return f, nil
+	}
+	candidates := p.flagCandidates(word)
+	if len(candidates) != 0 && !slices.ContainsFunc(candidates[1:], func(c Candidate) bool { return c.Text != candidates[0].Text }) {
+		return p.flag(candidates[0].Text), nil
+	}
+	if len(candidates) == 0 {
+		if f, attached := lookup(word, p.flag); f != nil && (!strings.HasPrefix(word, "--") || attached && f.Value != "") {
+			return f, nil
+		}
+	}
+	return nil, candidates
+}
+
+// Complete returns the candidates for word, the argument being typed, after
+// the arguments words that follow the executable.
+func (s *Spec) Complete(words []string, word string) ([]Candidate, Files) {
+	p := s.position(words)
+	if p.pending != nil {
+		return values(p.pending.Choices, p.pending.Complete, word, "")
+	}
+	if !p.dashdash && strings.HasPrefix(word, "--") && strings.Contains(word, "=") {
+		name, value, _ := strings.Cut(word, "=")
+		if f := p.flag(name); f != nil && f.Value != "" {
+			return values(f.Choices, f.Complete, value, name+"=")
+		}
+		return nil, NoFiles
+	}
+	if !p.dashdash && strings.HasPrefix(word, "-") {
+		return p.flagCandidates(word), NoFiles
 	}
 	var candidates []Candidate
-	if positional == 0 && !dashdash {
-		for _, c := range cmd.Commands {
+	if p.positional == 0 && !p.dashdash {
+		for _, c := range p.cmd.Commands {
 			if strings.HasPrefix(c.Name, word) {
 				candidates = append(candidates, Candidate{Text: c.Name, Help: c.Help, Kind: "command"})
 			}
 		}
 	}
-	if n := len(cmd.Args); n != 0 && (positional < n || cmd.Args[n-1].Variadic) {
-		arg := cmd.Args[min(positional, n-1)]
+	if n := len(p.cmd.Args); n != 0 && (p.positional < n || p.cmd.Args[n-1].Variadic) {
+		arg := p.cmd.Args[min(p.positional, n-1)]
 		more, files := values(arg.Choices, arg.Complete, word, "")
 		return append(candidates, more...), files
 	}
-	if len(cmd.Commands) != 0 && positional == 0 {
+	if len(p.cmd.Commands) != 0 && p.positional == 0 {
 		return candidates, NoFiles
 	}
 	return candidates, AnyFiles
@@ -240,7 +290,7 @@ func lookup(word string, find func(string) *Flag) (*Flag, bool) {
 	for i := 1; i < len(word); i++ {
 		f := find("-" + word[i:i+1])
 		if f == nil {
-			return last, false
+			return nil, false
 		}
 		if f.Value != "" {
 			return f, i+1 < len(word)

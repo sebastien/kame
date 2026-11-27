@@ -597,6 +597,97 @@ func TestNativeInteractiveKashSpecCompletion(t *testing.T) {
 	}
 }
 
+func TestNativeInteractiveKashOptionHint(t *testing.T) {
+	binary := nativeCLIBinary(t)
+	directory := t.TempDir()
+	bin := filepath.Join(directory, "bin")
+	config := filepath.Join(directory, "config")
+	man := filepath.Join(directory, "man")
+	writeReplTool(t, bin, "specdemo", `printf 'specdemo:%s\n' "$*"`)
+	writeReplTool(t, bin, "coldtool", "exit 0")
+	specWrite(t, filepath.Join(config, "kash", "completions", "specdemo.usage.kdl"), kashtoolSpec)
+	specWrite(t, filepath.Join(man, "man1", "coldtool.1"),
+		".SH OPTIONS\n.TP\n\\fB\\-\\-cold\\fR\nA flag from the man page.\n")
+	env := []string{"TERM=xterm-256color", "NO_COLOR=1", "XDG_CONFIG_HOME=" + config,
+		"XDG_DATA_DIRS=/nonexistent", "MANPATH=" + man, "PATH=" + bin + ":/usr/bin:/bin"}
+	s := startTerminalSession(t, binary, directory, env, "do", "run", "-i")
+	s.waitFor("kash ")
+	s.waitReading()
+
+	const bottom = "\x1b7\x1b[24;1H\x1b[2K"
+	const format = "ⓘ -f, --format <format> — Output format · json, text"
+	before := len(s.raw())
+	s.send("specdemo --fo")
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, bottom+format+"\x1b8")
+	})
+	before = len(s.raw())
+	s.send("\x01") // move the cursor to the start of the line, away from the option
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, bottom+"\x1b8") && !strings.Contains(frame, format)
+	})
+	before = len(s.raw())
+	s.send("\x05")
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, bottom+format+"\x1b8")
+	})
+
+	before = len(s.raw())
+	s.send("\x15specdemo --\t")
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, "options") && strings.Contains(frame, "--out") &&
+			!strings.Contains(frame, bottom+"ⓘ ")
+	})
+	before = len(s.raw())
+	s.send("\x03")
+	s.waitReadingAfterSubmission(before)
+	before = len(s.raw())
+	s.send("specdemo --fo")
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, bottom+format+"\x1b8")
+	})
+
+	before = len(s.raw())
+	if err := unix.IoctlSetWinsize(int(s.control.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 12, Col: 38}); err != nil {
+		t.Fatal(err)
+	}
+	const resizedBottom = "\x1b7\x1b[12;1H\x1b[2K"
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, resizedBottom+"ⓘ -f, --format") && strings.Contains(frame, "…\x1b8")
+	})
+	before = len(s.raw())
+	s.send("\tt\t\r")
+	s.waitFor("specdemo:--format text")
+	s.waitReadingAfterSubmission(before)
+	if frame := s.redraw(); strings.Contains(frame, "Output format") {
+		t.Fatalf("option hint survived submission: %q", frame)
+	}
+
+	before = len(s.raw())
+	s.send("coldtool --co")
+	// No Tab or extra keystrokes: the completed background build wakes the editor.
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, resizedBottom+"ⓘ --cold — A flag from the man page")
+	})
+	before = len(s.raw())
+	s.send("\x03")
+	s.waitReadingAfterSubmission(before)
+	if raw := s.raw()[before:]; !strings.Contains(raw, resizedBottom+"\x1b8") || !strings.Contains(raw, "^C") {
+		t.Fatalf("interrupt did not erase the option hint: %q", raw)
+	}
+	if status := s.finish(); status != 130 {
+		t.Fatalf("option hint session status %d: %q", status, s.text())
+	}
+
+	s = startTerminalSession(t, binary, directory, append(env, "NO_COLOR="), "do", "run", "-i")
+	s.waitReading()
+	before = len(s.raw())
+	s.send("specdemo --fo")
+	s.waitFrame(before, func(frame string) bool {
+		return strings.Contains(frame, bottom+"\x1b[36m"+format+"\x1b[0m\x1b8")
+	})
+}
+
 func TestNativeInteractiveKashCompletionSeparator(t *testing.T) {
 	for _, mode := range []string{"colour", "no-colour", "dumb"} {
 		t.Run(mode, func(t *testing.T) {

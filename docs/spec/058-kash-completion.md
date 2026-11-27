@@ -1,5 +1,5 @@
 ---
-revision: 3
+revision: 4
 ---
 
 # Kash command completion
@@ -78,11 +78,18 @@ offers, for the word at the cursor:
 | --- | --- | --- |
 | After a flag that requires a value | The flag's choices | When the flag has no choices and its completer allows files |
 | `--NAME=VALUE` | The flag's choices, kept attached | Same as above |
-| Starting with `-` | Flags of the command and inherited global flags; only long spellings after `--` | No |
+| Starting with `-`, before the `--` terminator | Flags of the command and inherited global flags; a `--` prefix matches only long spellings | No |
 | Anything else | Subcommands at the first position, then the positional argument's choices | When the argument allows files, or the command declares neither arguments nor subcommands |
 
 Path candidates follow the existing [path rules](052-kash-interactive.md#completion);
 a `dir` completer offers directories only.
+
+While editing, Kash uses the same command and option context for passive help.
+An exact option or a unique prefix shows the option's spellings, value
+placeholder, description and choices when present; an ambiguous prefix lists
+matching spellings. The option stays in view while its value is being edited.
+After a committed `--`, no options are suggested. The passive hint uses static
+specs only; registered live protocols are invoked by Tab.
 
 ### Man pages
 
@@ -167,6 +174,8 @@ granted reads and the processes of user rules:
 - When Tab finds no build product for a command on the session `PATH`. A
   refresh that finishes within 100 ms is used by the same Tab; otherwise the
   next Tab uses it.
+- While editing an option for a command on the session `PATH` with no spec
+  available. The editor stays responsive and redraws when the refresh finishes.
 
 One refresh runs at a time per session; requests made meanwhile are combined
 into the next. Concurrent shells share the build root through Kame's cache

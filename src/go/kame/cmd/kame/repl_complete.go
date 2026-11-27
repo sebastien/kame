@@ -90,10 +90,7 @@ func completionAfterDelimiter(line, delimiters string) int {
 	return start
 }
 
-func completionCandidates(word, before string, ctx completionContext) []completionCandidate {
-	entryBefore := before
-	// Use the current logical line, retaining escaped line endings.
-	before = before[completionAfterDelimiter(before, "\n"):]
+func builtinArgumentCompletions(word, before string) ([]completionCandidate, bool) {
 	if fields := strings.Fields(before); len(fields) != 0 && fields[0] == "option" {
 		args := fields[1:]
 		if len(args) != 0 && (args[0] == "-l" || args[0] == "--local" || args[0] == "-g" || args[0] == "--global") {
@@ -122,7 +119,7 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 				}
 			}
 		}
-		return candidates
+		return candidates, true
 	}
 	if fields := strings.Fields(before); len(fields) != 0 && fields[0] == "history" {
 		args := fields[1:]
@@ -150,6 +147,16 @@ func completionCandidates(word, before string, ctx completionContext) []completi
 				}
 			}
 		}
+		return candidates, true
+	}
+	return nil, false
+}
+
+func completionCandidates(word, before string, ctx completionContext) []completionCandidate {
+	entryBefore := before
+	// Use the current logical line, retaining escaped line endings.
+	before = before[completionAfterDelimiter(before, "\n"):]
+	if candidates, ok := builtinArgumentCompletions(word, before); ok {
 		return candidates
 	}
 	trimmed := strings.TrimRight(before, " \t")
@@ -205,54 +212,40 @@ func commandCompletions(word, before string, ctx completionContext) ([]completio
 		return nil, false
 	}
 	words, current, ok := commandWords(before + word)
-	if !ok || len(words) == 0 || !strings.HasSuffix(current.raw, word) {
+	if !ok || !strings.HasSuffix(current.raw, word) {
+		return nil, false
+	}
+	command, ok := completionArguments(words, current, ctx)
+	if !ok {
 		return nil, false
 	}
 	// The editor's word starts after delimiters such as =; the spec sees the
 	// whole argument, and prefix is the part already typed before the word.
 	prefix, ok := expr.LiteralCommandWord(current.raw[:len(current.raw)-len(word)])
-	if !ok || !words[0].literal {
+	if !ok {
 		return nil, false
-	}
-	name, args := words[0].text, words[1:]
-	if alias := ctx.Aliases[name]; len(alias) != 0 {
-		name = alias[0]
-		args = append(literalWords(alias[1:]), args...)
-	}
-	name = strings.TrimPrefix(name, "x/")
-	if replSessionCommands[name] != "" || slices.Contains(replKeywords, name) {
-		return nil, false
-	}
-	typed := name
-	name = filepath.Base(name)
-	if !specName.MatchString(name) {
-		return nil, false
-	}
-	texts := make([]string, len(args))
-	literal := current.literal
-	for i, w := range args {
-		texts[i] = w.text
-		literal = literal && w.literal
 	}
 	var matches []usage.Candidate
 	var files usage.Files
 	live := false
-	if executable := resolveExecutable(typed, ctx); literal && executable != "" {
-		if protocol := ctx.Specs.protocol(executable); protocol != "" {
-			matches, files, live = liveComplete(protocol, executable, typed, texts, current.text, ctx)
-			matches = slices.DeleteFunc(matches, func(m usage.Candidate) bool { return !strings.HasPrefix(m.Text, current.text) })
+	if command.literal {
+		if executable := resolveExecutable(command.typed, ctx); executable != "" {
+			if protocol := ctx.Specs.protocol(executable); protocol != "" {
+				matches, files, live = liveComplete(protocol, executable, command.typed, command.args, current.text, ctx)
+				matches = slices.DeleteFunc(matches, func(m usage.Candidate) bool { return !strings.HasPrefix(m.Text, current.text) })
+			}
 		}
 	}
 	if !live {
-		spec, found, cached := ctx.Specs.lookup(name)
-		if !cached && resolveCommand(name, ctx) {
-			ctx.Specs.await(name)
-			spec, found, _ = ctx.Specs.lookup(name)
+		spec, found, cached := ctx.Specs.lookup(command.name)
+		if !cached && resolveCommand(command.name, ctx) {
+			ctx.Specs.await(command.name)
+			spec, found, _ = ctx.Specs.lookup(command.name)
 		}
 		if !found {
 			return nil, false
 		}
-		matches, files = spec.Complete(texts, current.text)
+		matches, files = spec.Complete(command.args, current.text)
 	}
 	var candidates []completionCandidate
 	for _, m := range matches {
@@ -264,13 +257,7 @@ func commandCompletions(word, before string, ctx completionContext) ([]completio
 		if tag == "" {
 			tag = tagValues
 		}
-		description := strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return -1
-			}
-			return r
-		}, m.Help)
-		candidates = append(candidates, completionCandidate{Text: completionEscape(text), Display: text, Description: description, Tag: tag})
+		candidates = append(candidates, completionCandidate{Text: completionEscape(text), Display: text, Description: completionText(m.Help), Tag: tag})
 	}
 	switch files {
 	case usage.AnyFiles:
@@ -279,6 +266,120 @@ func commandCompletions(word, before string, ctx completionContext) ([]completio
 		candidates = append(candidates, completePaths(word, ctx, true)...)
 	}
 	return candidates, true
+}
+
+func completionText(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, text)
+}
+
+type commandArguments struct {
+	typed, name string
+	args        []string
+	literal     bool
+}
+
+func completionArguments(words []commandWord, current commandWord, ctx completionContext) (commandArguments, bool) {
+	if len(words) == 0 || !words[0].literal {
+		return commandArguments{}, false
+	}
+	typed, args := words[0].text, words[1:]
+	if alias := ctx.Aliases[typed]; len(alias) != 0 {
+		typed = alias[0]
+		args = append(literalWords(alias[1:]), args...)
+	}
+	typed = strings.TrimPrefix(typed, "x/")
+	name := filepath.Base(typed)
+	if replSessionCommands[typed] != "" || slices.Contains(replKeywords, typed) || !specName.MatchString(name) {
+		return commandArguments{}, false
+	}
+	command := commandArguments{typed: typed, name: name, args: make([]string, len(args)), literal: current.literal}
+	for i, word := range args {
+		command.args[i] = word.text
+		command.literal = command.literal && word.literal
+	}
+	return command, true
+}
+
+// optionHint uses static completion data only. A cold lookup queues the normal
+// cache refresh and returns immediately; live completers belong to Tab.
+func optionHint(before string, ctx completionContext) string {
+	if !strings.Contains(before, "-") && len(ctx.Aliases) == 0 {
+		return ""
+	}
+	words, current, ok := commandWords(before)
+	if !ok || len(words) == 0 || !words[0].literal || !current.literal {
+		return ""
+	}
+	flagPrefix := strings.HasPrefix(current.text, "-")
+	if name := words[0].text; flagPrefix && (name == "history" || name == "option") {
+		lead := before[:len(before)-len(current.raw)]
+		candidates, _ := builtinArgumentCompletions(current.text, lead[completionAfterDelimiter(lead, "\n"):])
+		if len(candidates) == 1 {
+			return candidates[0].Text + " — " + candidates[0].Description
+		}
+		if len(candidates) > 1 {
+			names := make([]string, 0, len(candidates))
+			for _, candidate := range candidates {
+				names = append(names, candidate.Text)
+			}
+			return optionSpellings(names)
+		}
+	}
+	if ctx.Specs == nil {
+		return ""
+	}
+	command, ok := completionArguments(words, current, ctx)
+	if !ok {
+		return ""
+	}
+	if !flagPrefix && !slices.ContainsFunc(command.args, func(arg string) bool { return strings.HasPrefix(arg, "-") }) {
+		return ""
+	}
+	spec, found, _ := ctx.Specs.lookup(command.name)
+	if !found {
+		if flagPrefix && resolveCommand(command.name, ctx) {
+			ctx.Specs.refresh(command.name)
+		}
+		return ""
+	}
+	flag, matches := spec.OptionHint(command.args, current.text)
+	if flag == nil {
+		if len(matches) == 0 {
+			return ""
+		}
+		var names []string
+		for _, match := range matches {
+			if completionText(match.Text) == match.Text {
+				names = append(names, match.Text)
+			}
+		}
+		return optionSpellings(names)
+	}
+	text := strings.Join(flag.Names, ", ")
+	if flag.Value != "" {
+		if flag.Optional {
+			text += "[=<" + flag.Value + ">]"
+		} else {
+			text += " <" + flag.Value + ">"
+		}
+	}
+	if flag.Help != "" {
+		text += " — " + flag.Help
+	}
+	if len(flag.Choices) != 0 {
+		text += " · " + strings.Join(flag.Choices, ", ")
+	}
+	return completionText(text)
+}
+
+func optionSpellings(names []string) string {
+	slices.Sort(names)
+	return strings.Join(slices.Compact(names), "  ")
 }
 
 type commandWord struct {

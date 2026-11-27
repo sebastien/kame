@@ -27,11 +27,12 @@ type completionSpecs struct {
 	usageDirs, fishDirs, manDirs []string
 	userRules                    string
 	executable                   string // kame for builds; empty means this executable
+	wakeEditor                   func() // configured before editing starts
 
 	mu        sync.Mutex
 	parsed    map[string]parsedSpec
 	queued    map[string]bool
-	waiters   []chan struct{}
+	pending   map[string]chan struct{}
 	running   bool
 	refreshed map[string]time.Time
 	live      map[string]string // executable path -> cobra or clap
@@ -98,7 +99,7 @@ func newCompletionSpecs() *completionSpecs {
 }
 
 func specStore(root string) *completionSpecs {
-	return &completionSpecs{root: root, parsed: map[string]parsedSpec{}, queued: map[string]bool{}, refreshed: map[string]time.Time{}, live: map[string]string{}}
+	return &completionSpecs{root: root, parsed: map[string]parsedSpec{}, queued: map[string]bool{}, pending: map[string]chan struct{}{}, refreshed: map[string]time.Time{}, live: map[string]string{}}
 }
 
 func absoluteDirs(list string, fallback []string) []string {
@@ -167,17 +168,26 @@ func (c *completionSpecs) read(path string) (usage.Spec, bool) {
 	return spec, true
 }
 
-// refresh queues names for the next background build. The returned channel
-// closes when a build including them ends.
-func (c *completionSpecs) refresh(names []string) <-chan struct{} {
-	done := make(chan struct{})
+// refresh queues a background build or joins one already pending for name.
+// A recently refreshed spec needs no build and returns nil.
+func (c *completionSpecs) refresh(name string) <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, name := range names {
-		c.queued[name] = true
-		c.refreshed[name] = time.Now()
+	return c.queueRefresh(name)
+}
+
+// queueRefresh requires c.mu.
+func (c *completionSpecs) queueRefresh(name string) <-chan struct{} {
+	if done := c.pending[name]; done != nil {
+		return done
 	}
-	c.waiters = append(c.waiters, done)
+	if time.Since(c.refreshed[name]) < specRefreshPeriod {
+		return nil
+	}
+	done := make(chan struct{})
+	c.pending[name] = done
+	c.queued[name] = true
+	c.refreshed[name] = time.Now()
 	if !c.running {
 		c.running = true
 		go c.drain()
@@ -186,16 +196,14 @@ func (c *completionSpecs) refresh(names []string) <-chan struct{} {
 }
 
 // await refreshes a missing spec and waits for it up to the completion
-// budget, unless it was refreshed recently.
+// budget, including when typing already queued the build.
 func (c *completionSpecs) await(name string) {
-	c.mu.Lock()
-	recent := time.Since(c.refreshed[name]) < specRefreshPeriod
-	c.mu.Unlock()
-	if recent {
+	done := c.refresh(name)
+	if done == nil {
 		return
 	}
 	select {
-	case <-c.refresh([]string{name}):
+	case <-done:
 	case <-time.After(specBudget):
 	}
 }
@@ -203,15 +211,9 @@ func (c *completionSpecs) await(name string) {
 // refreshUsed refreshes commands an entry used, unless refreshed recently.
 func (c *completionSpecs) refreshUsed(names []string) {
 	c.mu.Lock()
-	var due []string
+	defer c.mu.Unlock()
 	for _, name := range names {
-		if time.Since(c.refreshed[name]) > specRefreshPeriod {
-			due = append(due, name)
-		}
-	}
-	c.mu.Unlock()
-	if len(due) != 0 {
-		c.refresh(due)
+		c.queueRefresh(name)
 	}
 }
 
@@ -228,12 +230,17 @@ func (c *completionSpecs) drain() {
 		for name := range c.queued {
 			names = append(names, name)
 		}
-		waiters := c.waiters
-		c.queued, c.waiters = map[string]bool{}, nil
+		c.queued = map[string]bool{}
 		c.mu.Unlock()
 		c.build(names, io.Discard, time.Minute)
-		for _, w := range waiters {
-			close(w)
+		c.mu.Lock()
+		for _, name := range names {
+			close(c.pending[name])
+			delete(c.pending, name)
+		}
+		c.mu.Unlock()
+		if c.wakeEditor != nil {
+			c.wakeEditor()
 		}
 	}
 }

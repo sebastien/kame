@@ -40,8 +40,8 @@ type editorReader struct {
 	right   string   // right prompt, empty for none
 	output  *os.File // replaces a non-terminal stdout while editing
 	context func() completionContext
-	// snapshot is the session state for highlighting, taken by the session
-	// before each entry is read.
+	// snapshot is the session state for highlighting and option hints, taken
+	// by the session before each entry is read.
 	snapshot completionContext
 	color    bool
 	known    map[string]bool          // command words judged during this entry
@@ -68,6 +68,7 @@ func (e *editorReader) resetEditor() {
 	// Terminals that do not answer cursor-position queries would stall the
 	// editor; dumb ones are assumed not to.
 	terminal := os.Getenv("TERM")
+	e.color = os.Getenv("NO_COLOR") == "" && terminal != "dumb"
 	if terminal == "" || terminal == "dumb" {
 		e.shell.Config.Set("cursor-position-probe", false)
 	} else {
@@ -75,8 +76,11 @@ func (e *editorReader) resetEditor() {
 		// line breaks do not submit the entry; otherwise every pasted
 		// character is a keystroke. Bash enables it by default too.
 		e.shell.Config.Set("enable-bracketed-paste", true)
+		e.shell.Display.SetFooter(e.optionFooter)
+		if e.color {
+			e.shell.Display.SetFooterStyle("36")
+		}
 	}
-	e.color = os.Getenv("NO_COLOR") == "" && terminal != "dumb"
 	if !term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
 		e.output = os.Stderr
 	}
@@ -233,7 +237,7 @@ func (e *editorReader) completeOrIndent() {
 	e.shell.Keymap.Commands()["complete"]()
 }
 
-// bind connects completion and highlighting to the session.
+// bind connects completion and the editor's passive UI to the session.
 func (e *editorReader) bind(repl *replSession) {
 	// The editor runs on its own goroutine: it asks the session's goroutine,
 	// which owns the program, for a snapshot (replSession.read).
@@ -243,9 +247,23 @@ func (e *editorReader) bind(repl *replSession) {
 		return <-reply
 	}
 	e.shell.Completer = e.complete
+	if repl.specs != nil {
+		repl.specs.wakeEditor = e.shell.Keys.RequestRefresh
+	}
 	if e.color {
 		e.shell.SyntaxHighlighter = e.highlight
 	}
+}
+
+func (e *editorReader) optionFooter(line []rune, cursor int) string {
+	if local := e.shell.Keymap.Local(); local == "menu-select" || local == "isearch" {
+		return ""
+	}
+	hint := optionHint(string(line[:cursor]), e.snapshot)
+	if hint == "" {
+		return ""
+	}
+	return "ⓘ " + hint
 }
 
 // ReadLine reads one whole entry; the prompt is the first-line prompt.

@@ -1,5 +1,5 @@
 ---
-revision: 3
+revision: 4
 ---
 
 # Interactive Kash
@@ -571,6 +571,12 @@ Built-in completion does not evaluate session definitions or run commands.
 from man pages and completion files, cached by a Kame build, and opt-in live
 protocols.
 
+On terminals other than `TERM=dumb`, available option help follows the cursor
+in a single line at the bottom of the terminal, marked with `ⓘ` and styled
+cyan unless `NO_COLOR` is set. It is clipped to fit and hidden when there is
+no applicable option, when the editor needs the space for input or a menu, or
+when editing ends. It never changes the entry.
+
 Explicit file, command and history pickers use the backends defined by
 [057 Kash UI](057-kash-ui.md). Picking edits the current entry without
 submitting it. Tab completion and incremental history search are unchanged.
@@ -619,6 +625,6 @@ Highlighting runs on every keystroke and must not wait on running jobs or rescan
 | Startup file | Definitions, aliases, `cd` and `set env/NAME` apply before the first entry; diagnostics locate file positions; failures do not stop later startup entries; empty `KASH_INIT` disables loading; an unreadable explicit file is reported. |
 | Job control | Under a pseudo-terminal: Ctrl-Z stops a foreground command and every stage of its pipeline, and also stops an entry during a capture, an `if` test, and pure evaluation; the session restores its modes and reports the job; `fg` resumes the entry where it stopped, runs its remaining statements once, restores the job's modes, and returns its status; `bg` continues it while later entries and the prompt run, and its completion is reported before the next prompt; a background read of the terminal stops the job; a final `&` line starts a block entry as a background job and returns the prompt at once, and a one-line `cmd &` entry is a running job until the command ends; a `cmd &` graph reading the terminal stops its job, `fg` gives it the terminal, and `fg` of a running `&` job waits for it to finish; `wait %N` returns the job's `&` graph status and forgets it, and `wait` without operands returns 0; `jobs` marks the current and previous jobs, `%+` and `%-` select them, and a cancelled job is listed as `killed`; a session ending on `--timeout` cancels its background jobs; `kill %N` cancels, `kill -SIG %N` delivers to every group and continues a stopped job, and `x/kill PID` runs the external command; the first end of input with a stopped job reports it and continues, the second ends the session and reaps it; job-command operand errors. |
 | Prompt | Under a pseudo-terminal, a `kash-prompt` string replaces the prompt and sees the last status; a failing or non-string prompt falls back to the default; a `kash-rprompt` string is drawn as the right prompt and sees the last status, and a failing one is reported. ANSI colours and wide Unicode use display columns; the right prompt hides before overlapping input, returns after deletion, and follows resizing; wrapped cursor editing and completion preserve submitted argv. |
-| Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with builtins, aliases, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion and a grouped menu. |
+| Completion | Word extraction and escapes; groups and descriptions for `$` bindings, functions after `(`, command position with builtins, aliases, keywords, and `PATH` executables, `cd` directories, and paths; hidden-file rule; under a pseudo-terminal, a unique completion, a grouped menu, and a passive option hint that follows the cursor and terminal size and clears on submission or interrupt. |
 | Highlighting | Lexical classes of complete and unclosed input; highlighting preserves text; unknown literal command words, existing paths, builtins, and aliases; `PATH` listings follow installs, removals, and mode changes between entries; under a pseudo-terminal, an unknown command is marked, and a `PATH` change, an alias, and a `cd` in the previous entry are reflected. |
 | Line editing | Under a pseudo-terminal, a bracketed multi-line paste is not submitted before Enter and then runs as one entry; a keystroke latency probe reports kash and, when installed, bash on the same terminal without a timing threshold. |
