@@ -58,6 +58,7 @@ type Session struct {
 	unit                 eval.ExecutionUnit
 	FollowDirectoryRead  bool
 	FollowDirectoryWrite bool
+	AllowExternalSource  bool
 }
 
 func (s *Session) Directory() string { return s.unit.Directory(s.Program.Options.Directory) }
@@ -417,6 +418,7 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	context.Deferred = state.Deferred
 	context.Unit, context.Environment = &state.Session.unit, p.Options.Environment
 	context.DirectUnit = context.Unit
+	context.AllowExternalSource = state.Session.AllowExternalSource
 	if endpoint, ok := p.Host.(host.ForeignShellHost); ok && !p.Forwarding {
 		context.SupportsForeignShell = endpoint.SupportsForeignShell
 		context.CloseForeignShell = endpoint.CloseForeignShell

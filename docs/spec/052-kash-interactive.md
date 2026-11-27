@@ -287,7 +287,7 @@ working directory and child environment persist across entries:
 | `set env/NAME = VALUE` | Sets `NAME` in the child environment that later lookups and processes see. `VALUE` is a scalar (string, number or path). |
 | `set env/NAME = nil` | Removes a name added in this session, not a name inherited at invocation (`051`). |
 | `set env/${NAME-EXPR} = VALUE` | Computes the name and applies the same write or removal rules. |
-| `source PATH` | Runs native Kash and publishes environment and directory changes only on success (`055`). |
+| `source PATH [-- ARG …]` | Runs native Kash and publishes top-level definitions, environment and directory changes only on success (`055`). |
 
 `cd` is the builtin of `055` §6 and is available in any statement position,
 including functions, control blocks and command lists. Its operand is an

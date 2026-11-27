@@ -32,6 +32,7 @@ type Context struct {
 	DirectoryGrantRoot    string
 	FollowDirectoryRead   bool
 	FollowDirectoryWrite  bool
+	AllowExternalSource   bool
 	Environment           []string
 	Unit                  *ExecutionUnit
 	DirectUnit            *ExecutionUnit // direct session only; captures use a different Unit

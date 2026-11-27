@@ -223,9 +223,13 @@ Relative source paths use the directory of the containing source.
 `module/dir` and `module/file` identify a definition's authoring source.
 
 In a direct script or session, `source $profile` runs a Kash file selected at
-runtime. It can see caller bindings but does not publish its own. Its environment
-and directory changes persist only if it succeeds. `source bash $profile as
-tools` instead loads a Bash file into a separate worker namespace.
+runtime. Use `source $profile -- ARG …` to pass typed `args`. On success,
+the file's top-level `def` bindings become available to the caller, and its
+environment and directory changes persist. `source bash $profile as tools`
+loads a Bash file into a separate worker namespace.
+Default Kash-first CLI sessions can source files outside the current
+directory. Explicit `--allow-read` and `--no-default-grants` constrain
+`source` to granted paths.
 [Modules](spec/050-kash-libraries.md)
 
 Recipes bind `inputs`, `outputs`, `changed-inputs`, `captures`, and named

@@ -590,7 +590,7 @@ The head of a command statement resolves syntactically and then by name
    | `cd [DIR]` | everywhere | Change the unit's working directory. No operand means `$HOME`, `-` the previous directory; `~`/`~/…` expand to `$HOME`. |
    | `wait [JOB…]` | everywhere | Wait for owned async work and return its outcome. |
    | `kill [-SIGNAL] JOB…` | everywhere | Signal owned async work. |
-   | `source PATH` | direct | Run a Kash file chosen at runtime; publish environment and directory changes only on success (`055`). |
+   | `source PATH [-- ARG …]` | direct | Run a Kash file chosen at runtime; publish top-level definitions, environment and directory changes only on success (`055`). |
    | `source SHELL PATH as NAME` | direct | Load a script into a foreign-shell namespace (`056`). |
    | `jobs`, `fg`, `bg`, `alias`, `unalias`, `history`, `option`, `explain` | interactive | Session commands of `052`, `053` and `054`. |
 

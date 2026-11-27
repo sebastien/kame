@@ -18,7 +18,7 @@ tools/configure "two words"
 
 `source SHELL PATH as NAME [unset ENV-NAME …]` is a command-position builtin
 in direct Kash scripts and interactive sessions, not an `import` or an
-expression. The two-word `source PATH` form runs native Kash (`055`).
+expression. `source PATH [-- ARG …]` runs native Kash (`055`).
 `SHELL`, `as`, `NAME`, and the optional `unset` clause are literal
 words, checked when the action is reached. `NAME` is an unreserved Kash
 namespace name. `PATH` is one word that must yield a nonempty local path.

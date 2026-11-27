@@ -59,6 +59,14 @@ func (s *Scope) collectCaptureCycles() {
 	}
 	for _, node := range graph {
 		if !node.live {
+			for i := range node.scope.Bindings {
+				b := &node.scope.Bindings[i]
+				if index, ok := indices[b.Source]; ok && !graph[index].live {
+					capture := b.Source
+					b.Source = nil
+					capture.Free()
+				}
+			}
 			node.scope.visitOwnedClosures(func(value *core.Value, scope *Scope) {
 				if i, ok := indices[scope]; ok && !graph[i].live {
 					freeCallables(node.scope.Alloc, value)
@@ -76,6 +84,11 @@ func (s *Scope) collectCaptureCycles() {
 func (s *Scope) visitOwnedScopes(visit func(*Scope)) {
 	if s.Parent != nil {
 		visit(s.Parent)
+	}
+	for i := range s.Bindings {
+		if capture := s.Bindings[i].Source; capture != nil {
+			visit(capture)
+		}
 	}
 	s.visitOwnedClosures(func(_ *core.Value, capture *Scope) { visit(capture) })
 }

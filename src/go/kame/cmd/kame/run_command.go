@@ -142,7 +142,8 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	}
 	defer mem.FreeString(mem.System, directory)
 	defaults := []eval.Grant{{Capability: eval.Read, Names: []string{directory}}, {Capability: eval.Write, Names: []string{directory}}, {Capability: eval.Run}}
-	if len(inv.Inputs) != 0 && inv.Inputs[0].Lang == "kash" {
+	kashFirst := len(inv.Inputs) != 0 && inv.Inputs[0].Lang == "kash"
+	if kashFirst {
 		defaults = append(defaults, eval.Grant{Capability: eval.Env})
 	}
 	grants := effectiveGrants(inv.Grants, defaults, inv.NoDefaultGrants || inv.ExplicitGrantsOnly)
@@ -199,6 +200,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		return status
 	}
 	session := compiled.Session
+	session.AllowExternalSource = kashFirst && !inv.NoDefaultGrants && !inv.ExplicitGrantsOnly && !hasGrant(inv.Grants, eval.Read)
 	p := session.Program
 	defer session.Free()
 	values := make([]core.Value, len(inv.Args))

@@ -14,6 +14,7 @@ const (
 	bindingDefinition
 	bindingLocalDefinition
 	bindingEager
+	bindingSourced
 )
 
 type binding struct {
@@ -23,6 +24,7 @@ type binding struct {
 	Function    *Function
 	Definition  core.ResourceKey
 	Local       *localDefinition
+	Source      *Scope
 	Initialized bool
 	Captured    bool // A compiled source or session entry closes over this let.
 	LetBinding  *expr.LetBinding
@@ -278,6 +280,7 @@ func (s *Scope) Free() {
 
 func (s *Scope) freeBinding(b *binding) {
 	mem.FreeString(s.Alloc, b.Name)
+	b.Source.Free()
 	if b.Kind == bindingValue || b.Kind == bindingEager {
 		freeCallables(s.Alloc, &b.Value)
 		b.Value.Free(s.Alloc)

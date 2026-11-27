@@ -212,6 +212,23 @@ include or import in inline or stdin input needs a file-backed source.
 Source loading retains the invocation's existing effect grants.
 [Modules](../../../spec/050-kash-libraries.md)
 
+In a direct Kash script, at the prompt, or in `init.kash`, use
+`source PATH [-- ARG …]` to run a file chosen at runtime. Relative paths
+resolve from the current working directory. Default Kash-first CLI sessions
+can source files outside it; explicit `--allow-read` and
+`--no-default-grants` limit sourcing to granted paths:
+
+```kash
+source $profile -- "preview"
+hello "Lin"                  # a top-level def from the sourced file
+```
+
+Arguments after `--` become the file's `args` as typed values. A successful
+source publishes its own top-level `def` bindings into the calling scope
+along with changes to the environment and working directory. Its `let` and
+imported names stay private. Previously sourced names can be replaced;
+other bindings in the same scope cannot. A failed source publishes nothing.
+
 ## Explicit boundaries and argv
 
 | Form | Meaning |

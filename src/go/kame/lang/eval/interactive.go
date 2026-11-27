@@ -24,6 +24,9 @@ func (p *Program) InteractiveNames() []InteractiveName {
 	var names []InteractiveName
 	for _, entry := range p.Scope.bindingIndex {
 		b := &p.Scope.Bindings[entry.index]
+		if b.Kind == bindingSourced {
+			b = b.Source.localBinding(b.Name)
+		}
 		name := InteractiveName{Name: entry.name}
 		switch b.Kind {
 		case bindingFunction:
@@ -64,6 +67,9 @@ func (p *Program) InteractiveNames() []InteractiveName {
 // HasFunction reports whether name is bound to a top-level session function.
 func (p *Program) HasFunction(name string) bool {
 	b := p.Scope.lookup(name)
+	if b != nil && b.Kind == bindingSourced {
+		b = b.Source.localBinding(b.Name)
+	}
 	return b != nil && b.Kind == bindingFunction
 }
 

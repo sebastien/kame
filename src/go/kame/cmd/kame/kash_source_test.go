@@ -80,3 +80,93 @@ printenv KASH_SOURCE_VALUE
 		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
+
+func TestNativeKashSourcePublishesDefinitions(t *testing.T) {
+	dir := t.TempDir()
+	nativeCLIWrite(t, filepath.Join(dir, "lib.kash"), `let greeting = args.0
+def suffix = greeting
+def hello name = str suffix name
+out! (hello "self") "\n"
+`)
+	nativeCLIWrite(t, filepath.Join(dir, "outer.kash"), `source ./lib.kash -- $...args
+out! (hello "nested") "\n"
+def app name = hello name
+`)
+	nativeCLIWrite(t, filepath.Join(dir, "bad.kash"), `def app name = "bad"
+def leaked () = "bad"
+false
+`)
+	init := filepath.Join(dir, "init.kash")
+	nativeCLIWrite(t, init, "source ./outer.kash -- \"init \"\n")
+	t.Setenv("KASH_INIT", init)
+	code := `out! (app "prompt") "\n"
+def callapp prefix
+	source ./outer.kash -- $prefix
+	return app
+
+let saved = callapp "local "
+out! (saved "escaped") "\n"
+source ./bad.kash ?
+out! (app "unchanged") "\n"
+(leaked ())
+source ./outer.kash -- (42)
+out! (app "again") "\n"
+out! (saved "still") "\n"
+`
+	var out, errOut bytes.Buffer
+	runNativeCLIIn(t, dir, []string{"do", "run", "-i"}, strings.NewReader(code), &out, &errOut)
+	want := "init self\ninit nested\ninit prompt\nlocal self\nlocal nested\nlocal escaped\ninit unchanged\n42self\n42nested\n42again\nlocal still\n"
+	if out.String() != want || strings.Count(errOut.String(), "error[") != 1 || !strings.Contains(errOut.String(), "unknown operation: leaked") {
+		t.Fatalf("stdout=%q, want %q; stderr=%q", out.String(), want, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	status := runNativeCLIIn(t, dir, []string{"do", "run", "--lang", "kash", "-c", `def callapp ()
+	source ./outer.kash -- $(printf "direct ")
+	out! (app "caller") "\n"
+callapp
+`}, nil, &out, &errOut)
+	if status != 0 || out.String() != "direct self\ndirect nested\ndirect caller\n" || errOut.Len() != 0 {
+		t.Fatalf("status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}
+
+func TestNativeKashSourceOutsideDefaultReadGrant(t *testing.T) {
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.Mkdir(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(root, "profile.kash"), "def greet () = \"loaded\"\n")
+	t.Setenv("KASH_INIT", "")
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		code  string
+		want  string
+	}{
+		{"default", nil, `source ../profile.kash; out! (greet ())`, "loaded"},
+		{"restricted", []string{"--allow-read=."}, `source ../profile.kash`, ""},
+		{"opt-out", []string{"--no-default-grants"}, `source ../profile.kash`, ""},
+		{"ordinary read", nil, `(read ../profile.kash)`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			args := append([]string{"do", "run", "--lang", "kash"}, tc.flags...)
+			status := runNativeCLIIn(t, work, append(args, "-c", tc.code), nil, &out, &errOut)
+			if tc.want != "" {
+				if status != 0 || out.String() != tc.want || errOut.Len() != 0 {
+					t.Fatalf("status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+				}
+			} else if status != 1 || !strings.Contains(errOut.String(), "[CAP_DENIED]") {
+				t.Fatalf("status=%d stderr=%q, want CAP_DENIED", status, errOut.String())
+			}
+		})
+	}
+	var out, errOut bytes.Buffer
+	status := runNativeCLIIn(t, root, []string{"do", "run", "-i"}, strings.NewReader("cd work\nsource ../profile.kash\nout! (greet ())\n"), &out, &errOut)
+	if status != 0 || out.String() != "loaded" || errOut.Len() != 0 {
+		t.Fatalf("after cd: status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}

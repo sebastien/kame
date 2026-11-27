@@ -216,6 +216,13 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		c.Source = parsed.Source.Name
 	}
 	r := p.advanceKash(state, c)
+	if !r.Waiting && !r.Completed && !r.Yielded && r.Diagnostic.Code == "" &&
+		c.nativeSource != nil && parsed == c.nativeSource.source.Parsed {
+		if published := publishSourceDefinitions(previousScope, state.Scope, c); published.Diagnostic.Code != "" {
+			r.Free(c.Run)
+			r = published
+		}
+	}
 	mem.FreeString(c.Run, c.CallPath)
 	c.Args, c.HasArgs, c.Scope = previousArgs, previousHasArgs, previousScope
 	c.ScriptGroup, c.CallPath, c.Source = previousGroup, previousPath, previousSource

@@ -23,3 +23,20 @@ func TestCaptureCycleWaitsForLastExternalOwner(t *testing.T) {
 		t.Fatal("last closure release retained the scope cycle")
 	}
 }
+
+func TestPublishedSourceScopeWaitsForLastExternalOwner(t *testing.T) {
+	caller := newScope(nil, nil)
+	loaded := newScope(nil, caller)
+	loaded.setFunction("hello", &Function{Kind: FunctionDefinition, Scope: loaded})
+	publishSourceDefinitions(caller, loaded, &Context{})
+	saved := borrowFunction(nil, loaded.localBinding("hello").Function)
+	loaded.Free()
+	caller.Free()
+	if caller.localBinding("hello") == nil || loaded.Parent != caller {
+		t.Fatal("published scope was released while its function was still held")
+	}
+	freeBorrowedWrapper(nil, saved)
+	if caller.References != 0 || loaded.References != 0 {
+		t.Fatal("published source kept its caller alive")
+	}
+}

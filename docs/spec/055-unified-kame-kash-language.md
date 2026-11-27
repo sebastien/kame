@@ -464,6 +464,7 @@ yields `nil` when unset.
 | `cd [DIR]` | everywhere | Change the unit's working directory (§5.3). No operand means `$HOME`, `-` means the previous directory, and `~`/`~/…` expand to `$HOME`, as in `052`. |
 | `wait [JOB…]` | everywhere | Wait for owned async work and return its outcome. |
 | `kill [-SIGNAL] JOB…` | everywhere | Signal owned async work. |
+| `source PATH [-- ARG …]` | direct scripts and interactive sessions | Run a Kash file and publish its top-level definitions on success (§11). |
 | `source SHELL PATH as NAME [unset ENV-NAME …]` | direct scripts and interactive sessions | Source a file in a persistent foreign shell and expose its functions as namespaced commands (`056`). |
 | `out! ARG…`, `err! ARG…` | everywhere | Write the arguments' exact text or bytes to the stage's stdout or stderr, so they work with pipes and redirection (`out! $content > $outputs.0`). These are the library's `out!` and `err!` (`007`). |
 | `jobs` | interactive | List session jobs. |
@@ -885,17 +886,29 @@ include? ./local.km
 
 ### Runtime Kash source
 
-`source PATH` is a direct foreground Kash command, available in direct scripts
+`source PATH [-- ARG …]` is a direct foreground Kash command, available in direct scripts
 and interactive sessions. `PATH` is one command word evaluated when reached;
 it must yield a nonempty local path. Relative paths resolve against the
-current directory; `~/` uses the unit's `HOME`. Reading the file requires read
-authority; sourcing is trusted code execution, not sandboxing. The exact path
+current directory; `~/` uses the unit's `HOME`. Kash-first CLI sessions with
+default grants can source files outside their read roots. Explicit read grants
+and `--no-default-grants` require read authority for the path. Sourcing does
+not grant ordinary file reads. Sourcing is trusted code execution, not
+sandboxing. The exact path
 is read on every invocation and parsed as Kash
 regardless of suffix. Active source paths cannot be sourced recursively.
 `source SHELL PATH as NAME` is the separate foreign-shell form (`056`).
+Arguments after `--` are evaluated as typed Kash command arguments, including
+list spreads, and become the sourced script's `args`. A bare `--` supplies
+an empty list; omitting it inherits the caller's `args`.
 
-The file has its own lexical scope: it can see caller bindings but does not
-publish its own or assign caller `let` bindings. Literal `import` and `from`
+The file runs in a child lexical scope that can see caller bindings but cannot
+assign caller `let` bindings. On success, its own top-level `def` bindings
+become visible in the immediate caller's scope. They keep their defining scope,
+including file-local `let` bindings and names available from nested sources.
+Bindings from nested `source`, `let`, `import` and `from` are not themselves
+published. A source can replace previously sourced names in the same scope;
+a conflict with another local binding is `DEF_INVALID` and publishes nothing.
+Literal `import` and `from`
 resolve relative to the file with ordinary module semantics. Use another
 `source` to run another action file; `include` and `export` are not supported
 in a runtime-sourced file.
@@ -905,7 +918,8 @@ recovery branches, background execution, deferred execution or build recipes.
 
 The file and its cleanup run with a private copy of the unit's environment and
 directory. They see their own changes immediately. A successful source
-publishes both back to the caller; failure, interruption or `exit` does not.
+publishes both back to the caller; failure, interruption or `exit` publishes
+neither state nor definitions.
 `exit` still requests termination of the enclosing execution boundary.
 `source PATH ?` accepts an ordinary process failure without publishing
 changes; authority, parser and loading errors are not accepted. Output and

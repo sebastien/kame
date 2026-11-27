@@ -15,6 +15,7 @@ type kashSourceState struct {
 	parent  *kashSourceState
 	unit    ExecutionUnit
 	path    string
+	args    []core.Value
 	request int64
 	source  *moduleSource
 	pending *kashModule
@@ -29,6 +30,7 @@ func freeKashSource(a mem.Allocator, value any) {
 	state := value.(*kashSourceState)
 	state.pending.Free()
 	state.failure.Free(a)
+	freeValuesWithCallables(a, state.args)
 	FreeEffects(a, state.operand.Effects)
 	for _, path := range state.operand.WritePaths {
 		mem.FreeString(a, path)
@@ -39,6 +41,10 @@ func (c *Context) directSourceUnit() bool {
 	return c.Unit != nil && (c.Unit == c.DirectUnit || c.nativeSource != nil && c.Unit == &c.nativeSource.unit)
 }
 
+func sourceArgumentSeparator(words []*expr.Expr) bool {
+	return len(words) >= 3 && literalSetupWord(words[2]) && words[2].Parts[0].Text == "--"
+}
+
 func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Result {
 	if !c.directSourceUnit() || c.asyncHandle != nil || c.Phase != EvaluatePhase ||
 		c.Finalizing || c.PrepareDeferred != nil || c.functionStage != nil || c.InputClosed ||
@@ -46,8 +52,9 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 		len(graph.Body) != 0 || len(c.StageEnvironment) != 0 || c.StageDirectory != "" || !commandOnlyWords(stage) {
 		return failure(c.Run, "FEATURE_UNSUP", graph.Span, "native source requires a direct foreground command")
 	}
-	if len(stage.Items) != 2 {
-		return failure(c.Run, "PARSE_ERR", graph.Span, "expected source PATH or source SHELL PATH as NAME")
+	explicitArgs := sourceArgumentSeparator(stage.Items)
+	if len(stage.Items) != 2 && !explicitArgs {
+		return failure(c.Run, "PARSE_ERR", graph.Span, "expected source PATH [-- ARG …] or source SHELL PATH as NAME")
 	}
 	if p.DryRun {
 		return Result{}
@@ -58,17 +65,27 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 	state, _ := c.OperationState().(*kashSourceState)
 	if state == nil {
 		word := stage.Items[1]
+		pathWord := *word
+		pathWord.CommandGlob, pathWord.CommandHome = false, false
+		operands := []*expr.Expr{&pathWord}
+		var arguments []*expr.Expr
+		if explicitArgs {
+			arguments = commandWordArguments(stage.Items[3:])
+			operands = append(operands, arguments...)
+		}
 		before, paths := len(c.Effects), len(c.WritePaths)
 		sequenced := c.sequencedOperand
 		c.sequencedOperand = true
-		r := p.commandWord(word, c, "")
+		evaluated := p.argumentValues(c.Scope, operands, c, graph.Span)
 		c.sequencedOperand = sequenced
+		r := evaluated.Result
 		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 			return r
 		}
-		defer r.Free(c.Run)
-		name := r.Value.Text
-		if !r.Value.IsPathText() || name == "" || strings.ContainsRune(name, 0) {
+		defer freeValuesWithCallables(c.Run, evaluated.Values)
+		value := evaluated.Values[0]
+		name := value.Text
+		if !value.IsPathText() || name == "" || strings.ContainsRune(name, 0) {
 			return failure(c.Run, "EXPR_INVALID", word.Span, "source requires a nonempty local path")
 		}
 		if rest, ok := strings.CutPrefix(name, "~/"); ok {
@@ -83,7 +100,7 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 		if !path.IsAbs(filename) {
 			return failure(c.Run, "RES_INVALID", word.Span, "source requires a local file path")
 		}
-		if !c.Allows(Read, filename) {
+		if !c.AllowExternalSource && !c.Allows(Read, filename) {
 			return failure(c.Run, "CAP_DENIED", word.Span, "source path requires read authority")
 		}
 		for active := c.nativeSource; active != nil; active = active.parent {
@@ -98,6 +115,9 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 		state = &kashSourceState{
 			parent: c.nativeSource, path: strings.Clone(filename), request: id,
 			unit: ExecutionUnit{environment: maps.Clone(c.Unit.environment), directory: c.Cwd, previous: c.Unit.previous},
+		}
+		if explicitArgs {
+			_, state.args = expandArguments(p.Alloc, arguments, evaluated.Values[1:])
 		}
 		p.retainControlEffects(&state.operand, c, c.Scope, before, paths)
 		c.SetOperationState(state, freeKashSource)
@@ -174,7 +194,11 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 	parent, directory := c.Unit, c.Cwd
 	c.Unit, c.Cwd, c.nativeSource = &state.unit, state.unit.directory, state
 	c.CallPath += "/body"
-	r := p.invokeKashBody(state.source.Parsed, nil, c.Scope, c.Args, c)
+	args := c.Args
+	if explicitArgs {
+		args = state.args
+	}
+	r := p.invokeKashBody(state.source.Parsed, nil, c.Scope, args, c)
 	c.Unit, c.Cwd, c.nativeSource = parent, directory, state.parent
 	if r.Waiting || r.Completed {
 		return r
@@ -192,6 +216,30 @@ func (p *Program) nativeSourceCommand(graph, stage *expr.Expr, c *Context) Resul
 	c.Cwd = parent.directory
 	state.done = true
 	return Result{}
+}
+
+func publishSourceDefinitions(caller, loaded *Scope, c *Context) Result {
+	// Validate the whole set before publishing any names.
+	for _, b := range loaded.Bindings {
+		if b.Kind != bindingFunction && b.Kind != bindingLocalDefinition {
+			continue
+		}
+		if existing := caller.localBinding(b.Name); existing != nil && existing.Kind != bindingSourced {
+			return failure(c.Run, "DEF_INVALID", c.Span, "source definition conflicts with caller binding: "+b.Name)
+		}
+	}
+	for _, b := range loaded.Bindings {
+		if b.Kind == bindingFunction || b.Kind == bindingLocalDefinition {
+			caller.hasDescendantCapture = true
+			loaded.Retain()
+			caller.storeBinding(binding{Kind: bindingSourced, Name: owned(caller.Alloc, b.Name), Source: loaded}, true)
+		}
+	}
+	return Result{}
+}
+
+func nameInSource(b *binding, span source.Span, c *Context) Result {
+	return name(b.Source, b.Name, nil, span, c)
 }
 
 func (state *kashSourceState) failImport(a mem.Allocator, c *Context, r Result) Result {

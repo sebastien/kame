@@ -30,7 +30,7 @@ func (p *Program) localCommand(graph *expr.Expr, c *Context) (Result, bool, comm
 			lexical := c.Scope.lookupResolved(spelling, head.LetBinding) != nil || imported != nil ||
 				p.moduleImport(head.SourceOrigin, spelling).module != nil
 			if !lexical {
-				if spelling == "source" && len(stage.Items) < 5 {
+				if spelling == "source" && (len(stage.Items) < 5 || sourceArgumentSeparator(stage.Items)) {
 					return p.nativeSourceCommand(graph, stage, c), true, heads
 				}
 				if r, handled := p.foreignShellCommand(graph, stage, spelling, c); handled {
@@ -128,8 +128,12 @@ func (p *Program) localCommand(graph *expr.Expr, c *Context) (Result, bool, comm
 }
 
 func commandArguments(stage *expr.Expr) []*expr.Expr {
-	arguments := make([]*expr.Expr, 0, len(stage.Items)-1)
-	for _, word := range stage.Items[1:] {
+	return commandWordArguments(stage.Items[1:])
+}
+
+func commandWordArguments(words []*expr.Expr) []*expr.Expr {
+	arguments := make([]*expr.Expr, 0, len(words))
+	for _, word := range words {
 		argument := word
 		if word.CommandGlob || word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...") {
 			argument = &expr.Expr{Kind: expr.ListSpread, Span: word.Span, Items: []*expr.Expr{word}}

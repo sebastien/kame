@@ -289,6 +289,9 @@ func name(scope *Scope, name string, let *expr.LetBinding, span source.Span, con
 		}
 		return missingOperation(context, name, span, true)
 	}
+	if b.Kind == bindingSourced {
+		return nameInSource(b, span, context)
+	}
 	if b.Kind == bindingValue {
 		return Result{Value: borrowValue(context.Run, b.Value)}
 	}
