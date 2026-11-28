@@ -295,11 +295,10 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 			}
 		}
 		if r.InputMode == "invocation" && i == r.InputRoot {
-			fd, e := syscall.Dup(r.InputFD)
+			f, e := invocationInput(r.InputFD)
 			if e != nil {
 				return fail()
 			}
-			f := os.NewFile(uintptr(fd), "invocation input")
 			resources = append(resources, f)
 			cmd.Stdin = f
 		}
@@ -376,8 +375,11 @@ func (h *Host) Start(r host.ProcessRequest) bool {
 		handoff = lent
 		run.handoff = lent
 	}
-	if r.Passthrough {
-		attachPassthrough(commands, out, errout)
+	// A builtin runs in the host and uses the relay to keep backpressure cancellable.
+	if r.Passthrough && inline == nil {
+		for _, f := range attachPassthrough(commands, out, errout) {
+			resources = append(resources, f)
+		}
 	}
 	for _, f := range truncateFiles {
 		info, e := f.Stat()

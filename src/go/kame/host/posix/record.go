@@ -7,6 +7,8 @@ import (
 	"kame/internal/mem"
 	"slices"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 type recordCursor struct {
@@ -49,7 +51,7 @@ func km_record_next(fd int, offset *int64, delimiter int, buffer []byte) c.Int {
 }
 func km_record_close(fd int) { syscall.Close(fd) }
 func km_record_borrow(fd int) c.Int {
-	n, e := syscall.Dup(fd)
+	n, e := unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0)
 	if e != nil {
 		return -1
 	}
@@ -68,6 +70,9 @@ func km_record_byte(fd int) c.Int {
 	}
 	var b [1]byte
 	n, e := syscall.Read(fd, b[:])
+	if e == syscall.EINTR || e == syscall.EAGAIN || e == syscall.EWOULDBLOCK {
+		return -1
+	}
 	if e != nil {
 		return -2
 	}

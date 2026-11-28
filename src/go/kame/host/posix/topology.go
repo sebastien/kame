@@ -246,11 +246,10 @@ func (h *Host) startTopology(r host.ProcessRequest, parent *running, parentStage
 			readers[i] = []io.Reader{f}
 		}
 		if r.InputMode == "invocation" && i == r.InputRoot {
-			fd, e := syscall.Dup(r.InputFD)
+			f, e := invocationInput(r.InputFD)
 			if e != nil {
 				return fail("cannot borrow graph input")
 			}
-			f := os.NewFile(uintptr(fd), "graph invocation input")
 			files = append(files, f)
 			readers[i] = []io.Reader{f}
 		}
@@ -357,7 +356,9 @@ func (h *Host) startTopology(r host.ProcessRequest, parent *running, parentStage
 		run.handoff = lent
 	}
 	if r.Passthrough {
-		attachPassthrough(commands, out, errout)
+		presentation := attachPassthrough(commands, out, errout)
+		files = append(files, presentation...)
+		parentCopies = append(parentCopies, presentation...)
 	}
 	// Open every input and sink before truncating any existing output or
 	// launching a process. A malformed later branch must leave prior sinks intact.

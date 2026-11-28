@@ -115,6 +115,9 @@ input. Hosts must preserve unread bytes across consumer handoffs, including any
 host-side read-ahead. Readers borrow the boundary's stream; completing a command
 does not close the caller's original stream. Owned descriptors/relays are released
 normally, and cancellation remains serviceable during backpressure.
+Native Linux reopens nonblocking pipes for child stdin where available, so a
+producer pause does not fail an ordinary blocking reader. This preserves the
+shared byte queue and the caller's status flags.
 
 Supplied input requires no filesystem-read grant. `< FILE` retains read grants
 and dependency tracking. Opaque input has no reusable content identity: cached
@@ -165,6 +168,11 @@ and channel cardinality. Aliasing two independent stages to the capture sink doe
 not implicitly merge them. Unaliased stderr remains live. Preserve each stream's
 byte order without promising cross-stream ordering or record atomicity. Transport
 failure, overflow, and cancellation retain graph failure and retirement rules.
+Native children receive a direct presentation pipe only if they can write it
+in blocking mode without sharing the host writer's flag changes. If the host
+relays the output, closure of the public pipe stops the producing invocation.
+Batch relays honor the invocation's timeout or interruption while waiting for
+the destination to drain.
 
 Only unquoted, unescaped `2` immediately adjacent to the operator selects stderr.
 `printf "%s" 2 > ./out` retains the argument `2`; quoted `"2>"` is data.

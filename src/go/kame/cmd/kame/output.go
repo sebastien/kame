@@ -5,6 +5,8 @@ import (
 	"kame/host/posix"
 	"kame/program"
 	"os"
+	"syscall"
+	"time"
 )
 
 // Like presentation state, output delivery is single-owner for one Run. Custom
@@ -16,13 +18,17 @@ type nativeOutputState struct {
 	FailureCode string
 	Bounded     bool
 	Signal      int
+	Batch       bool
+	RunDeadline time.Time
+	RunExpired  bool
 }
 
 type nativeOutputWriter struct {
-	State    *nativeOutputState
-	FD       int
-	Failed   bool
-	TimedOut bool
+	State       *nativeOutputState
+	FD          int
+	Failed      bool
+	TimedOut    bool
+	Interrupted bool
 }
 
 var activeNativeOutput *nativeOutputState
@@ -61,22 +67,43 @@ func (w *nativeOutputWriter) Write(data []byte) (int, error) {
 		}
 		return 0, posix.ErrOutputWrite
 	}
+	finalizing := w.State.DeadlineNS != 0 && w.State.Program != nil
+	if w.Interrupted && !finalizing {
+		return 0, posix.ErrOutputInterrupted
+	}
 	remaining := int64(0)
-	if w.State.DeadlineNS != 0 && w.State.Program != nil {
+	if finalizing {
 		w.State.Bounded = true
 		remaining = w.State.DeadlineNS - w.State.Program.Host.Monotonic()
 		if remaining <= 0 {
 			remaining = -1
 		}
-	}
-	n, err := posix.WriteOutput(w.FD, data, remaining)
-	if remaining != 0 {
-		if signal := posix.TakeSignal(); signal != 0 {
-			w.State.Signal = signal
-			w.State.Program.Eval.FinalizerOutputCancelled(w.State.DeadlineNS)
+	} else if w.State.Program != nil && !w.State.RunDeadline.IsZero() {
+		remaining = int64(time.Until(w.State.RunDeadline))
+		if remaining <= 0 {
+			w.State.RunExpired = true
+			return 0, posix.ErrOutputTimeout
 		}
 	}
-	if err != nil && remaining != 0 {
+	n, err := posix.WriteOutput(w.FD, data, remaining, !finalizing)
+	if !finalizing {
+		if err == syscall.EPIPE && w.State.Program != nil {
+			// A closed relay must stop the producer as a direct pipe would.
+			w.Failed = true
+			w.State.Signal = int(syscall.SIGPIPE)
+		}
+		if w.State.Batch && (err == posix.ErrOutputInterrupted || err == posix.ErrOutputTimeout) {
+			// Queued output from the cancelled body must not block cleanup.
+			w.Interrupted = true
+			w.State.RunExpired = w.State.RunExpired || err == posix.ErrOutputTimeout
+		}
+		return n, err
+	}
+	if signal := posix.TakeSignal(); signal != 0 {
+		w.State.Signal = signal
+		w.State.Program.Eval.FinalizerOutputCancelled(w.State.DeadlineNS)
+	}
+	if err != nil {
 		w.Failed, w.TimedOut = true, err == posix.ErrOutputTimeout
 		if w.TimedOut {
 			w.State.FailureCode = "FINALIZE_TIMEOUT"

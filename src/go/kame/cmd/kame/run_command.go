@@ -12,6 +12,7 @@ import (
 	"kame/operations"
 	"kame/ownership"
 	"kame/program"
+	"math"
 	"os"
 	"path"
 	"slices"
@@ -266,8 +267,15 @@ func processExitStatus(d diagnostic.Diagnostic, explicitRun bool) int {
 }
 
 func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer, errOut io.Writer, fragments []program.Fragment, loaded []buildSource) int {
-	startedAt := time.Now().UnixNano()
-	run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: startedAt}
+	startedAt := time.Now()
+	if activeNativeOutput != nil {
+		activeNativeOutput.Batch = true
+		if inv.TimeoutMS > 0 {
+			duration := time.Duration(min(inv.TimeoutMS, math.MaxInt64/int64(time.Millisecond))) * time.Millisecond
+			activeNativeOutput.RunDeadline = startedAt.Add(duration)
+		}
+	}
+	run := sessionRun{Session: session, Inv: inv, Out: out, Err: errOut, Fragments: fragments, Loaded: loaded, StartedAt: startedAt.UnixNano()}
 	defer run.Last.Free(mem.System)
 	for i := 0; i <= len(session.Work); i++ {
 		if i == len(session.Work) && !run.joinNeeded() {
@@ -380,8 +388,14 @@ func (r *sessionRun) step(i int) (int, bool) {
 			r.Session.Observe(h)
 		}
 		drainEvents(p, r.Out, r.Err, r.Inv.JSON, &r.Progress)
+		if posix.SignalPending() {
+			continue
+		}
 		if signal := nativeOutputSignal(); signal != 0 {
 			return r.endForSignal(h, signal, true)
+		}
+		if activeNativeOutput != nil && activeNativeOutput.RunExpired {
+			return r.endForTimeout(h)
 		}
 		if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
 			return r.endForOutputFailure(h, code)
@@ -417,6 +431,9 @@ func (r *sessionRun) endForSignal(h *program.Handle, signal int, finalizeFirst b
 
 // endForTimeout ends the session when the invocation deadline passes.
 func (r *sessionRun) endForTimeout(h *program.Handle) (int, bool) {
+	if activeNativeOutput != nil {
+		activeNativeOutput.RunDeadline = time.Time{}
+	}
 	p := r.Session.Program
 	p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: "RECIPE_TIMEOUT", Severity: diagnostic.Error, Message: "invocation timed out"})
 	h.Cancel()
